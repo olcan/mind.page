@@ -13,6 +13,7 @@ import {
   containsOpaqueMarker,
   decodeInertSource,
   inertCandidateSpan,
+  inertSearchText,
   editInertText,
   encodeInert,
   escapeInertBody,
@@ -255,8 +256,41 @@ test('isVaultRouted: exact roots and descendants over the INERT grammar view', (
   expect(isVaultRouted('#_agent/vault/opus\nhello')).toBe(true)
   expect(isVaultRouted('#agent/vaultish\nhello')).toBe(false) // slash boundary
   expect(isVaultRouted('note about #agent/openai')).toBe(false)
+  // review 186: legacy roots, case, relative tags, and extra slashes pinned
+  expect(isVaultRouted('#agent/native\nhello')).toBe(true) // legacy root
+  expect(isVaultRouted('#_agent/native/x\nhello')).toBe(true) // legacy descendant
+  expect(isVaultRouted('#AGENT/Vault\nhello')).toBe(true) // lowercased before parse
+  expect(isVaultRouted('#/vault\nhello')).toBe(false) // relative tags never route raw
+  expect(isVaultRouted('#//agent/vault\nhello')).toBe(false) // ditto deeper relative
+  expect(isVaultRouted('#agent/vault/\nhello')).toBe(true) // trailing slash = descendant
+  expect(isVaultRouted('#agent/vault//x\nhello')).toBe(true) // 186's exact extra-slash row
+  expect(isVaultRouted('#agent\nhello')).toBe(false) // bare prefix is not a root
   // a route inside a CLAIMED region is invisible (the grammar view sees a marker)
   expect(isVaultRouted(`${INERT_OPEN}\n#agent/vault\n${INERT_CLOSE}`)).toBe(false)
   // a route inside an UNCLOSED region is equally claimed to EOF
   expect(isVaultRouted(`${INERT_OPEN}\n#agent/vault`)).toBe(false)
+})
+
+
+test('inertSearchText: collision-safe, simultaneous, position-preserving (189 §2.1)', () => {
+  // (a) an owner-typed UPPERCASE marker lookalike must not case-fold into the real
+  // marker: substitution happens on the case-preserving text, so only the real marker
+  // (at the BODY position) is replaced; the lookalike lowercases into plain text
+  const marker = '⟦vault_result_v1:7:0⟧'
+  const values = new Map([[marker, 'Decoded BODY']])
+  expect(inertSearchText(`⟦VAULT_RESULT_V1:7:0⟧\nprefix\n${marker}\nsuffix`, values)).toBe(
+    '⟦vault_result_v1:7:0⟧\nprefix\ndecoded body\nsuffix'
+  )
+  // (b) simultaneous, nonrecursive: a decoded value that IS another candidate's
+  // marker stays literal (callback output is never rescanned), while that other
+  // candidate's real position still substitutes
+  const markerA = '⟦vault_result_v1:7:1⟧'
+  const markerB = '⟦vault_result_v1:7:2⟧'
+  const twoValues = new Map([
+    [markerA, `sneaky ${markerB} payload`],
+    [markerB, 'real_b'],
+  ])
+  expect(inertSearchText(`a\n${markerA}\nmid\n${markerB}\nz`, twoValues)).toBe(
+    `a\nsneaky ${markerB} payload\nmid\nreal_b\nz`
+  )
 })

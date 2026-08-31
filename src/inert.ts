@@ -2,8 +2,8 @@
 // The readable successor to the vault_result_v1 base64 envelope; the TypeScript v1 path
 // (vault_result.ts) is deleted and every app seam (render, editor, edit, routing,
 // capability) consumes this module. Python twin: the vault's lib/mindpage_inert.py;
-// parity vectors are pinned in both suites. NOTE: the app is STAGED -- deployment
-// happens only inside the quiescent app-first cutover (design §2.2a).
+// parity vectors are pinned in both suites. LIVE since the 2026-08-31 attended
+// cutover (design §2.2a): production replies are stored as inert regions.
 //
 // Wire format (178 §1): exact standalone marker lines (no indentation, no trailing
 // whitespace, LF-boundary recognition only -- a \r anywhere on the line disqualifies
@@ -34,9 +34,9 @@ export const INERT_CLOSE = '<!--/inert-->'
 // applied anywhere in the body, not only line-anchored -- one uniform rule
 const CLOSE_SHAPED = /<!--(\\*)\/inert-->/g
 
-// the app's _log|_output opener grammar, duplicated VERBATIM from vault_result.ts
-// (178 §2.3: the active v1 module stays untouched; this new-only scanner composes with
-// the same landed _log|_output ownership -- ownership only, bytes preserved)
+// the app's _log|_output opener grammar, carried over VERBATIM from the deleted v1
+// module vault_result.ts (178 §2.3): this scanner composes with the same landed
+// _log|_output ownership -- ownership only, bytes preserved
 const LOG_OPEN = /^\s*```(?:\S+:)?(?:_output|_log)(?:_hidden|_removed)?(?::\S*\.\S*)?(?:\s|$)/i
 const LOG_CLOSE = /^\s*```/
 
@@ -178,6 +178,19 @@ export const INVALID_INERT_REGION = '⟦invalid inert region⟧'
 // a region in code gets this fixed non-leaking text. Grammar opacity is global either
 // way (the bytes stay claimed regardless of placement).
 export const INERT_FENCED_PLACEHOLDER = '⟦inert region⟧'
+
+// SEARCH view (owner bug 2026-08-31; reviews 188 §2.2 + 189 §2.1): the grammar text
+// with each of THIS render's markers replaced by its decoded value AT ITS POSITION,
+// lowercased ONCE at the end -- for term/regex matching only, never parsing. ONE
+// regex-callback pass over the CASE-PRESERVING text makes it collision-safe: an
+// owner-typed uppercase lookalike cannot case-fold into a marker (the pattern is
+// lowercase and the text is not folded before the pass), and callback output is never
+// rescanned (a decoded value that happens to be marker-shaped stays literal).
+export function inertSearchText(grammarText: string, values: Map<string, string>): string {
+  return grammarText
+    .replace(new RegExp(INERT_MARKER_SOURCE, 'g'), marker => values.get(marker) ?? marker)
+    .toLowerCase()
+}
 
 // the centralized opaque-marker containment predicate (178 §5.1): whether TEXT (a whole
 // embed/caption/body capture, not one token) contains any generated grammar marker.

@@ -1,309 +1,20 @@
-// e2e proof of the vault-web agent bridge PoC (design: vault notes/design/mind_bridge_v2.md):
-// a request item created in the browser is answered by the vault's Python bridge listener
-// (bin/mind_bridge.py) through the Firestore emulator, and the signed reply renders back in
-// the app as a realtime remote update. Full round trip:
-//   browser -> Firestore (emulator) -> vault listener -> Firestore -> browser
-// The listener is spawned from the vault checkout (VAULT_DIR, default ~/vault) using its venv;
-// the whole spec is skipped when no vault checkout is available.
+// e2e witnesses for the INERT reply boundary (design: vault notes/design/mind_bridge_v2.md).
+// The v0/v1 PoC listener rows and their bin/mind_bridge.py spawn setup were retired with the
+// legacy executor (review 189 §2.2): end-to-end Python dispatch evidence lives in the vault's
+// Firestore-emulator component smoke and the recorded attended production canary. What remains
+// here are the APP-side witnesses: hostile render classification, read/render domain
+// separation, startup/run opacity, and decoded-body search.
 // Request items carry a unique test-owned visible label plus a hidden #_agent/vault routing
 // tag (the real /vault request shape): in the configured gate this lane runs behind the
 // admin-installed corpus, which contains the #agent/vault provider item itself, and a second
 // visible #agent/vault label would make _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
-import { FieldValue } from 'firebase-admin/firestore'
-import { spawn, type ChildProcessWithoutNullStreams } from 'child_process'
-import { existsSync, writeFileSync } from 'fs'
-import { delimiter, resolve } from 'path'
 import { type Page } from '@playwright/test'
-import { firestore, loadAdmin, loadUser, secretFor, waitForApp, type TestUser } from './helpers.js'
+import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
-const VAULT = resolve(process.env.VAULT_DIR ?? `${process.env.HOME}/vault`)
-const PYTHON = `${VAULT}/.venv/bin/python`
-
-// dedicated personal account for the encrypted row: the personal suite owns ALICE (different
-// phrase, plus deliberately malformed/v1/foreign-keyed ciphers) and runs concurrently on the same
-// emulator corpus; the listener reads every item of its user and treats an undecryptable cipher
-// as fatal by contract, so the accounts must not be shared
-const BRIDGE_USER: TestUser = { uid: 'bridge_e2e', displayName: 'Bridge Test', email: 'bridge@e2e.test' }
-
-let bridge: ChildProcessWithoutNullStreams
-
-test.skip(!existsSync(PYTHON), 'vault checkout with venv required (set VAULT_DIR)')
-
-// spawns a bridge listener for the given account and resolves once it is listening; bounded:
-// rejects on spawn error, premature exit, or a startup timeout, and kills the child on failure
-// (FIRESTORE_EMULATOR_HOST comes from `firebase emulators:exec`, see tests/e2e/run.sh)
-async function spawnBridge(user: string, env: Record<string, string> = {}): Promise<ChildProcessWithoutNullStreams> {
-  const child = spawn(PYTHON, [`${VAULT}/bin/mind_bridge.py`, '--user', user], {
-    cwd: VAULT,
-    // self-contained import path: the script does `from mindpage_bridge import ...`, which lives
-    // in the vault's lib/ (normally supplied by the vault's interactive shell PYTHONPATH); an
-    // ordinary shell would otherwise fail with ModuleNotFoundError
-    env: {
-      ...process.env,
-      PYTHONPATH: `${VAULT}/lib${process.env.PYTHONPATH ? delimiter + process.env.PYTHONPATH : ''}`,
-      // scrub BOTH ambient credentials (the vault .env may define them and the child's
-      // load_dotenv does not override set vars); empty means absent to the CLI, and each
-      // row overrides exactly the credential it needs
-      MIND_BRIDGE_USER_SECRET: '',
-      MIND_BRIDGE_USER_ENVELOPE_FILE: '',
-      ...env,
-    } as NodeJS.ProcessEnv,
-  })
-  let stdout = '' // accumulated: the listening marker may straddle chunk boundaries
-  child.stdout.on('data', (data: Buffer) => {
-    stdout += data.toString()
-    console.log(`[bridge:${user}] ${data.toString().trim()}`)
-  })
-  child.stderr.on('data', (data: Buffer) => console.log(`[bridge:${user}:err] ${data.toString().trim()}`))
-  // a post-ready death would otherwise surface only as a later poll timeout
-  child.on('exit', (code, signal) => console.log(`[bridge:${user}] exited (code=${code}, signal=${signal})`))
-  await new Promise<void>((ready, failed) => {
-    let settled = false
-    const settle = (fn: () => void) => settled || ((settled = true), clearTimeout(timer), fn())
-    const timer = setTimeout(
-      () => settle(() => (child.kill('SIGKILL'), failed(new Error(`bridge startup timed out in 15s; stdout: ${stdout}`)))),
-      15_000
-    )
-    // registered after the accumulating listener above, so `stdout` already includes the chunk
-    child.stdout.on('data', () => stdout.includes('listening') && settle(ready))
-    child.on('error', e => settle(() => (child.kill('SIGKILL'), failed(new Error(`bridge failed to spawn: ${e}`)))))
-    child.on('exit', code => settle(() => failed(new Error(`bridge exited during startup with code ${code}`))))
-  })
-  return child
-}
-
-// SIGTERM, await exit briefly, SIGKILL only on timeout (then wait up to 2s for the exit): an
-// unkilled listener would contaminate the next run. a process that exits by signal leaves
-// exitCode null and records signalCode, so both mark the already-exited state
-async function stopBridge(child: ChildProcessWithoutNullStreams | undefined) {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return
-  const exited = new Promise<void>(done => child.once('exit', () => done()))
-  child.kill('SIGTERM')
-  let timer: NodeJS.Timeout | undefined
-  const timedOut = await Promise.race([
-    exited.then(() => false),
-    new Promise<boolean>(done => (timer = setTimeout(() => done(true), 5_000))),
-  ])
-  clearTimeout(timer)
-  if (timedOut) {
-    child.kill('SIGKILL')
-    await Promise.race([exited, new Promise<void>(done => setTimeout(done, 2_000))])
-  }
-}
-
-test.beforeAll(async () => {
-  bridge = await spawnBridge('anonymous')
-})
-
-test.afterAll(() => stopBridge(bridge))
-
-// item text lookup by name, empty until the item exists (e.g. right after _create)
 function itemText(page: Page, name: string): Promise<string> {
   return page.evaluate(name => window._item(name, true)?.text ?? '', name)
 }
-
-test('bridge replies to a request item created in the browser', async ({ page }) => {
-  page.on('console', m => {
-    const text = m.text()
-    if (/bridge|vault/.test(text)) console.log(`[page] ${text.slice(0, 200)}`)
-  })
-  await loadAdmin(page)
-  await page.evaluate(() => void window._create('#e2e_bridge_roundtrip #_agent/vault\n<<user>> hello bridge'))
-  // the vault reply appears in item text via realtime sync, no reload
-  await expect
-    .poll(() => itemText(page, '#e2e_bridge_roundtrip'), { timeout: 30_000 })
-    .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): hello bridge")
-  // and renders in the app like any other chat reply
-  await expect(page.getByText(/echo\(cost_limit=/).first()).toBeVisible()
-  // a replied item must not be answered again (trailing agent message guard, echo suppression)
-  await page.waitForTimeout(2_000)
-  const text = await itemText(page, '#e2e_bridge_roundtrip')
-  expect(text.match(/<<agent\('vault\/default'\)>>/g)?.length, text).toBe(1)
-})
-
-test('personas resolve on the vault side, unknown personas get error replies', async ({ page }) => {
-  await loadAdmin(page)
-  await page.evaluate(() => void window._create('#e2e_bridge_opus #_agent/vault/opus\n<<user>> ping'))
-  await page.evaluate(() => void window._create('#e2e_bridge_unknown #_agent/vault/nope\n<<user>> ping'))
-  // opus resolves to the registry entry with its own authority (cost_limit=5.0)
-  await expect
-    .poll(() => itemText(page, '#e2e_bridge_opus'), { timeout: 30_000 })
-    .toContain("<<agent('vault/opus')>> echo(cost_limit=5.0): ping")
-  // unknown personas fail as replies listing available personas -- no request dies silently
-  await expect
-    .poll(() => itemText(page, '#e2e_bridge_unknown'), { timeout: 30_000 })
-    .toContain("<<agent('vault')>> error: unknown persona 'nope' (available: default, opus)")
-})
-
-test('bridge replies to encrypted personal-account requests', async ({ page }) => {
-  // personal (non-anonymous) accounts store each item's JSON aes-gcm-encrypted in a
-  // `cipher` field with `text` null; the bridge decrypts with the account's stored
-  // secret (the localStorage.mindpage_secret form) and writes back a re-encrypted
-  // reply the app can decrypt -- proving v0 crypto compatibility in both directions.
-  // NOTE: this row pins the legacy v0-only mode on a fresh emulator account (KDF
-  // flags off) as an explicit v0 PoC; the v1/mixed-corpus port is pinned by the
-  // envelope row below, which serves both frames and writes replies as v1.
-  const PHRASE = 'bridge-e2e-phrase'
-  const secret = secretFor(BRIDGE_USER, PHRASE)
-  const listener = await spawnBridge(BRIDGE_USER.uid, { MIND_BRIDGE_USER_SECRET: secret })
-  try {
-    // seed the secret as a returning device would have it, before signing in; the reader flag is
-    // EXPLICITLY 'off' — this ROW deliberately pins the legacy v0-only MODE (the port itself
-    // is mixed-corpus), and under the reader default an absent flag would enable acquisition
-    // and prompt
-    await page.addInitScript(secret => {
-      localStorage.setItem('mindpage_secret', secret)
-      localStorage.setItem('mindpage_kdf', 'off')
-    }, secret)
-    await loadUser(page, BRIDGE_USER)
-    // brand-new empty account: loadUser only waits for initialization to START (and writability);
-    // welcome copying/reconstruction/rendering may still be in flight, so wait for the app proper
-    await waitForApp(page)
-    await page.evaluate(() => void window._create('#e2e_bridge_secret #_agent/vault\n<<user>> secret ping'))
-    // the decrypted vault reply appears in item text via realtime sync
-    await expect
-      .poll(() => itemText(page, '#e2e_bridge_secret'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): secret ping")
-    // and the item is encrypted at rest, exactly as the personal suite pins it: text and attr
-    // null, cipher base64, and no plaintext anywhere in the stored document
-    const id = await page.evaluate(() => window._item('#e2e_bridge_secret', true)?.saved_id)
-    expect(id, 'saved item id').toBeTruthy()
-    const doc = (await firestore().collection('items').doc(id!).get()).data()!
-    expect(doc.text, 'text must not be stored').toBeNull()
-    expect(doc.attr, 'attr must not be stored').toBeNull()
-    expect(doc.cipher).toMatch(/^[A-Za-z0-9+/=]{40,}$/)
-    expect(JSON.stringify(doc)).not.toContain('secret ping')
-  } finally {
-    await stopBridge(listener)
-  }
-})
-
-test('bridge serves a mixed v0/v1 corpus via the key envelope and replies v1', async ({ page }) => {
-  // the v1/mixed-corpus port row (vault review 101 §2, landed with the port): a personal
-  // account holding BOTH cipher versions is served by a bridge running on the account's key
-  // ENVELOPE (the localStorage.mindpage_key1 form: v1 key + bound v0 secret in one
-  // account-bound value, via MIND_BRIDGE_USER_ENVELOPE_FILE). the bridge must decrypt each
-  // frame with its own credential and write EVERY reply as v1 -- a v0 write would re-create
-  // retired-KDF ciphertext in a swept corpus. cross-parity is real in both directions: the
-  // envelope comes from the app's own ENCODER and the v0 request from its v0 primitive
-  // (src/kdf_profile.js, src/crypto.js), the v1 request is written by the BROWSER (writer on)
-  // and asserted v1 at rest BEFORE the listener starts (so the mixed corpus is established,
-  // not assumed), and the app decrypts and renders both bridge replies live
-  const PHRASE = 'bridge-v1-phrase'
-  const V1_USER: TestUser = { uid: 'bridge_v1_e2e', displayName: 'Bridge V1', email: 'bridge_v1@e2e.test' }
-  const SALT = Buffer.from(new Uint8Array(16).fill(8)).toString('base64')
-  const KEY_BYTES = new Uint8Array(32).map((_, i) => 96 + i)
-  const { encryptWithSecret, importV1Key, decryptV1Text } = await import('../../src/crypto.js')
-  const { encodeKeyEnvelope } = await import('../../src/kdf_profile.js')
-  const v1key = await importV1Key(KEY_BYTES)
-  const secret = secretFor(V1_USER, PHRASE)
-  // the app's own envelope encoder: the same value a real device persists as mindpage_key1
-  const envelope = encodeKeyEnvelope({ uid: V1_USER.uid, salt: SALT, keyBytes: KEY_BYTES, v0Secret: secret })
-  // the committed profile (the metadata shape the app's session and the bridge's startup
-  // fence both confirm against), and a v0-encrypted REQUEST already at rest
-  await firestore().collection('users').doc(V1_USER.uid).set({ kdf: { v: 1, salt: SALT } }, { merge: true })
-  await firestore()
-    .collection('items')
-    .doc('e2e-bridge-v0req')
-    .set({
-      user: V1_USER.uid,
-      time: Date.now(),
-      hidden: false,
-      text: null,
-      attr: null,
-      cipher: await encryptWithSecret(
-        JSON.stringify({ text: '#e2e_bridge_v0req #_agent/vault\n<<user>> v0 ping', attr: null }),
-        secret
-      ),
-    })
-  let browserId: string | undefined
-  let listener: ChildProcessWithoutNullStreams | undefined
-  try {
-    // a returning v1 device: secret + envelope + writer ON (reader at its production default)
-    await page.addInitScript(
-      ([secret, envelope]) => {
-        localStorage.setItem('mindpage_secret', secret)
-        localStorage.setItem('mindpage_key1', envelope)
-        localStorage.setItem('mindpage_kdf_write', 'on')
-      },
-      [secret, envelope]
-    )
-    await loadUser(page, V1_USER)
-    await waitForApp(page)
-    // the browser writes its request and it SETTLES BEFORE the listener exists, so the
-    // browser-v1 direction is proven on the initial cipher -- were the writer flag ignored
-    // and this stored as v0, the bridge's later v1 rewrite would mask it
-    await page.evaluate(() => void window._create('#e2e_bridge_v1req #_agent/vault\n<<user>> v1 ping'))
-    await expect
-      .poll(() => page.evaluate(() => window._item('#e2e_bridge_v1req', true)?.saved_id), { timeout: 30_000 })
-      .toBeTruthy()
-    browserId = (await page.evaluate(() => window._item('#e2e_bridge_v1req', true)?.saved_id))!
-    const initial = (await firestore().collection('items').doc(browserId).get()).data()!
-    expect(initial.cipher, 'browser request is v1 at rest BEFORE any bridge ran').toMatch(/^1![0-9a-f]{24}/)
-    const seeded = (await firestore().collection('items').doc('e2e-bridge-v0req').get()).data()!
-    expect(seeded.cipher, 'seeded request is still v0 (untagged) -- a genuinely mixed corpus').toMatch(
-      /^[0-9a-f]{24}/
-    )
-    // install the modal collector BEFORE the listener exists (review 150 §3.2): it must
-    // observe the whole span of both live {cipher,time} reply rewrites and the ~2s
-    // reconciliation that follows -- a snapshot or late observer misses transient modals.
-    // error modals carry real text; spinner overlays are whitespace-only.
-    await page.evaluate(() => {
-      const seen: string[] = ((window as any)._modals_seen = [])
-      const record = () =>
-        document.querySelectorAll('.modal').forEach(m => {
-          const text = (m.textContent ?? '').trim()
-          if (text) seen.push(text)
-        })
-      new MutationObserver(record).observe(document.body, { childList: true, subtree: true })
-      record()
-    })
-    // only NOW start the listener: its initial catch-up snapshot serves the mixed corpus.
-    // the envelope reaches it as a 0600 file, exactly like production operation
-    const envelopePath = test.info().outputPath('envelope.json')
-    writeFileSync(envelopePath, envelope, { mode: 0o600 })
-    listener = await spawnBridge(V1_USER.uid, { MIND_BRIDGE_USER_ENVELOPE_FILE: envelopePath })
-    // both replies -- to the seeded v0 request and the browser's v1 request -- render live
-    await expect
-      .poll(() => itemText(page, '#e2e_bridge_v0req'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): v0 ping")
-    await expect
-      .poll(() => itemText(page, '#e2e_bridge_v1req'), { timeout: 30_000 })
-      .toContain("<<agent('vault/default')>> echo(cost_limit=0.5): v1 ping")
-    // warm-cache no-error-modal (owner-observed 2026-08-30, design §2.2): the collector
-    // installed BEFORE the listener has observed both live reply rewrites; wait past the
-    // ~2s reconciliation window and require nothing surfaced at any point in the span
-    await page.waitForTimeout(3_000)
-    expect(
-      await page.evaluate(() => (window as any)._modals_seen as string[]),
-      'no modal appeared from reply delivery through reconciliation'
-    ).toEqual([])
-    // at rest, BOTH replied items are v1 (`1!`-tagged): the bridge upgraded the v0 item on
-    // write and never re-created v0; the ciphers decrypt under the app's own v1 primitive,
-    // and no exact request/reply plaintext appears outside the cipher field
-    for (const id of ['e2e-bridge-v0req', browserId]) {
-      const doc = (await firestore().collection('items').doc(id).get()).data()!
-      expect(doc.text, 'text must not be stored').toBeNull()
-      expect(doc.attr, 'attr must not be stored').toBeNull()
-      expect(doc.cipher, `cipher of ${id} is v1 at rest`).toMatch(/^1![0-9a-f]{24}/)
-      const plain = JSON.parse(await decryptV1Text(doc.cipher, v1key))
-      expect(plain.text).toContain("<<agent('vault/default')>> echo(")
-      for (const phrase of ['v0 ping', 'v1 ping', 'agent/vault']) {
-        expect(JSON.stringify({ ...doc, cipher: null }), `no '${phrase}' outside cipher`).not.toContain(phrase)
-      }
-    }
-  } finally {
-    await stopBridge(listener)
-    await firestore().collection('items').doc('e2e-bridge-v0req').delete()
-    if (browserId) await firestore().collection('items').doc(browserId).delete()
-    await firestore().collection('users').doc(V1_USER.uid).update({ kdf: FieldValue.delete() })
-    await page.evaluate(() => {
-      localStorage.removeItem('mindpage_key1')
-      localStorage.removeItem('mindpage_kdf_write')
-    })
-  }
-})
 
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {
   // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO
@@ -417,11 +128,16 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     // this is the exact old defect (a top-level dead-frame div escaped inside the list code)
     { name: 'list_nested', body: 'list_body', framed: false,
       lines: ['- ```js', '  before', '<!--inert-->', 'list_body', '<!--/inert-->', '  after', '  ```'] },
-    // a fence created by a MACRO after Item's own transforms -> CODE. the expression has
+    // a fence created by a MACRO after the opaque scan -> CODE. the expression has
     // no raw backtick (so it passes the app's balance predicate) and evaluates to a
     // three-backtick js opener; only Marked-native classification sees this fence
     { name: 'macro_fence', body: 'macro_body', framed: false,
       lines: ["<<String.fromCharCode(96).repeat(3) + 'js'>>", '<!--inert-->', 'macro_body', '<!--/inert-->', '```'] },
+    // a region as an IMAGE DESTINATION (review 186 §4.1): the marker lands in the image
+    // token's href, where Marked's default renderer would percent-encode it into a live
+    // src request -- the renderer.image interception renders the fixed placeholder
+    { name: 'image_dest', body: 'image_body', framed: false,
+      lines: ['![alt](', '<!--inert-->', 'image_body', '<!--/inert-->', ')'] },
     // a trailing TAB after the closing run: the app pipeline normalizes trailing whitespace
     // before Marked, so this closes the ```js and the region is TOP-LEVEL (raw Marked would
     // keep it in code; either placement is safe -- the assertion pins whichever the pipeline
@@ -447,6 +163,11 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
         // candidate bytes initially enter through textContent and never create
         // candidate-supplied elements/attributes (review 183 §1.3)
         frameChildElements: [...(content?.querySelectorAll('.vault-result *') ?? [])].length,
+        // review 186 §4.1: a marker must never survive into a URL attribute (raw or
+        // percent-encoded -- the ascii 'vault_result_v1:' substring survives encodeURI)
+        markerUrls: [...(content?.querySelectorAll('img, a') ?? [])].filter(el =>
+          ((el.getAttribute('src') ?? '') + (el.getAttribute('href') ?? '')).includes('vault_result_v1')
+        ).length,
       }
     }, hashName)
     // invariants that hold for EVERY placement Marked chooses (review 182 §1):
@@ -454,6 +175,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
     expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
     expect(r.frameChildElements, `${rc.name}: candidate bytes create no child elements`).toBe(0)
+    expect(r.markerUrls, `${rc.name}: no marker survives into a src/href attribute`).toBe(0)
     // the DISCRIMINATING assertion (review 183 §1.2): Marked's classification is pinned --
     // a top-level region is a dead frame with the decoded body and NOT the placeholder; a
     // code region is the fixed placeholder and NOT the body. A regression that flips either
@@ -468,6 +190,101 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       expect(r.rendered, `${rc.name}: code shows the fixed placeholder`).toContain('⟦inert region⟧')
       expect(r.rendered, `${rc.name}: code does NOT show the decoded body`).not.toContain(rc.body)
     }
+  }
+
+  // (c1b) encoded marker LOOKALIKE in an ordinary image stays an ordinary image
+  // (review 187 §2): owner text percent-encoding a marker shape must NOT trip the raw
+  // interception -- the real region still frames, and the lookalike renders as an img
+  {
+    const hashName = '#e2e_vault_lookalike'
+    const lines = [
+      hashName,
+      '![ordinary](%E2%9F%A6vault_result_v1%3A0%3A0%E2%9F%A7)',
+      '',
+      '<!--inert-->',
+      'lookalike_body',
+      '<!--/inert-->',
+    ]
+    await page.evaluate(text => void window._create(text), lines.join('\n'))
+    await page.evaluate(name => void (location.hash = name), hashName)
+    await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem, hashName), { timeout: 15_000 }).toBe(true)
+    const r = await page.evaluate(name => {
+      const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+      return {
+        rendered: content?.textContent ?? '',
+        frames: [...(content?.querySelectorAll('.vault-result') ?? [])].length,
+        images: [...(content?.querySelectorAll('img') ?? [])].length,
+      }
+    }, hashName)
+    expect(r.frames, 'lookalike: the real region still frames').toBe(1)
+    expect(r.rendered, 'lookalike: decoded body shown').toContain('lookalike_body')
+    expect(r.images, 'lookalike: the ordinary encoded image is NOT suppressed').toBe(1)
+    expect(r.rendered, 'lookalike: no placeholder for the ordinary image').not.toContain('⟦inert region⟧')
+  }
+
+  // (c1c) SEARCH reaches decoded bodies (owner bug 2026-08-31; review 188 §§2.1-2.3):
+  // a term existing ONLY inside a canonical region body must match the item and
+  // highlight inside its frame -- in visible ORDER (regex terms), and still after a
+  // MACRO forces the expanded-item search path
+  {
+    const hashName = '#e2e_vault_searchable'
+    const lines = [
+      hashName,
+      'prompt text here',
+      '<!--inert-->',
+      'zanzibar_reply_term',
+      '<!--/inert-->',
+      'suffix searchable_suffix <<1+1>>',
+    ]
+    await page.evaluate(text => void window._create(text), lines.join('\n'))
+    // drive the real mindbox search (editor.spec idiom): backdrop click focuses it
+    await page.locator('.header .backdrop').first().click()
+    await page.locator('#textarea-mindbox').fill('zanzibar_reply_term')
+    // the item matches on the decoded body alone (editor.spec matching idiom)...
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            name => window.__items.find(item => item.labelText == name)?.matching ?? false,
+            hashName
+          ),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    // ...and the occurrence inside the dead frame is highlight-wrapped
+    await expect
+      .poll(
+        () =>
+          page.evaluate(name => {
+            const elem = window._item(name, true)?.elem
+            return [...(elem?.querySelectorAll('.vault-result .highlight') ?? [])].some(span =>
+              (span.textContent ?? '').includes('zanzibar_reply_term')
+            )
+          }, hashName),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    const matching = () =>
+      page.evaluate(name => window.__items.find(item => item.labelText == name)?.matching ?? false, hashName)
+    // regex ORDER follows the visible text (188 §2.2): body precedes the suffix
+    await page.locator('#textarea-mindbox').fill('regex:zanzibar_reply_term[^]*searchable_suffix')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(true)
+    await page.locator('#textarea-mindbox').fill('regex:searchable_suffix[^]*zanzibar_reply_term')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(false)
+    // the EXPANDED-item path (188 §2.1): force macro expansion, then the same
+    // reply-only term must still match through expanded.item's search text
+    await page.evaluate(name => void (window._item(name, true) as any)?.read('', { eval_macros: true }), hashName)
+    await expect
+      .poll(
+        () => page.evaluate(name => !!(window.__items.find(item => item.labelText == name) as any)?.expanded?.item, hashName),
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+    await page.locator('#textarea-mindbox').fill('zanzibar_reply_term')
+    await expect.poll(matching, { timeout: 15_000 }).toBe(true)
+    // clear the search for the rows below
+    await page.locator('#textarea-mindbox').fill('')
+    await page.keyboard.press('Escape')
   }
 
   // (c2) EDITOR keeps its open block across the candidate (review 181 §2): a simple

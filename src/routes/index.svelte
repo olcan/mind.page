@@ -2605,9 +2605,11 @@
         labelUnique,
         tagsAlt,
         lctext,
+        lcsearch,
         tagsExpanded,
         text,
       } = item.expanded?.item ?? item
+      const searchText = lcsearch ?? lctext // decoded inert bodies are searchable
 
       // match query terms against visible tags (+prefixes) in item
       item.tagMatches = _.intersection(tagsVisibleExpanded, terms).length
@@ -2640,10 +2642,10 @@
         item.matchingTerms = terms.filter(t => t[0] == '#' && tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
 
         // match all terms (tag or non-tag) anywhere in text
-        item.matchingTerms.push(...terms.filter(t => lctext.includes(t)))
+        item.matchingTerms.push(...terms.filter(t => searchText.includes(t)))
 
         // match regex:* terms as regex
-        item.matchingTerms.push(...regexTerms.filter(t => lctext.match(t)))
+        item.matchingTerms.push(...regexTerms.filter(t => searchText.match(t)))
 
         // match id:* terms against id
         const id = 'id:' + item.id.toLowerCase()
@@ -3700,6 +3702,12 @@
     // precompute macro-expanded item state used for search in onEditorChange and store in item.expanded.item
     // we reuse itemTextChanged (w/ update_deps:false) to switch temporarily to expanded text and back
     // this is simpler, ensures consistency, and is also easy to extend to other item state in future
+    // capture the RAW scan's marker -> decoded-value pairs first (review 188 §2.1):
+    // expanded.text is marker-domain, so the temporary rescan below finds no raw inert
+    // candidates and would otherwise lose decoded-body search for macro-bearing items
+    const rawInertValues: [string, string][] = item.vaultScan.candidates
+      .filter(c => typeof c.value == 'string')
+      .map(c => [c.marker, c.value as string])
     itemTextChanged(item.index, item.expanded.text, false /* update_deps */)
     item.expanded.item = _.pick(item, [
       // these names should match destructured item state in onEditorChange
@@ -3712,10 +3720,24 @@
       'labelUnique',
       'tagsAlt',
       'lctext',
+      'lcsearch',
       'tagsExpanded',
       'missingTags',
       'text',
     ])
+    // derive expanded search text from the expanded scan's CASE-PRESERVING grammar
+    // text plus BOTH maps -- the original raw markers that survive expansion and any
+    // macro-produced regions the temporary scan claimed (reviews 188 §2.1, 189 §2.1);
+    // values stay matcher-only and never re-enter the grammar
+    item.expanded.item.lcsearch = inertSearchText(
+      item.vaultScan.grammarText, // the temporary EXPANDED scan at this point
+      new Map([
+        ...rawInertValues,
+        ...item.vaultScan.candidates
+          .filter(c => typeof c.value == 'string')
+          .map(c => [c.marker, c.value as string] as [string, string]),
+      ])
+    )
     // note this call may use item.expanded.item.* to update certain global state, e.g. tagCounts
     itemTextChanged(item.index, item.text, false /* update_deps */)
 
@@ -3751,9 +3773,24 @@
     // ONE scan per text change (bridge design §2.2-2.3): every grammar consumer below
     // (search text, tags, labels, runnable/input detection -- and the read/render paths
     // via item.vaultScan) receives the GRAMMAR VIEW, in which inert-region candidate
-    // ranges are collapsed to inert markers; association decides per-message validity
+    // ranges are collapsed to inert markers; the bridge's Python transcript classifier
+    // alone decides trusted-result validity (TS association was removed at cutover)
     item.vaultScan = scanInert(text)
     item.lctext = item.vaultScan.grammarText.toLowerCase()
+    // SEARCH text (owner bug 2026-08-31; reviews 188 §2.2 + 189 §2.1): the grammar
+    // view is right for tags/labels/runnable (a route or tag inside a claimed region
+    // must stay invisible), but the readable inert era means search should also match
+    // DECODED canonical bodies at their visible positions. inertSearchText runs ONE
+    // collision-safe pass over the CASE-PRESERVING grammar text (matching only; values
+    // never re-enter the grammar).
+    item.lcsearch = inertSearchText(
+      item.vaultScan.grammarText,
+      new Map(
+        item.vaultScan.candidates
+          .filter(c => typeof c.value == 'string')
+          .map(c => [c.marker, c.value as string])
+      )
+    )
     item.runnable = item.lctext.match(inputBlockRegExp()) // note input type required
     // changes in mindpage can reset (but not set) previewable flag
     // only changes in local repo (detected in fetchPreview) can set previewable
@@ -7148,7 +7185,7 @@
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { autodepParent } from '../install_deps'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
-  import { containsOpaqueMarker, editInertText, isVaultRouted, scanInert } from '../inert'
+  import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert } from '../inert'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)

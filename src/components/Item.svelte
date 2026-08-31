@@ -287,13 +287,19 @@
     dependentsString: string,
     version: number
   ) {
-    // bridge reviews 177-184: the grammar view's opaque markers flow UNCHANGED through
-    // macro expansion and every block transform below; MARKED itself then classifies
-    // each marker's placement (review 182 §1.3) via the inert extension registered on
-    // the parser -- a marker Marked lexes at top level becomes a dead-frame span
-    // (decoded value assigned post-render via textContent), a marker Marked lexes inside
-    // a code token is left as literal text and swapped for the fixed placeholder after
-    // parse. No pre-parse fence prediction; the decoded bytes never enter Markdown.
+    // bridge reviews 177-188: candidate BYTES never enter macro expansion or the block
+    // transforms below -- only opaque markers do, and a surviving marker (an enclosing
+    // _removed transform may drop one with its span) reaches the final classification
+    // seams, where MARKED classifies
+    // each marker's placement via the inert extension registered on the parser -- a
+    // marker Marked lexes in ordinary inline flow (paragraph, list item, blockquote,
+    // heading, table cell) becomes a dead-frame span (decoded value assigned
+    // post-render via textContent); a marker inside BLOCK code (fenced or indented --
+    // marked-highlight walks every block code token) is swapped for the fixed
+    // placeholder in the callback, with the post-parse backstop covering the
+    // inline-code residual; a marker in a link/image destination is escaped by the
+    // link override or intercepted by the image override (reviews 186 §4.1, 187 §2).
+    // No pre-parse fence prediction; the decoded bytes never enter Markdown.
     const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
       vaultValues = new Map(
@@ -771,6 +777,22 @@
         href
       )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
     }
+    // a claimed region inside LINK/IMAGE DESTINATION syntax lands in the token's
+    // href (review 186 §4.1): the app's link override _.escape()s it so the post-parse
+    // backstop rewrites it, but Marked's default image renderer percent-encodes the
+    // marker into a live src request before the backstop can match -- intercept and
+    // render the fixed placeholder instead (returning false keeps the default for
+    // ordinary images)
+    renderer.image = ({ href }) => {
+      // RAW comparison only (review 187 §2): Marked hands overrides the raw href and
+      // URL-encodes solely in its default renderer, so a generated marker arrives here
+      // verbatim -- while owner text that percent-ENCODES a marker lookalike must fall
+      // through as an ordinary image (decoding it would let owner text impersonate a
+      // collision-free marker and suppress a real image)
+      for (const m of (href ?? '').matchAll(new RegExp(INERT_MARKER_SOURCE, 'g')))
+        if (vaultValues.has(m[0])) return _.escape(INERT_FENCED_PLACEHOLDER)
+      return false
+    }
     marked.use({ renderer }) // note a bare renderer instance is silently ignored by marked.use
     // the INERT extension (bridge reviews 182-184): an inline tokenizer for the grammar
     // markers of THIS render's claimed regions. Marked runs inline tokenizers wherever it
@@ -809,8 +831,10 @@
           // a claimed region MARKED lexed inside this code block becomes the fixed
           // placeholder HERE, at the exact seam where raw code enters highlight.js --
           // before highlight.js can fragment the marker into spans and leak it (review
-          // 182 §1.1). Top-level markers never reach this callback (the inline extension
-          // renders them as dead-frame spans); so exactly one path handles every marker.
+          // 182 §1.1). marked-highlight walks every BLOCK code token (fenced and
+          // indented); ordinary-inline markers never reach it (the inline extension
+          // already rendered them), and inline-code markers are the post-parse
+          // backstop's residual.
           if (vaultValues.size)
             code = code.replace(inertGlobal, (m: string) =>
               vaultValues.has(m) ? INERT_FENCED_PLACEHOLDER : m
