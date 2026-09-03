@@ -1,6 +1,8 @@
 import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
-import { install, loadAdmin, loadAnonymous } from './helpers.js'
+import { readdirSync, readFileSync } from 'fs'
+import { resolve } from 'path'
+import { firestore, install, loadAdmin, loadAnonymous } from './helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the baseline project
@@ -597,5 +599,271 @@ test('vault routing: start, completion, and catch fences suppress web dispatch',
     expect(await textOf('#chat/ollama/2'), 'catch fence: no error log block').not.toContain('```_log')
   } finally {
     await cleanup()
+  }
+})
+
+// ---- vault renderer contract (mind sync design, phase 0) ----
+
+// the SYNTHETIC consumer fixtures of the vault's mind sync design (section 8): each file is
+// one managed item's full text under a synthetic managed path (agents/e2e_*.md), generated once
+// by the vault's Python encoder and checked in; they exercise the schema and nesting, not
+// producer truth. resolved like helpers.ts (cwd-relative: playwright runs from the mind.page
+// root; ESM has no __dirname)
+const FIXTURES = resolve(process.env.MIND_ITEMS_DIR ?? '../mind.items', 'tests', 'fixtures', 'vault_sync')
+const MANIFEST = ['e2e_absent.md', 'e2e_config.md', 'e2e_large.md', 'e2e_nested.md', 'e2e_section.md', 'e2e_worker.md']
+const PREFIX = '#vault/agents/e2e_' // every synthetic label starts with this
+const RENDERER = '#template/vault'
+const block = (text: string, lang: string) => text.split('```' + lang + '\n')[1]?.split('\n```')[0] ?? ''
+const unescape = (body: string) => body.replace(/(\\+)<{2}/g, (_m, bs: string) => bs.slice(1) + '<<')
+const label = (p: string) => '#vault/' + p.replace(/\.md$/, '')
+// a managed item's text from its payload JSON text (the consumer accepts any strict JSON; the
+// producer's canonical spelling is a producer invariant, not a consumer check)
+const itemText = (p: string, source: string, payloadJson: string, deps: string[]) =>
+  [
+    `${label(p)} <<vault_badge()>>`,
+    '```jinja_removed',
+    source.replace(/(\\*)<{2}/g, (_m, bs: string) => bs + '\\<<'),
+    '```',
+    '```vault_removed',
+    Buffer.from(payloadJson, 'utf8').toString('base64'),
+    '```',
+    '<!-- template -->',
+    '<<vault_render()>>',
+    '<!-- /template -->',
+    ['#_template/vault', ...deps.map(d => '#_' + label(d).slice(1))].join(' '),
+  ].join('\n')
+
+test('vault renderer contract', async ({ page }) => {
+  await loadAdmin(page)
+  const files = readdirSync(FIXTURES).filter(f => f.endsWith('.md')).sort()
+  expect(files, 'the exact fixture manifest').toEqual(MANIFEST)
+  const texts = files.map(file => readFileSync(resolve(FIXTURES, file), 'utf8'))
+  const nameOf = (text: string) => text.split(/\s/)[0]
+  const fixture = (file: string) => texts[files.indexOf(file)]
+  // items are addressed by LOCAL id: a duplicated label renames both wrappers to id:<local-id>,
+  // so names are ambiguous exactly in the killed-run state the pre-clean must recover from
+  const localIdOf = (label: string) => page.evaluate(l => window._items().find(i => i.label == l)?.id ?? null, label)
+  const savedIdOfId = (id: string) => page.evaluate(id => (window._item(id, true) as any)?.saved_id ?? null, id)
+  const savedIdOf = async (label: string) => {
+    const id = await localIdOf(label)
+    return id ? savedIdOfId(id) : null
+  }
+  // DURABLE persistence (feedback 6/7): a create is awaited until the item has its saved id,
+  // a delete is awaited until the emulator's document is gone (the app's deleteDoc is
+  // fire-and-forget and the local array drops the item synchronously)
+  const absent = async (ids: string[]) => {
+    for (const id of ids) await expect.poll(async () => (await firestore().collection('items').doc(id).get()).exists, { timeout: 30_000 }).toBe(false)
+  }
+  const create = async (text: string) => {
+    const before: string[] = await page.evaluate(l => window._items().filter(i => i.label == l).map(i => i.id), nameOf(text))
+    await page.evaluate(t => void window._create(t), text)
+    let id: string | null = null
+    await expect.poll(async () => (id = await page.evaluate(([l, b]) => window._items().find(i => i.label == l && !b.includes(i.id))?.id ?? null, [nameOf(text), before] as const)), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => savedIdOfId(id!), { timeout: 30_000 }).toBeTruthy()
+    return { id: id!, saved: (await savedIdOfId(id!)) as string }
+  }
+  const remove = async (localId: string, savedId: string | null) => {
+    await page.evaluate(id => window._item(id)!.delete(false), localId)
+    if (savedId) await absent([savedId])
+  }
+  // every local item under the synthetic prefix or the renderer, by LOCAL id (labels may be
+  // duplicated after a killed run, when _item(label) would be ambiguous); pre-cleaning is the
+  // recovery path after a killed or timed-out run, the finally path handles failures
+  const clean = async () => {
+    const local: { id: string; saved: string | null }[] = await page.evaluate(
+      ([p, r]) => window._items().filter(i => i.label.startsWith(p) || i.label == r).map(i => ({ id: i.id, saved: (i as any).saved_id ?? null })),
+      [PREFIX, RENDERER] as const
+    )
+    for (const { id, saved } of local) await remove(id, saved)
+    expect(await page.evaluate(([p, r]) => window._items().filter(i => i.label.startsWith(p) || i.label == r).length, [PREFIX, RENDERER] as const)).toBe(0)
+    return local.map(l => l.saved).filter((s): s is string => !!s)
+  }
+  const carriers = (n: string) =>
+    page.evaluate(n => {
+      const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
+      return [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent ?? '')
+    }, n)
+  const show = async (n: string) => {
+    await page.evaluate(n => void (location.hash = n), n)
+    await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem, n), { timeout: 15_000 }).toBe(true)
+  }
+  await clean()
+  try {
+    expect(await install(page, 'template/vault'), '/_install template/vault').toBeNull()
+    await expect.poll(() => savedIdOf(RENDERER), { timeout: 30_000 }).toBeTruthy()
+    // install every fixture before rendering any (dependency tags must resolve first)
+    for (const text of texts) await create(text)
+    for (const [i, file] of files.entries()) {
+      const text = texts[i]
+      const name = nameOf(text)
+      const payload = block(text, 'vault_removed').trim()
+      const source = unescape(block(text, 'jinja_removed'))
+      await show(name)
+      const r = await page.evaluate(n => {
+        const item = window._item(n, true)!
+        const content = item.elem?.querySelector('.content') as HTMLElement
+        const owner = (el: Element) => (el.getAttribute('onclick') ?? '').match(/_item\('([^']+)'\)/)?.[1] ?? ''
+        // both halves of every toggle: the visible span and the revealed div, paired by id class
+        const halves = [...(content?.querySelectorAll('span.template_toggle') ?? [])].map(s => {
+          const idc = [...s.classList].find(c => c.startsWith('id_')) ?? ''
+          const div = idc ? content.querySelector('div.template_toggle.' + idc) : null
+          return {
+            idc,
+            spanOwner: owner(s),
+            divOwner: div ? owner(div) : null,
+            inVault: !!s.closest('.vault') && !!div?.closest('.vault'),
+            labelHasBlock: !!s.querySelector('pre'),
+            hidden: div?.classList.contains('hidden') ?? null,
+            handlerLeak: (div?.textContent ?? '').includes('classList.toggle'),
+          }
+        })
+        return {
+          id: item.id,
+          rendered: content?.textContent ?? '',
+          containers: content?.querySelectorAll('.vault').length ?? 0,
+          // every block carrier sits under a .vault ancestor (checked outward from the carrier)
+          carriersOutsideVault: [...(content?.querySelectorAll('pre code') ?? [])].filter(c => !c.closest('.vault')).length,
+          codeText: [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent ?? ''),
+          // the badge is the placeholder span titled by vault_badge()
+          badge: item.elem?.querySelector('[title="managed by the vault sync"]')?.textContent ?? '',
+          carrierChildElements: [...(content?.querySelectorAll('pre code *') ?? [])].length,
+          togglesInPre: [...(content?.querySelectorAll('pre .template_toggle') ?? [])].length,
+          halves,
+          // the expanded context (agent/chat.js: eval_macros with context 'expanded'): both macros
+          // return plain text there (the removed blocks are the app's later pass, not the macros')
+          expanded: String((item as any).eval_macros('<<vault_badge()>> <<vault_render()>>', { context: 'expanded' })),
+        }
+      }, name)
+      expect(r.containers, `${file}: rendered under a .vault container`).toBeGreaterThan(0)
+      expect(r.carriersOutsideVault, `${file}: every carrier has a .vault ancestor`).toBe(0)
+      expect(r.rendered, `${file}: the opaque payload never renders`).not.toContain(payload.slice(0, 40))
+      expect(r.codeText, `${file}: the editable source is carried verbatim`).toContain(source)
+      expect(r.badge, `${file}: the badge decodes the payload`).toMatch(/^(section|config|no preview) · agents\/e2e_[a-z]+\.md · source (matches|differs|absent) sync-pinned HEAD at last sync$/)
+      expect(r.carrierChildElements, `${file}: carriers hold text only`).toBe(0)
+      expect(r.togglesInPre, `${file}: no toggle inside a pre`).toBe(0)
+      expect(r.halves.length, `${file}: at least the source toggle`).toBeGreaterThan(0)
+      for (const t of r.halves) {
+        expect(t.divOwner, `${file}: toggle ${t.idc} has a revealed div bound to the outer item`).toBe(r.id)
+        expect(t.spanOwner, `${file}: toggle ${t.idc} span bound to the outer item`).toBe(r.id)
+        expect(t.inVault, `${file}: toggle ${t.idc} halves have a .vault ancestor`).toBe(true)
+        expect(t.labelHasBlock, `${file}: toggle ${t.idc} label carries no block carrier`).toBe(false)
+        expect(t.hidden, `${file}: toggle ${t.idc} starts collapsed`).toBe(true)
+        expect(t.handlerLeak, `${file}: toggle ${t.idc} leaks no handler text into content`).toBe(false)
+      }
+      expect(r.expanded, `${file}: expanded context carries no markup`).not.toMatch(/<(div|span|pre|code)\b/)
+      expect(r.expanded, `${file}: expanded context never leaks the payload`).not.toContain(payload.slice(0, 40))
+    }
+    // current-item identity, browser form: the config (A) nests the section (B); A's DOM shows
+    // B-unique navigation output (from _this = B) with every toggle bound to A (asserted above),
+    // and never B's source (a nested child returns only its navigation composition)
+    const A = nameOf(fixture('e2e_config.md'))
+    const B = nameOf(fixture('e2e_section.md'))
+    const sectionSource = unescape(block(fixture('e2e_section.md'), 'jinja_removed'))
+    await show(A)
+    const nested = await carriers(A)
+    expect(nested.some(t => t.startsWith('**Docs**\nB\n')), 'B-unique navigation rendered under A').toBe(true)
+    expect(nested, 'B source never rendered under A').not.toContain(sectionSource)
+    // a nested toggle opens on its span and closes on its revealed div (both handlers bound to A)
+    const nestedToggle = await page.evaluate(n => {
+      const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
+      const span = [...content.querySelectorAll('span.template_toggle')].find(s => (s.textContent ?? '').includes('![[agents/e2e_section]]'))
+      return span ? ([...span.classList].find(c => c.startsWith('id_')) ?? null) : null
+    }, A)
+    expect(nestedToggle, 'the nested section toggle exists under A').toBeTruthy()
+    const hiddenState = () => page.evaluate(idc => document.querySelector('div.template_toggle.' + idc)?.classList.contains('hidden') ?? null, nestedToggle!)
+    // programmatic clicks: a real mouse click also starts editing the item, which is not the
+    // toggle contract under test and would leave editing state behind
+    const clickToggle = (sel: string) => page.evaluate(sel => (document.querySelector(sel) as HTMLElement).click(), sel)
+    await clickToggle('span.template_toggle.' + nestedToggle)
+    await expect.poll(hiddenState, { timeout: 5_000 }).toBe(false)
+    await clickToggle('div.template_toggle.' + nestedToggle)
+    await expect.poll(hiddenState, { timeout: 5_000 }).toBe(true)
+    // no rescan: the nested item carries its marker-shaped text part byte-for-byte
+    await show(nameOf(fixture('e2e_nested.md')))
+    expect(await carriers(nameOf(fixture('e2e_nested.md'))), 'marker-shaped text part carried verbatim').toContain('\n![[agents/e2e_section]]\n')
+
+    await test.step('carrier textContent corpus', async () => {
+      // section 3's corpus: exact fields carry the empty and leading/terminal-LF cases, navigation
+      // text parts (separated by a target so they are never adjacent) carry the rest
+      const corpus = ['\n\nlead', 'trail\n\n', '&lt;', '😀 ünï é', '---', 'https://example.com/x?y=1', '#tag', '`code`', '<path>', '  padded  ', 'a\n\nb', 'a\tb']
+      const navigation = corpus.flatMap(text => [{ text }, { target: 'agents/e2e_worker.md' }])
+      const payload = JSON.stringify({ v: 1, path: 'agents/e2e_corpus.md', source_head_relation: 'matches', head_preview: { kind: 'config', navigation, base: null, exact: { profile: 'bare', instructions: '', run_instructions: '\nlead', user_prompt: 'trail\n' } } })
+      await create(itemText('agents/e2e_corpus.md', 'corpus\n', payload, ['agents/e2e_worker.md']))
+      await show(label('agents/e2e_corpus.md'))
+      const got = await carriers(label('agents/e2e_corpus.md'))
+      for (const text of ['', '\nlead', 'trail\n', ...corpus]) expect.soft(got, `carrier ${JSON.stringify(text)} is text-exact`).toContain(text)
+    })
+
+    await test.step('rejected payloads and envelopes fail closed', async () => {
+      const bad: [string, string, string][] = [
+        ['agents/e2e_bad_control.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_control.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'a\u0000b' }], base: null, exact: null } })],
+        ['agents/e2e_bad_c1.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_c1.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'a\u0080b' }], base: null, exact: null } })],
+        ['agents/e2e_bad_surrogate.md', 'bad\n', '{"v":1,"path":"agents/e2e_bad_surrogate.md","source_head_relation":"matches","head_preview":{"kind":"section","navigation":[{"text":"a\\ud800b"}],"base":null,"exact":null}}'],
+        ['agents/e2e_bad_delimiter.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_delimiter.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'x<!-- template -->y' }], base: null, exact: null } })],
+        // an otherwise VALID payload (absent relation, null preview) naming another item's path
+        ['agents/e2e_bad_label.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_worker.md', source_head_relation: 'absent', head_preview: null })],
+      ]
+      for (const [p, source, payload] of bad) {
+        await create(itemText(p, source, payload, []))
+        await show(label(p))
+        const r = await page.evaluate(n => {
+          const item = window._item(n, true)!
+          const content = item.elem?.querySelector('.content') as HTMLElement
+          return { badge: item.elem?.querySelector('[title="managed by the vault sync"]')?.textContent ?? '', rendered: content?.textContent ?? '', containers: content?.querySelectorAll('.vault').length ?? 0 }
+        }, label(p))
+        expect.soft(r.badge, `${p}: badge fails closed`).toBe('vault payload invalid')
+        expect.soft(r.containers, `${p}: no composition`).toBe(0)
+        expect.soft(r.rendered, `${p}: no partial interpretation`).not.toMatch(/a.b|x.y|e2e_worker\.md/)
+      }
+    })
+
+    // the timed forced-remount record is a phase-2 attended procedure (design section 8): the
+    // app keeps a programmatically rendered root mounted across hash navigation in a
+    // history-dependent way, so an unmounted-root precondition could not be made stable here
+    // HARD: A-to-B invalidation through the hidden dependency tags -- editing B's payload
+    // re-renders A's nested composition
+    const bText = fixture('e2e_section.md')
+    const bPayload = JSON.parse(Buffer.from(block(bText, 'vault_removed').trim(), 'base64').toString('utf8'))
+    bPayload.head_preview.navigation[0].text = '**Docs**\nB (edited)\n'
+    const bEdited = itemText('agents/e2e_section.md', unescape(block(bText, 'jinja_removed')), JSON.stringify(bPayload), ['agents/e2e_worker.md'])
+    await show(A)
+    await page.evaluate(([n, t]) => void window._item(n)!.write(t, ''), [B, bEdited] as const)
+    await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
+
+    // HARD: missing-to-created recovery -- deleting a dependency makes the app's dependency
+    // resolution fail before vault_render() runs (raw text, no composition); recreating it
+    // (after its durable absence, so no two documents ever share the label) and reading A again
+    // recovers the composition
+    const worker = nameOf(fixture('e2e_worker.md'))
+    const workerLocalId = (await localIdOf(worker)) as string
+    await remove(workerLocalId, await savedIdOfId(workerLocalId))
+    await expect
+      .poll(
+        () =>
+          page.evaluate(n => {
+            const item = window._item(n, true)!
+            const error = String((window as any).__items[(item as any).index]?.expanded?.error?.message ?? '')
+            return { containers: item.elem?.querySelectorAll('.vault').length ?? -1, missing: error.startsWith('eval missing dependencies') }
+          }, A),
+        { timeout: 30_000 }
+      )
+      .toEqual({ containers: 0, missing: true })
+    await create(fixture('e2e_worker.md'))
+    await show(A)
+    await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
+
+    // the cleanup path must recover a killed run's duplicate labels: two saved items under one
+    // synthetic label (their names become id:<local-id>), both documents durably gone afterwards
+    await test.step('duplicate-label cleanup', async () => {
+      const dup = itemText('agents/e2e_dup.md', 'dup\n', JSON.stringify({ v: 1, path: 'agents/e2e_dup.md', source_head_relation: 'absent', head_preview: null }), [])
+      const first = await create(dup)
+      const second = await create(dup)
+      expect(await page.evaluate(([a, b]) => [window._item(a, true)?.name, window._item(b, true)?.name], [first.id, second.id] as const), 'duplicate labels renamed').toEqual([`id:${first.id}`, `id:${second.id}`])
+      const removed = await clean()
+      expect(removed, 'both duplicates were addressed').toEqual(expect.arrayContaining([first.saved, second.saved]))
+      await absent([first.saved, second.saved])
+    })
+  } finally {
+    await clean()
   }
 })

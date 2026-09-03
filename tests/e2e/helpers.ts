@@ -11,12 +11,13 @@ declare global {
   interface Window {
     _items: (
       selector?: string
-    ) => { id: string; name: string; text: string; attr?: { source?: string }; global_store?: Record<string, unknown> }[]
+    ) => { id: string; name: string; label: string; text: string; attr?: { source?: string }; global_store?: Record<string, unknown> }[]
     _item: (
       name: string,
       silent?: boolean
     ) => {
       id: string
+      name: string
       elem: HTMLElement | null
       text: string
       saved_id?: string
