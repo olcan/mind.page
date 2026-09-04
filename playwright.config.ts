@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test'
 // e2e tests run against local firebase emulators (see tests/e2e/run.sh) and the production build
 // served by `node server.mjs`. lanes that share mutable state are serialized by dependency and by
 // a one-worker cap per project; independent lanes overlap (see the projects below)
-const WRITE_SPECS = /(admin|admin_live|editor|personal|bridge)\.spec\.ts/
+const WRITE_SPECS = /(admin|admin_live|editor|personal|bridge|store_propagation)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -21,8 +21,9 @@ export default defineConfig({
     baseURL: 'http://localhost:3100', // the emulator port: own origin, and client.ts keys on it
     trace: 'retain-on-failure',
   },
-  // `unit` (no browser or app instance), `chromium` (the shared-fixture baseline lane) and
-  // `personal` are all eligible immediately, and two workers run whichever of them is ready.
+  // `unit` (no browser or app instance), `chromium` (the shared-fixture baseline lane),
+  // `personal`, and `propagation` (its own dedicated account) are all eligible immediately, and
+  // two workers run whichever of them is ready.
   // `admin` and `editor` mutate the shared anonymous account, so they are an explicit chain behind
   // the baseline lane. each project is capped to one worker of its own, so nothing inside a lane
   // overlaps — chromium in particular is NOT read-only: its server tests mutate anonymous and
@@ -62,6 +63,14 @@ export default defineConfig({
       testDir: 'tests/e2e',
       testMatch: /bridge\.spec\.ts/,
       dependencies: ['editor'], // ORDERING: also mutates the shared anonymous account
+      workers: 1,
+      use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'propagation',
+      testDir: 'tests/e2e',
+      testMatch: /store_propagation\.spec\.ts/,
+      // a dedicated account (store_prop_e2e): mutates nothing any other lane inspects
       workers: 1,
       use: { ...devices['Desktop Chrome'] },
     },

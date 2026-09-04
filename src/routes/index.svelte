@@ -7267,6 +7267,7 @@
     type HiddenWrapper,
   } from '../hidden'
   import { classifyHiddenDocument } from '../hidden_confirm'
+  import { createStorePublisher } from '../hidden_publish'
   import { scanHiddenDocuments, type ScanDeps, type ScanRow as HiddenScanRow } from '../hidden_scan'
   import {
     createStopWaiters,
@@ -7722,10 +7723,8 @@
         // 'adopted' mergeAdoptedStore has already published the projection, and syncing again from
         // byName was the round-35 double sync
         const outcome = registerHidden(hiddenIndex(), wrapper, mergeAdoptedStore)
-        if (outcome != 'adopted') {
-          const local = tempIdFromSavedId.get(owner) ?? owner
-          if (_exists(local)) item(local).global_store = _.cloneDeep(hiddenItemsByName.get(wrapper.name)?.item) || {}
-        }
+        // a changed publication re-renders the owner AND its dependents (see storePublisher)
+        if (outcome != 'adopted') storePublisher.registerOwner(wrapper.name)
         continue
       }
       retained.push(entry) // still ownerless: reported and left alone
@@ -9953,6 +9952,25 @@
   // writes for a name are serialized, settlement goes through the index transitions, and an
   // unconfirmed create re-confirms the hidden index against the server first (failing closed on
   // any hidden-document error — a partial index must never lead to a duplicate document)
+  // the owner-store publication seam (src/hidden_publish.ts): the controller and startup paths
+  // that publish a store to its owner go through this one composition, and the delivery handler
+  // takes its dependent-invalidation pass from it (keeping its own changed-state assignment), so
+  // a changed store re-renders the owner AND the items that embed it — dependent invalidation
+  // otherwise keys off item text hashes, which a store lacks. the adapters: local ids, the applied
+  // hidden index, the owner's in-memory store, its transitive dependents, and the keyed
+  // force-render invalidation
+  const storePublisher = createStorePublisher({
+    exists: (id: string) => _exists(id),
+    localId: (savedId: string) => tempIdFromSavedId.get(savedId) ?? savedId,
+    applied: (name: string) => hiddenItemsByName.get(name)?.item,
+    current: (id: string) => item(id).global_store,
+    assign: (id: string, state: unknown) => void (item(id).global_store = state),
+    dependents: (id: string): readonly string[] => item(id).dependents ?? [],
+    invalidate: (id: string) => _item(id).invalidate_elem_cache({ force_render: true }),
+    equal: (a: unknown, b: unknown) => _.isEqual(a, b),
+    clone: (state: unknown) => _.cloneDeep(state),
+  })
+
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
     encryptState: state => encryptItem(state),
@@ -9985,15 +10003,9 @@
     },
     // while a name owes a change, deliveries do not touch the owner's copy (see owes()); this
     // puts it back in step once the change settles, so the owner cannot be left behind
-    reconcileOwner: name => {
-      const owner = name.match(/^global_store_(.+)$/)?.[1]
-      if (!owner) return
-      const local = tempIdFromSavedId.get(owner) ?? owner
-      if (!_exists(local)) return
-      const applied = hiddenItemsByName.get(name)?.item
-      if (applied && !_.isEqual(item(local).global_store ?? {}, applied))
-        item(local).global_store = _.cloneDeep(applied)
-    },
+    // the applied index over the owner's copy, cloned only when it differs; a changed publication
+    // re-renders the owner AND its dependents (see storePublisher)
+    reconcileOwner: name => storePublisher.reconcileOwner(name),
     // an ordinary queued update. no revision field and no compare-and-set: firestore transactions
     // fail outright offline (they never reach the durable queue), and an advisory client-written
     // revision has the costs of a protocol with none of its guarantees — an offline client can
@@ -10018,15 +10030,11 @@
     // the returned object is DISCARDED explicitly: lodash returns its target, and letting that
     // escape past an `any` would defeat the dep's exact `=> undefined` contract
     adopt: (pending, found) => void _.defaultsDeep(pending.item, found.item),
-    syncOwner: (name, state): undefined => {
-      const owner = name.match(/^global_store_(.+)$/)?.[1]
-      if (!owner) return
-      const local = tempIdFromSavedId.get(owner) ?? owner
-      // no cloneDeep: the controller clones at its boundary (see mergeAdopted/cloneState), so
-      // `state` is already this call's private copy — a second full-state clone per publication
-      // bought nothing (round 38)
-      if (_exists(local)) item(local).global_store = state
-    },
+    // no cloneDeep: the controller clones at its boundary (see mergeAdopted/cloneState), so
+    // `state` is already this call's private copy — a second full-state clone per publication
+    // bought nothing (round 38). a changed publication re-renders the owner AND its dependents
+    // (see storePublisher); an unchanged one assigns nothing
+    syncOwner: (name, state): undefined => void storePublisher.syncOwner(name, state),
     invalidateAuthority: reason => revokeHiddenAuthority(reason),
     // ONE fresh complete hidden read for `name`, through the serialized corpus seam. the ADAPTER
     // fetches, decrypts and purely classifies; the CONTROLLER commits synchronously inside this
@@ -10143,6 +10151,11 @@
         console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
         return
       }
+      // the owner's dependents re-render for EVERY applied delivery, before the two early returns
+      // below: a local save invalidates only the owner (save_global_store), so its own echo (equal
+      // to the owner's memory) or a foreign delivery while that save is owed would otherwise leave
+      // an item that embeds the owner rendered from a stale cache. one pass, each dependent once
+      storePublisher.deliver(id)
       // every delivery is applied now, INCLUDING the echo of this tab's own write (see
       // isOwnPendingChange). so "changed remotely" is decided by the STATE, not by the delivery:
       // an echo that carries what the item already holds changes nothing and must not fire the

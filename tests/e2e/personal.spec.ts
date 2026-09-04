@@ -43,12 +43,18 @@ const savedId = (page: Page, name: string) => page.evaluate(name => window._item
 // the account's hidden document holding a given store NAME, or null. names live inside the
 // ciphertext, so this decrypts — which is also why an account-wide COUNT can never identify one
 async function findStoreDoc(name: string) {
+  return (await findStore(name))?.id ?? null
+}
+
+// the account's hidden document holding a store NAME together with its decrypted state, or null
+async function findStore(name: string): Promise<{ id: string; item: any } | null> {
   const { decryptWithSecret } = await import('../../src/crypto.js')
   const snap = await firestore().collection('items').where('user', '==', ALICE.uid).where('hidden', '==', true).get()
   for (const doc of snap.docs) {
     try {
       const plain = JSON.parse(await decryptWithSecret(doc.data().cipher, secretFor(ALICE, PHRASE)))
-      if (JSON.parse(plain.text).name == name) return doc.id
+      const wrapper = JSON.parse(plain.text)
+      if (wrapper.name == name) return { id: doc.id, item: wrapper.item }
     } catch {} // an unrelated corrupt or foreign-keyed record: not ours to identify
   }
   return null
@@ -533,13 +539,23 @@ test('global-store updates and deletions reach a second tab of the same account'
       })
       .toBe(7)
     const ownerId = await savedId(page, '#e2e_xstore')
-    // ONE query/decrypt pass. `expect.poll(...).not.toBeNull()` discards the value it polled, so
-    // the old shape ran the whole account query and decrypted every hidden document a second time
-    // just to recover the id it had already found
+    // the SERVER must hold `_old = 7` before the overwrite below: the other tab sees the value
+    // through the shared persistent cache with the write still pending, and the store document
+    // already exists from the `_xtab` phases, so finding it by name proves nothing about this
+    // update — an overwrite racing the pending client update could land first and be undone by
+    // it (the one-in-two full-gate failure of 2026-09-04). ONE query/decrypt pass per poll,
+    // recovering the id from the same pass that proved the value
     let storeDocId: string | null = null
     await expect
-      .poll(async () => (storeDocId = await findStoreDoc(`global_store_${ownerId}`)), { timeout: 30_000 })
-      .not.toBeNull()
+      .poll(
+        async () => {
+          const found = await findStore(`global_store_${ownerId}`)
+          storeDocId = found?.id ?? null
+          return found?.item?._old ?? null
+        },
+        { timeout: 30_000 }
+      )
+      .toBe(7)
     // overwrite THAT id with visible content: the hidden side is dropped through the real
     // reducer, so the owner's store loses the value on BOTH tabs
     await firestore().collection('items').doc(storeDocId!).set({
