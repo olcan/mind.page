@@ -301,7 +301,9 @@
               name: user.displayName?.match(/^\S*/)[0] || user.email,
               full_name: user.displayName || user.email,
               image_url: user.photoURL,
-              image: `<img src="${user.photoURL}" style="width:20px;height:20px;border-radius:50%">`,
+              image: user.photoURL // an account without a photo (emulator, some providers) has none
+                ? `<img src="${user.photoURL}" style="width:20px;height:20px;border-radius:50%">`
+                : '',
               uid: user.uid,
               items: items.length,
               total_text_length: textLength,
@@ -7003,7 +7005,16 @@
       }
       setTimeout(() => _watchLocalRepo(repo), 1000)
     } catch (e) {
-      console.warn(`error watching local repo ${repo}: ${e}; will retry in 10s...`)
+      // the wrapped fetch throws on HTTP errors with the response and body attached; a 404 means
+      // this server does not serve /watch/ (chokidar loads only in dev, never in server.mjs), so
+      // stop instead of retrying every 10s and dumping the error page into the console each time
+      if (e.resp?.status == 404) {
+        console.warn(`local repo ${repo} is not watched: /watch/ is not served by this server`)
+        watching.delete(repo)
+        return
+      }
+      const reason = e.resp ? `${e.resp.status} (${e.resp.statusText})` : String(e)
+      console.warn(`error watching local repo ${repo}: ${reason}; will retry in 10s...`)
       setTimeout(() => _watchLocalRepo(repo), 10000)
     }
   }
