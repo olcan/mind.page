@@ -604,11 +604,15 @@ test('vault routing: start, completion, and catch fences suppress web dispatch',
 
 // ---- vault renderer contract (mind sync design, phase 0) ----
 
-// the SYNTHETIC consumer fixtures of the vault's mind sync design (section 8): each file is
-// one managed item's full text under a synthetic managed path (agents/e2e_*.md), generated once
-// by the vault's Python encoder and checked in; they exercise the schema and nesting, not
-// producer truth. resolved like helpers.ts (cwd-relative: playwright runs from the mind.page
-// root; ESM has no __dirname)
+// the SYNTHETIC consumer fixtures of the vault's mind sync design (v2 representation,
+// notes/design/mind_sync_store.md in the vault): each .md file is one managed item's full text
+// under a synthetic managed path (agents/e2e_*.md) and its .json sidecar is the `_vault` value
+// of the item's store, converted once from the v1 fixtures the vault's Python encoder generated
+// and checked in; they exercise the schema and nesting, not producer truth. in this ANONYMOUS
+// row the store is injected in memory (the app's anonymous store path); real hidden documents,
+// the non-saving accessor's no-write property, and store-driven propagation through the
+// renderer are the personal-account row in vault_renderer.spec.ts. resolved like helpers.ts
+// (cwd-relative: playwright runs from the mind.page root; ESM has no __dirname)
 const FIXTURES = resolve(process.env.MIND_ITEMS_DIR ?? '../mind.items', 'tests', 'fixtures', 'vault_sync')
 const MANIFEST = ['e2e_absent.md', 'e2e_config.md', 'e2e_large.md', 'e2e_nested.md', 'e2e_section.md', 'e2e_worker.md']
 const PREFIX = '#vault/agents/e2e_' // every synthetic label starts with this
@@ -616,28 +620,43 @@ const RENDERER = '#template/vault'
 const block = (text: string, lang: string) => text.split('```' + lang + '\n')[1]?.split('\n```')[0] ?? ''
 const unescape = (body: string) => body.replace(/(\\+)<{2}/g, (_m, bs: string) => bs.slice(1) + '<<')
 const label = (p: string) => '#vault/' + p.replace(/\.md$/, '')
-// a managed item's text from its payload JSON text (the consumer accepts any strict JSON; the
-// producer's canonical spelling is a producer invariant, not a consumer check)
-const itemText = (p: string, source: string, payloadJson: string, deps: string[]) =>
+// a managed item's text (the v2 skeleton: the escaped source, the template region, the tags)
+const itemText = (p: string, source: string, deps: string[]) =>
   [
     `${label(p)} <<vault_badge()>>`,
     '```jinja_removed',
     source.replace(/(\\*)<{2}/g, (_m, bs: string) => bs + '\\<<'),
-    '```',
-    '```vault_removed',
-    Buffer.from(payloadJson, 'utf8').toString('base64'),
     '```',
     '<!-- template -->',
     '<<vault_render()>>',
     '<!-- /template -->',
     ['#_template/vault', ...deps.map(d => '#_' + label(d).slice(1))].join(' '),
   ].join('\n')
+// a `_vault` store value (the consumer accepts any object; wrapper identity and provenance are
+// the vault's and the producer's, not a renderer check)
+const storeOf = (p: string, pinned: string | null, head_preview: unknown) => ({ v: 2, path: p, pinned_source: pinned, head_preview })
 
 test('vault renderer contract', async ({ page }) => {
   await loadAdmin(page)
   const files = readdirSync(FIXTURES).filter(f => f.endsWith('.md')).sort()
   expect(files, 'the exact fixture manifest').toEqual(MANIFEST)
   const texts = files.map(file => readFileSync(resolve(FIXTURES, file), 'utf8'))
+  const stores = files.map(file => JSON.parse(readFileSync(resolve(FIXTURES, file.replace(/\.md$/, '.json')), 'utf8')))
+  // the in-memory store injection of this anonymous row (the app's anonymous store path), then a
+  // forced render so the injected value is what the next read sees
+  const setStore = (n: string, store: unknown) =>
+    page.evaluate(
+      ([n, store]) => {
+        const item = window._item(n)!
+        item.global_store = { _vault: store }
+        ;(item as any).invalidate_elem_cache({ force_render: true, render_delay: 0 })
+      },
+      [n, store] as const
+    )
+  // the badge as rendered on screen; the forced render after an injection is asynchronous, so
+  // every read of an injected item first waits for its badge to leave the pre-injection note
+  const badgeOf = (n: string) =>
+    page.evaluate(n => window._item(n, true)?.elem?.querySelector('[title="managed by the vault sync"]')?.textContent ?? null, n)
   const nameOf = (text: string) => text.split(/\s/)[0]
   const fixture = (file: string) => texts[files.indexOf(file)]
   // items are addressed by LOCAL id: a duplicated label renames both wrappers to id:<local-id>,
@@ -691,14 +710,20 @@ test('vault renderer contract', async ({ page }) => {
   try {
     expect(await install(page, 'template/vault'), '/_install template/vault').toBeNull()
     await expect.poll(() => savedIdOf(RENDERER), { timeout: 30_000 }).toBeTruthy()
-    // install every fixture before rendering any (dependency tags must resolve first)
+    // install every fixture before rendering any (dependency tags must resolve first), then
+    // inject every store
     for (const text of texts) await create(text)
+    for (const [i, text] of texts.entries()) await setStore(nameOf(text), stores[i])
     for (const [i, file] of files.entries()) {
       const text = texts[i]
       const name = nameOf(text)
-      const payload = block(text, 'vault_removed').trim()
+      const store = stores[i]
       const source = unescape(block(text, 'jinja_removed'))
+      const expectedBadge = store.head_preview
+        ? `${store.head_preview.kind} · ${store.path}` + (source === store.pinned_source ? '' : ' · differs from the stored sync snapshot')
+        : `${store.path} · not in the stored sync snapshot`
       await show(name)
+      await expect.poll(() => badgeOf(name), { timeout: 30_000 }).toBe(expectedBadge)
       const r = await page.evaluate(n => {
         const item = window._item(n, true)!
         const content = item.elem?.querySelector('.content') as HTMLElement
@@ -715,6 +740,7 @@ test('vault renderer contract', async ({ page }) => {
             labelHasBlock: !!s.querySelector('pre'),
             hidden: div?.classList.contains('hidden') ?? null,
             handlerLeak: (div?.textContent ?? '').includes('classList.toggle'),
+            label: s.textContent ?? '',
           }
         })
         return {
@@ -736,12 +762,13 @@ test('vault renderer contract', async ({ page }) => {
       }, name)
       expect(r.containers, `${file}: rendered under a .vault container`).toBeGreaterThan(0)
       expect(r.carriersOutsideVault, `${file}: every carrier has a .vault ancestor`).toBe(0)
-      expect(r.rendered, `${file}: the opaque payload never renders`).not.toContain(payload.slice(0, 40))
-      expect(r.codeText, `${file}: the editable source is carried verbatim`).toContain(source)
-      expect(r.badge, `${file}: the badge decodes the payload`).toMatch(/^(section|config|no preview) · agents\/e2e_[a-z]+\.md · source (matches|differs|absent) sync-pinned HEAD at last sync$/)
+      expect(r.codeText, `${file}: the editable source is the editor's, never a carrier`).not.toContain(source)
+      expect(r.badge, `${file}: the live badge compares the source with the stored snapshot`).toBe(expectedBadge)
       expect(r.carrierChildElements, `${file}: carriers hold text only`).toBe(0)
       expect(r.togglesInPre, `${file}: no toggle inside a pre`).toBe(0)
-      expect(r.halves.length, `${file}: at least the source toggle`).toBeGreaterThan(0)
+      expect(r.halves.map(t => t.label), `${file}: no source control`).not.toContain('⋮ source')
+      if (store.head_preview) expect(r.halves.length, `${file}: at least the navigation toggle`).toBeGreaterThan(0)
+      else expect(r.rendered, `${file}: a null preview renders its placeholder`).toContain('no pinned preview (not in the stored sync snapshot)')
       for (const t of r.halves) {
         expect(t.divOwner, `${file}: toggle ${t.idc} has a revealed div bound to the outer item`).toBe(r.id)
         expect(t.spanOwner, `${file}: toggle ${t.idc} span bound to the outer item`).toBe(r.id)
@@ -751,7 +778,7 @@ test('vault renderer contract', async ({ page }) => {
         expect(t.handlerLeak, `${file}: toggle ${t.idc} leaks no handler text into content`).toBe(false)
       }
       expect(r.expanded, `${file}: expanded context carries no markup`).not.toMatch(/<(div|span|pre|code)\b/)
-      expect(r.expanded, `${file}: expanded context never leaks the payload`).not.toContain(payload.slice(0, 40))
+      expect(r.expanded, `${file}: expanded context never carries the editable source`).not.toContain(source.trim())
     }
     // current-item identity, browser form: the config (A) nests the section (B); A's DOM shows
     // B-unique navigation output (from _this = B) with every toggle bound to A (asserted above),
@@ -787,47 +814,72 @@ test('vault renderer contract', async ({ page }) => {
       // text parts (separated by a target so they are never adjacent) carry the rest
       const corpus = ['\n\nlead', 'trail\n\n', '&lt;', '😀 ünï é', '---', 'https://example.com/x?y=1', '#tag', '`code`', '<path>', '  padded  ', 'a\n\nb', 'a\tb']
       const navigation = corpus.flatMap(text => [{ text }, { target: 'agents/e2e_worker.md' }])
-      const payload = JSON.stringify({ v: 1, path: 'agents/e2e_corpus.md', source_head_relation: 'matches', head_preview: { kind: 'config', navigation, base: null, exact: { profile: 'bare', instructions: '', run_instructions: '\nlead', user_prompt: 'trail\n' } } })
-      await create(itemText('agents/e2e_corpus.md', 'corpus\n', payload, ['agents/e2e_worker.md']))
+      const store = storeOf('agents/e2e_corpus.md', 'corpus\n', { kind: 'config', navigation, base: null, exact: { profile: 'bare', instructions: '', run_instructions: '\nlead', user_prompt: 'trail\n' } })
+      await create(itemText('agents/e2e_corpus.md', 'corpus\n', ['agents/e2e_worker.md']))
+      await setStore(label('agents/e2e_corpus.md'), store)
       await show(label('agents/e2e_corpus.md'))
+      await expect.poll(() => badgeOf(label('agents/e2e_corpus.md')), { timeout: 30_000 }).toBe('config · agents/e2e_corpus.md')
       const got = await carriers(label('agents/e2e_corpus.md'))
       for (const text of ['', '\nlead', 'trail\n', ...corpus]) expect.soft(got, `carrier ${JSON.stringify(text)} is text-exact`).toContain(text)
     })
 
-    await test.step('rejected payloads and envelopes fail closed', async () => {
-      const bad: [string, string, string][] = [
-        ['agents/e2e_bad_control.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_control.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'a\u0000b' }], base: null, exact: null } })],
-        ['agents/e2e_bad_c1.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_c1.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'a\u0080b' }], base: null, exact: null } })],
-        ['agents/e2e_bad_surrogate.md', 'bad\n', '{"v":1,"path":"agents/e2e_bad_surrogate.md","source_head_relation":"matches","head_preview":{"kind":"section","navigation":[{"text":"a\\ud800b"}],"base":null,"exact":null}}'],
-        ['agents/e2e_bad_delimiter.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_bad_delimiter.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [{ text: 'x<!-- template -->y' }], base: null, exact: null } })],
-        // an otherwise VALID payload (absent relation, null preview) naming another item's path
-        ['agents/e2e_bad_label.md', 'bad\n', JSON.stringify({ v: 1, path: 'agents/e2e_worker.md', source_head_relation: 'absent', head_preview: null })],
+    await test.step('rejected stores and envelopes fail closed', async () => {
+      // stores that fail the observable contract: a control, a C1 character, a lone surrogate,
+      // and a delimiter in a text part; a store naming another item's path; a missing store;
+      // and a leftover v1 payload block in the text
+      const badStores: [string, unknown][] = [
+        ['agents/e2e_bad_control.md', storeOf('agents/e2e_bad_control.md', 'bad\n', { kind: 'section', navigation: [{ text: 'a\u0000b' }], base: null, exact: null })],
+        ['agents/e2e_bad_c1.md', storeOf('agents/e2e_bad_c1.md', 'bad\n', { kind: 'section', navigation: [{ text: 'a\u0080b' }], base: null, exact: null })],
+        ['agents/e2e_bad_surrogate.md', storeOf('agents/e2e_bad_surrogate.md', 'bad\n', { kind: 'section', navigation: [{ text: 'a\ud800b' }], base: null, exact: null })],
+        ['agents/e2e_bad_delimiter.md', storeOf('agents/e2e_bad_delimiter.md', 'bad\n', { kind: 'section', navigation: [{ text: 'x<!-- /template -->y' }], base: null, exact: null })],
+        // an otherwise VALID store (null preview) naming another item's path
+        ['agents/e2e_bad_label.md', storeOf('agents/e2e_worker.md', null, null)],
+        // a v1 payload object under the key
+        ['agents/e2e_bad_v1.md', { v: 1, path: 'agents/e2e_bad_v1.md', source_head_relation: 'matches', head_preview: { kind: 'section', navigation: [], base: null, exact: null } }],
       ]
-      for (const [p, source, payload] of bad) {
-        await create(itemText(p, source, payload, []))
-        await show(label(p))
-        const r = await page.evaluate(n => {
+      const failed = (p: string) =>
+        page.evaluate(n => {
           const item = window._item(n, true)!
           const content = item.elem?.querySelector('.content') as HTMLElement
           return { badge: item.elem?.querySelector('[title="managed by the vault sync"]')?.textContent ?? '', rendered: content?.textContent ?? '', containers: content?.querySelectorAll('.vault').length ?? 0 }
         }, label(p))
-        expect.soft(r.badge, `${p}: badge fails closed`).toBe('vault payload invalid')
+      for (const [p, store] of badStores) {
+        await create(itemText(p, 'bad\n', []))
+        await setStore(label(p), store)
+        await show(label(p))
+        await expect.poll(() => badgeOf(label(p)), { timeout: 30_000 }).toBe('vault store invalid')
+        const r = await failed(p)
+        expect.soft(r.badge, `${p}: badge fails closed`).toBe('vault store invalid')
         expect.soft(r.containers, `${p}: no composition`).toBe(0)
         expect.soft(r.rendered, `${p}: no partial interpretation`).not.toMatch(/a.b|x.y|e2e_worker\.md/)
       }
+      await create(itemText('agents/e2e_no_store.md', 'bad\n', []))
+      await show(label('agents/e2e_no_store.md'))
+      await expect.poll(() => badgeOf(label('agents/e2e_no_store.md')), { timeout: 30_000 }).toBe('vault store missing')
+      let r = await failed('agents/e2e_no_store.md')
+      expect.soft(r.badge, 'a missing store fails closed').toBe('vault store missing')
+      expect.soft(r.containers, 'a missing store composes nothing').toBe(0)
+      const v1Text = itemText('agents/e2e_v1_text.md', 'bad\n', []).replace('<!-- template -->', '```vault_removed\nYQ==\n```\n<!-- template -->')
+      await create(v1Text)
+      await setStore(label('agents/e2e_v1_text.md'), storeOf('agents/e2e_v1_text.md', null, null))
+      await show(label('agents/e2e_v1_text.md'))
+      await expect.poll(() => badgeOf(label('agents/e2e_v1_text.md')), { timeout: 30_000 }).toBe('vault source invalid')
+      r = await failed('agents/e2e_v1_text.md')
+      expect.soft(r.badge, 'a leftover v1 payload block fails closed').toBe('vault source invalid')
+      expect.soft(r.containers, 'a leftover v1 payload block composes nothing').toBe(0)
     })
 
     // the timed forced-remount record is a phase-2 attended procedure (design section 8): the
     // app keeps a programmatically rendered root mounted across hash navigation in a
     // history-dependent way, so an unmounted-root precondition could not be made stable here
-    // HARD: A-to-B invalidation through the hidden dependency tags -- editing B's payload
-    // re-renders A's nested composition
-    const bText = fixture('e2e_section.md')
-    const bPayload = JSON.parse(Buffer.from(block(bText, 'vault_removed').trim(), 'base64').toString('utf8'))
-    bPayload.head_preview.navigation[0].text = '**Docs**\nB (edited)\n'
-    const bEdited = itemText('agents/e2e_section.md', unescape(block(bText, 'jinja_removed')), JSON.stringify(bPayload), ['agents/e2e_worker.md'])
+    // a nested render reads the child's CURRENT store: after B's store changes and A is forced to
+    // render, A's nested composition shows the new text (no stale nested cache through template();
+    // store-driven propagation without a forced render is the personal-account row's contract)
+    const bStore = JSON.parse(JSON.stringify(stores[files.indexOf('e2e_section.md')]))
+    bStore.head_preview.navigation[0].text = '**Docs**\nB (edited)\n'
     await show(A)
-    await page.evaluate(([n, t]) => void window._item(n)!.write(t, ''), [B, bEdited] as const)
+    await setStore(B, bStore)
+    await page.evaluate(n => void (window._item(n) as any).invalidate_elem_cache({ force_render: true, render_delay: 0 }), A)
     await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
 
     // HARD: missing-to-created recovery -- deleting a dependency makes the app's dependency
@@ -849,13 +901,16 @@ test('vault renderer contract', async ({ page }) => {
       )
       .toEqual({ containers: 0, missing: true })
     await create(fixture('e2e_worker.md'))
+    await setStore(worker, stores[files.indexOf('e2e_worker.md')])
+    await show(worker)
+    await expect.poll(() => badgeOf(worker), { timeout: 30_000 }).toBe('config · agents/e2e_worker.md')
     await show(A)
     await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
 
     // the cleanup path must recover a killed run's duplicate labels: two saved items under one
     // synthetic label (their names become id:<local-id>), both documents durably gone afterwards
     await test.step('duplicate-label cleanup', async () => {
-      const dup = itemText('agents/e2e_dup.md', 'dup\n', JSON.stringify({ v: 1, path: 'agents/e2e_dup.md', source_head_relation: 'absent', head_preview: null }), [])
+      const dup = itemText('agents/e2e_dup.md', 'dup\n', [])
       const first = await create(dup)
       const second = await create(dup)
       expect(await page.evaluate(([a, b]) => [window._item(a, true)?.name, window._item(b, true)?.name], [first.id, second.id] as const), 'duplicate labels renamed').toEqual([`id:${first.id}`, `id:${second.id}`])
