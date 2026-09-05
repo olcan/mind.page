@@ -36,6 +36,48 @@ const itemText = (p: string, source: string, deps: string[]) =>
   ].join('\n')
 const C_SOURCE = '---\nbase: agents/e2e_prs.md\n---\nIntro\n![[agents/e2e_prs]]\n'
 const S_SOURCE = 'Section text\n'
+// the source-first view (mind sync presentation, slices P1/P2): the frontmatter block envelope
+// and a hostile body whose every grammar construct must render inert
+const H_PATH = 'agents/e2e_prh.md'
+const H = label(H_PATH)
+const H_FRONTMATTER = '# c &amp; $`x`$ #todo https://e.com\nname: hostile'
+const H_BODY = [
+  '# Heading with #tag and <<macro>>',
+  'Prose A &amp; B with #todo, @{eval}@, $`x`$, `<tag>` and `&amp;` and `[[agents/e2e_prs]]` in code.',
+  'Literal A &copycat and &amp=2 and &notit; stay as written.',
+  'Valid A &semi; B decodes.',
+  '- [query](https://example.com/?x=1&notebook=2)',
+  '- [semi](https://example.com/?x=1&semi;y=2)',
+  '<script>window.__h_script = 1</script>',
+  '<!-- hidden -->secret<!-- /hidden -->',
+  '- [ok](https://example.com?a=1&amp;b=2)',
+  '- [Run](javascript:window.__h_js=1)',
+  '- [ ] a task',
+  '![img](https://example.com/i.png)',
+  '![[agents/e2e_prs]] and [[AGENTS]].',
+  '',
+].join('\n')
+const H_SOURCE = '---\n' + H_FRONTMATTER + '\n---\n' + H_BODY
+const itemTextYaml = (p: string, frontmatter: string, body: string, deps: string[]) =>
+  [
+    `${label(p)} <<vault_badge()>>`,
+    '```yaml_removed',
+    frontmatter.replace(/(\\*)<{2}/g, (_m, bs: string) => bs + '\\<<'),
+    '```',
+    '```jinja_removed',
+    body.replace(/(\\*)<{2}/g, (_m, bs: string) => bs + '\\<<'),
+    '```',
+    '<!-- template -->',
+    '<<vault_render()>>',
+    '<!-- /template -->',
+    ['#_template/vault', ...deps.map(d => '#_' + label(d).slice(1))].join(' '),
+  ].join('\n')
+const hStore = () => ({
+  v: 2,
+  path: H_PATH,
+  pinned_source: H_SOURCE,
+  head_preview: { kind: 'config', navigation: [{ target: S_PATH }], base: null, exact: { profile: 'bare', instructions: 'H instructions', run_instructions: null, user_prompt: null } },
+})
 const cStore = (sText: string) => ({
   v: 2,
   path: C_PATH,
@@ -153,19 +195,20 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
 
   // (a) adoption: the stored previews render; C nests S; the badges compare the editable source
   // with the pinned source; no source control anywhere
-  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section · ' + S_PATH)
-  await expect.poll(async () => (await rendered(page, C))?.badge, { timeout: 30_000 }).toBe('config · ' + C_PATH)
+  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section')
+  await expect.poll(async () => (await rendered(page, C))?.badge, { timeout: 30_000 }).toBe('config')
   await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('C instructions one')
   const c1 = (await rendered(page, C))!
   expect(c1.carriers, 'C nests S\'s navigation text').toContain('S one\n')
   expect(c1.carriers, 'the editable source is never a carrier').not.toContain(C_SOURCE)
   expect(c1.toggles.join('|'), 'no source control').not.toContain('⋮ source')
+  expect(c1.toggles.some(t => t.includes('⋮ projection')), 'the projection sits behind one toggle').toBe(true)
   expect(c1.toggles.some(t => t.includes('instructions (bare profile)')), 'the instructions control').toBe(true)
   // an edited source shows the differs form the moment it renders, without any sync; the edit
   // must then be acknowledged by the server before phase (c)'s no-visible-write baseline
   const sEdited = itemText(S_PATH, S_SOURCE + 'edited\n', [])
   await page.evaluate(([n, t]) => void window._item(n)!.write(t, ''), [S, sEdited] as const)
-  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section · ' + S_PATH + ' · differs from the stored sync snapshot')
+  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section · differs from the stored sync snapshot')
   await expect.poll(() => serverText(sId), { timeout: 30_000 }).toBe(sEdited)
 
   // (b) the non-saving accessor: from a stale non-empty in-memory copy, evaluating both macros
@@ -211,8 +254,82 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   // re-renders S and the already-visible C, with both visible documents unwritten
   const before = { s: await updateTime(sId), c: await updateTime(cId) }
   await writeStore(S_STORE_ID, `global_store_${sId}`, { _vault: sStore('S two\n', S_SOURCE + 'edited\n') })
-  await expect.poll(async () => (await rendered(page, S))?.carriers ?? [], { timeout: 30_000 }).toContain('S two\n')
-  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section · ' + S_PATH)
+  // S's own view shows its source, not its text-only navigation (presentation decision 4), so its
+  // re-render shows as the badge flipping back to the pinned form; C's nested view carries S two
+  await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section')
   await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('S two\n')
   expect({ s: await updateTime(sId), c: await updateTime(cId) }, 'no visible-item write').toEqual(before)
+
+  // (d) the source-first view through the REAL pipeline (presentation design sections 3 and 4):
+  // the frontmatter block envelope, highlighted YAML with an inert comment, the body as inert
+  // markdown (entities decoded once, code literal, a managed reference rendered as the app's own
+  // tag-link markup whose mousedown reaches a recording callback installed in place of the app's
+  // handler, an unmanaged hint, no script, checkbox, image, math, or
+  // executable destination), the projection behind its toggle
+  await page.evaluate(t => void window._create(t), itemTextYaml(H_PATH, H_FRONTMATTER, H_BODY, [S_PATH]))
+  await expect.poll(() => savedId(page, H), { timeout: 30_000 }).toBeTruthy()
+  const hId = (await savedId(page, H))!
+  await writeStore('e2e-prh-store', `global_store_${hId}`, { _vault: hStore() })
+  await expect.poll(async () => (await rendered(page, H))?.badge, { timeout: 30_000 }).toBe('config')
+  const view = await page.evaluate(async name => {
+    const item = window._item(name, true)!
+    const elem = (item.elem ?? (await window._render_item(item))) as HTMLElement
+    const content = elem.querySelector('.content') as HTMLElement
+    const w = window as any
+    const clicked: unknown[][] = []
+    const original = w._handleTagClick
+    w._handleTagClick = (...args: unknown[]) => {
+      clicked.push(args)
+    }
+    const link = content.querySelector('.vault-source mark.link[title="#vault/agents/e2e_prs"]') as HTMLElement | null
+    if (link) link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    w._handleTagClick = original
+    const yaml = content.querySelector('pre.vault-frontmatter') as HTMLElement | null
+    return {
+      yamlText: yaml?.textContent ?? null,
+      yamlComment: !!yaml?.querySelector('.vault-comment'),
+      yamlMarks: yaml?.querySelectorAll('mark, a, span.math').length ?? -1,
+      yamlHighlighted: !!yaml?.querySelector('.hljs-attr'),
+      heading: (content.querySelector('.vault-source h1') as HTMLElement | null)?.textContent ?? null,
+      codes: [...content.querySelectorAll('.vault-source code')].map(c => c.textContent),
+      prose: (content.querySelector('.vault-source p') as HTMLElement | null)?.textContent ?? null,
+      hrefs: [...content.querySelectorAll('.vault-source a')].map(a => a.getAttribute('href')),
+      literalProse: (content.querySelector('.vault-source') as HTMLElement | null)?.textContent?.includes('Literal A &copycat and &amp=2 and &notit; stay as written.') ?? false,
+      semiProse: (content.querySelector('.vault-source') as HTMLElement | null)?.textContent?.includes('Valid A ; B decodes.') ?? false,
+      anchors: content.querySelectorAll('.vault-source a').length,
+      marks: [...content.querySelectorAll('.vault-source mark')].map(m => m.getAttribute('title')),
+      hint: (content.querySelector('.vault-source [title="not a managed file"]') as HTMLElement | null)?.textContent ?? null,
+      checkboxes: content.querySelectorAll('input').length,
+      images: content.querySelectorAll('img').length,
+      scripts: content.querySelectorAll('script').length,
+      math: content.querySelectorAll('span.math').length,
+      hidden: content.textContent?.includes('secret') ?? false,
+      scriptRan: w.__h_script === 1 || w.__h_js === 1,
+      clicked,
+      ownerId: item.id,
+      toggles: [...content.querySelectorAll('span.template_toggle')].map(s => s.textContent ?? ''),
+    }
+  }, H)
+  expect(view.yamlText, 'the frontmatter characters are shown exactly').toBe(H_FRONTMATTER)
+  expect(view.yamlHighlighted && view.yamlComment, 'highlighted YAML with the renamed comment class').toBe(true)
+  expect(view.yamlMarks, 'no tag link, anchor, or math inside the frontmatter').toBe(0)
+  expect(view.heading, 'the heading keeps its grammar characters as text').toBe('Heading with #tag and <<macro>>')
+  expect(view.codes, 'code spans are literal').toEqual(expect.arrayContaining(['<tag>', '&amp;', '[[agents/e2e_prs]]']))
+  expect(view.prose, 'prose entities decode once; the dollar-backtick span is a code span, not app math').toContain('Prose A & B with #todo, @{eval}@, $x$')
+  expect(view.literalProse, 'incomplete or unknown references stay literal').toBe(true)
+  expect(view.semiProse, 'the valid &semi; reference decodes to its semicolon').toBe(true)
+  expect(view.hrefs, 'valid entities in destinations decode once (&amp;, &semi;); a parameter that only looks like one survives').toEqual([
+    'https://example.com/?x=1&notebook=2',
+    'https://example.com/?x=1;y=2',
+    'https://example.com?a=1&b=2',
+  ])
+  expect(view.anchors, 'only the allowed links are anchors').toBe(3)
+  expect(view.marks, 'the one managed reference is the app tag link (the code-span one stays literal)').toEqual(['#vault/agents/e2e_prs'])
+  expect(view.hint, 'the unmanaged reference is a hint').toBe('[[AGENTS]]')
+  expect([view.checkboxes, view.images, view.scripts, view.math], 'no checkbox, image, script, or math').toEqual([0, 0, 0, 0])
+  expect(view.hidden, 'the hidden-section comment stays visible text').toBe(true)
+  expect(view.scriptRan, 'nothing executed').toBe(false)
+  expect(view.clicked.length && view.clicked[0][1], 'the managed link\'s mousedown reaches the recording tag-click callback with the label').toBe('#vault/agents/e2e_prs')
+  expect(view.clicked.length && view.clicked[0][0], 'bound to the owning item\'s in-app id (as the app\'s own tag marks are)').toBe(view.ownerId)
+  expect(view.toggles.some(t => t.includes('⋮ projection')), 'the projection toggle').toBe(true)
 })

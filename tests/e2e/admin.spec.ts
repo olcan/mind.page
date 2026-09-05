@@ -719,9 +719,10 @@ test('vault renderer contract', async ({ page }) => {
       const name = nameOf(text)
       const store = stores[i]
       const source = unescape(block(text, 'jinja_removed'))
+      // the visible badge drops the path the label already carries (mind sync presentation P2)
       const expectedBadge = store.head_preview
-        ? `${store.head_preview.kind} · ${store.path}` + (source === store.pinned_source ? '' : ' · differs from the stored sync snapshot')
-        : `${store.path} · not in the stored sync snapshot`
+        ? store.head_preview.kind + (source === store.pinned_source ? '' : ' · differs from the stored sync snapshot')
+        : 'not in the stored sync snapshot'
       await show(name)
       await expect.poll(() => badgeOf(name), { timeout: 30_000 }).toBe(expectedBadge)
       const r = await page.evaluate(n => {
@@ -818,7 +819,7 @@ test('vault renderer contract', async ({ page }) => {
       await create(itemText('agents/e2e_corpus.md', 'corpus\n', ['agents/e2e_worker.md']))
       await setStore(label('agents/e2e_corpus.md'), store)
       await show(label('agents/e2e_corpus.md'))
-      await expect.poll(() => badgeOf(label('agents/e2e_corpus.md')), { timeout: 30_000 }).toBe('config · agents/e2e_corpus.md')
+      await expect.poll(() => badgeOf(label('agents/e2e_corpus.md')), { timeout: 30_000 }).toBe('config')
       const got = await carriers(label('agents/e2e_corpus.md'))
       for (const text of ['', '\nlead', 'trail\n', ...corpus]) expect.soft(got, `carrier ${JSON.stringify(text)} is text-exact`).toContain(text)
     })
@@ -903,7 +904,7 @@ test('vault renderer contract', async ({ page }) => {
     await create(fixture('e2e_worker.md'))
     await setStore(worker, stores[files.indexOf('e2e_worker.md')])
     await show(worker)
-    await expect.poll(() => badgeOf(worker), { timeout: 30_000 }).toBe('config · agents/e2e_worker.md')
+    await expect.poll(() => badgeOf(worker), { timeout: 30_000 }).toBe('config')
     await show(A)
     await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
 
