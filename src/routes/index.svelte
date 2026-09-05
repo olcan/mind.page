@@ -9450,7 +9450,7 @@
     // if (intro && !modified) document.querySelector('.webcam-background.intro')?.dispatchEvent(new MouseEvent('click'))
 
     // disable arrow keys to prevent ambiguous behavior
-    if (key.startsWith('Arrow')) e.preventDefault()
+    if (key.startsWith('Arrow') && !(e.altKey || e.metaKey)) e.preventDefault()
 
     // disable space bar page-scroll behavior
     if (key == 'Space') e.preventDefault()
