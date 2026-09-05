@@ -338,9 +338,9 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
       // presentation design section 8: jinja and literal html wrappers, the frontmatter gap
       jinjaInline: [...content.querySelectorAll('.vault-source p code.vault-jinja')].map(c => c.textContent),
       jinjaBlocks: [...content.querySelectorAll('.vault-source pre code.vault-jinja')].map(c => c.textContent),
-      comments: [...content.querySelectorAll('.vault-source .vault-comment')].map(c => [c.tagName.toLowerCase(), c.textContent, getComputedStyle(c).fontFamily.toLowerCase().includes('mono'), getComputedStyle(c).color, getComputedStyle(c).fontSize]),
-      // an inline-code element of the body (the first one): the comment's computed size must match the app's desktop inline-code size
-      inlineCodeSize: (c => (c ? getComputedStyle(c).fontSize : null))(content.querySelector('.vault-source p > code:not(.vault-jinja)') as HTMLElement | null),
+      comments: [...content.querySelectorAll('.vault-source .vault-comment')].map(c => [c.tagName.toLowerCase(), c.textContent, getComputedStyle(c).fontFamily, getComputedStyle(c).color, getComputedStyle(c).fontSize, getComputedStyle(c).backgroundColor, getComputedStyle(c).padding]),
+      // an inline-code element of the body (the first one that is not a comment): the comment inherits the app's code typography
+      inlineCode: (c => (c ? [getComputedStyle(c).fontFamily, getComputedStyle(c).fontSize] : null))(content.querySelector('.vault-source p > code:not(.vault-jinja):not(.vault-comment)') as HTMLElement | null),
       placeholderCode: [...content.querySelectorAll('.vault-source p > code:not(.vault-jinja)')].map(c => c.textContent),
       gapAfterYaml: (yaml?.nextElementSibling as HTMLElement | null)?.outerHTML === '<p>&nbsp;<br></p>',
       gapBeforeProjection: (content.querySelector('div.vault') as HTMLElement | null)?.previousElementSibling?.outerHTML === '<p>&nbsp;<br></p>',
@@ -375,8 +375,11 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   expect(view.toggles.some(t => t.includes('⋮ projection')), 'the projection toggle').toBe(true)
   expect(view.jinjaInline, 'inline jinja constructs are inline code with their exact text').toEqual(['{{ inline | x }}', '{% if flag -%}', '{%- endif %}'])
   expect(view.jinjaBlocks, 'a multi-line jinja construct is a code block with its exact text').toEqual(['{{ assert_(\n  a,\n  b\n) }}'])
-  expect(view.comments, 'the trailing html comment is a gray monospace span with its exact text at the inline-code size').toEqual([['span', '<!-- trailing note -->', true, 'rgb(106, 115, 125)', '14px']])
-  expect(view.inlineCodeSize, 'the app renders inline code at 14px, the size the comment span matches').toBe('14px')
+  expect(view.comments.length, 'one html comment element').toBe(1)
+  expect(view.comments[0].slice(0, 2), 'the trailing html comment is a code element with its exact text').toEqual(['code', '<!-- trailing note -->'])
+  expect([view.comments[0][2], view.comments[0][4]], 'the comment inherits the app\'s code font stack and size from the code rule').toEqual(view.inlineCode)
+  expect(view.comments[0][2].toLowerCase(), 'the app\'s code font stack').toContain('jetbrains mono')
+  expect([view.comments[0][3], view.comments[0][5], view.comments[0][6]], 'gray, with the code background and padding neutralized').toEqual(['rgb(106, 115, 125)', 'rgba(0, 0, 0, 0)', '0px'])
   expect(view.placeholderCode, 'literal tags render as inline code').toEqual(expect.arrayContaining(['<name>']))
   expect(view.gapAfterYaml, 'one blank line between the frontmatter and the body').toBe(true)
   expect(view.gapBeforeProjection, 'one blank line above the projection toggle').toBe(true)
