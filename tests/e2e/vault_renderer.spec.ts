@@ -40,7 +40,7 @@ const S_SOURCE = 'Section text\n'
 // and a hostile body whose every grammar construct must render inert
 const H_PATH = 'agents/e2e_prh.md'
 const H = label(H_PATH)
-const H_FRONTMATTER = '# c &amp; $`x`$ #todo https://e.com\nname: hostile'
+const H_FRONTMATTER = '# c &amp; $`x`$ #todo https://e.com\nname: hostile\nbase: "[[agents/e2e_prs]]"\nroot: [[AGENTS]] [[notes/x]]'
 const H_BODY = [
   '# Heading with #tag and <<macro>>',
   'Prose A &amp; B with #todo, @{eval}@, $`x`$, `<tag>` and `&amp;` and `[[agents/e2e_prs]]` in code.',
@@ -54,9 +54,14 @@ const H_BODY = [
   '- [Run](javascript:window.__h_js=1)',
   '- [ ] a task',
   '![img](https://example.com/i.png)',
-  '![[agents/e2e_prs]] and [[AGENTS]].',
+  '![[agents/e2e_prs]] and [[AGENTS]] and [[notes/x]].',
   '',
 ].join('\n')
+// the layout witness (presentation design 7.2): the same text as an ordinary item and as a managed source
+const L_PATH = 'agents/e2e_prl.md'
+const L = label(L_PATH)
+const L_BODY = 'Para one.\n\nPara two.\n\n\nPara three.\n- a\n- b\nafter the list\n\n---\n\nlast\n\n\n' // two trailing blank lines after the final newline: rendered by neither
+const lStore = () => ({ v: 2, path: L_PATH, pinned_source: L_BODY, head_preview: { kind: 'section', navigation: [{ text: L_BODY }], base: null, exact: null } })
 const H_SOURCE = '---\n' + H_FRONTMATTER + '\n---\n' + H_BODY
 const itemTextYaml = (p: string, frontmatter: string, body: string, deps: string[]) =>
   [
@@ -76,7 +81,7 @@ const hStore = () => ({
   v: 2,
   path: H_PATH,
   pinned_source: H_SOURCE,
-  head_preview: { kind: 'config', navigation: [{ target: S_PATH }], base: null, exact: { profile: 'bare', instructions: 'H instructions', run_instructions: null, user_prompt: null } },
+  head_preview: { kind: 'config', navigation: [{ target: S_PATH }], base: null, exact: { profile: 'bare', instructions: 'H instructions\n\nsee [[agents/e2e_prs]]', run_instructions: null, user_prompt: null } },
 })
 const cStore = (sText: string) => ({
   v: 2,
@@ -119,7 +124,8 @@ const rendered = (page: Page, name: string) =>
     const content = (elem as HTMLElement).querySelector('.content') as HTMLElement | null
     return {
       text: content?.textContent ?? '',
-      carriers: [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent ?? ''),
+      // the carriers (frontmatter, code) and the projection's inert-markdown views, as text without the layout spacers
+      carriers: [...(content?.querySelectorAll('pre code, .vault .vault-source') ?? [])].map(c => (c.textContent ?? '').replace(/\u00a0/g, '').trimEnd()),
       toggles: [...(content?.querySelectorAll('span.template_toggle') ?? [])].map(s => s.textContent ?? ''),
       badge: (elem as HTMLElement).querySelector('[title="managed by the vault sync"]')?.textContent ?? '',
     }
@@ -199,7 +205,7 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   await expect.poll(async () => (await rendered(page, C))?.badge, { timeout: 30_000 }).toBe('config')
   await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('C instructions one')
   const c1 = (await rendered(page, C))!
-  expect(c1.carriers, 'C nests S\'s navigation text').toContain('S one\n')
+  expect(c1.carriers, 'C nests S\'s navigation text').toContain('S one')
   expect(c1.carriers, 'the editable source is never a carrier').not.toContain(C_SOURCE)
   expect(c1.toggles.join('|'), 'no source control').not.toContain('⋮ source')
   expect(c1.toggles.some(t => t.includes('⋮ projection')), 'the projection sits behind one toggle').toBe(true)
@@ -234,7 +240,11 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
     try {
       for (const n of [c, s]) {
         out[n + ':ordinary'] = String((window._item(n) as any).eval_macros('<<vault_badge()>> <<vault_render()>>'))
-        out[n + ':expanded'] = String((window._item(n) as any).eval_macros('<<vault_badge()>> <<vault_render()>>', { context: 'expanded' }))
+        try {
+          out[n + ':expanded'] = String((window._item(n) as any).eval_macros('<<vault_badge()>> <<vault_render()>>', { context: 'expanded' }))
+        } catch (error) {
+          out[n + ':expanded'] = 'THROWN ' + String((error as Error).message ?? error) // presentation design 7.6
+        }
       }
     } finally {
       proto.save_global_store = original
@@ -245,7 +255,8 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   expect(evaluated.out[C + ':ordinary'], 'C renders its composition in the ordinary context').toContain('class="vault"')
   expect(evaluated.out[C + ':ordinary'], 'C badge in the ordinary context').toContain('title="managed by the vault sync"')
   expect(evaluated.out[C + ':expanded'], 'C expanded context is its instructions').toContain('C instructions one')
-  expect(evaluated.out[S + ':expanded'], 'S expanded context is the navigation-only string').toContain('vault: navigation only')
+  expect(evaluated.out[S + ':expanded'], 'S (a section) throws in the expanded context instead of a fixed string').toContain('THROWN')
+  expect(evaluated.out[S + ':expanded'], 'with the reason').toContain('a section carries no standalone context')
   expect(evaluated.saves, 'no store save scheduled by rendering').toBe(0)
   expect(await cipherOf(S_STORE_ID), 'the S store cipher is unchanged').toBe(cipherS)
   expect(await cipherOf(C_STORE_ID), 'the C store cipher is unchanged').toBe(cipherC)
@@ -257,7 +268,7 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   // S's own view shows its source, not its text-only navigation (presentation decision 4), so its
   // re-render shows as the badge flipping back to the pinned form; C's nested view carries S two
   await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section')
-  await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('S two\n')
+  await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('S two')
   expect({ s: await updateTime(sId), c: await updateTime(cId) }, 'no visible-item write').toEqual(before)
 
   // (d) the source-first view through the REAL pipeline (presentation design sections 3 and 4):
@@ -283,12 +294,21 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
     }
     const link = content.querySelector('.vault-source mark.link[title="#vault/agents/e2e_prs"]') as HTMLElement | null
     if (link) link.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    // the frontmatter's own link (presentation design 7.4), dispatched separately
+    const yamlLink = content.querySelector('pre.vault-frontmatter mark.link[title="#vault/agents/e2e_prs"]') as HTMLElement | null
+    if (yamlLink) yamlLink.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     w._handleTagClick = original
     const yaml = content.querySelector('pre.vault-frontmatter') as HTMLElement | null
     return {
       yamlText: yaml?.textContent ?? null,
       yamlComment: !!yaml?.querySelector('.vault-comment'),
-      yamlMarks: yaml?.querySelectorAll('mark, a, span.math').length ?? -1,
+      yamlMarks: yaml ? [...yaml.querySelectorAll('mark')].map(m => m.getAttribute('title') + '=' + m.textContent) : null,
+      yamlOther: yaml?.querySelectorAll('a, span.math').length ?? -1,
+      projection: (() => {
+        const div = [...content.querySelectorAll('div.template_toggle')].find(d => (d.getAttribute('title') ?? '').includes('projection')) as HTMLElement | undefined
+        const inner = div?.querySelector('div.template_toggle[title*="instructions"] .vault-source') as HTMLElement | null | undefined
+        return { paragraphs: inner?.querySelectorAll('p').length ?? -1, marks: inner ? [...inner.querySelectorAll('mark')].map(m => m.getAttribute('title')) : null, spacer: inner?.innerHTML.includes('&nbsp;<br>') ?? false }
+      })(),
       yamlHighlighted: !!yaml?.querySelector('.hljs-attr'),
       heading: (content.querySelector('.vault-source h1') as HTMLElement | null)?.textContent ?? null,
       codes: [...content.querySelectorAll('.vault-source code')].map(c => c.textContent),
@@ -297,7 +317,8 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
       literalProse: (content.querySelector('.vault-source') as HTMLElement | null)?.textContent?.includes('Literal A &copycat and &amp=2 and &notit; stay as written.') ?? false,
       semiProse: (content.querySelector('.vault-source') as HTMLElement | null)?.textContent?.includes('Valid A ; B decodes.') ?? false,
       anchors: content.querySelectorAll('.vault-source a').length,
-      marks: [...content.querySelectorAll('.vault-source mark')].map(m => m.getAttribute('title')),
+      // the body's source view only (the projection's inert-markdown views sit inside div.vault)
+      marks: [...([...content.querySelectorAll('.vault-source')].find(d => !d.closest('div.vault'))?.querySelectorAll('mark') ?? [])].map(m => m.getAttribute('title')),
       hint: (content.querySelector('.vault-source [title="not a managed file"]') as HTMLElement | null)?.textContent ?? null,
       checkboxes: content.querySelectorAll('input').length,
       images: content.querySelectorAll('img').length,
@@ -312,7 +333,9 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   }, H)
   expect(view.yamlText, 'the frontmatter characters are shown exactly').toBe(H_FRONTMATTER)
   expect(view.yamlHighlighted && view.yamlComment, 'highlighted YAML with the renamed comment class').toBe(true)
-  expect(view.yamlMarks, 'no tag link, anchor, or math inside the frontmatter').toBe(0)
+  expect(view.yamlMarks, 'managed references inside the frontmatter are tag links showing their exact spelling; an unmanaged one is text').toEqual(['#vault/agents/e2e_prs=[[agents/e2e_prs]]', '#vault/AGENTS=[[AGENTS]]'])
+  expect(view.yamlOther, 'no anchor or math inside the frontmatter').toBe(0)
+  expect(view.projection, 'the projection fields render as inert markdown with the spacer and links').toEqual({ paragraphs: 2, marks: ['#vault/agents/e2e_prs'], spacer: true })
   expect(view.heading, 'the heading keeps its grammar characters as text').toBe('Heading with #tag and <<macro>>')
   expect(view.codes, 'code spans are literal').toEqual(expect.arrayContaining(['<tag>', '&amp;', '[[agents/e2e_prs]]']))
   expect(view.prose, 'prose entities decode once; the dollar-backtick span is a code span, not app math').toContain('Prose A & B with #todo, @{eval}@, $x$')
@@ -324,12 +347,70 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
     'https://example.com?a=1&b=2',
   ])
   expect(view.anchors, 'only the allowed links are anchors').toBe(3)
-  expect(view.marks, 'the one managed reference is the app tag link (the code-span one stays literal)').toEqual(['#vault/agents/e2e_prs'])
-  expect(view.hint, 'the unmanaged reference is a hint').toBe('[[AGENTS]]')
+  expect(view.marks, 'the managed references (the root file included) are app tag links; the code-span one stays literal').toEqual(['#vault/agents/e2e_prs', '#vault/AGENTS'])
+  expect(view.hint, 'the unmanaged reference is a hint').toBe('[[notes/x]]')
   expect([view.checkboxes, view.images, view.scripts, view.math], 'no checkbox, image, script, or math').toEqual([0, 0, 0, 0])
   expect(view.hidden, 'the hidden-section comment stays visible text').toBe(true)
   expect(view.scriptRan, 'nothing executed').toBe(false)
   expect(view.clicked.length && view.clicked[0][1], 'the managed link\'s mousedown reaches the recording tag-click callback with the label').toBe('#vault/agents/e2e_prs')
   expect(view.clicked.length && view.clicked[0][0], 'bound to the owning item\'s in-app id (as the app\'s own tag marks are)').toBe(view.ownerId)
+  expect(view.clicked.length, 'the body link and the frontmatter link each reached the callback once').toBe(2)
+  expect([view.clicked[1][0], view.clicked[1][1]], 'the frontmatter link is bound to the same item and label').toEqual([view.ownerId, '#vault/agents/e2e_prs'])
   expect(view.toggles.some(t => t.includes('⋮ projection')), 'the projection toggle').toBe(true)
+
+  // (e) the layout witness (presentation design 7.2): the same paragraphs, blank lines, list, and
+  // rule as an ordinary item and as a managed source lay out with the same elements
+  await page.evaluate(t => void window._create(t), '#e2e_plain_layout\n\n' + L_BODY) // the label paragraph is removed below
+  await page.evaluate(t => void window._create(t), itemTextYaml(L_PATH, '', L_BODY, []).replace('```yaml_removed\n\n```\n', ''))
+  await expect.poll(() => savedId(page, L), { timeout: 30_000 }).toBeTruthy()
+  const lId = (await savedId(page, L))!
+  await writeStore('e2e-prl-store', `global_store_${lId}`, { _vault: lStore() })
+  await expect.poll(async () => (await rendered(page, L))?.badge, { timeout: 30_000 }).toBe('section')
+  // measure each item while it is the shown item (an item that is not laid out reports zero offsets)
+  const show = async (n: string) => {
+    await page.evaluate(n => void (location.hash = n), n)
+    await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem?.offsetParent, n), { timeout: 15_000 }).toBe(true)
+  }
+  const measure = (name: string, dropLabel: boolean, selector: string) =>
+    page.evaluate(([n, drop, sel]) => {
+      const shapeOf = (root: Element) => ({
+        p: root.querySelectorAll('p').length,
+        br: root.querySelectorAll('br').length,
+        hr: root.querySelectorAll('hr').length,
+        li: root.querySelectorAll('li').length,
+        spacers: (root.innerHTML.match(/&nbsp;<br>/g) ?? []).length,
+        // the block sequence with its text (whitespace removed: the app's pass keeps newline text nodes between list items)
+        blocks: [...root.children].map(el => el.tagName.toLowerCase() + ':' + (el.textContent ?? '').replace(/\s+/g, '')),
+        tops: [...root.children].map(el => Math.round(el.getBoundingClientRect().top - root.getBoundingClientRect().top)),
+      })
+      const elem = window._item(n as string, true)!.elem as HTMLElement
+      const root = elem.querySelector(sel as string) as HTMLElement | null
+      if (!root) return null
+      const shape = shapeOf(root)
+      if (drop) {
+        // the ordinary item's label paragraph (label, break, spacer) is not part of the body
+        const labelTop = shape.tops.length > 1 ? shape.tops[1] : 0
+        const first = root.children[0]
+        shape.p -= (first?.tagName == 'P' ? 1 : 0) + (first?.querySelectorAll('p').length ?? 0)
+        shape.br -= first?.querySelectorAll('br').length ?? 0
+        shape.spacers -= (root.children[0]?.innerHTML.match(/&nbsp;<br>/g) ?? []).length
+        shape.blocks = shape.blocks.slice(1)
+        shape.tops = shape.tops.slice(1).map(t => t - labelTop)
+      }
+      return shape
+    }, [name, dropLabel, selector] as const)
+  await show('#e2e_plain_layout')
+  const plainLayout = await measure('#e2e_plain_layout', true, '.content')
+  await show(L)
+  const managedLayout = await measure(L, false, '.content .vault-source')
+  const layout = { plain: plainLayout!, managed: managedLayout }
+  const { tops: managedTops, ...managedShape } = layout.managed!
+  const { tops: plainTops, ...plainShape } = layout.plain
+  expect(managedShape, 'the managed source lays out like the ordinary item (block sequence and text, paragraphs, breaks, rule, list items, spacers)').toEqual(plainShape)
+  expect(managedTops.length, 'the same number of blocks').toBe(plainTops.length)
+  const offsets = managedTops.map((t, i) => t - plainTops[i])
+  // the app's direct-child list paddings (2px above and below a list) do not reach a list inside the source
+  // container: the accepted difference (presentation design 7.2); every other block sits within a pixel
+  expect(offsets.every((d, i) => Math.abs(d) <= 1 || (i >= plainShape.blocks.findIndex(b => b.startsWith('ul:')) && Math.abs(d) <= 4)), `block offsets differ beyond the list padding: ${JSON.stringify({ plainTops, managedTops })}`).toBe(true)
+  expect(plainShape.spacers, 'one spacer per blank line (five blank lines; neither the final newline nor the trailing blank lines)').toBe(5)
 })

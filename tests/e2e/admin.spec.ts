@@ -700,7 +700,8 @@ test('vault renderer contract', async ({ page }) => {
   const carriers = (n: string) =>
     page.evaluate(n => {
       const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
-      return [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent ?? '')
+      // the carriers and the inert-markdown views (text parts and projection fields since the presentation design's section 7)
+      return [...(content?.querySelectorAll('pre code, .vault .vault-source') ?? [])].map(c => c.textContent ?? '')
     }, n)
   const show = async (n: string) => {
     await page.evaluate(n => void (location.hash = n), n)
@@ -757,8 +758,15 @@ test('vault renderer contract', async ({ page }) => {
           togglesInPre: [...(content?.querySelectorAll('pre .template_toggle') ?? [])].length,
           halves,
           // the expanded context (agent/chat.js: eval_macros with context 'expanded'): both macros
-          // return plain text there (the removed blocks are the app's later pass, not the macros')
-          expanded: String((item as any).eval_macros('<<vault_badge()>> <<vault_render()>>', { context: 'expanded' })),
+          // return plain text there (the removed blocks are the app's later pass, not the macros'),
+          // or the render throws for an item without standalone context (presentation design 7.6)
+          expanded: (() => {
+            try {
+              return String((item as any).eval_macros('<<vault_badge()>> <<vault_render()>>', { context: 'expanded' }))
+            } catch (error) {
+              return 'THROWN ' + String((error as Error).message ?? error)
+            }
+          })(),
         }
       }, name)
       expect(r.containers, `${file}: rendered under a .vault container`).toBeGreaterThan(0)
@@ -780,6 +788,11 @@ test('vault renderer contract', async ({ page }) => {
       }
       expect(r.expanded, `${file}: expanded context carries no markup`).not.toMatch(/<(div|span|pre|code)\b/)
       expect(r.expanded, `${file}: expanded context never carries the editable source`).not.toContain(source.trim())
+      const h = store.head_preview
+      if (!h) expect(r.expanded, `${file}: no pinned preview throws in the expanded context`).toContain('THROWN vault: no pinned preview')
+      else if (h.kind == 'section') expect(r.expanded, `${file}: a section throws in the expanded context`).toContain('THROWN vault: a section carries no standalone context')
+      else if (h.exact.instructions === null) expect(r.expanded, `${file}: null pinned instructions throw in the expanded context`).toContain('THROWN vault: the pinned instructions are null')
+      else expect(r.expanded, `${file}: a config's expanded context is its pinned instructions`).not.toContain('THROWN')
     }
     // current-item identity, browser form: the config (A) nests the section (B); A's DOM shows
     // B-unique navigation output (from _this = B) with every toggle bound to A (asserted above),
@@ -789,7 +802,7 @@ test('vault renderer contract', async ({ page }) => {
     const sectionSource = unescape(block(fixture('e2e_section.md'), 'jinja_removed'))
     await show(A)
     const nested = await carriers(A)
-    expect(nested.some(t => t.startsWith('**Docs**\nB\n')), 'B-unique navigation rendered under A').toBe(true)
+    expect(nested.some(t => t.replace(/\s+/g, '').startsWith('DocsB')), 'B-unique navigation rendered under A (as inert markdown: the emphasis element, then the B branch)').toBe(true)
     expect(nested, 'B source never rendered under A').not.toContain(sectionSource)
     // a nested toggle opens on its span and closes on its revealed div (both handlers bound to A)
     const nestedToggle = await page.evaluate(n => {
@@ -806,13 +819,19 @@ test('vault renderer contract', async ({ page }) => {
     await expect.poll(hiddenState, { timeout: 5_000 }).toBe(false)
     await clickToggle('div.template_toggle.' + nestedToggle)
     await expect.poll(hiddenState, { timeout: 5_000 }).toBe(true)
-    // no rescan: the nested item carries its marker-shaped text part byte-for-byte
+    // no rescan: the nested item's marker-shaped text part renders as inert markdown (the reference a
+    // tag link showing the path, never a nested toggle or template call; presentation design section 7)
     await show(nameOf(fixture('e2e_nested.md')))
-    expect(await carriers(nameOf(fixture('e2e_nested.md'))), 'marker-shaped text part carried verbatim').toContain('\n![[agents/e2e_section]]\n')
+    const nestedTexts = await carriers(nameOf(fixture('e2e_nested.md')))
+    expect(nestedTexts.some(t => t.replace(/\s+/g, '') == 'agents/e2e_section'), 'marker-shaped text part rendered as the tag link text').toBe(true)
+    expect(nestedTexts, 'never carried as the raw marker').not.toContain('\n![[agents/e2e_section]]\n')
 
-    await test.step('carrier textContent corpus', async () => {
-      // section 3's corpus: exact fields carry the empty and leading/terminal-LF cases, navigation
-      // text parts (separated by a target so they are never adjacent) carry the rest
+    await test.step('projection text corpus: inert markdown, grammar characters as text', async () => {
+      // section 3's corpus, rendered as inert markdown since the presentation design's section 7: the exact
+      // fields carry the empty and leading/terminal-LF cases, navigation text parts (separated by a target so
+      // they are never adjacent) carry the rest; grammar characters stay text, the URL is a plain anchor with
+      // its exact destination, the code span is a code element, the rule is a rule, nothing becomes an app
+      // tag, macro, or math
       const corpus = ['\n\nlead', 'trail\n\n', '&lt;', '😀 ünï é', '---', 'https://example.com/x?y=1', '#tag', '`code`', '<path>', '  padded  ', 'a\n\nb', 'a\tb']
       const navigation = corpus.flatMap(text => [{ text }, { target: 'agents/e2e_worker.md' }])
       const store = storeOf('agents/e2e_corpus.md', 'corpus\n', { kind: 'config', navigation, base: null, exact: { profile: 'bare', instructions: '', run_instructions: '\nlead', user_prompt: 'trail\n' } })
@@ -820,8 +839,26 @@ test('vault renderer contract', async ({ page }) => {
       await setStore(label('agents/e2e_corpus.md'), store)
       await show(label('agents/e2e_corpus.md'))
       await expect.poll(() => badgeOf(label('agents/e2e_corpus.md')), { timeout: 30_000 }).toBe('config')
-      const got = await carriers(label('agents/e2e_corpus.md'))
-      for (const text of ['', '\nlead', 'trail\n', ...corpus]) expect.soft(got, `carrier ${JSON.stringify(text)} is text-exact`).toContain(text)
+      const got = await page.evaluate(n => {
+        const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
+        const views = [...content.querySelectorAll('.vault .vault-source')] as HTMLElement[]
+        const text = views.map(v => (v.textContent ?? '').replace(/\s+/g, ' ').trim())
+        return {
+          text,
+          anchors: views.flatMap(v => [...v.querySelectorAll('a')].map(a => a.getAttribute('href'))),
+          codes: views.flatMap(v => [...v.querySelectorAll('code')].map(c => c.textContent)),
+          rules: views.reduce((n, v) => n + v.querySelectorAll('hr').length, 0),
+          marks: views.reduce((n, v) => n + v.querySelectorAll('mark, span.math, input, script').length, 0),
+          headings: views.reduce((n, v) => n + v.querySelectorAll('h1, h2, h3').length, 0),
+        }
+      }, label('agents/e2e_corpus.md'))
+      for (const text of ['lead', 'trail', '<', '😀 ünï é', 'https://example.com/x?y=1', '#tag', 'code', '<path>', 'padded', 'a b', 'a\tb'.replace(/\s+/g, ' ')])
+        expect.soft(got.text, `projection text ${JSON.stringify(text)} is present as text`).toContain(text)
+      expect.soft(got.anchors, 'the bare URL is a plain anchor with its exact destination').toEqual(['https://example.com/x?y=1'])
+      expect.soft(got.codes, 'the code span is a code element').toEqual(['code'])
+      expect.soft(got.rules, 'the rule is a rule, not a setext heading').toBe(1)
+      expect.soft(got.headings, 'no heading from the rule').toBe(0)
+      expect.soft(got.marks, 'no app tag mark, math, checkbox, or script from the corpus').toBe(0)
     })
 
     await test.step('rejected stores and envelopes fail closed', async () => {
@@ -881,7 +918,7 @@ test('vault renderer contract', async ({ page }) => {
     await show(A)
     await setStore(B, bStore)
     await page.evaluate(n => void (window._item(n) as any).invalidate_elem_cache({ force_render: true, render_delay: 0 }), A)
-    await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
+    await expect.poll(async () => (await carriers(A)).some(t => t.replace(/\s+/g, '').startsWith('DocsB(edited)')), { timeout: 30_000 }).toBe(true)
 
     // HARD: missing-to-created recovery -- deleting a dependency makes the app's dependency
     // resolution fail before vault_render() runs (raw text, no composition); recreating it
@@ -906,7 +943,7 @@ test('vault renderer contract', async ({ page }) => {
     await show(worker)
     await expect.poll(() => badgeOf(worker), { timeout: 30_000 }).toBe('config')
     await show(A)
-    await expect.poll(async () => (await carriers(A)).some(t => t.startsWith('**Docs**\nB (edited)\n')), { timeout: 30_000 }).toBe(true)
+    await expect.poll(async () => (await carriers(A)).some(t => t.replace(/\s+/g, '').startsWith('DocsB(edited)')), { timeout: 30_000 }).toBe(true)
 
     // the cleanup path must recover a killed run's duplicate labels: two saved items under one
     // synthetic label (their names become id:<local-id>), both documents durably gone afterwards
