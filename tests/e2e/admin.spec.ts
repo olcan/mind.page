@@ -855,7 +855,7 @@ test('vault renderer contract', async ({ page }) => {
       for (const text of ['lead', 'trail', '<', '😀 ünï é', 'https://example.com/x?y=1', '#tag', 'code', '<path>', 'padded', 'a b', 'a\tb'.replace(/\s+/g, ' ')])
         expect.soft(got.text, `projection text ${JSON.stringify(text)} is present as text`).toContain(text)
       expect.soft(got.anchors, 'the bare URL is a plain anchor with its exact destination').toEqual(['https://example.com/x?y=1'])
-      expect.soft(got.codes, 'the code span is a code element').toEqual(['code'])
+      expect.soft(got.codes, 'the code span is a code element; the literal tag placeholder is inline code too (presentation design 8.2)').toEqual(['code', '<path>'])
       expect.soft(got.rules, 'the rule is a rule, not a setext heading').toBe(1)
       expect.soft(got.headings, 'no heading from the rule').toBe(0)
       expect.soft(got.marks, 'no app tag mark, math, checkbox, or script from the corpus').toBe(0)

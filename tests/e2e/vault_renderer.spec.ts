@@ -55,6 +55,13 @@ const H_BODY = [
   '- [ ] a task',
   '![img](https://example.com/i.png)',
   '![[agents/e2e_prs]] and [[AGENTS]] and [[notes/x]].',
+  'Jinja {{ inline | x }} in prose and a placeholder <name> here. <!-- trailing note -->',
+  '{% if flag -%}',
+  '{{ assert_(',
+  '  a,',
+  '  b',
+  ') }}',
+  '{%- endif %}',
   '',
 ].join('\n')
 // the layout witness (presentation design 7.2): the same text as an ordinary item and as a managed source
@@ -328,6 +335,13 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
       scriptRan: w.__h_script === 1 || w.__h_js === 1,
       clicked,
       ownerId: item.id,
+      // presentation design section 8: jinja and literal html wrappers, the frontmatter gap
+      jinjaInline: [...content.querySelectorAll('.vault-source p code.vault-jinja')].map(c => c.textContent),
+      jinjaBlocks: [...content.querySelectorAll('.vault-source pre code.vault-jinja')].map(c => c.textContent),
+      comments: [...content.querySelectorAll('.vault-source .vault-comment')].map(c => [c.tagName.toLowerCase(), c.textContent, getComputedStyle(c).fontFamily.toLowerCase().includes('mono'), getComputedStyle(c).color]),
+      placeholderCode: [...content.querySelectorAll('.vault-source p > code:not(.vault-jinja)')].map(c => c.textContent),
+      gapAfterYaml: (yaml?.nextElementSibling as HTMLElement | null)?.outerHTML === '<p>&nbsp;<br></p>',
+      gapBeforeProjection: (content.querySelector('div.vault') as HTMLElement | null)?.previousElementSibling?.outerHTML === '<p>&nbsp;<br></p>',
       toggles: [...content.querySelectorAll('span.template_toggle')].map(s => s.textContent ?? ''),
     }
   }, H)
@@ -357,6 +371,12 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   expect(view.clicked.length, 'the body link and the frontmatter link each reached the callback once').toBe(2)
   expect([view.clicked[1][0], view.clicked[1][1]], 'the frontmatter link is bound to the same item and label').toEqual([view.ownerId, '#vault/agents/e2e_prs'])
   expect(view.toggles.some(t => t.includes('⋮ projection')), 'the projection toggle').toBe(true)
+  expect(view.jinjaInline, 'inline jinja constructs are inline code with their exact text').toEqual(['{{ inline | x }}', '{% if flag -%}', '{%- endif %}'])
+  expect(view.jinjaBlocks, 'a multi-line jinja construct is a code block with its exact text').toEqual(['{{ assert_(\n  a,\n  b\n) }}'])
+  expect(view.comments, 'the trailing html comment is a gray monospace span with its exact text (computed font and color)').toEqual([['span', '<!-- trailing note -->', true, 'rgb(106, 115, 125)']])
+  expect(view.placeholderCode, 'literal tags render as inline code').toEqual(expect.arrayContaining(['<name>']))
+  expect(view.gapAfterYaml, 'one blank line between the frontmatter and the body').toBe(true)
+  expect(view.gapBeforeProjection, 'one blank line above the projection toggle').toBe(true)
 
   // (e) the layout witness (presentation design 7.2): the same paragraphs, blank lines, list, and
   // rule as an ordinary item and as a managed source lay out with the same elements
