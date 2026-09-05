@@ -373,7 +373,7 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   expect(view.toggles.some(t => t.includes('⋮ projection')), 'the projection toggle').toBe(true)
   expect(view.jinjaInline, 'inline jinja constructs are inline code with their exact text').toEqual(['{{ inline | x }}', '{% if flag -%}', '{%- endif %}'])
   expect(view.jinjaBlocks, 'a multi-line jinja construct is a code block with its exact text').toEqual(['{{ assert_(\n  a,\n  b\n) }}'])
-  expect(view.comments, 'the trailing html comment is a gray monospace span with its exact text (computed font and color)').toEqual([['span', '<!-- trailing note -->', true, 'rgb(106, 115, 125)']])
+  expect(view.comments, 'the trailing html comment is a gray span with its exact text inheriting the font (computed: not monospace, gray)').toEqual([['span', '<!-- trailing note -->', false, 'rgb(106, 115, 125)']])
   expect(view.placeholderCode, 'literal tags render as inline code').toEqual(expect.arrayContaining(['<name>']))
   expect(view.gapAfterYaml, 'one blank line between the frontmatter and the body').toBe(true)
   expect(view.gapBeforeProjection, 'one blank line above the projection toggle').toBe(true)
