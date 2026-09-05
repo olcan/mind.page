@@ -1915,7 +1915,7 @@
     // set zoom (if any) on items div
     if (itemsdiv && itemsdiv.style.zoom != zoom) itemsdiv.style.zoom = zoom
     const documentWidth = getDocumentWidth()
-    const minColumnWidth = 750 // minimum column width for multiple columns (see .column max-width)
+    const minColumnWidth = 750 // minimum column width for multiple columns (columns grow to .column max-width)
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
     let target = null
     lastLayoutTime = Date.now()
@@ -11059,7 +11059,7 @@
     flex: 1;
     /* NOTE: BOTH min/max width are necessary to get proper flexing behavior */
     min-width: 0px;
-    max-width: 750px; /* see minColumnWidth for effective min-width */
+    max-width: 1000px; /* see minColumnWidth (750) for the effective min-width in multi-column layouts */
     /* allow absolute-positioned .hidden items */
     position: relative;
     /* prevents content height going below 100%, which can trigger odd zooming/scrolling effects in iOS  */
@@ -11068,10 +11068,6 @@
     /* also ensures consistent width as items switch columns (conditional left/right-margins would also work) */
     /* also helps avoid scroll bar on desktop (which conditional left/right margins would not)*/
     margin-right: 8px;
-  }
-  /* a single column may grow to 1000px; multiple columns stay at the 750px item width */
-  .column:not(.multi-column) {
-    max-width: 1000px;
   }
   /* column padding allows scrolling top items to ~anywhere on screen */
   .column-padding {
