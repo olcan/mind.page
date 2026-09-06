@@ -35,6 +35,7 @@
   } from '../inert'
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
+  import { renderInertMarkdown } from '../inert_markdown'
   export let editable = true
   export let pushable = false
   export let previewable = false
@@ -299,17 +300,20 @@
     // each marker's placement via the inert extension registered on the parser -- a
     // marker Marked lexes in ordinary inline flow (paragraph, list item, blockquote,
     // heading, table cell) becomes a dead-frame span (decoded value assigned
-    // post-render via textContent); a marker inside BLOCK code (fenced or indented --
+    // post-render: a canonical body as inert markdown by innerHTML, a malformed candidate
+    // as the fixed placeholder text); a marker inside BLOCK code (fenced or indented --
     // marked-highlight walks every block code token) is swapped for the fixed
     // placeholder in the callback, with the post-parse backstop covering the
     // inline-code residual; a marker in a link/image destination is escaped by the
     // link override or intercepted by the image override (reviews 186 §4.1, 187 §2).
-    // No pre-parse fence prediction; the decoded bytes never enter Markdown.
+    // No pre-parse fence prediction; the decoded bytes never enter THIS Markdown pass (they
+    // enter only the inert-policy instance of src/inert_markdown.ts, design §2.2a amended).
     const vaultScan = scanInert(text)
     if (vaultScan.candidates.length) {
-      vaultValues = new Map(
-        vaultScan.candidates.map(candidate => [candidate.marker, candidate.value ?? INVALID_INERT_REGION])
-      )
+      // every claimed marker is a key (the placement/code/image seams use .has); a malformed
+      // candidate keeps an UNDEFINED value so the frame population can tell validity apart
+      // from a canonical body that merely equals the placeholder string
+      vaultValues = new Map(vaultScan.candidates.map(candidate => [candidate.marker, candidate.value ?? undefined]))
       text = vaultScan.grammarText
     } else if (vaultValues.size) vaultValues = new Map()
 
@@ -775,7 +779,7 @@
         )}','${_.escape(text)}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`
       }
       // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
-      // NOTE: rel="opener" is required by Chrome for target="_blank" to work. rel="external" is said to replace target=_blank but does NOT open a new window (in Safari or chrome), so we are forced to used _blank+opener.
+      // NOTE: rel="opener" is NOT required for target="_blank" (a misconception recorded here earlier): it GRANTS the destination an opener relationship, so it is kept only for these owner-authored links (a separate change may drop it; model-supplied links in src/inert_markdown.ts use noopener).
       let attribs = ''
       if (!href.startsWith('javascript:')) attribs = ` target="_blank" rel="opener"`
       return `<a${attribs} title="${_.escape(href)}" href="${_.escape(
@@ -804,8 +808,9 @@
     // lexes ORDINARY TEXT (a paragraph, list item, blockquote, heading, table cell) but
     // NEVER inside a code token, so a marker in ordinary inline flow becomes a dead-frame
     // span here while a marker inside code is swapped for the fixed placeholder in the
-    // markedHighlight callback below. The span is populated post-render via textContent by
-    // its data-vault-marker (afterUpdate); candidate bytes never enter html. Only markers
+    // markedHighlight callback below. The span is populated post-render by its
+    // data-vault-marker (afterUpdate: inert markdown for a canonical body, placeholder text
+    // for a malformed one); candidate bytes never enter THIS html. Only markers
     // of the current scan match (owner-typed lookalikes are ignored).
     const inertGlobal = new RegExp(INERT_MARKER_SOURCE, 'g')
     if (vaultValues.size) {
@@ -1043,9 +1048,10 @@
   import { afterUpdate, onDestroy } from 'svelte'
   let container: HTMLDivElement
   let itemdiv: HTMLDivElement
-  // decoded vault-result values (or the fixed invalid placeholder), assigned to the
-  // rendered placeholder elements via textContent only (bridge design §2.2)
-  let vaultValues = new Map<string, string>() // marker -> decoded value / invalid text
+  // decoded vault-result values by marker (undefined for a malformed candidate): a canonical
+  // body is rendered into its dead frame as inert markdown, a malformed one shows the fixed
+  // placeholder as a text node (bridge design §2.2a, amended 2026-09-05)
+  let vaultValues = new Map<string, string | undefined>() // marker -> decoded value / undefined
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1158,12 +1164,22 @@
   let highlightDispatchCount = 0
 
   afterUpdate(() => {
-    // populate vault-result placeholders via textContent ONLY (bridge design §2.2):
-    // decoded model bytes never enter html/attributes, and repopulation survives the
-    // app's forced rerenders
+    // populate vault-result dead frames (bridge design §2.2a, amended 2026-09-05): a
+    // canonical decoded body is rendered as INERT MARKDOWN -- the vault renderer's policy
+    // (src/inert_markdown.ts): decoded bytes enter only that local Marked instance, whose
+    // trusted html is assigned by innerHTML and never sees the app's own Markdown, macro,
+    // tag or url passes; the fixed invalid placeholder stays a text node. Repopulation
+    // survives the app's forced rerenders (the rendered marker is remembered per frame).
     itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
-      const value = vaultValues.get(elem.getAttribute('data-vault-marker')!) ?? INVALID_INERT_REGION
-      if (elem.textContent !== value) elem.textContent = value
+      const marker = elem.getAttribute('data-vault-marker')!
+      const value = vaultValues.get(marker)
+      if (value === undefined) {
+        if (elem.textContent !== INVALID_INERT_REGION) elem.textContent = INVALID_INERT_REGION
+        elem.removeAttribute('data-inert-rendered')
+      } else if (elem.getAttribute('data-inert-rendered') !== marker) {
+        elem.innerHTML = renderInertMarkdown(value)
+        elem.setAttribute('data-inert-rendered', marker)
+      }
     })
     // always report container height for potential changes
     // WARNING: afterUpdate can be triggered for _multiple_ items on every key press in the editor of a single item, so it is critical for onResized to be efficient. These updates were traced to binding such as editor.focused when focusing on an editor or editor.selectionStart when typing into an editor, and then seem to always get propagated to every item that is rendered on the page
@@ -2655,10 +2671,10 @@
     vertical-align: middle;
   }
   .item > :global(.content .vault-result) {
-    white-space: pre-wrap; /* decoded inert bodies keep their line structure */
+    white-space: normal; /* the inert markdown carries its own structure (pre-wrap for the invalid placeholder is moot) */
     overflow-wrap: anywhere;
-    /* the DEAD FRAME (reviews 177-178): machine text, visibly inert -- a quiet frame
-       around a pure text node; content is only ever assigned via textContent */
+    /* the DEAD FRAME (reviews 177-178; inert markdown since 2026-09-05): visibly inert -- a
+       quiet frame around the inert-policy markdown of a canonical body, or the placeholder text */
     display: block;
     padding: 4px 8px;
     border-left: 2px solid #555;

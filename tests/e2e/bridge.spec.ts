@@ -11,6 +11,60 @@
 import { expect, test } from '@playwright/test'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
+test('a canonical reply renders as inert markdown: structure, admitted links, literal grammar', async ({ page }) => {
+  // design §2.2a amended 2026-09-05 (owner): the dead frame shows the decoded body as Markdown
+  // STRUCTURE under the vault renderer's policy (src/inert_markdown.ts), assigned by innerHTML;
+  // the app's own Markdown, macro, tag and url passes never see the decoded bytes
+  await loadAdmin(page)
+  const body = [
+    '## Findings',
+    '',
+    '- first `#not_a_tag`',
+    '- [docs](https://example.com/x?a=1&b=2)',
+    '- [bad](javascript:window._pwned=9)',
+    '',
+    'Plain <<not_a_macro>> and #not_a_tag text.',
+    '',
+    '```js',
+    'const x = 1 // note',
+    '```',
+  ].join('\n')
+  await page.evaluate(
+    body =>
+      void window._create(
+        "#e2e_inert_md reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\n" + body + '\n<!--/inert-->'
+      ),
+    body
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_inert_md'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_inert_md', true)?.elem?.querySelector('.vault-result h2')), { timeout: 15_000 }).toBe(true)
+  const shape = await page.evaluate(() => {
+    const frame = window._item('#e2e_inert_md', true)!.elem!.querySelector('.vault-result')!
+    const item = window._item('#e2e_inert_md', true) as any
+    return {
+      heading: frame.querySelector('h2')?.textContent,
+      items: frame.querySelectorAll('li').length,
+      anchors: [...frame.querySelectorAll('a')].map(a => [a.getAttribute('href'), a.getAttribute('target'), a.getAttribute('rel')]),
+      text: frame.textContent ?? '',
+      code: frame.querySelector('pre code')?.textContent,
+      marks: frame.querySelectorAll('mark').length, // no tag links from the frame's text
+      pwned: (window as any)._pwned ?? null,
+      tags: (item?.tags ?? []).join(' '),
+    }
+  })
+  expect(shape.heading).toBe('Findings')
+  expect(shape.items).toBe(3)
+  expect(shape.anchors, 'only the https link is an anchor, with noopener; javascript: is shown as text').toEqual([
+    ['https://example.com/x?a=1&b=2', '_blank', 'noopener'],
+  ])
+  expect(shape.text).toContain('bad (javascript:window._pwned=9)')
+  expect(shape.text).toContain('<<not_a_macro>>')
+  expect(shape.code).toBe('const x = 1 // note')
+  expect(shape.marks).toBe(0)
+  expect(shape.pwned).toBeNull()
+  expect(shape.tags, 'a #tag inside the reply is not an item tag').not.toContain('#not_a_tag')
+})
+
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {
   // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO
   // phases: (a) a VALID envelope whose DECODED text carries every active item grammar,
@@ -54,9 +108,19 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
         runnable: !!item?.runnable,
         tags: (item?.tags ?? []).join(' '),
         rendered: item?.elem?.querySelector('.content')?.textContent ?? '',
-        // the placeholder must hold ONLY text nodes: any element/attribute means
-        // decoded or raw candidate bytes reached the html grammar
-        placeholderElements: [...(item?.elem?.querySelectorAll('.vault-result *') ?? [])].length,
+        // the dead frame holds the inert-markdown policy's html only (design §2.2a, amended
+        // 2026-09-05): every element is one the policy emits, none carries an event-handler
+        // attribute, and no anchor has a non-http(s)/mailto destination -- any other element or
+        // attribute means decoded bytes reached the html grammar
+        frameViolations: [...(item?.elem?.querySelectorAll('.vault-result *') ?? [])].filter(el => {
+          const allowed = ['DIV', 'P', 'PRE', 'CODE', 'SPAN', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'EM', 'STRONG', 'DEL', 'HR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']
+          if (!allowed.includes(el.tagName)) return true
+          if ([...el.attributes].some(a => a.name.startsWith('on'))) return true
+          return el.tagName == 'A' && !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
+        }).length,
+        frameText: item?.elem?.querySelector('.vault-result')?.textContent ?? '',
+        frameChildren: item?.elem?.querySelector('.vault-result')?.children.length ?? -1,
+        frameRendered: item?.elem?.querySelector('.vault-result')?.hasAttribute('data-inert-rendered') ?? null,
         liveNodes: [
           ...(item?.elem?.querySelectorAll('.content script, .content img, .content [onerror], .content a[href^="javascript:"]') ??
             []),
@@ -74,7 +138,9 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(valid.tags, 'decoded tags did not enter item state').not.toContain('#_autorun')
   expect(valid.tags).not.toContain('#chat/gpt')
   expect(valid.rendered, 'the decoded payload displays literally').toContain('window._pwned = 1')
-  expect(valid.placeholderElements, 'the placeholder holds text nodes only').toBe(0)
+  expect(valid.frameViolations, 'the frame holds only the policy html: no foreign element, handler, or bad anchor').toBe(0)
+  expect(valid.frameText, 'the hostile spellings display literally inside the frame').toContain('<<window._pwned = 1>>')
+  expect(valid.frameText).toContain('<script>window._pwned = 2</script>')
   expect(valid.liveNodes, 'no script/img/handler/javascript-link element was created').toBe(0)
   expect(valid.messages, 'the decoded <<user>> is not a delimiter in the grammar view').toBe(1)
   // (b) MALFORMED candidate: the same payloads as RAW body, opaque and placeholdered
@@ -94,9 +160,28 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(bad.tags).not.toContain('#chat/gpt')
   expect(bad.rendered, 'the invalid candidate renders the fixed placeholder').toContain('⟦invalid inert region⟧')
   expect(bad.rendered, 'raw candidate bytes are not displayed').not.toContain('window._pwned')
-  expect(bad.placeholderElements, 'the placeholder holds text nodes only').toBe(0)
+  // the malformed candidate's frame is EXACTLY the placeholder text node: no markdown rendering,
+  // no child element, no rendered marker
+  expect(bad.frameText, 'the invalid placeholder is the frame text').toBe('⟦invalid inert region⟧')
+  expect(bad.frameChildren, 'the invalid placeholder is a text node').toBe(0)
+  expect(bad.frameRendered, 'no markdown was rendered for a malformed candidate').toBe(false)
   expect(bad.liveNodes, 'no script/img/handler/javascript-link element was created').toBe(0)
   expect(bad.messages, 'the raw <<user>> is not a delimiter in the grammar view').toBe(1)
+  // a CANONICAL body that merely equals the placeholder string is a valid value: it renders
+  // as inert markdown (a child element, the rendered marker), unlike the malformed candidate
+  await page.evaluate(
+    () =>
+      void window._create(
+        "#e2e_vault_placeholder_body reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\n⟦invalid inert region⟧\n<!--/inert-->"
+      )
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_vault_placeholder_body'))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_vault_placeholder_body', true)?.elem?.querySelector('.vault-result')), { timeout: 15_000 }).toBe(true)
+  const lookalike = await state('#e2e_vault_placeholder_body')
+  expect(lookalike.frameText).toBe('⟦invalid inert region⟧')
+  expect(lookalike.frameChildren, 'a canonical body equal to the placeholder is still rendered as markdown').toBeGreaterThan(0)
+  expect(lookalike.frameRendered).toBe(true)
+  expect(lookalike.frameViolations).toBe(0)
   // the read path (grammar view) masks candidate bytes for every downstream parser
   expect(
     await page.evaluate(() => (window._item('#e2e_vault_bad') as any).read()),
@@ -155,9 +240,15 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
         // injected class name
         framesInCode: [...(content?.querySelectorAll('pre code .vault-result') ?? [])].length,
         codeText: [...(content?.querySelectorAll('pre code') ?? [])].map(c => c.textContent).join(''),
-        // candidate bytes initially enter through textContent and never create
-        // candidate-supplied elements/attributes (review 183 §1.3)
-        frameChildElements: [...(content?.querySelectorAll('.vault-result *') ?? [])].length,
+        // candidate bytes never create candidate-supplied elements/attributes (review 183 §1.3):
+        // the frame's children are the inert-markdown policy's html only (design §2.2a, amended
+        // 2026-09-05): allowed elements, no handler attributes, no non-http(s)/mailto anchor
+        frameViolations: [...(content?.querySelectorAll('.vault-result *') ?? [])].filter(el => {
+          const allowed = ['DIV', 'P', 'PRE', 'CODE', 'SPAN', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'EM', 'STRONG', 'DEL', 'HR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']
+          if (!allowed.includes(el.tagName)) return true
+          if ([...el.attributes].some(a => a.name.startsWith('on'))) return true
+          return el.tagName == 'A' && !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
+        }).length,
         // review 186 §4.1: a marker must never survive into a URL attribute (raw or
         // percent-encoded -- the ascii 'vault_result_v1:' substring survives encodeURI)
         markerUrls: [...(content?.querySelectorAll('img, a') ?? [])].filter(el =>
@@ -169,7 +260,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     expect(r.rendered, `${rc.name}: no marker leaks into rendered text`).not.toContain('vault_result_v1:')
     expect(r.framesInCode, `${rc.name}: no dead-frame element inside a code block`).toBe(0)
     expect(r.codeText, `${rc.name}: no injected class name escaped as code text`).not.toContain('vault-result')
-    expect(r.frameChildElements, `${rc.name}: candidate bytes create no child elements`).toBe(0)
+    expect(r.frameViolations, `${rc.name}: the frame holds only the policy html`).toBe(0)
     expect(r.markerUrls, `${rc.name}: no marker survives into a src/href attribute`).toBe(0)
     // the DISCRIMINATING assertion (review 183 §1.2): Marked's classification is pinned --
     // a top-level region is a dead frame with the decoded body and NOT the placeholder; a
