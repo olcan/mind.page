@@ -29,6 +29,49 @@ test('typing in the mindbox and pressing shift+enter creates an item', async ({ 
   expect(await itemText(page, '#e2e_typed')).toBe('#e2e_typed created via keyboard')
 })
 
+test('a transitive missing dependency logs one diagnostic at the red border; clears and relogs', async ({ page }) => {
+  // src/item_errors.ts at Item.svelte's dom inspection seam: the macro expansion deliberately
+  // keeps `eval missing dependencies` out of the console (a DIRECT missing dependency is marked
+  // visibly), so a dependency's OWN missing dependency left the root red with no render-time
+  // diagnostic, only the background reader's later line (the #chat/fable install, 2026-09-05). Now the rendered causes are read where the border is
+  // decided and logged once per item; recovery forgets the item so a recurrence logs again.
+  await loadAdmin(page)
+  const root = '#e2e_dep_root'
+  const diagnostics: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && msg.text().includes(`[${root}] error indication`)) diagnostics.push(msg.text())
+  })
+  // the dependency exists and is unique; ITS hidden dependency does not exist
+  await page.evaluate(text => void window._create(text), '#e2e_dep_dep #_e2e_dep_absent\nthe dependency')
+  await page.evaluate(text => void window._create(text), `${root} #_e2e_dep_dep\nroot with a macro <<1+1>>`)
+  const bordered = () =>
+    page.evaluate(root => !!window._item(root, true)?.elem?.querySelector('.container.error.bordered'), root)
+  await expect.poll(bordered, { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => diagnostics.length).toBe(1)
+  expect(diagnostics[0]).toContain('macro error: eval missing dependencies: e2e_dep_absent')
+  expect(diagnostics[0]).toContain('dependencies can be transitive')
+  // repeated mindbox passes re-rank and re-inspect but do NOT re-log
+  await focusMindbox(page)
+  await mindbox(page).fill('root with a macro')
+  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false)).toBe(true)
+  expect(diagnostics.length).toBe(1)
+  // the missing dependency arrives: the root re-expands, the border clears, nothing is logged
+  await page.evaluate(text => void window._create(text), '#e2e_dep_absent\nnow present')
+  await expect.poll(bordered, { timeout: 30_000 }).toBe(false)
+  expect(diagnostics.length).toBe(1)
+  // it disappears again: the SAME failure logs again (the item was forgotten on recovery)
+  await page.evaluate(() => void window._item('#e2e_dep_absent', true)?.delete(false))
+  await expect.poll(bordered, { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => diagnostics.length).toBe(2)
+  expect(diagnostics[1]).toContain('eval missing dependencies: e2e_dep_absent')
+  // leave no red-bordered items behind: error-ranked items pop on every mindbox change and
+  // would shift the layout under later rows of this shared account
+  for (const name of [root, '#e2e_dep_dep']) {
+    await page.evaluate(name => void window._item(name, true)?.delete(false), name)
+  }
+  await expect.poll(() => page.evaluate(root => !!window._item(root, true), root)).toBe(false)
+})
+
 test('failed _tests rank, border, and log with dedup; relog after a healthy interval', async ({ page }) => {
   // issues/MindPage Failed Tests Pop Items Up With No Error Indication (reviews 192):
   // failed _tests in an item's global store rank it as an error on every mindbox
@@ -492,10 +535,22 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
     ({ id, len }) => document.querySelector(`#item-${id}`)!.closest('.container')!.setAttribute('data-selection', `0,${len}`),
     { id, len: TODO.length }
   )
-  // click the plain text (mid-paragraph is inside the long plain prefix, clear of the links)
-  const paragraph = page.locator(`#item-${id} p`).first()
-  const box = (await paragraph.boundingBox())!
-  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  // click the plain text: the CENTER OF ITS TEXT NODE, not the paragraph's midpoint -- with the
+  // 2026-09-05 column widths (1000px columns) the whole line fits on one row and the paragraph
+  // midpoint lands on a link, which navigates instead of opening the editor
+  const point = await page.evaluate(id => {
+    const paragraph = document.querySelector(`#item-${id} p`)!
+    const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent?.includes('Ask vedant')) continue
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      const rect = range.getBoundingClientRect()
+      return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+    }
+    return null
+  }, id)
+  await page.mouse.click(point!.x, point!.y)
   const textarea = page.locator(`#textarea-${id}`)
   await expect(textarea).toBeVisible()
   const { value, start, end } = await textarea.evaluate((el: HTMLTextAreaElement) => ({

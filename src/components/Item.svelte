@@ -34,6 +34,7 @@
     INVALID_INERT_REGION,
   } from '../inert'
   import Editor from './Editor.svelte'
+  import { collectItemErrorSources, logItemErrors } from '../item_errors'
   export let editable = true
   export let pushable = false
   export let previewable = false
@@ -1460,6 +1461,9 @@
     // indicate errors/warnings and context/target items
     // NOTE: .error and .warning classes can be used to trigger a visual indication of errors/warnings, but ranking is handled separately in index.svelte (in onEditorChange) and uses a separate hasError flag computed there
     error = !!itemdiv.querySelector('.console-error,.macro-error,mark.missing,.error')
+    // the console explanation of that border, deduped per item (src/item_errors.ts): the
+    // rendered causes, incl. the macro errors the expansion deliberately does not log
+    logItemErrors(id, name, collectItemErrorSources(itemdiv))
     warning = !!itemdiv.querySelector('.console-warn,.warning')
 
     // trigger typesetting of any math elements
