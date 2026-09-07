@@ -657,8 +657,21 @@
       this.dispatch_task('_update_attr_async.' + prop, () => {
         if (!_exists(this.id)) return // item deleted, just cancel
         const _item = item(this.id)
-        _item.attr ??= {}
-        if (!_.isEqual(_item.attr[prop], this[prop])) {
+        // HELD until the corpus is SERVER-CONFIRMED (attrSaveStep in src/welcome.ts): the save
+        // below writes the whole item, and from a cache-served corpus that rewrote a stale text
+        // over the server's newer revision (2026-09-07); a welcome fallback (offline, timeout)
+        // does not release it. the in-memory value already drives the ui meanwhile. a held turn
+        // must leave `attr` and its container untouched: initializing a null map here made an
+        // unchanged item look dirty to discardEdits, which then saved the cached text
+        const step = attrSaveStep({
+          confirmed: !!window['_server_confirmed'],
+          current: this[prop],
+          stored: _item.attr?.[prop],
+          equal: _.isEqual,
+        })
+        if (step == 'retry') return 250 // poll again
+        if (step == 'save') {
+          _item.attr ??= {}
           _item.attr[prop] = _.cloneDeep(this[prop])
           itemAttrChanged(this.id, false /* remote */) // invoke _on_attr_change on item or listeners
           // console.debug('saving in _update_attr_async', prop)
@@ -7256,6 +7269,7 @@
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
   import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
+  import { attrSaveStep, settleCorpus, WELCOME_CONFIRMATION_TIMEOUT_MS } from '../welcome'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -7616,6 +7630,25 @@
     if (ingressStopped || window['_server_confirmed']) return
     window['_server_confirmed'] = true
     init_log('server-confirmed corpus')
+    resolveServerConfirmed()
+  }
+  let resolveServerConfirmed: () => void = () => {}
+  const serverConfirmation = new Promise<void>(resolve => (resolveServerConfirmed = resolve))
+  // the corpus SETTLES once for the page (see settleCorpus in src/welcome.ts): the server
+  // confirmation, or no confirmation to wait for now — offline, or the timeout on a slow link.
+  // item welcome hooks run only after it; a fallback lets them run on the cached corpus (the
+  // flag stays false, so gated hooks keep waiting) but releases nothing else — whole-item
+  // attribute saves wait for the confirmation itself (_update_attr_async). the timer starts at
+  // the welcome step, after the rebuild, since a cached confirmation waits for the rebuild
+  async function settleCorpusForWelcome() {
+    const how = await settleCorpus({
+      confirmation: serverConfirmation,
+      online: navigator.onLine,
+      timeoutMs: WELCOME_CONFIRMATION_TIMEOUT_MS,
+      delay: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    })
+    init_log(`corpus settled: ${how}`)
+    if (how == 'timeout') console.warn(`welcome hooks on an unconfirmed corpus after ${WELCOME_CONFIRMATION_TIMEOUT_MS}ms`)
   }
 
   // reserves this callback's AUTHORITY LEASE at receipt, in listener order, and returns the
@@ -9423,20 +9456,24 @@
             // handle url fragment if any
             if (url_fragment) handleFragment(url_fragment)
 
-            // finalize dom & evaluate _on_welcome on welcome items
-            update_dom().then(() => {
-              items.forEach(item => {
-                if (!item.welcome) return
-                if (!itemDefinesFunction(item, '_on_welcome')) return
-                Promise.resolve(
-                  _item(item.id).eval('_on_welcome()', {
-                    trigger: 'welcome',
-                    async: item.deepasync, // run async if item is async or has async deps
-                    async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-                  })
-                ).catch(e => {}) // already logged
+            // finalize dom, then evaluate _on_welcome on welcome items once the corpus SETTLED (see
+            // settleCorpusForWelcome): not while a server confirmation is still due within the wait;
+            // after a fallback the hooks run on the cached corpus with `_server_confirmed` false
+            update_dom()
+              .then(settleCorpusForWelcome)
+              .then(() => {
+                items.forEach(item => {
+                  if (!item.welcome) return
+                  if (!itemDefinesFunction(item, '_on_welcome')) return
+                  Promise.resolve(
+                    _item(item.id).eval('_on_welcome()', {
+                      trigger: 'welcome',
+                      async: item.deepasync, // run async if item is async or has async deps
+                      async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+                    })
+                  ).catch(e => {}) // already logged
+                })
               })
-            })
           })
 
         init_log('initialized document')

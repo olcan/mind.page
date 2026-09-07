@@ -18,7 +18,9 @@ test('charts regenerate after a stale hidden render (zero-width skip)', async ({
   // zero width in a delayed callback, skip generation and invalidate the element cache — which
   // must force a re-render when the empty element was already adopted (see invalidate_elem_cache
   // in index.svelte; regression under svelte 5, where adoption started winning that race and
-  // charts came up empty when toggled into view)
+  // charts came up empty when toggled into view). section separators exist only in a multi-column
+  // layout: floor(1600 / 750) = 2 columns (the default 1280 px viewport is a single column)
+  await page.setViewportSize({ width: 1600, height: 900 })
   await loadAnonymous(page)
   await page.locator('.section-separator').last().click()
   await page.waitForTimeout(2_000) // let the stale chart callbacks fire

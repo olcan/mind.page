@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { loadAnonymous } from './helpers.js'
 
-// column layout (see updateItemLayout in index.svelte): columnCount is max(1, floor(width / 500)),
+// column layout (see updateItemLayout in index.svelte): columnCount is max(1, floor(width / 750)),
 // every visible item is rendered exactly once with per-column order following index order, and the
 // hidden render column and element cache track the first column's width; this pins the layout
 // math ahead of its extraction from index.svelte
@@ -64,7 +64,7 @@ test('column layout follows viewport width, keeping items unique, ordered and co
 }) => {
   const settle = (count: number) => expect.poll(() => columns(page), { timeout: 15_000 }).toBe(count)
 
-  await page.setViewportSize({ width: 1200, height: 900 }) // floor(1200 / 500) = 2 columns
+  await page.setViewportSize({ width: 1600, height: 900 }) // floor(1600 / 750) = 2 columns
   await loadAnonymous(page)
   await settle(2)
   const ids = await expectConsistentColumns(page)
@@ -75,9 +75,9 @@ test('column layout follows viewport width, keeping items unique, ordered and co
 
   for (const [width, count] of [
     [900, 1],
-    [1200, 2],
-    [1600, 3],
-    [900, 1],
+    [1600, 2],
+    [2400, 3],
+    [1200, 1],
   ] as const) {
     await page.setViewportSize({ width, height: 900 })
     await settle(count)
