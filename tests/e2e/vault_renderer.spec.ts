@@ -96,7 +96,7 @@ const cStore = (sText: string) => ({
   pinned_source: C_SOURCE,
   head_preview: {
     kind: 'config',
-    navigation: [{ text: 'Intro\n' }, { target: S_PATH }],
+    navigation: [{ text: 'Intro [site](https://example.com/x)\n' }, { target: S_PATH }],
     base: null,
     exact: { profile: 'bare', instructions: 'C instructions ' + sText, run_instructions: null, user_prompt: null },
   },
@@ -139,6 +139,17 @@ const rendered = (page: Page, name: string) =>
   }, name)
 
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
+
+// the projection is LAZY (init_perf): its content renders on the toggle's first open, so a row that
+// reads the projection's carriers opens the toggle first (idempotent: a filled toggle stays filled;
+// a re-rendered item carries a fresh, unfilled toggle, so the poll that follows opens it again)
+const openProjection = (page: Page, name: string) =>
+  page.evaluate(name => {
+    const elem = window._item(name, true)?.elem as HTMLElement | undefined
+    const span = [...(elem?.querySelectorAll('span.template_toggle') ?? [])].find(s => (s.textContent ?? '').includes('⋮ projection'))
+    const div = span?.nextElementSibling as HTMLElement | null
+    if (span && div && !div.dataset.filled) (span as HTMLElement).click()
+  }, name)
 
 // the app's hidden document shape, encrypted v0 with the account's stored secret
 async function writeStore(id: string, name: string, item: unknown) {
@@ -210,13 +221,45 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   // with the pinned source; no source control anywhere
   await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section')
   await expect.poll(async () => (await rendered(page, C))?.badge, { timeout: 30_000 }).toBe('config')
-  await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('C instructions one')
+  await expect
+    .poll(async () => (await openProjection(page, C), (await rendered(page, C))?.carriers ?? []), { timeout: 30_000 })
+    .toContain('C instructions one')
   const c1 = (await rendered(page, C))!
   expect(c1.carriers, 'C nests S\'s navigation text').toContain('S one')
   expect(c1.carriers, 'the editable source is never a carrier').not.toContain(C_SOURCE)
   expect(c1.toggles.join('|'), 'no source control').not.toContain('⋮ source')
   expect(c1.toggles.some(t => t.includes('⋮ projection')), 'the projection sits behind one toggle').toBe(true)
   expect(c1.toggles.some(t => t.includes('instructions (bare profile)')), 'the instructions control').toBe(true)
+  // an allowed link inside the lazily filled projection keeps the app's link handling: the click
+  // reaches _handleLinkClick bound to C (the app's handler stops propagation), so the enclosing
+  // toggle does not collapse. navigation is blocked here by a capture-phase listener only; the
+  // app's own handler does not prevent an http link's default
+  const linkClick = await page.evaluate(n => {
+    const w = window as any
+    const item = w._item(n, true)
+    const content = item.elem.querySelector('.content') as HTMLElement
+    const a = content.querySelector('div.vault a[href="https://example.com/x"]') as HTMLAnchorElement | null
+    const span = [...content.querySelectorAll('span.template_toggle')].find(s => (s.textContent ?? '').includes('⋮ projection'))
+    const div = span?.nextElementSibling as HTMLElement | null
+    if (!a || !div) return { missing: true }
+    const calls: unknown[][] = []
+    const original = w._handleLinkClick
+    w._handleLinkClick = (...args: unknown[]) => {
+      calls.push([args[0], args[1]])
+      original(...args)
+    }
+    const prevent = (e: Event) => e.preventDefault()
+    document.addEventListener('click', prevent, true)
+    const hiddenBefore = div.classList.contains('hidden')
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    document.removeEventListener('click', prevent, true)
+    w._handleLinkClick = original
+    return { missing: false, wired: typeof a.onclick == 'function', calls, hiddenBefore, hiddenAfter: div.classList.contains('hidden'), id: item.id }
+  }, C)
+  expect(linkClick.missing, 'the projection carries the allowed link').toBe(false)
+  expect(linkClick.wired, 'the inserted anchor has the app link handler').toBe(true)
+  expect(linkClick.calls, 'the click reaches _handleLinkClick bound to C with the href').toEqual([[linkClick.id, 'https://example.com/x']])
+  expect([linkClick.hiddenBefore, linkClick.hiddenAfter], 'the open projection stays open (propagation stopped before the toggle)').toEqual([false, false])
   // an edited source shows the differs form the moment it renders, without any sync; the edit
   // must then be acknowledged by the server before phase (c)'s no-visible-write baseline
   const sEdited = itemText(S_PATH, S_SOURCE + 'edited\n', [])
@@ -275,7 +318,9 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   // S's own view shows its source, not its text-only navigation (presentation decision 4), so its
   // re-render shows as the badge flipping back to the pinned form; C's nested view carries S two
   await expect.poll(async () => (await rendered(page, S))?.badge, { timeout: 30_000 }).toBe('section')
-  await expect.poll(async () => (await rendered(page, C))?.carriers ?? [], { timeout: 30_000 }).toContain('S two')
+  await expect
+    .poll(async () => (await openProjection(page, C), (await rendered(page, C))?.carriers ?? []), { timeout: 30_000 })
+    .toContain('S two')
   expect({ s: await updateTime(sId), c: await updateTime(cId) }, 'no visible-item write').toEqual(before)
 
   // (d) the source-first view through the REAL pipeline (presentation design sections 3 and 4):
@@ -289,6 +334,7 @@ test('the renderer reads real hidden stores, saves nothing, and follows store-on
   const hId = (await savedId(page, H))!
   await writeStore('e2e-prh-store', `global_store_${hId}`, { _vault: hStore() })
   await expect.poll(async () => (await rendered(page, H))?.badge, { timeout: 30_000 }).toBe('config')
+  await openProjection(page, H) // the projection fields are read below: open the lazy toggle first
   const view = await page.evaluate(async name => {
     const item = window._item(name, true)!
     const elem = (item.elem ?? (await window._render_item(item))) as HTMLElement

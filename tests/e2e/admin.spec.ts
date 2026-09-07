@@ -697,12 +697,25 @@ test('vault renderer contract', async ({ page }) => {
     expect(await page.evaluate(([p, r]) => window._items().filter(i => i.label.startsWith(p) || i.label == r).length, [PREFIX, RENDERER] as const)).toBe(0)
     return local.map(l => l.saved).filter((s): s is string => !!s)
   }
-  const carriers = (n: string) =>
+  // the projection is LAZY (init_perf): a read of the projection's views fills it first, as its
+  // first open would, without toggling visibility (a re-rendered item carries a fresh toggle)
+  const fillProjection = (n: string) =>
     page.evaluate(n => {
+      const item = window._item(n, true)
+      const content = item?.elem?.querySelector('.content') as HTMLElement | null | undefined
+      for (const s of content?.querySelectorAll('span.template_toggle') ?? []) {
+        const idc = [...s.classList].find(c => c.startsWith('id_'))
+        if (idc && (s.textContent ?? '').includes('⋮ projection')) (window as any)._vault_lazy_fill?.(item!.id, idc)
+      }
+    }, n)
+  const carriers = async (n: string) => {
+    await fillProjection(n)
+    return page.evaluate(n => {
       const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
       // the carriers and the inert-markdown views (text parts and projection fields since the presentation design's section 7)
       return [...(content?.querySelectorAll('pre code, .vault .vault-source') ?? [])].map(c => c.textContent ?? '')
     }, n)
+  }
   const show = async (n: string) => {
     await page.evaluate(n => void (location.hash = n), n)
     await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem, n), { timeout: 15_000 }).toBe(true)
@@ -730,6 +743,12 @@ test('vault renderer contract', async ({ page }) => {
         const item = window._item(n, true)!
         const content = item.elem?.querySelector('.content') as HTMLElement
         const owner = (el: Element) => (el.getAttribute('onclick') ?? '').match(/_item\('([^']+)'\)/)?.[1] ?? ''
+        // the projection is LAZY (init_perf): fill it as its first open would (without toggling
+        // visibility), so its placeholder or its inner toggles are on the page for the checks below
+        for (const s of content?.querySelectorAll('span.template_toggle') ?? []) {
+          const idc = [...s.classList].find(c => c.startsWith('id_'))
+          if (idc && (s.textContent ?? '').includes('⋮ projection')) (window as any)._vault_lazy_fill?.(item.id, idc)
+        }
         // both halves of every toggle: the visible span and the revealed div, paired by id class
         const halves = [...(content?.querySelectorAll('span.template_toggle') ?? [])].map(s => {
           const idc = [...s.classList].find(c => c.startsWith('id_')) ?? ''
@@ -839,6 +858,7 @@ test('vault renderer contract', async ({ page }) => {
       await setStore(label('agents/e2e_corpus.md'), store)
       await show(label('agents/e2e_corpus.md'))
       await expect.poll(() => badgeOf(label('agents/e2e_corpus.md')), { timeout: 30_000 }).toBe('config')
+      await fillProjection(label('agents/e2e_corpus.md'))
       const got = await page.evaluate(n => {
         const content = window._item(n, true)!.elem?.querySelector('.content') as HTMLElement
         const views = [...content.querySelectorAll('.vault .vault-source')] as HTMLElement[]

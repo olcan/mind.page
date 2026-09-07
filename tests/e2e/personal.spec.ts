@@ -268,6 +268,58 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
 })
 
+test('direct typed reads are memoized per text hash; deep reads follow a dependency edit and a dependency identity change (init_perf)', async ({ page }) => {
+  // the read memo (readMemo in index.svelte): a DIRECT typed read is served from the memo on
+  // repeat (window._read_memo counts hits and misses); a deep read is rebuilt from the memoized
+  // direct reads, so it follows a dependency's text edit (a new hash) and a dependency IDENTITY
+  // change with the same text (a duplicate-label twin outliving the original); the dependency is
+  // the hidden tag #_e2e_memo_dep (dependencies come from hidden tags, see itemDeps)
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const dep = (n: number) => `#e2e_memo_dep\n\`\`\`js\nconst E2E_MEMO = ${n}\nconst E2E_MEMO_ID = "$id"\n\`\`\``
+  await page.evaluate(t => void window._create(t), dep(1))
+  await page.evaluate(() => void window._create('#e2e_memo_user #_e2e_memo_dep\n```js\nE2E_MEMO\n```'))
+  await expect
+    .poll(() => page.evaluate(() => !!window._item('#e2e_memo_user', true)?.saved_id && !!window._item('#e2e_memo_dep', true)?.saved_id), {
+      timeout: 30_000,
+    })
+    .toBe(true)
+  const stats = () => page.evaluate(() => ({ ...(window as any)._read_memo }))
+  const deep = () => page.evaluate(() => window._item('#e2e_memo_user')!.read_deep('js', { replace_ids: true }))
+  const first = await deep()
+  const depId = await page.evaluate(() => window._item('#e2e_memo_dep')!.id)
+  expect(first).toContain('const E2E_MEMO = 1')
+  expect(first, 'the dependency read substitutes its own id').toContain(`const E2E_MEMO_ID = "${depId}"`)
+  // a repeated deep read misses nothing: its direct reads are memoized (a work count, not a
+  // string comparison)
+  const before = await stats()
+  expect(await deep()).toBe(first)
+  const after = await stats()
+  expect(after.misses, 'no new miss on the repeated read').toBe(before.misses)
+  expect(after.hits, 'the direct reads hit').toBeGreaterThan(before.hits)
+  // a dependency text edit: a new hash, a new read
+  await page.evaluate(t => window._item('#e2e_memo_dep')!.write(t, ''), dep(2))
+  await expect.poll(deep, { timeout: 30_000 }).toContain('const E2E_MEMO = 2')
+  expect(await deep()).not.toContain('E2E_MEMO = 1')
+  // a dependency IDENTITY change with the same text: a twin with the same label, then the
+  // original deleted — the twin's id must appear (a deep read memoized under the deephash would
+  // keep the original's id, since the deephash carries text hashes only)
+  await page.evaluate(t => void window._create(t), dep(2))
+  await page.evaluate(id => window._item(id)!.delete(false), depId)
+  await expect
+    .poll(async () => (await page.evaluate(() => window._items().filter(i => i.label == '#e2e_memo_dep').map(i => i.id))).length, { timeout: 30_000 })
+    .toBe(1)
+  const twinId = await page.evaluate(() => window._items().find(i => i.label == '#e2e_memo_dep')!.id)
+  expect(twinId).not.toBe(depId)
+  await expect.poll(deep, { timeout: 30_000 }).toContain(`const E2E_MEMO_ID = "${twinId}"`)
+  expect(await deep(), 'the deleted original is gone from the deep read').not.toContain(depId)
+  // cleanup once the twin has its saved id (it was created moments ago)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_memo_dep', true)?.saved_id ?? null), { timeout: 30_000 }).toBeTruthy()
+  const ids = await page.evaluate(() => [window._item('#e2e_memo_user')!.saved_id, window._item('#e2e_memo_dep')!.saved_id])
+  for (const id of ids) await firestore().collection('items').doc(id!).delete()
+})
+
 test('a partially cached account does not prompt for a new phrase', async ({ page }) => {
   // visiting a shared page caches its (plaintext) items; signing in afterwards on a device without
   // the stored secret used to initialize from that partial cache snapshot, see no ciphertext and

@@ -476,6 +476,42 @@
 
   const log_levels = ['debug', 'info', 'log', 'warn', 'error']
 
+  // READ MEMO (init_perf, 2026-09-07): a DIRECT typed read (no dependencies, no macro
+  // evaluation, no replacement text, no async exclusion) is a pure function of the item's own
+  // text, its id and the scalar options, so it is memoized per item under the item's text HASH: a
+  // stale scope is dropped whole. a deep read (include_deps) is NOT memoized as a whole — the
+  // deephash carries the dependencies' text hashes, not their identities, so a dependency
+  // replaced by an identical twin (duplicate label, then the original deleted) would keep serving
+  // the old `$id` — it is rebuilt from the memoized direct reads of each dependency each time,
+  // which keeps the expensive part (the comment, test and benchmark stripping of every
+  // dependency: about a fifth of the initial render's cpu on a 1600-item corpus, tmp/init_perf).
+  // deliberately NOT the item's general `cache` object, whose validate_cache() keeps entries
+  // across a hash change; a read must never outlive its text. `window._read_memo` counts hits
+  // and misses (the e2e memo row asserts on them)
+  const READ_MEMO_OPTIONS = [
+    'include_deps',
+    'exclude_async_deps',
+    'exclude_async',
+    'comment_deps',
+    'replace_ids',
+    'remove_empty_lines',
+    'remove_comment_lines',
+    'remove_tests_and_benchmarks',
+    'remove_hidden',
+    'remove_removed',
+  ]
+  function readMemoKey(type: string, options: object): string {
+    const flags = READ_MEMO_OPTIONS.map(key => (options[key] ? '1' : '0')).join('')
+    return type + '\u0000' + flags + '\u0000' + String(options['remove_blocks'] ?? '')
+  }
+  function readMemo(item, hash: number): Map<string, string> {
+    if (item.readMemo?.hash !== hash) item.readMemo = { hash, reads: new Map<string, string>() }
+    return item.readMemo.reads
+  }
+  // the counters, exposed to the client page only (the component script also runs for ssr)
+  const readMemoStats = { hits: 0, misses: 0 }
+  if (typeof window != 'undefined') window['_read_memo'] = readMemoStats
+
   class _Item {
     id: string
     read_only: boolean
@@ -922,6 +958,19 @@
         console.warn(`item.read: removing ZWSPs in ${item.name}`)
         item.text = item.text.replaceAll('\u200B', '')
       }
+      // a DIRECT typed read is memoized (see readMemo); a deep read is rebuilt from its parts
+      const memoKey =
+        type && !options['include_deps'] && !options['exclude_async'] && !options['eval_macros'] && !options['replace_items']
+          ? readMemoKey(type, options)
+          : null
+      if (memoKey) {
+        const memoized = readMemo(item, item.hash).get(memoKey)
+        if (memoized !== undefined) {
+          readMemoStats.hits++
+          return memoized
+        }
+        readMemoStats.misses++
+      }
       let content = []
       // include dependencies in order, _before_ item itself
       if (options['include_deps']) {
@@ -1051,8 +1100,9 @@
       if (options['remove_blocks'] && !type) text = text.replace(blockRegExp(options['remove_blocks']), '')
 
       content.push(text)
-      // console.debug(content)
-      return content.filter(s => s).join('\n')
+      const result = content.filter(s => s).join('\n')
+      if (memoKey) readMemo(item, item.hash).set(memoKey, result)
+      return result
     }
 
     // "deep read" function with include_deps=true as default
@@ -7266,6 +7316,7 @@
   import type { DocumentChange } from 'firebase/firestore'
   import { createHiddenIngress } from '../hidden_ingress'
   import { createRecordAllocator } from '../hidden_listener_records'
+  import { nextRenderChunk } from '../render_pace'
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
   import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
@@ -8035,7 +8086,15 @@
   let renderEnd = 0
   let keepOnPageDuringDelay = false
 
+  // TIME-BUDGETED initial rendering (init_perf, 2026-09-07): the hidden-column measuring pass
+  // renders as many items per turn as the previous turn's wall time suggests fit the budget
+  // (nextRenderChunk, table-tested) and yields between turns to input and painting. fixed
+  // 10-item chunks were 0.3-0.8 s tasks on a desktop and several seconds on a phone — the page
+  // showed early and then froze until the initial render finished
+  const RENDER_BUDGET_MS = 60
+  const RENDER_CHUNK_MAX = 10 // the fixed cap: a cheap turn can grow back to it after expensive ones
   function renderRange(start, end, chunk, cutoff, delay) {
+    const started = performance.now()
     renderStart = start
     renderEnd = Math.min(cutoff, end)
     return Promise.all(
@@ -8052,7 +8111,8 @@
         // init_log(`rendered items ${renderStart}-${renderEnd}`)
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
           init_log(`rendered ${renderEnd}/${items.length} items (limit ${cutoff})`)
-        tick().then(() => setTimeout(() => renderRange(renderEnd, renderEnd + chunk, chunk, cutoff, delay), delay))
+        const next = nextRenderChunk(renderEnd - start, performance.now() - started, RENDER_BUDGET_MS, RENDER_CHUNK_MAX)
+        tick().then(() => yieldToInput(() => renderRange(renderEnd, renderEnd + next, next, cutoff, delay), delay))
       } else {
         init_log(`rendered ${cutoff}/${items.length} items (limit ${cutoff})`)
         rendered = true
@@ -8063,6 +8123,12 @@
     })
   }
 
+  // yields between render turns: an idle callback where available (its timeout keeps progress
+  // under sustained activity), else a zero timeout — either lets queued input run first
+  function yieldToInput(fn: () => void, timeout: number) {
+    if (typeof window['requestIdleCallback'] == 'function') window['requestIdleCallback'](() => fn(), { timeout })
+    else setTimeout(fn, 0)
+  }
   async function renderItem(item) {
     if (!(item instanceof _Item)) throw new Error('invalid item, must be of type _Item')
     if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
