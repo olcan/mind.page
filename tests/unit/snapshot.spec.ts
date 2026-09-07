@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 import {
   needsFinalStateEvidence,
+  pushableAfterRemoteModify,
+  serverConfirmed,
   snapshotDecision,
   type SnapshotFacts,
   type AuthorityPolicy,
@@ -212,3 +214,26 @@ for (const [what, facts, expected] of [
   ],
 ] as const)
   test(`final-state evidence: ${what}`, () => expect(needsFinalStateEvidence(facts)).toBe(expected))
+
+// SERVER CONFIRMATION (2026-09-07 stale-cache reversion): only a current server revision confirms
+// the corpus for text comparisons with an external source; cache-served and pending-write
+// snapshots never do, whatever the account mode. the listener publishes it behind the lease's
+// ordered turn (AuthorityLease.done, ordering table-tested in hidden_ingress.spec.ts)
+for (const [what, facts, expected] of [
+  ['a server revision', { fromCache: false, hasPendingWrites: false }, true],
+  ['a cache-served revision', { fromCache: true, hasPendingWrites: false }, false],
+  ['a pending-write overlay', { fromCache: false, hasPendingWrites: true }, false],
+  ['a cache-served pending-write overlay', { fromCache: true, hasPendingWrites: true }, false],
+] as const)
+  test(`server confirmation: ${what}`, () => expect(serverConfirmed(facts)).toBe(expected))
+
+// the TRANSIENT mark across a remote modification: an attribute-only update keeps the tab's
+// overwrite protection, a remote edit clears it; an unmarked item never becomes marked here
+for (const [what, local, remoteText, expected] of [
+  ['marked, attribute-only update', { pushable: true, text: 'a' }, 'a', true],
+  ['marked, remote edit', { pushable: true, text: 'a' }, 'b', false],
+  ['unmarked, attribute-only update', { pushable: false, text: 'a' }, 'a', false],
+  ['unmarked, remote edit', { pushable: false, text: 'a' }, 'b', false],
+] as const)
+  test(`pushable after remote modify: ${what}`, () =>
+    expect(pushableAfterRemoteModify(local, remoteText)).toBe(expected))

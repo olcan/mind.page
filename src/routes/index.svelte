@@ -423,6 +423,9 @@
     // this object (fail closed) instead of probing individual globals; the legacy
     // `_vault_edit`/`_vault_routed` globals above remain as aliases for
     // already-loaded old consumer code only.
+    // FALSE until a current server revision of the account has been applied (see
+    // markServerConfirmed): item code comparing texts with an external source waits for it
+    window['_server_confirmed'] = false
     window['_grammar'] = {
       version: 2,
       edit: window['_vault_edit'],
@@ -603,8 +606,9 @@
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since pushability can affect it
       }
-      // also update & save in attr, but async to allow changes to be combined/batched
-      this._update_attr_async('pushable')
+      // TRANSIENT, never saved: the pusher establishes it at welcome (after the corpus is
+      // server-confirmed) and maintains it in-tab. Saving on mark rewrote the whole item, and a
+      // mark decided on cache-served (stale) text then overwrote a newer revision (2026-09-07)
     }
 
     get shared(): object {
@@ -5613,8 +5617,7 @@
                         return
                       }
                     }
-                    // maintain pushable, editable & shared flags before replacing attr
-                    attr.pushable = item.pushable
+                    // maintain editable & shared flags before replacing attr (pushable is transient)
                     attr.editable = item.editable
                     attr.shared = _.cloneDeep(item.shared)
                     __item(item.id).attr = attr
@@ -7252,7 +7255,7 @@
   import { createRecordAllocator } from '../hidden_listener_records'
   import { createHiddenCorpus, commitOrStop, type CorpusRun } from '../hidden_corpus'
   import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
-  import { snapshotDecision } from '../snapshot'
+  import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -7601,6 +7604,20 @@
   const hiddenAuthorityUsable = () => hiddenIngress.authorityUsable()
 
 
+  // the corpus is SERVER-CONFIRMED once a current server revision of the account has been applied
+  // (see reserveHiddenAuthority): item code that compares texts with an external source (the
+  // pusher's mirror verification) may trust them from here. idempotent; the flag never clears.
+  // NOT published after the ingress stopped (sync disabled, a terminal listener error): a stop
+  // fails the outstanding work and releases the ordered tail, so a confirmation waiting behind
+  // an unapplied delivery would otherwise publish over the old text — `ingressStopped` is set
+  // synchronously before any affected lease is released, so this checks the final state at the
+  // boundary; an already-published flag stays
+  function markServerConfirmed() {
+    if (ingressStopped || window['_server_confirmed']) return
+    window['_server_confirmed'] = true
+    init_log('server-confirmed corpus')
+  }
+
   // reserves this callback's AUTHORITY LEASE at receipt, in listener order, and returns the
   // settle/revoke pair the application already expects. the coordinator owns the ordering: a
   // sealed candidate advances the durable basis only after every EARLIER lease settles, so a
@@ -7608,7 +7625,13 @@
   // into a state that transition is about to change. `policy` comes from the one snapshot seam
   // (src/snapshot.ts): `revoke` invalidates synchronously at receipt — authority must not stay
   // usable while a cached queue drains — `candidate` may advance the basis, `preserve` neither
-  function reserveHiddenAuthority({ policy }: { policy: 'candidate' | 'revoke' | 'preserve' }) {
+  function reserveHiddenAuthority({
+    policy,
+    confirmsServer = false,
+  }: {
+    policy: 'candidate' | 'revoke' | 'preserve'
+    confirmsServer?: boolean
+  }) {
     const lease = hiddenIngress.reserveAuthority(policy == 'candidate')
     if (policy == 'revoke') {
       // EDGE-TRIGGERED level: a cached revision that strips USABLE authority is a live loss and
@@ -7647,6 +7670,11 @@
       })
       if (outcome == 'seal') lease.seal()
       else lease.fail()
+      // SERVER CONFIRMATION rides the same ordered turn: a sealed current server revision confirms
+      // the corpus only after every earlier lease settled (earlier deliveries applied, the first
+      // rebuild completed) and this one's own application landed — never at receipt, and never
+      // from a failed attempt
+      if (outcome == 'seal' && confirmsServer) void lease.done.then(markServerConfirmed)
     }
     return { settle, revoke, lease }
   }
@@ -7753,9 +7781,10 @@
   function initItemState(item, index, state = {}) {
     // state used in onEditorChange
     if (!item.attr) item.attr = null // default to null for older items missing attr
-    // NOTE: editable and pushable are transient UX state unless saved in item.attr
+    // NOTE: editable is transient UX state unless saved in item.attr; pushable is ALWAYS transient
+    // (never saved, see set pushable)
     item.editable = (item.attr?.editable ?? true) || fixed // fixed items are always editable (but not deletable)
-    item.pushable = (item.attr?.pushable ?? false) && !fixed // fixed items are not pushable
+    item.pushable = false // transient: the pusher marks after the corpus is server-confirmed
     item.shared = _.cloneDeep(item.attr?.shared) ?? null
     item.previewable = false // should be true iff previewText && previewText != text
     item.previewText = null
@@ -8665,7 +8694,7 @@
                     })
                     // update mutable ux properties from item.attr
                     item.editable = (item.attr?.editable ?? true) || fixed
-                    item.pushable = (item.attr?.pushable ?? false) && !fixed
+                    item.pushable = false // transient (see set pushable)
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     items = [item, ...items]
                     // update indices as needed by itemTextChanged
@@ -8740,6 +8769,9 @@
                     let index = indexFromId.get(tempIdFromSavedId.get(doc.id) ?? doc.id)
                     if (index === undefined) return // nothing to modify
                     let item = items[index]
+                    // decided BEFORE the text is replaced: an attribute-only remote update keeps the
+                    // tab's transient mark (its overwrite protection), a remote edit clears it
+                    const pushable = pushableAfterRemoteModify(item, savedItem.text)
                     item.time = item.savedTime = savedItem.time
                     item.text = item.savedText = savedItem.text
                     // LIVE attr, deliberately (round 36 reversed round 35 here): itemAttrChanged
@@ -8753,7 +8785,7 @@
                     item.savedAttr = _.cloneDeep(savedItem.attr)
                     // update mutable ux properties from item.attr
                     item.editable = (item.attr?.editable ?? true) || fixed
-                    item.pushable = (item.attr?.pushable ?? false) && !fixed
+                    item.pushable = pushable // transient, decided above (see set pushable)
                     item.shared = _.cloneDeep(item.attr?.shared) ?? null
                     // if attr is modified, invoke _on_attr_change on item or listeners
                     // note it is important to do this after updating dependent properties like item.shared
@@ -8834,7 +8866,7 @@
             if (ingressStopped) return void reserveHiddenAuthority({ policy: 'revoke' }).lease.fail()
             // the gating decisions are extracted and table-tested (see snapshotDecision in
             // src/snapshot.ts); this listener owns the effects and the firstSnapshot bookkeeping
-            const decision = snapshotDecision({
+            const facts = {
               syncDisabled: !!window['_disable_sync'],
               initializationStarted: !!initTime,
               firstSnapshot,
@@ -8848,8 +8880,12 @@
               // TRUE once the fixed-owner scan has completed: a cached first snapshot must then
               // wait for the server, because prefetched same-id copies are superseded by it
               prefetchSucceeded: !!prefetchedHiddenDocs,
-            })
+            }
+            const decision = snapshotDecision(facts)
             const action = decision.action
+            // a current server revision: once applied (in lease order, see reserveHiddenAuthority)
+            // it confirms the corpus for item code that compares texts with an external source
+            const confirmsServer = serverConfirmed(facts)
             // authority (a current, server, no-pending-writes revision of the full-account
             // query) is settled INSIDE the serialized application chain, never on receipt: a
             // receipt-time grant let a save skip confirmation while the revision's own changes
@@ -8869,7 +8905,7 @@
               // server catching up after a cache initialization): it takes its receipt-ordered
               // slot and settles immediately — it carries no transitions of its own, but cannot
               // overtake an earlier revision that does
-              reserveHiddenAuthority({ policy: decision.policy }).settle({ failed: false })
+              reserveHiddenAuthority({ policy: decision.policy, confirmsServer }).settle({ failed: false })
 
               return
             }
@@ -8936,7 +8972,7 @@
                   // authoritative first snapshot can never grant after a later revision revoked.
                   // it SEALS only after the attempt succeeds — settling as success up front let a
                   // lease seal over a rebuild that had not finished, or had failed
-                  const lease = reserveHiddenAuthority({ policy: decision.policy })
+                  const lease = reserveHiddenAuthority({ policy: decision.policy, confirmsServer })
                   initializeAttempt = attemptInitialize()
                   void initializeAttempt.then(ok => lease.settle({ failed: !ok }))
                 }
@@ -8999,6 +9035,7 @@
             // settles it once every hidden transition of this revision has landed
             const { settle: settleApplied, revoke: revokeThisRevision, lease } = reserveHiddenAuthority({
               policy: decision.policy,
+              confirmsServer,
             })
 
             // ONE COMPLETION RECORD PER CHANGED DOCUMENT, allocated synchronously at receipt, in

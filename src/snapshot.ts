@@ -159,3 +159,22 @@ export function needsFinalStateEvidence(facts: {
 }): boolean {
   return !facts.readonly && !facts.anonymous && ((facts.fixed && facts.removed) || !!facts.sideUncertain)
 }
+
+// a CURRENT SERVER revision: served by the server, with no pending local writes overlaid. once
+// such a revision has been applied, the item texts are what the account holds — item code that
+// compares texts with an external source (the pusher's mirror verification, which MARKS items
+// whose text disagrees with the mirror) must not run before this: a cache-served startup can
+// present a stale text and the comparison would then mark — and once did overwrite — a newer
+// revision (2026-09-07). the listener publishes it in lease order (see reserveHiddenAuthority)
+export function serverConfirmed(facts: Pick<SnapshotFacts, 'fromCache' | 'hasPendingWrites'>): boolean {
+  return !facts.fromCache && !facts.hasPendingWrites
+}
+
+// the transient `pushable` mark across a REMOTE modification of an existing item: kept when the
+// remote text is the one the mark was established on (an attribute-only update, e.g. an
+// editability change, must not drop the tab's overwrite protection), cleared by a remote edit
+// (the mark described the previous text; the pusher decides afresh on the change). the mark is
+// never restored from the persisted attribute
+export function pushableAfterRemoteModify(local: { pushable: boolean; text: string }, remoteText: string): boolean {
+  return local.pushable && local.text == remoteText
+}
