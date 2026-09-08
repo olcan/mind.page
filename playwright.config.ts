@@ -14,7 +14,7 @@ const lane = (name: string, extra: object) => ({
 // served by `node server.mjs`, one server per LANE (src/e2e_lanes.js): every browser project is a
 // lane with its own port and its own project id on the shared emulators, so the lanes overlap
 // freely and only the rows inside a lane are serial (a one-worker cap per project)
-const WRITE_SPECS = /(admin|admin_live|editor|personal|bridge|store_propagation|vault_renderer)\.spec\.ts/
+const WRITE_SPECS = /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -42,6 +42,10 @@ export default defineConfig({
     lane('renderer', { testMatch: /vault_renderer\.spec\.ts/ }),
     lane('propagation', { testMatch: /store_propagation\.spec\.ts/ }),
     lane('personal', { testMatch: /personal\.spec\.ts/ }),
+    // the two longest lanes split in two (see tests/e2e/README.md): the editor's self-contained long rows
+    // and the admin lane's renderer contract row run beside the rest of their suites
+    lane('editor2', { testMatch: /editor2\.spec\.ts/ }),
+    lane('contract', { testMatch: /renderer_contract\.spec\.ts/ }),
   ],
   // one server per lane, started by playwright (see the lane note above). FIREBASE_CONFIG (set by
   // firebase emulators:exec) must be removed, since server.ts takes it to mean running on cloud

@@ -57,10 +57,10 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 
 ## Tests
 
-Tests run as eight projects (see `playwright.config.ts`): `unit` (no browser) and seven browser
+Tests run as ten projects (see `playwright.config.ts`): `unit` (no browser) and nine browser
 LANES — `chromium` (the shared-fixture baseline lane: not read-only, its server tests mutate
 anonymous and prerender state its render tests inspect, which is why it stays serial inside),
-`admin`, `editor`, `bridge`, `renderer`, `propagation` and `personal` — each capped to one worker,
+`admin`, `editor`, `bridge`, `renderer`, `propagation`, `personal`, `editor2` and `contract` — each capped to one worker,
 all running at once (one worker per project). Lanes no longer depend on each other: each has its
 own project id and its own copy of the seed, so there is no chain and nothing for `--no-deps` to
 skip; naming one spec runs only its rows (every lane's server still starts and every lane's
