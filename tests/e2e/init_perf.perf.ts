@@ -195,6 +195,16 @@ test('init responsiveness on the owner-shaped corpus, cold and warm, per CPU thr
       await page.waitForTimeout(QUIET_MS)
       const perf: Perf = await page.evaluate(() => (window as any).__perf)
       const itemCount = await page.evaluate(() => (window as any).__items?.length ?? 0)
+      // PROBE: read counters and dependency-list diversity (cache-eligible deep reads = prefix hits + misses;
+      // bypassed reads are not counted; the list count and median are over ALL items, empty lists included)
+      const probe = await page.evaluate(() => {
+        const w = window as any
+        const items = w.__items ?? []
+        const lists = new Set(items.map((i: any) => (i.deps ?? []).join(',')))
+        const withDeps = items.filter((i: any) => i.deps?.length).length
+        const depsLen = items.map((i: any) => i.deps?.length ?? 0).sort((a: number, b: number) => a - b)
+        return { read_memo: { ...w._read_memo }, deps_prefix_memo: { ...w._deps_prefix_memo }, distinct_dep_lists: lists.size, items_with_deps: withDeps, deps_len_median: depsLen[Math.floor(depsLen.length / 2)], deps_len_max: depsLen[depsLen.length - 1] }
+      })
       if (profile) {
         const { profile: data } = (await cdp.send('Profiler.stop')) as { profile: unknown }
         const file = `/Users/olcan/vault/tmp/init_perf/profile_${rate}x_${kind}.cpuprofile`
@@ -204,7 +214,7 @@ test('init responsiveness on the owner-shaped corpus, cold and warm, per CPU thr
       const run = { tag: TAG, rate, kind, items: itemCount, ...summarize(perf), marks: perf.marks.slice(0, 60) }
       runs.push(run)
       console.log(JSON.stringify({ ...run, marks: undefined }))
-      appendFileSync(RESULTS, JSON.stringify({ at: new Date().toISOString(), ...run }) + '\n')
+      appendFileSync(RESULTS, JSON.stringify({ at: new Date().toISOString(), ...run, probe }) + '\n')
     }
     await context.close()
   }

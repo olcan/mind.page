@@ -268,12 +268,14 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
 })
 
-test('direct typed reads are memoized per text hash; deep reads follow a dependency edit and a dependency identity change (init_perf)', async ({ page }) => {
+test('direct typed reads and dependency prefixes are memoized; deep reads follow a dependency edit and a dependency identity change (init_perf)', async ({ page }) => {
   // the read memo (readMemo in index.svelte): a DIRECT typed read is served from the memo on
   // repeat (window._read_memo counts hits and misses); a deep read is rebuilt from the memoized
   // direct reads, so it follows a dependency's text edit (a new hash) and a dependency IDENTITY
   // change with the same text (a duplicate-label twin outliving the original); the dependency is
-  // the hidden tag #_e2e_memo_dep (dependencies come from hidden tags, see itemDeps)
+  // the hidden tag #_e2e_memo_dep (dependencies come from hidden tags, see itemDeps). the
+  // dependency PART of a deep read is memoized too (depsPrefixMemo, window._deps_prefix_memo),
+  // keyed by the dependency ids, hashes and async flags, so it follows both changes as well
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
@@ -285,23 +287,87 @@ test('direct typed reads are memoized per text hash; deep reads follow a depende
       timeout: 30_000,
     })
     .toBe(true)
-  const stats = () => page.evaluate(() => ({ ...(window as any)._read_memo }))
+  const prefixStats = () => page.evaluate(() => ({ ...(window as any)._deps_prefix_memo }))
   const deep = () => page.evaluate(() => window._item('#e2e_memo_user')!.read_deep('js', { replace_ids: true }))
   const first = await deep()
   const depId = await page.evaluate(() => window._item('#e2e_memo_dep')!.id)
   expect(first).toContain('const E2E_MEMO = 1')
   expect(first, 'the dependency read substitutes its own id').toContain(`const E2E_MEMO_ID = "${depId}"`)
-  // a repeated deep read misses nothing: its direct reads are memoized (a work count, not a
-  // string comparison)
-  const before = await stats()
+  // a repeated deep read does no read work: its dependency part comes from the prefix memo (one
+  // hit, no miss) and its direct reads are not repeated (their counters do not move); a repeated
+  // DIRECT typed read of the dependency is served from the direct memo (work counts, not string
+  // comparisons; the counters are read and the reads made in one synchronous evaluation)
+  const repeat = await page.evaluate(() => {
+    const w = window as any
+    const snap = () => ({ read: { ...w._read_memo }, prefix: { ...w._deps_prefix_memo } })
+    const before = snap()
+    const text = w._item('#e2e_memo_user').read_deep('js', { replace_ids: true })
+    const after = snap()
+    const direct = w._item('#e2e_memo_dep').read('js', { replace_ids: true })
+    return { before, text, after, direct, afterDirect: snap() }
+  })
+  expect(repeat.text).toBe(first)
+  expect(repeat.after.prefix.hits, 'the dependency prefix was served from the memo').toBe(repeat.before.prefix.hits + 1)
+  expect(repeat.after.prefix.misses, 'the dependency prefix was not reassembled').toBe(repeat.before.prefix.misses)
+  expect(repeat.after.read, 'no direct read was made for the repeated deep read').toEqual(repeat.before.read)
+  expect(repeat.direct).toContain('const E2E_MEMO = 1')
+  expect(repeat.afterDirect.read.hits, 'the direct read hits').toBe(repeat.after.read.hits + 1)
+  expect(repeat.afterDirect.read.misses, 'no miss on the repeated direct read').toBe(repeat.after.read.misses)
+  // whole-item deep reads bypass the prefix memo: their block selector is not in the key (a regex
+  // supplies its source, a string is used as given: blockRegExp), so the two reads below must
+  // differ — the first removes the dependency's js block, the second matches no block
+  const whole = await page.evaluate(() => {
+    const w = window as any
+    const user = w._item('#e2e_memo_user')
+    const before = { ...w._deps_prefix_memo }
+    const removed = user.read('', { include_deps: true, remove_blocks: /js/ })
+    const kept = user.read('', { include_deps: true, remove_blocks: '/js/' })
+    return { before, after: { ...w._deps_prefix_memo }, removed, kept }
+  })
+  expect(whole.removed, 'the regex selector removed the dependency block').not.toContain('const E2E_MEMO')
+  expect(whole.kept, 'the string selector matched no block').toContain('const E2E_MEMO = 1')
+  expect(whole.after, 'whole-item reads touch no prefix memo counter').toEqual(whole.before)
+  // the budget: a prefix over the live budget is assembled and returned but not stored (oversize),
+  // an insertion that would exceed the budget clears the map first, and entries and chars track
+  // what is stored (new read options make new keys, i.e. misses, without changing the text much)
+  const budget = await page.evaluate(() => {
+    const w = window as any
+    const s = w._deps_prefix_memo
+    const user = w._item('#e2e_memo_user')
+    const saved = s.budget
+    const text = user.read_deep('js', { replace_ids: true })
+    s.budget = 1
+    const before = { ...s }
+    const oversize = user.read_deep('js', { replace_ids: true, remove_comment_lines: true })
+    const afterOversize = { ...s }
+    s.budget = saved
+    const stored = user.read_deep('js', { replace_ids: true, remove_comment_lines: true })
+    const afterStored = { ...s }
+    // a budget just below the current size plus one more prefix: the next new key clears the map
+    s.budget = afterStored.chars + 1
+    const cleared = user.read_deep('js', { replace_ids: true, remove_empty_lines: true })
+    const afterCleared = { ...s }
+    s.budget = saved
+    return { text, before, oversize, afterOversize, stored, afterStored, cleared, afterCleared }
+  })
+  expect(budget.oversize).toBe(budget.stored) // the same read, bypassed then stored
+  expect(budget.afterOversize.oversize, 'an oversize prefix is counted, not stored').toBe(budget.before.oversize + 1)
+  expect(budget.afterOversize.misses).toBe(budget.before.misses + 1)
+  expect([budget.afterOversize.entries, budget.afterOversize.chars]).toEqual([budget.before.entries, budget.before.chars])
+  expect(budget.afterStored.entries, 'stored once the budget allows').toBe(budget.before.entries + 1)
+  expect(budget.afterStored.chars).toBeGreaterThan(budget.before.chars)
+  expect(budget.afterStored.chars - budget.before.chars, 'chars grows by the stored prefix, less than the read').toBeLessThan(budget.stored.length)
+  expect(budget.afterCleared.entries, 'the over-budget insertion cleared the map first').toBe(1)
+  expect(budget.afterCleared.chars).toBeLessThanOrEqual(budget.cleared.length)
+  expect(budget.cleared).toContain('const E2E_MEMO = 1')
+  // a dependency text edit: a new hash, a new read, a reassembled prefix. the budget case evicted
+  // this key, so it is warmed again first: the edit must invalidate a CACHED prefix
   expect(await deep()).toBe(first)
-  const after = await stats()
-  expect(after.misses, 'no new miss on the repeated read').toBe(before.misses)
-  expect(after.hits, 'the direct reads hit').toBeGreaterThan(before.hits)
-  // a dependency text edit: a new hash, a new read
+  const prefixBeforeEdit = await prefixStats()
   await page.evaluate(t => window._item('#e2e_memo_dep')!.write(t, ''), dep(2))
   await expect.poll(deep, { timeout: 30_000 }).toContain('const E2E_MEMO = 2')
   expect(await deep()).not.toContain('E2E_MEMO = 1')
+  expect((await prefixStats()).misses, 'the edited dependency is a new prefix key').toBeGreaterThan(prefixBeforeEdit.misses)
   // a dependency IDENTITY change with the same text: a twin with the same label, then the
   // original deleted — the twin's id must appear (a deep read memoized under the deephash would
   // keep the original's id, since the deephash carries text hashes only)

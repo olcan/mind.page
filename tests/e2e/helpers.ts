@@ -23,6 +23,7 @@ declare global {
       text: string
       saved_id?: string
       read_deep: (type: string, options?: object) => string
+      read: (type: string, options?: object) => string
       dependencies: string[] // runtime dependency ids (itemDeps)
       global_store: Record<string, unknown>
       write: (text: string, type?: string) => boolean | void

@@ -479,12 +479,13 @@
   // READ MEMO (init_perf, 2026-09-07): a DIRECT typed read (no dependencies, no macro
   // evaluation, no replacement text, no async exclusion) is a pure function of the item's own
   // text, its id and the scalar options, so it is memoized per item under the item's text HASH: a
-  // stale scope is dropped whole. a deep read (include_deps) is NOT memoized as a whole — the
-  // deephash carries the dependencies' text hashes, not their identities, so a dependency
-  // replaced by an identical twin (duplicate label, then the original deleted) would keep serving
-  // the old `$id` — it is rebuilt from the memoized direct reads of each dependency each time,
-  // which keeps the expensive part (the comment, test and benchmark stripping of every
-  // dependency: about a fifth of the initial render's cpu on a 1600-item corpus, tmp/init_perf).
+  // stale scope is dropped whole. a deep read (include_deps) is NOT memoized as a whole under
+  // the deephash — it carries the dependencies' text hashes, not their identities, so a
+  // dependency replaced by an identical twin (duplicate label, then the original deleted) would
+  // keep serving the old `$id` — its dependency part is memoized by depsPrefixMemo below under a
+  // key that names each dependency's id and hash, and the item's own part is rebuilt from these
+  // direct reads, which keep the expensive part (the comment, test and benchmark stripping of
+  // every dependency: about a fifth of the initial render's cpu on a 1600-item corpus, tmp/init_perf).
   // deliberately NOT the item's general `cache` object, whose validate_cache() keeps entries
   // across a hash change; a read must never outlive its text. `window._read_memo` counts hits
   // and misses (the e2e memo row asserts on them)
@@ -511,6 +512,48 @@
   // the counters, exposed to the client page only (the component script also runs for ssr)
   const readMemoStats = { hits: 0, misses: 0 }
   if (typeof window != 'undefined') window['_read_memo'] = readMemoStats
+
+  // the DEPENDENCY part of a TYPED deep read (every dependency's typed read, in order, with its
+  // comment line) memoized per dependency list and read options: the key names each dependency
+  // with its text hash and async flag, so any dependency edit is a different key, and items that
+  // share a dependency list share one string. every evaluation of an item reads its prefix
+  // through this (eval → read_deep), so a render of many items over the same dependencies
+  // assembles it once; the direct reads it joins are the per-item memo above. whole-item reads
+  // (no type) are never memoized: the shared key (readMemoKey) does not distinguish the two
+  // meanings of their block selector (remove_blocks as a regex or as a string, see blockRegExp);
+  // nor are transient reads (replace_items) and reads that evaluate macros. BUDGET: at most `budget` code units of prefix text (about
+  // 8 million: a 1600-item corpus needs 6.5-7.2 million after its init render) and at most
+  // DEPS_PREFIX_MEMO_MAX entries; an insertion that would exceed either clears the map first,
+  // and a single prefix over the budget is assembled and returned but never stored (oversize).
+  // `window._deps_prefix_memo` exposes the counters and the live budget (the e2e memo row
+  // lowers it to exercise the clear and the bypass); the map lives in this component's instance
+  const DEPS_PREFIX_MEMO_MAX = 1000
+  const DEPS_PREFIX_MEMO_CHARS = 8_000_000
+  const depsPrefixMemo = new Map<string, string>()
+  function depsPrefixKey(item, type: string, options: object): string | null {
+    if (!type || options['replace_items'] || options['eval_macros']) return null
+    const deps = item.deps.map(id => {
+      const dep = _item(id)
+      return id + ':' + dep.hash + (dep.deepasync ? 'a' : '')
+    })
+    return readMemoKey(type, options) + '\u0000' + deps.join(',')
+  }
+  // hits, misses (assembled), oversize (assembled, not stored), entries and chars (the memo's
+  // current size, chars in code units), budget (live)
+  const depsPrefixStats = { hits: 0, misses: 0, oversize: 0, entries: 0, chars: 0, budget: DEPS_PREFIX_MEMO_CHARS }
+  function depsPrefixStore(key: string, prefix: string) {
+    if (prefix.length > depsPrefixStats.budget) depsPrefixStats.oversize++
+    else {
+      if (depsPrefixMemo.size >= DEPS_PREFIX_MEMO_MAX || depsPrefixStats.chars + prefix.length > depsPrefixStats.budget) {
+        depsPrefixMemo.clear()
+        depsPrefixStats.chars = 0
+      }
+      depsPrefixMemo.set(key, prefix)
+      depsPrefixStats.chars += prefix.length
+    }
+    depsPrefixStats.entries = depsPrefixMemo.size
+  }
+  if (typeof window != 'undefined') window['_deps_prefix_memo'] = depsPrefixStats
 
   class _Item {
     id: string
@@ -958,7 +1001,8 @@
         console.warn(`item.read: removing ZWSPs in ${item.name}`)
         item.text = item.text.replaceAll('\u200B', '')
       }
-      // a DIRECT typed read is memoized (see readMemo); a deep read is rebuilt from its parts
+      // a DIRECT typed read is memoized (see readMemo); a deep read takes its dependency part from
+      // depsPrefixMemo (typed reads only) and rebuilds the rest
       const memoKey =
         type && !options['include_deps'] && !options['exclude_async'] && !options['eval_macros'] && !options['replace_items']
           ? readMemoKey(type, options)
@@ -975,18 +1019,30 @@
       // include dependencies in order, _before_ item itself
       if (options['include_deps']) {
         options = _.merge({}, options, { include_deps: false }) // deps are recursive already
-        item.deps.forEach(id => {
-          const dep = _item(id)
-          // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
-          if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
-          // indicate dependency name in comments for comment_deps (using html) or for certain types of reads
-          // note the conditions here should match those below (just outside the for loop)
-          if (options['comment_deps'])
-            content.push(`<!-- ${dep.name} -->`) // use html comment
-          else if (type.match(/^(?:js|webppl)(?:_|$)/)) content.push(`/* ${type} @ ${dep.name} */`)
-          else if (type.match(/^(?:html)(?:_|$)/)) content.push(`<!-- ${type} @ ${dep.name} -->`)
-          content.push(dep.read(type, options))
-        })
+        const prefixKey = depsPrefixKey(item, type, options)
+        let prefix = prefixKey ? depsPrefixMemo.get(prefixKey) : undefined
+        if (prefix !== undefined) depsPrefixStats.hits++
+        else {
+          const parts = []
+          item.deps.forEach(id => {
+            const dep = _item(id)
+            // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
+            if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
+            // indicate dependency name in comments for comment_deps (using html) or for certain types of reads
+            // note the conditions here should match those below (just outside the for loop)
+            if (options['comment_deps'])
+              parts.push(`<!-- ${dep.name} -->`) // use html comment
+            else if (type.match(/^(?:js|webppl)(?:_|$)/)) parts.push(`/* ${type} @ ${dep.name} */`)
+            else if (type.match(/^(?:html)(?:_|$)/)) parts.push(`<!-- ${type} @ ${dep.name} -->`)
+            parts.push(dep.read(type, options))
+          })
+          prefix = parts.filter(s => s).join('\n')
+          if (prefixKey) {
+            depsPrefixStats.misses++
+            depsPrefixStore(prefixKey, prefix)
+          }
+        }
+        content.push(prefix)
         // if dependencies are commented, also comment the dependent item name (where include_deps is true)
         if (options['comment_deps'])
           content.push(`<!-- ${item.name} -->`) // use html comment
