@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { customToken, firestore, secretFor, waitForApp, type TestUser } from './helpers.js'
 import { requireLocalEmulators } from './init_perf_guard.js'
 
@@ -13,6 +15,65 @@ requireLocalEmulators(process.env)
 // (server) and warm (persistent cache) start: when the loading overlay hides, when the deferred
 // rendering finishes, the first moment the main thread is free, and the long tasks in between.
 // run: tmp/init_perf/run.sh (emulators + server); OWNER_CORPUS points at the exported json
+//
+// HOW THIS HARNESS DIFFERS FROM PRODUCTION (keep this list current; each item is a deliberate choice):
+//  1. server + host: the production build served by the same node server (server.mjs: the express
+//     middleware, the LOCAL PROXY at /proxy/<backend>/… mounted unconditionally, kit's handler) on
+//     http://localhost:3100 (NO_HTTPS=1, NODE_ENV=production, CONTENT_CACHE_MS=100); no deployed
+//     hosting/ssr transport. the app is in LOCALHOST mode: after init it fetches a preview of every
+//     installed item via /file/<repo>/<path> from the served checkout's SIBLING directory (parsing and
+//     attr.embeds rebuilding cost real work even when nothing is written) and then requests /watch/,
+//     which this server answers 404 (chokidar loads only in dev) so the client stops with one warning.
+//     production never runs the watcher. the seed keeps the previews equal to the items (see 4).
+//  2. backend: firebase auth + firestore EMULATORS on loopback (requireLocalEmulators), no production
+//     latency; the whole corpus round-trips on this machine. a fresh emulator state per invocation is
+//     the runner's doing (emulators:exec), not enforced here; the seed runs ONCE before the rate loop,
+//     so item and store writes made during a start persist into the warm starts and the later rates
+//     (each rate gets a fresh browser context, not a fresh corpus).
+//  3. account: a synthetic user seeded from the exported owner corpus at its original document ids
+//     (v1 rows re-encrypted under a seeded envelope, v0 rows under the test secret, plaintext rows as
+//     they are); sign-in by custom token with the v0 secret and the bound v1 envelope in localStorage
+//     — credentials only: no device preferences or item local stores, no writer flag (v1 writing and
+//     lazy migration are off), no google sign-in, no phrase prompt.
+//  4. installed items: their text is refreshed from the served checkout, byte-for-byte as the app's
+//     preview would render it (source file + embed blocks), so the watcher finds nothing to write;
+//     attr (source/repo/sha/embeds/token) stays as exported, so attr.sha is the export's, not the
+//     checkout's. a production item holds its installed github revision plus any local edits.
+//  5. network: DIRECT browser requests are OFFLINE by default (init_perf.config.ts: a chromium
+//     host-resolver rule, so the http cache is untouched) except loopback (localhost, 127.0.0.1,
+//     ::1: the server and the emulators) and the hosts app.html loads libraries and fonts from
+//     (cdn.jsdelivr.net, cdnjs.cloudflare.com, unpkg.com, fonts.googleapis.com, fonts.gstatic.com;
+//     item content on those hosts loads too). NOT covered: the server's local proxy (/proxy/…
+//     forwards through node and resolves on its own; nothing used it in the measured runs). effects:
+//     #updater's github checks stop at their first failed request (one warning per load) and its
+//     github_webhooks listener still registers against the emulator; #pusher fails at its branch
+//     lookup, so its welcome-time mirror fetch, corpus hashing and pushable reconciliation do not run;
+//     #gapi's google api scripts and calendar refreshes fail fast; direct requests to other hosts fail
+//     resolution, including embedded images on those hosts. PERF_ONLINE=1 lifts the browser rule
+//     only (real direct requests with the credentials the corpus carries: per-item github token, gapi
+//     client secret and tokens; updates may be applied and modals shown; firestore stays the
+//     emulator) — use it to measure that part of init deliberately, never by default.
+//  6. cpu: the BROWSER is throttled with CDP Emulation.setCPUThrottlingRate (PERF_RATES, default
+//     1,4,6); the node server and the emulators are not, and no network throttling is applied (a
+//     Slow-4G run needs Network.emulateNetworkConditions on the same cdp session). this is not a
+//     slower device end to end.
+//  7. cold / warm: the context is fresh (empty http cache and storage) for the ANONYMOUS first visit
+//     that installs the credentials and signs in; the measured COLD start is the auth-triggered
+//     reload that follows, so the account's corpus comes from the server (no firestore persistence
+//     yet) while the page's assets were already requested once. warm1/warm2 are reloads of the same
+//     page with the persistence cache primed (and with whatever the earlier starts wrote, see 2).
+//     an empty-asset-cache start is a separate experiment; production cold starts also pay real
+//     network and hosting transport that no number here includes.
+//  8. instrumentation: an init script hooks console.debug for the app's init_log marks, observes
+//     long tasks and paint (first-contentful-paint as the browser reports it; nothing here says
+//     what was painted), polls the overlay and __rendered with rAF, and runs a 50 ms timer-drift
+//     probe — an unquantified overhead present in every measured run and absent in production.
+//     phase blocking assigns each long task to the phase where it STARTS, and the after-overlay
+//     fields include the QUIET_MS settling window after __rendered. PERF_PROFILE=1 samples the cpu
+//     every 500 µs for all three starts of the first rate: keep profile runs out of timing baselines.
+//  9. not exercised: first sign-in and phrase flows, multiple tabs, the shared and pwa scopes, github
+//     webhook DELIVERY (the listener is registered, see 5). a minimal service worker
+//     (src/service-worker.ts) is registered by kit in both production and here.
 const PERF: TestUser = { uid: 'perf_e2e', displayName: 'Perf Test', email: 'perf@e2e.test' }
 const PHRASE = 'perf phrase'
 const SALT = 'BwcHBwcHBwcHBwcHBwcHBw=='
@@ -124,19 +185,44 @@ test('init responsiveness on the owner-shaped corpus, cold and warm, per CPU thr
   let batch = db.batch()
   let n = 0
   const counts = { v1: 0, v0: 0, plain: 0 }
-  // PERF_PATCH_VAULT_JS=<file>: the seeded #template/vault item carries the checkout's renderer
-  // (its ```js_removed:vault.js block body replaced), so a renderer change is measured too
-  const patchVault = process.env.PERF_PATCH_VAULT_JS ? readFileSync(process.env.PERF_PATCH_VAULT_JS, 'utf8').replace(/\n$/, '') : null
-  let patched = 0
+  // INSTALLED ITEMS ARE REFRESHED FROM THE SERVED CHECKOUT, exactly as the app's localhost preview
+  // would render them (fetchPreview: the source file, each ```lang:path embed block body replaced by
+  // that file's text verbatim, resolve_embed_path semantics), so the app finds every preview equal to
+  // its item and writes nothing. items stay installed (source/repo/sha/embeds/token untouched): on the
+  // owner's account they are, and the app's watcher, #updater and #pusher paths run as they do there.
+  // the app serves /file/<repo>/<path> from the served checkout's SIBLING directory (src/server/app.mjs),
+  // which is what this reads too; a checkout renderer change is therefore measured (this replaces the
+  // PERF_PATCH_VAULT_JS block patch, whose stripped trailing newline was itself a drift the app's
+  // auto-preview then wrote back into #template/vault inside the cold start, 2026-09-08).
+  // fail closed: an installed item whose repo is not a sibling checkout aborts the seed
+  // the served checkout's sibling directory, from THIS file's location (tests/e2e/ under the checkout),
+  // not from the cwd of whoever invoked playwright
+  const repoDir = (repo: string) => resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', repo)
+  const embedPath = (sfx: string, itemPath: string) =>
+    sfx.startsWith('/') || !itemPath.includes('/', 1) ? sfx : itemPath.substr(0, itemPath.lastIndexOf('/')) + '/' + sfx
+  const refreshed = { items: 0, changed: 0 }
+  const refresh = (inner: { text: string; attr?: Record<string, any> | null }) => {
+    const attr = inner.attr
+    if (!attr?.source) return
+    const root = repoDir(attr.repo)
+    if (!existsSync(root)) throw new Error(`installed item from ${attr.repo} but ${root} does not exist (expected the served checkout's sibling)`)
+    let text = readFileSync(join(root, attr.path.replace(/^\//, '')), 'utf8')
+    text = text.replace(/((?:^|\n) *)```(\S+):(\S+?)\n(.*?)\n```/gs, (m: string, mpfx: string, pfx: string, sfx: string) => {
+      if (!sfx.includes('.')) return m // not a path
+      const embed = readFileSync(join(root, embedPath(sfx, attr.path).replace(/^\//, '')), 'utf8')
+      return mpfx + '```' + pfx + ':' + sfx + '\n' + embed + '\n```'
+    })
+    refreshed.items++
+    if (text != inner.text) refreshed.changed++
+    inner.text = text
+  }
   for (const row of items) {
     let { id, plain, version, error: _error, ...fields } = row
-    if (patchVault && plain?.includes('js_removed:vault.js')) {
+    if (plain) {
       const inner = JSON.parse(plain)
-      const before = inner.text
-      inner.text = inner.text.replace(/(```js_removed:vault\.js\n)[\s\S]*?(\n```)/, (_m: string, a: string, b: string) => a + patchVault + b)
-      if (inner.text != before) patched++
+      refresh(inner)
       plain = JSON.stringify(inner)
-    }
+    } else refresh(fields as { text: string; attr?: Record<string, any> | null })
     const doc: Record<string, unknown> = { ...fields, user: PERF.uid }
     if (version == 'v1') (doc.cipher = await encryptV1Text(plain, v1key)), counts.v1++
     else if (version == 'v0') (doc.cipher = await encryptWithSecret(plain, secret)), counts.v0++
@@ -148,13 +234,16 @@ test('init responsiveness on the owner-shaped corpus, cold and warm, per CPU thr
     }
   }
   await batch.commit()
-  if (patchVault && patched == 0) throw new Error('PERF_PATCH_VAULT_JS matched no item: the corpus has no ```js_removed:vault.js block')
-  console.log(`seeded ${n} items for ${PERF.uid}: ${JSON.stringify(counts)}${patchVault ? `, vault renderer patched in ${patched} item(s)` : ''}`)
+  console.log(`seeded ${n} items for ${PERF.uid}: ${JSON.stringify(counts)}, ${refreshed.items} installed items refreshed from the checkout (${refreshed.changed} changed)`)
 
   for (const rate of RATES) {
     const context = await browser.newContext() // fresh: no persistent cache, no storage
     const page = await context.newPage()
     await instrument(page)
+    // NO page.route here: enabling playwright routing disables the browser http cache, and a warm start
+    // then re-downloads the bundle (visible 0.65 → 1.4-1.8 s, measured 2026-09-08). the localhost repo
+    // watcher finds nothing to write (see the seed refresh above) and the network policy is the
+    // browser's resolver rule (init_perf.config.ts, header item 5)
     const cdp = await context.newCDPSession(page)
     await cdp.send('Emulation.setCPUThrottlingRate', { rate })
     const profile = process.env.PERF_PROFILE == '1' && rate == RATES[0]
