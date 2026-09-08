@@ -268,22 +268,35 @@ test('shared items are stored in the clear and visible to anonymous visitors by 
   expect((await stored(page, '#e2e_shared')).cipher).toBeTruthy()
 })
 
-test('direct typed reads and dependency prefixes are memoized; deep reads follow a dependency edit and a dependency identity change (init_perf)', async ({ page }) => {
+test('direct typed reads and dependency prefixes are memoized, evaluation scripts cache-friendly; deep reads follow a dependency edit and a dependency identity change (init_perf)', async ({ page }) => {
   // the read memo (readMemo in index.svelte): a DIRECT typed read is served from the memo on
   // repeat (window._read_memo counts hits and misses); a deep read is rebuilt from the memoized
   // direct reads, so it follows a dependency's text edit (a new hash) and a dependency IDENTITY
   // change with the same text (a duplicate-label twin outliving the original); the dependency is
   // the hidden tag #_e2e_memo_dep (dependencies come from hidden tags, see itemDeps). the
   // dependency PART of a deep read is memoized too (depsPrefixMemo, window._deps_prefix_memo),
-  // keyed by the dependency ids, hashes and async flags, so it follows both changes as well
+  // keyed by the dependency ids, hashes and async flags, so it follows both changes as well. an
+  // EVALUATION's script keeps its strict directive inside the wrapper (its top level sloppy: for
+  // this script shape and indirect eval, V8's compilation cache served a repeated identical script
+  // only then) and runs its replacement passes over the item's own part and the code only when the
+  // dependency part carries no macro or $ token
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
-  const dep = (n: number) => `#e2e_memo_dep\n\`\`\`js\nconst E2E_MEMO = ${n}\nconst E2E_MEMO_ID = "$id"\n\`\`\``
+  const dep = (n: number) => `#e2e_memo_dep\n\`\`\`js\nconst E2E_MEMO = ${n}\nconst E2E_MEMO_ID = "$id"\nfunction e2e_memo_strict() { return this === undefined }\n\`\`\``
   await page.evaluate(t => void window._create(t), dep(1))
-  await page.evaluate(() => void window._create('#e2e_memo_user #_e2e_memo_dep\n```js\nE2E_MEMO\n```'))
+  await page.evaluate(() => void window._create('#e2e_memo_user #_e2e_memo_dep\n```js\nE2E_MEMO\nconst E2E_OWN_NAME = "$name"\n```'))
+  // a dependency carrying a $ token (its dependents keep the whole-script replacement passes)
+  await page.evaluate(() => void window._create('#e2e_memo_tokendep\n```js\nconst E2E_DEP_NAME = "$name"\n```'))
+  await page.evaluate(() => void window._create('#e2e_memo_tokenuser #_e2e_memo_tokendep\n```js\nE2E_DEP_NAME\n```'))
+  // a dependent whose own block does not reference the dependency (the include_deps table)
+  await page.evaluate(() => void window._create('#e2e_memo_incl #_e2e_memo_dep\n```js\nconst E2E_INCL = 1\n```'))
+  // a dependency with a markdown macro outside its js block and a $ token inside it, and its
+  // dependent: a transient read (eval_macros with replace_items) must run the macro ONCE
+  await page.evaluate(() => void window._create('#e2e_memo_macrodep <<++window.__e2e_counter>>\n```js\nconst E2E_MACRO_VALUE = "$name"\n```'))
+  await page.evaluate(() => void window._create('#e2e_memo_macrouser #_e2e_memo_macrodep\n```js\nconst E2E_MACRO_USER = 1\n```'))
   await expect
-    .poll(() => page.evaluate(() => !!window._item('#e2e_memo_user', true)?.saved_id && !!window._item('#e2e_memo_dep', true)?.saved_id), {
+    .poll(() => page.evaluate(() => ['#e2e_memo_user', '#e2e_memo_dep', '#e2e_memo_tokendep', '#e2e_memo_tokenuser', '#e2e_memo_incl', '#e2e_memo_macrodep', '#e2e_memo_macrouser'].every(n => !!window._item(n, true)?.saved_id)), {
       timeout: 30_000,
     })
     .toBe(true)
@@ -313,6 +326,69 @@ test('direct typed reads and dependency prefixes are memoized; deep reads follow
   expect(repeat.direct).toContain('const E2E_MEMO = 1')
   expect(repeat.afterDirect.read.hits, 'the direct read hits').toBe(repeat.after.read.hits + 1)
   expect(repeat.afterDirect.read.misses, 'no miss on the repeated direct read').toBe(repeat.after.read.misses)
+  // the evaluation script: sloppy at its top level with the strict directive inside the wrapper,
+  // the dependency part once at its place before the own part, and the $ tokens replaced in the
+  // own part (a token-free dependency part) as in a dependency that carries one (the whole
+  // script's passes, where the dependency's token takes the EVALUATING item's name, as before)
+  const script = await page.evaluate(() => {
+    const w = window as any
+    const user = w._item('#e2e_memo_user')
+    const text: string = user.eval('E2E_OWN_NAME', { trigger: 'e2e_script', skip_eval: true })
+    const wrapperAt = text.indexOf('(() => {')
+    return {
+      head: text.slice(0, 10),
+      strictInside: text.indexOf("'use strict';") > wrapperAt && wrapperAt > 0,
+      depOnce: text.split('const E2E_MEMO = 1').length - 1,
+      depBeforeOwn: text.indexOf('const E2E_MEMO = 1') < text.indexOf('const E2E_OWN_NAME'),
+      ownReplaced: text.includes('const E2E_OWN_NAME = "#e2e_memo_user"'),
+      value: user.eval('E2E_OWN_NAME', { trigger: 'e2e_script2' }),
+      tokenValue: w._item('#e2e_memo_tokenuser').eval('E2E_DEP_NAME', { trigger: 'e2e_script3' }),
+      debugLists: Object.keys(user.debug_store).includes('e2e_script2') && String(user.debug_store['e2e_script2']).includes('E2E_OWN_NAME'),
+    }
+  })
+  expect(script).toEqual({ head: 'undefined;', strictInside: true, depOnce: 1, depBeforeOwn: true, ownReplaced: true, value: '#e2e_memo_user', tokenValue: '#e2e_memo_tokenuser', debugLists: true })
+  // text parity with read_deep: the split path's script carries the prefix exactly as read_deep
+  // reads it (the $name of the own part replaced, the dependency part verbatim), and a forwarded
+  // comment_deps keeps read's html comments for the dependencies AND the item (the own comment
+  // line is read's, not a copy); a forwarded include_deps suppresses the dependencies exactly when
+  // read_deep did — for false and for an explicit undefined or null, not when absent or true
+  const parity = await page.evaluate(() => {
+    const w = window as any
+    const user = w._item('#e2e_memo_user')
+    const opts = { exclude_async_deps: true, replace_ids: true, remove_empty_lines: true, remove_comment_lines: true, remove_tests_and_benchmarks: true }
+    const expected = user.read_deep('js', opts).replace(/\$name/g, '#e2e_memo_user')
+    const text: string = user.eval('E2E_OWN_NAME', { trigger: 'e2e_parity', skip_eval: true })
+    const commented: string = user.eval('E2E_OWN_NAME', { trigger: 'e2e_parity2', skip_eval: true, comment_deps: true })
+    const typeOf = (o: object) => w._item('#e2e_memo_incl').eval('typeof E2E_MEMO', { trigger: 'e2e_parity3', ...o })
+    return {
+      prefixVerbatim: text.includes(expected),
+      commented: commented.includes('<!-- #e2e_memo_dep -->') && commented.includes('<!-- #e2e_memo_user -->') && !commented.includes('/* js @ #e2e_memo_user */'),
+      include: [typeOf({}), typeOf({ include_deps: true }), typeOf({ include_deps: false }), typeOf({ include_deps: undefined }), typeOf({ include_deps: null })],
+    }
+  })
+  expect(parity).toEqual({ prefixVerbatim: true, commented: true, include: ['number', 'number', 'undefined', 'undefined', 'undefined'] })
+  // the three wrappers keep the prefix's functions and the evaluated code strict (`this` of an
+  // ordinary function is undefined); the start form runs read-only so its output is not written
+  const strict = await page.evaluate(async () => {
+    const w = window as any
+    const user = w._item('#e2e_memo_user')
+    const code = '[e2e_memo_strict(), (function () { return this === undefined })()]'
+    return {
+      sync: user.eval(code, { trigger: 'e2e_strict' }),
+      simple: await user.eval(code, { trigger: 'e2e_strict2', async: true, async_simple: true }),
+      start: await user.eval(code, { trigger: 'e2e_strict3', async: true, read_only: true }),
+    }
+  })
+  expect(strict).toEqual({ sync: [true, true], simple: [true, true], start: [true, true] })
+  // a transient evaluation read (eval_macros with replace_items: not memoizable) of a dependent whose
+  // dependency carries a $ token: read_deep is taken at once, so the dependency's macro runs once
+  const once = await page.evaluate(() => {
+    const w = window as any
+    w.__e2e_counter = 0
+    const text: string = w._item('#e2e_memo_macrouser').eval('E2E_MACRO_VALUE', { trigger: 'e2e_once', skip_eval: true, eval_macros: true, replace_items: {} })
+    return { counter: w.__e2e_counter, replaced: text.includes('const E2E_MACRO_VALUE = "#e2e_memo_macrouser"') }
+  })
+  expect(once).toEqual({ counter: 1, replaced: true })
   // whole-item deep reads bypass the prefix memo: their block selector is not in the key (a regex
   // supplies its source, a string is used as given: blockRegExp), so the two reads below must
   // differ — the first removes the dependency's js block, the second matches no block
@@ -382,7 +458,7 @@ test('direct typed reads and dependency prefixes are memoized; deep reads follow
   expect(await deep(), 'the deleted original is gone from the deep read').not.toContain(depId)
   // cleanup once the twin has its saved id (it was created moments ago)
   await expect.poll(() => page.evaluate(() => window._item('#e2e_memo_dep', true)?.saved_id ?? null), { timeout: 30_000 }).toBeTruthy()
-  const ids = await page.evaluate(() => [window._item('#e2e_memo_user')!.saved_id, window._item('#e2e_memo_dep')!.saved_id])
+  const ids = await page.evaluate(() => ['#e2e_memo_user', '#e2e_memo_dep', '#e2e_memo_tokendep', '#e2e_memo_tokenuser', '#e2e_memo_incl', '#e2e_memo_macrodep', '#e2e_memo_macrouser'].map(n => window._item(n)!.saved_id))
   for (const id of ids) await firestore().collection('items').doc(id!).delete()
 })
 

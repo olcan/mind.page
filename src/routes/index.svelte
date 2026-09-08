@@ -541,19 +541,57 @@
   // hits, misses (assembled), oversize (assembled, not stored), entries and chars (the memo's
   // current size, chars in code units), budget (live)
   const depsPrefixStats = { hits: 0, misses: 0, oversize: 0, entries: 0, chars: 0, budget: DEPS_PREFIX_MEMO_CHARS }
-  function depsPrefixStore(key: string, prefix: string) {
+  function depsPrefixStore(key: string, prefix: string): boolean {
+    let stored = false
     if (prefix.length > depsPrefixStats.budget) depsPrefixStats.oversize++
     else {
       if (depsPrefixMemo.size >= DEPS_PREFIX_MEMO_MAX || depsPrefixStats.chars + prefix.length > depsPrefixStats.budget) {
         depsPrefixMemo.clear()
+        depsPrefixTokens.clear()
         depsPrefixStats.chars = 0
       }
       depsPrefixMemo.set(key, prefix)
       depsPrefixStats.chars += prefix.length
+      stored = true
     }
     depsPrefixStats.entries = depsPrefixMemo.size
+    return stored
   }
   if (typeof window != 'undefined') window['_deps_prefix_memo'] = depsPrefixStats
+  // the memoized dependency part of a typed deep read (see the comment above): the text, its memo
+  // key (null when the read is not memoizable) and whether it carries a code macro or a $ token
+  // (recorded once per memo key: eval() runs its replacement passes over the item's own part and
+  // the code only when it does not); used by read() and eval()
+  const PER_EVALUATION_TOKENS = /@\{|\$id|\$name|\$hash|\$deephash|\$cid/
+  const DEPS_MARK = '\u0000\u0001deps\u0001\u0000' // stands in for the dependency part while the passes run
+  const depsPrefixTokens = new Map<string, boolean>()
+  function depsPrefix(item, type: string, options: object): { text: string; key: string | null; tokens: boolean } {
+    const key = depsPrefixKey(item, type, options)
+    let text = key ? depsPrefixMemo.get(key) : undefined
+    let tokens: boolean | undefined = key ? depsPrefixTokens.get(key) : undefined
+    if (text !== undefined) depsPrefixStats.hits++
+    else {
+      const parts = []
+      item.deps.forEach(id => {
+        const dep = _item(id)
+        // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
+        if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
+        // indicate dependency name in comments for comment_deps (using html) or for certain types of reads
+        // note the conditions here should match those below (just outside the for loop)
+        if (options['comment_deps'])
+          parts.push(`<!-- ${dep.name} -->`) // use html comment
+        else if (type.match(/^(?:js|webppl)(?:_|$)/)) parts.push(`/* ${type} @ ${dep.name} */`)
+        else if (type.match(/^(?:html)(?:_|$)/)) parts.push(`<!-- ${type} @ ${dep.name} -->`)
+        parts.push(dep.read(type, options))
+      })
+      text = parts.filter(s => s).join('\n')
+      if (key) {
+        depsPrefixStats.misses++
+        if (depsPrefixStore(key, text)) depsPrefixTokens.set(key, (tokens = PER_EVALUATION_TOKENS.test(text)))
+      }
+    }
+    return { text, key, tokens: tokens ?? PER_EVALUATION_TOKENS.test(text) }
+  }
 
   class _Item {
     id: string
@@ -1002,7 +1040,7 @@
         item.text = item.text.replaceAll('\u200B', '')
       }
       // a DIRECT typed read is memoized (see readMemo); a deep read takes its dependency part from
-      // depsPrefixMemo (typed reads only) and rebuilds the rest
+      // depsPrefixMemo (typed reads only, depsPrefix) and rebuilds the rest
       const memoKey =
         type && !options['include_deps'] && !options['exclude_async'] && !options['eval_macros'] && !options['replace_items']
           ? readMemoKey(type, options)
@@ -1019,30 +1057,9 @@
       // include dependencies in order, _before_ item itself
       if (options['include_deps']) {
         options = _.merge({}, options, { include_deps: false }) // deps are recursive already
-        const prefixKey = depsPrefixKey(item, type, options)
-        let prefix = prefixKey ? depsPrefixMemo.get(prefixKey) : undefined
-        if (prefix !== undefined) depsPrefixStats.hits++
-        else {
-          const parts = []
-          item.deps.forEach(id => {
-            const dep = _item(id)
-            // NOTE: we allow async dependencies to be excluded so that "sync" items can still depend on async items for auto-updating or non-code content or to serve as a mix of sync/async items that can be selectively imported
-            if (options['exclude_async_deps'] && dep.deepasync) return // exclude async dependency chain
-            // indicate dependency name in comments for comment_deps (using html) or for certain types of reads
-            // note the conditions here should match those below (just outside the for loop)
-            if (options['comment_deps'])
-              parts.push(`<!-- ${dep.name} -->`) // use html comment
-            else if (type.match(/^(?:js|webppl)(?:_|$)/)) parts.push(`/* ${type} @ ${dep.name} */`)
-            else if (type.match(/^(?:html)(?:_|$)/)) parts.push(`<!-- ${type} @ ${dep.name} -->`)
-            parts.push(dep.read(type, options))
-          })
-          prefix = parts.filter(s => s).join('\n')
-          if (prefixKey) {
-            depsPrefixStats.misses++
-            depsPrefixStore(prefixKey, prefix)
-          }
-        }
-        content.push(prefix)
+        // eval's split path (see eval): a placeholder stands in for the dependency part, whose
+        // memoized text eval already holds and splices in after its replacement passes
+        content.push(options['deps_placeholder'] ?? depsPrefix(item, type, options).text)
         // if dependencies are commented, also comment the dependent item name (where include_deps is true)
         if (options['comment_deps'])
           content.push(`<!-- ${item.name} -->`) // use html comment
@@ -1457,6 +1474,7 @@
       )
 
       const evaljs_orig = evaljs // original evaljs passed to eval()
+      let deps_unreplaced = '' // a token-free dependency part, spliced in at DEPS_MARK after the replacement passes
 
       // no wrapping or context prefix in debug mode (since already self-contained and wrapped)
       if (!options['debug']) {
@@ -1508,29 +1526,58 @@
         const async = options['async']
         evaljs = [`return (${async ? 'async ' : ''}() => {`, evaljs, '})()'].join('\n')
 
-        // prepend context prefix (if not excluded)
+        // prepend context prefix (if not excluded), through read_deep's own semantics. when the
+        // memoized dependency part carries no code macro and no $ token (recorded once per memo
+        // key, depsPrefix.tokens), the replacement passes below run over the item's own part and
+        // the code only: the item is read as read_deep reads it (every option branch as before,
+        // deps_placeholder) with a marker standing in for the dependency part, which is spliced in
+        // afterwards — the passes are no-ops on a token-free text, and a macro cannot span the
+        // join (the dependency part holds no macro start and the newline between the parts stops
+        // an escape from reaching across, since skipEscaped looks at the preceding character only)
         if (!options['exclude_prefix']) {
-          let prefix = this.read_deep(options['type'] || 'js', prefix_read_options)
-          evaljs = [prefix, evaljs].join(';\n').trim()
+          const type = options['type'] || 'js'
+          const read_options = Object.assign({ include_deps: true }, prefix_read_options) // as read_deep
+          // the dependency part is inspected only when it is memoizable (depsPrefixKey: no
+          // eval_macros, no replace_items) and wanted: otherwise read_deep is taken at once, so a
+          // transient read (a dependency's macro) runs once, as before
+          const deps =
+            read_options['include_deps'] && !read_options['eval_macros'] && !read_options['replace_items']
+              ? depsPrefix(items[this.index], type, _.merge({}, read_options, { include_deps: false }))
+              : null
+          if (!deps || deps.tokens || !deps.text.trim()) evaljs = [this.read_deep(type, prefix_read_options), evaljs].join(';\n').trim()
+          else {
+            deps_unreplaced = deps.text.replace(/^\s+/, '') // the whole-prefix trim removed its leading whitespace
+            const prefix = this.read(type, Object.assign({}, read_options, { deps_placeholder: DEPS_MARK }))
+            evaljs = [prefix, evaljs].join(';\n').trim()
+          }
         }
 
+        // the strict directive sits INSIDE the wrapper (the prefix, the item's code and everything
+        // they declare run strict as before) while the script's own top level — the bindings
+        // below and the wrapper expression — stays sloppy: for this script shape and indirect
+        // eval.call, V8's compilation cache served a repeated identical script only when the
+        // script was sloppy at its top level (the cache-variant probe, tmp/init_perf: a measured
+        // shape, not a general V8 property), so a re-evaluation whose generated text is identical
+        // (a re-render, a repeated hook or run with constant code) skips the parse of the whole
+        // prefix, 0.6 ms of a 0.9 ms evaluation at desktop speed on a 1600-item corpus; the
+        // script's top level declares only consts and the expression
         if (async) {
           // async wrapper
           if (options['async_simple']) {
             // use light-weight wrapper without output/logging into item
             // note this also disables running state, error handling, cache invalidation, etc
-            evaljs = ['(async () => {', evaljs, '})()'].join('\n')
-          } else evaljs = ['_this.start(async () => {', evaljs, '}) // _this.start'].join('\n')
+            evaljs = ['(async () => {', "'use strict';", evaljs, '})()'].join('\n')
+          } else evaljs = ['_this.start(async () => {', "'use strict';", evaljs, '}) // _this.start'].join('\n')
         } else {
           // sync wrapper
           // wrap evaljs in anonymous function for scoping AND performance
           // e.g. benchmark(()=>Math.random()) is 10-20x faster with this wrapper
-          evaljs = ['(() => {', evaljs, '})()'].join('\n')
+          evaljs = ['(() => {', "'use strict';", evaljs, '})()'].join('\n')
         }
 
         if (options['trigger']) evaljs = [`const __trigger = '${options['trigger']}';`, evaljs].join('\n')
         evaljs = [
-          "'use strict';undefined;",
+          'undefined;',
           `const _id = '${this.id}';`,
           `const _name = '${this.name}';`,
           // overload window._item for read_only access to item itself (e.g. via _this) in lexical scope
@@ -1572,6 +1619,12 @@
       evaljs = evaljs.replace(/\$deephash/g, skipEscaped(this.deephash))
       if (options['cid']) evaljs = evaljs.replace(/\$cid/g, skipEscaped(options['cid']))
 
+      // the token-free dependency part, at its place in the script (see the prefix step above)
+      if (deps_unreplaced) {
+        const at = evaljs.indexOf(DEPS_MARK)
+        evaljs = evaljs.slice(0, at) + deps_unreplaced + evaljs.slice(at + DEPS_MARK.length)
+      }
+
       // if skipping eval, just return the js code
       if (options['skip_eval']) return evaljs
 
@@ -1581,11 +1634,15 @@
         .concat(this.name)
         .reverse()
         .join(' < ')
-      this.debug_store[options['trigger'] || 'other'] = appendBlock(
-        `\`eval(…)\` on ${stack}`,
-        'js_input',
-        addLineNumbers(evaljs)
-      )
+      // the stored text is built on demand (a numbered copy of the whole prefix on every
+      // evaluation was a fifth of an evaluation's cost, tmp/init_perf): an enumerable getter, so
+      // the store lists its triggers and reads as before
+      const debug_text = evaljs
+      Object.defineProperty(this.debug_store, options['trigger'] || 'other', {
+        get: () => appendBlock(`\`eval(…)\` on ${stack}`, 'js_input', addLineNumbers(debug_text)),
+        enumerable: true,
+        configurable: true,
+      })
       // run eval within try/catch block
       item(this.id).lastEvalTime = Date.now()
       if (options['trigger'] == 'run') {
