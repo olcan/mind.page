@@ -1,3 +1,31 @@
+<script context="module" lang="ts">
+  // the .item-menu size per menu shape (its buttons, by class list) and zoom, measured on the first
+  // item that shows that shape and reused by the others: measuring it per item forced a layout per
+  // render (see afterUpdate below). the menu's only per-item content is the item's number, and a
+  // number of at most MENU_INDEX_DIGITS digits gets a FIXED width (.item-menu > .index.reserved,
+  // css below: 4ch, whatever the digits, in whatever font is in use), so such numbers cannot size
+  // the menu; a longer number is not reserved and its item measures its own menu. cleared on a
+  // window resize and when fonts finish loading (ch follows the font, so a size measured in the
+  // fallback font must not be reused after the swap to the web font; spacers already inserted are
+  // not resized, as before)
+  const MENU_INDEX_DIGITS = 4
+  function menuReserved(index: number) {
+    return String(index + 1).length <= MENU_INDEX_DIGITS
+  }
+  const menuSizes = new Map<string, { width: number; height: number }>()
+  if (typeof window != 'undefined') {
+    window.addEventListener('resize', () => menuSizes.clear())
+    document.fonts?.addEventListener('loadingdone', () => menuSizes.clear())
+  }
+  function menuSize(menu: Element, zoom: string, reserved: boolean) {
+    if (!reserved) return { width: menu.clientWidth, height: menu.clientHeight }
+    const key = zoom + '|' + [...menu.children].map(c => c.className).join(',')
+    let size = menuSizes.get(key)
+    if (!size) menuSizes.set(key, (size = { width: menu.clientWidth, height: menu.clientHeight }))
+    return size
+  }
+</script>
+
 <script lang="ts">
   const _ = globalThis['_'] // imported in client.ts
   const Marked = globalThis['Marked'] // imported (and set up) in client.ts
@@ -1211,8 +1239,13 @@
     if (itemdiv.firstElementChild?.id != 'menu-' + id) {
       let menu = itemdiv.parentElement.querySelector('.item-menu')
       let div = document.createElement('div')
-      div.style.width = menu.clientWidth + 'px'
-      div.style.height = menu.clientHeight + 'px'
+      // the menu's size is measured once per menu shape and zoom and reused (menuSize, above):
+      // reading it here on every item render forced a synchronous layout per item — a third of a
+      // second of the initial render at desktop speed on a 1600-item corpus (init_perf, 2026-09-07)
+      const zoom = (itemdiv.closest('.items') as HTMLElement | null)?.style.zoom ?? ''
+      const size = menuSize(menu, zoom, menuReserved(index))
+      div.style.width = size.width + 'px'
+      div.style.height = size.height + 'px'
       /* -10px to remove .item padding, +1px for inset (when .bordered), +1px extra clearing space */
       div.style.marginTop = div.style.marginRight = '-8px'
       div.style.float = 'right'
@@ -1987,7 +2020,9 @@
         {#if runnable}
           <div class="button run" on:click={onRunClick}>run</div>
         {/if}
-        <div class="button index" class:leader class:matching on:click={onIndexClick}>{index + 1}</div>
+        <div class="button index" class:leader class:matching class:reserved={menuReserved(index)} on:click={onIndexClick}>
+          {index + 1}
+        </div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal>
@@ -2195,6 +2230,15 @@
   .item-menu > .index {
     background: transparent;
     color: #777;
+  }
+
+  /* a number of at most MENU_INDEX_DIGITS digits (see the module script): a fixed width, not a
+     minimum, so the digits cannot size the menu in any font (ch follows the font in use; tabular
+     digits fit it exactly where the font has them); the number keeps its place at the right */
+  .item-menu > .index.reserved {
+    width: 4ch;
+    justify-content: flex-end;
+    font-variant-numeric: tabular-nums;
   }
 
   .item-menu > .index.leader {

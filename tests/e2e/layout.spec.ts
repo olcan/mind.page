@@ -88,3 +88,83 @@ test('column layout follows viewport width, keeping items unique, ordered and co
     expect(sizes.cache, `element cache tracks the first at ${width}`).toBe(sizes.first)
   }
 })
+
+// the floating menu placeholder (the spacer inserted by Item.svelte's afterUpdate) must match its
+// item's menu: the menu size is measured once per menu shape and zoom and reused (menuSize), and
+// the item's number is the menu's only per-item content, so a number of at most four digits gets a
+// fixed width (.index.reserved, 4ch) and cannot size the menu. pinned across the 9/10 and 99/100
+// boundaries and for the runnable items of the corpus's digit bands, then for the four-digit case
+// (menus cloned in place with a one-digit and a four-digit number: equal widths, digits not
+// overflowing) in the page's font and in a wider bold fallback face, where four digits exceed the
+// web font's and the previous 36px reservation
+type SeededItem = { id: string; runnable?: unknown }
+const spacerAndMenu = (page: Page, position: number) =>
+  page.evaluate(async position => {
+    const seeded = window.__items[position] as SeededItem
+    const item = window._item(seeded.id)!
+    const elem = item.elem ?? (await window._render_item(item))
+    const menu = elem.querySelector('.item-menu') as HTMLElement
+    const spacer = elem.querySelector('#menu-' + seeded.id) as HTMLElement
+    return {
+      number: position + 1,
+      runnable: !!seeded.runnable,
+      menu: [menu.clientWidth, menu.clientHeight],
+      spacer: [parseFloat(spacer.style.width), parseFloat(spacer.style.height)],
+    }
+  }, position)
+// a rendered menu cloned beside itself with the number replaced: [menu width, number box width,
+// number overflow], for a one-digit and a four-digit number, optionally under an injected font
+const clonedMenuWidths = (page: Page, font = '') =>
+  page.evaluate(async font => {
+    const style = document.createElement('style')
+    if (font) document.head.append(Object.assign(style, { textContent: `.item-menu > .index { font: ${font} }` }))
+    await document.fonts.ready
+    const menu = document.querySelector('.item-menu')!
+    const widths = ['9', '1000'].map(text => {
+      const clone = menu.cloneNode(true) as HTMLElement
+      const index = clone.querySelector('.index') as HTMLElement
+      index.textContent = text
+      menu.parentElement!.append(clone)
+      const width = [clone.clientWidth, index.clientWidth, index.scrollWidth - index.clientWidth]
+      clone.remove()
+      return width
+    })
+    style.remove()
+    return widths
+  }, font)
+
+test('menu placeholders match their menus across digit boundaries, menu kinds and fonts', async ({ page }) => {
+  await page.setViewportSize({ width: 1200, height: 900 })
+  await loadAnonymous(page)
+  const count = await page.evaluate(() => window.__items.length)
+  expect(count).toBeGreaterThan(100) // both boundaries exist
+  // the first runnable item of each digit band the seeded corpus has one in (its runnable items all
+  // fall in the two-digit band in display order; the boundary positions cover plain menus per band)
+  const runnable = await page.evaluate(() =>
+    [1, 2, 3]
+      .map(digits =>
+        (window.__items as SeededItem[]).findIndex((item, i) => item.runnable && String(i + 1).length == digits),
+      )
+      .filter(position => position >= 0),
+  )
+  expect(runnable.length).toBeGreaterThan(0) // in display order the corpus's runnable items fall in one band
+  const positions = [...new Set([8, 9, 10, 98, 99, 100, ...runnable])].sort((a, b) => a - b)
+  const sizes = []
+  for (const position of positions) sizes.push(await spacerAndMenu(page, position)) // one render at a time
+  expect(sizes.some(size => size.runnable) && sizes.some(size => !size.runnable)).toBe(true)
+  for (const size of sizes) {
+    expect(size.menu[0], `menu ${size.number} has a width`).toBeGreaterThan(0)
+    expect(size.spacer, `spacer of item ${size.number} (runnable ${size.runnable})`).toEqual(size.menu)
+  }
+  // the four-digit case: the same menu with a one-digit and a four-digit number has one width and
+  // the digits fit their box, in the page's font and in a wider bold face (Verdana, installed on
+  // the gate's machine; the premise asserts a wider rendered box, whatever face the browser picks,
+  // so the case cannot pass vacuously)
+  const [one, four] = await clonedMenuWidths(page)
+  expect(four[0], 'menu width with 1000').toBe(one[0])
+  expect(four[2], 'digits of 1000 fit their box').toBe(0)
+  const [wideOne, wideFour] = await clonedMenuWidths(page, 'bold 15px Verdana')
+  expect(wideFour[1], 'four digits are wider in the wide face').toBeGreaterThan(four[1])
+  expect(wideFour[0], 'menu width with 1000 in the wide face').toBe(wideOne[0])
+  expect(wideFour[2], 'digits of 1000 fit their box in the wide face').toBe(0)
+})
