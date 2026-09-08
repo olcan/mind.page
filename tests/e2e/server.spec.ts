@@ -6,6 +6,9 @@ import { createServer, type Server } from 'http'
 import { resolve } from 'path'
 import { fileURLToPath } from 'url'
 import { ADMIN, ALICE, PROFILE_ONLY, firestore } from './helpers.js'
+import { E2E_LANES, lanePort, laneProject } from '../../src/e2e_lanes.js'
+import { getApps, initializeApp } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
 
 // server.ts contract over http (no browser): the ssr shell and its session fields, pwa scopes and
 // manifests, host-dependent icons, /user, webhooks, the cors proxy and the localhost-only dev routes
@@ -278,6 +281,47 @@ test('every cdn loader precedes kit\'s bootstrap in the BUILT shell', async ({ r
     expect(tag[0], `${tag[1]} is still parser-blocking`).not.toMatch(/\basync\b|\bdefer\b/)
     expect(tag[0], `${tag[1]} is still a classic script`).not.toMatch(/type="module"/)
     expect(tag.index, `${tag[1]} precedes the bootstrap`).toBeLessThan(bootstrap)
+  }
+})
+
+// LANES (src/e2e_lanes.js): every lane's server reads its own project. two lane projects hold
+// different values under the same ids; each server (its port) must serve its own for both the
+// profile endpoint and the crawler page content — the default admin app is bound to the lane at
+// the server bootstrap (src/server/app.mjs), and a first version bound only the content module
+test('lanes: each server reads its own project, for profiles and for page content', async ({ request }) => {
+  const lanes = E2E_LANES.slice(0, 2).map(lane => {
+    const port = lanePort(lane)
+    const project = laneProject(port, 'olcanswiki')
+    const app = getApps().find(a => a.name == project) ?? initializeApp({ projectId: project }, project)
+    return { port, project, db: getFirestore(app) }
+  })
+  expect(new Set(lanes.map(l => l.project)).size, 'two distinct lane projects').toBe(2)
+  try {
+    for (const [i, lane] of lanes.entries()) {
+      await lane.db.collection('users').doc('e2e_lane_witness').set({ displayName: `lane witness ${i}` })
+      await lane.db
+        .collection('items')
+        .doc('e2e-lane-witness')
+        .set({
+          user: 'lane_witness',
+          time: Date.now(),
+          text: `#e2e_lane_witness shared text of lane ${i}`,
+          attr: { shared: { keys: ['public'], indices: { public: 0 } } },
+        })
+    }
+    for (const [i, lane] of lanes.entries()) {
+      expect(await (await request.get(`http://localhost:${lane.port}/user/e2e_lane_witness`)).text(), `lane ${i} profile`).toBe(`lane witness ${i}`)
+      const html = await (
+        await request.get(`http://localhost:${lane.port}/?shared=lane_witness/public`, { headers: { 'X-Forwarded-Host': 'mind.page' } })
+      ).text()
+      expect(html, `lane ${i} page content`).toContain(`shared text of lane ${i}`)
+      expect(html, `lane ${i} never serves the other lane's content`).not.toContain(`shared text of lane ${1 - i}`)
+    }
+  } finally {
+    for (const lane of lanes) {
+      await lane.db.collection('users').doc('e2e_lane_witness').delete()
+      await lane.db.collection('items').doc('e2e-lane-witness').delete()
+    }
   }
 })
 

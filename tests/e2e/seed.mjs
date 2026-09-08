@@ -1,39 +1,20 @@
 // Seeds the Firestore emulator with the anonymous account's items (tests/e2e/fixtures), using the
 // admin sdk without credentials (the emulator accepts any writes); run with the emulators up.
+// Every e2e LANE gets its own copy under its own project id (src/e2e_lanes.js), so the lanes'
+// mutations never meet.
 import { existsSync, readFileSync, readdirSync, watch } from 'fs'
 import { basename, dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { E2E_LANES, lanePort, laneProject } from '../../src/e2e_lanes.js'
 
 process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080'
 const dir = dirname(fileURLToPath(import.meta.url))
 const items = JSON.parse(readFileSync(join(dir, 'fixtures/anonymous_items.json'), 'utf8'))
-initializeApp({ projectId: 'olcanswiki' })
-const db = getFirestore()
-let batch = db.batch()
-for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), data)
-// user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
-batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
-batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test' })
-// FIXTURE BOUNDARY between the read lane and the personal lane, which run concurrently.
-// custom-name PRECEDENCE is asserted against this uid, which nothing ever signs into: signing in
-// overwrites the whole user document with the auth profile and erases mindpageDisplayName, so
-// asserting it against alice_e2e (whom personal signs in as) forced the read lane to wait.
-// personal's other writes are its own account plus a uniquely-named crawl_e2e item it creates and
-// deletes, which is disjoint from the shared crawl_e2e fixture the read lane uses.
-batch.set(db.collection('users').doc('profile_e2e'), {
-  displayName: 'Profile Test',
-  mindpageDisplayName: 'Profile (custom)',
-})
-batch.set(db.collection('users').doc('markdown_e2e'), { displayName: 'Markdown' })
-// a shared item of another user, readable by anyone (see firestore.rules) via ?shared=crawl_e2e/public
-batch.set(db.collection('items').doc('e2e-crawl-shared'), {
-  user: 'crawl_e2e',
-  time: Date.now(),
-  text: '#e2e_crawl a shared item for crawlers',
-  attr: { shared: { keys: ['public'], indices: { public: 0 } } },
-})
+const BASE_PROJECT = 'olcanswiki'
+const projects = E2E_LANES.map(lane => laneProject(lanePort(lane), BASE_PROJECT))
+const dbs = projects.map(project => getFirestore(initializeApp({ projectId: project }, project)))
 // the markdown rendering corpus (fixtures/markdown/*.md, one item per file, first #label is the
 // item label): shared by the markdown_e2e user under key 'markdown', so it can be browsed and
 // tested at /?shared=markdown_e2e/markdown without auth, isolated from the anonymous account
@@ -58,15 +39,42 @@ const markdownFiles = readdirSync(markdownDir).filter(file => file.endsWith('.md
 const rootTags = readFileSync(join(markdownDir, 'markdown.md'), 'utf8').match(/#[\w/]+/g) ?? []
 const fileForTag = tag => tag.slice(1).replace(/\//g, '-') + '.md'
 const markdownOrder = [...new Set(['markdown.md', ...rootTags.map(fileForTag), ...[...markdownFiles].sort()])]
-for (const file of markdownFiles) {
-  const item = markdownItem(join(markdownDir, file))
-  batch.set(db.collection('items').doc(item.id), (({ id, ...data }) => data)(item))
+// the markdown corpus converted once; every lane's project gets the same documents
+const markdownItems = markdownFiles.map(file => markdownItem(join(markdownDir, file)))
+
+// seeds one lane's project
+async function seed(db, project) {
+  let batch = db.batch()
+  for (const { id, ...data } of items) batch.set(db.collection('items').doc(id), data)
+  // user records served by /user/<uid> (see server.ts); signing in overwrites them with the auth profile
+  batch.set(db.collection('users').doc('y2swh7JY2ScO5soV7mJMHVltAOX2'), { displayName: 'Olcan (seeded)' })
+  batch.set(db.collection('users').doc('alice_e2e'), { displayName: 'Alice Test' })
+  // FIXTURE BOUNDARY between the read lane and the personal lane, which run concurrently.
+  // custom-name PRECEDENCE is asserted against this uid, which nothing ever signs into: signing in
+  // overwrites the whole user document with the auth profile and erases mindpageDisplayName, so
+  // asserting it against alice_e2e (whom personal signs in as) forced the read lane to wait.
+  // personal's other writes are its own account plus a uniquely-named crawl_e2e item it creates and
+  // deletes, which is disjoint from the shared crawl_e2e fixture the read lane uses.
+  batch.set(db.collection('users').doc('profile_e2e'), {
+    displayName: 'Profile Test',
+    mindpageDisplayName: 'Profile (custom)',
+  })
+  batch.set(db.collection('users').doc('markdown_e2e'), { displayName: 'Markdown' })
+  // a shared item of another user, readable by anyone (see firestore.rules) via ?shared=crawl_e2e/public
+  batch.set(db.collection('items').doc('e2e-crawl-shared'), {
+    user: 'crawl_e2e',
+    time: Date.now(),
+    text: '#e2e_crawl a shared item for crawlers',
+    attr: { shared: { keys: ['public'], indices: { public: 0 } } },
+  })
+  for (const item of markdownItems) batch.set(db.collection('items').doc(item.id), (({ id, ...data }) => data)(item))
+  await batch.commit()
+  console.log(
+    `seeded ${items.length} anonymous and ${markdownFiles.length} markdown items ` +
+      `into project ${project} of the firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`
+  )
 }
-await batch.commit()
-console.log(
-  `seeded ${items.length} anonymous and ${markdownFiles.length} markdown items ` +
-    `into firestore emulator at ${process.env.FIRESTORE_EMULATOR_HOST}`
-)
+await Promise.all(dbs.map((db, i) => seed(db, projects[i])))
 
 // with --watch, re-seed a markdown fixture whenever its file changes, so edits appear live in the
 // app (the firestore listener applies them as remote updates); used by serve.sh
@@ -78,10 +86,9 @@ if (process.argv.includes('--watch')) {
     if (!existsSync(path)) return // deletions are ignored (re-run serve.sh to remove items)
     try {
       const item = markdownItem(path)
-      db.collection('items')
-        .doc(item.id)
-        .set((({ id, ...data }) => data)(item))
-        .then(() => console.log(`re-seeded ${file}`))
+      Promise.all(dbs.map(db => db.collection('items').doc(item.id).set((({ id, ...data }) => data)(item)))).then(() =>
+        console.log(`re-seeded ${file} into ${dbs.length} lane project(s)`)
+      )
     } catch (e) {
       console.error(`failed to re-seed ${file}:`, e.message)
     }

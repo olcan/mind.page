@@ -5,9 +5,8 @@
 // here are the APP-side witnesses: hostile render classification, read/render domain
 // separation, startup/run opacity, and decoded-body search.
 // Request items carry a unique test-owned visible label plus a hidden #_agent/vault routing
-// tag (the real /vault request shape): in the configured gate this lane runs behind the
-// admin-installed corpus, which contains the #agent/vault provider item itself, and a second
-// visible #agent/vault label would make _item(name, true) return null on the ambiguity.
+// tag (the real /vault request shape); a second visible #agent/vault label would make
+// _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 

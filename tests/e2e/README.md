@@ -36,24 +36,39 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 
 - `seed.mjs` writes `fixtures/anonymous_items.json` (the anonymous account, copied from the vault's
   `external/mindbox.io/items.json` as fetched by `fetch_mind_page.py`) into the Firestore emulator.
-- The app connects to the emulators whenever it is served on localhost port 3100 (`client.ts`),
-  the port dedicated to this stack: a separate origin from the dev server, so storage, the
-  Firestore cache and sign-in state never mix, and no flag is needed.
-- `playwright.config.ts` serves `node server.mjs` on port 3100 with `NO_HTTPS=1` (no 443 listener,
-  so the tests can run while `npm run dev` is up, given a production build), `CONTENT_CACHE_MS=100`
-  (the production 60s crawler-content ttl would otherwise make one test poll through a cache whose
-  age depends on what ran before it) and with `FIREBASE_CONFIG` removed from the environment (set
-  by `emulators:exec`, it would make the server skip listening).
+- LANES (`src/e2e_lanes.js`): every browser project is a lane with its own server port
+  (3100, 3101, ... in `E2E_LANES` order) and its own Firebase project id on the shared emulators
+  (`olcanswiki` for the first lane, `olcanswiki-e2eN` after it; the emulators apply the security
+  rules to every project id, `firebase.json` has `singleProjectMode: false`). `seed.mjs` seeds the
+  anonymous account into every lane's project, so no lane ever sees another's mutations and all
+  lanes run at once. `helpers.ts` binds the Firestore admin app and the REST urls to the running
+  test's lane (`lanePort()`, `laneProjectId()`, from the project's `baseURL`); tokens and identities
+  come from the shared Auth namespace (`adminAuth()`, see below).
+- The app connects to the emulators whenever it is served on localhost on one of the lane ports
+  (`client-globals.ts`, `isLanePort`) and binds to that lane's project id: each port is a separate
+  origin from the dev server, so storage, the Firestore cache and sign-in state never mix, and no
+  flag is needed. The server (`$lib/server/content.js`) derives its project id from `PORT` the same
+  way; anywhere else (production, the dev server) the base project applies.
+- `playwright.config.ts` serves one `node server.mjs` per lane on its port with `NO_HTTPS=1` (no
+  443 listener, so the tests can run while `npm run dev` is up, given a production build),
+  `CONTENT_CACHE_MS=100` (the production 60s crawler-content ttl would otherwise make one test poll
+  through a cache whose age depends on what ran before it) and with `FIREBASE_CONFIG` removed from
+  the environment (set by `emulators:exec`, it would make the server skip listening).
 
 ## Tests
 
-Tests run as five projects (see `playwright.config.ts`), each capped to one worker with two overall.
-`unit` (no browser), `chromium` (the shared-fixture baseline lane — not read-only: its server tests
-mutate anonymous and prerender state its render tests inspect, which is why it stays serial) and
-`personal` are all eligible immediately; `admin` and `editor` mutate the shared anonymous account
-and form a chain behind the baseline lane. Only projects with dependencies drag a closure along, so
-`--no-deps` matters for `editor.spec.ts`, whose closure is otherwise run in full, and not for
-`personal.spec.ts`.
+Tests run as eight projects (see `playwright.config.ts`): `unit` (no browser) and seven browser
+LANES — `chromium` (the shared-fixture baseline lane: not read-only, its server tests mutate
+anonymous and prerender state its render tests inspect, which is why it stays serial inside),
+`admin`, `editor`, `bridge`, `renderer`, `propagation` and `personal` — each capped to one worker,
+all running at once (one worker per project). Lanes no longer depend on each other: each has its
+own project id and its own copy of the seed, so there is no chain and nothing for `--no-deps` to
+skip; naming one spec runs only its rows (every lane's server still starts and every lane's
+project is still seeded, a few seconds of the run). Auth is ONE shared namespace across the
+lanes: the client sdk signs in through the api-key endpoint, which the auth emulator routes to its
+default project whatever project id the app was created with, so identities (uids, display
+names) are immutable fixtures created in the base project; everything a lane mutates lives in its
+own Firestore project (`helpers.ts`: `adminAuth()` vs `admin()`/`firestore()`).
 
 - `server.spec.ts` - `server.mjs` over http (no browser): the ssr shell and the session fields it
   embeds (`client_ip` honors the proxy-forwarded address), the numbered pwa scopes and their

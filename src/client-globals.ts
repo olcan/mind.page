@@ -10,7 +10,16 @@ window['_'] = _
 import { firebaseConfig } from '../firebase-config.js' // ~0
 import { isSharedOrigin, SHARED_LOCAL_HOST } from './host.js'
 import { initializeApp, onLog } from 'firebase/app' // ~10K
-const firebase = initializeApp(firebaseConfig)
+import { isLanePort, laneProject } from './e2e_lanes.js'
+// the e2e stack (tests/e2e): served on one of its lane ports on a local host, the app connects to
+// the local emulators (below) and binds to the lane's own project id (src/e2e_lanes.js), so
+// concurrent lanes keep their Firestore state apart (auth is one shared namespace of immutable
+// identity fixtures); never in production (no lane port there)
+const USING_EMULATORS =
+  ['localhost', '127.0.0.1', SHARED_LOCAL_HOST].includes(location.hostname) && isLanePort(location.port)
+const firebase = initializeApp(
+  USING_EMULATORS ? { ...firebaseConfig, projectId: laneProject(location.port, firebaseConfig.projectId) } : firebaseConfig
+)
 firebase['onLog'] = onLog // for use in index.svelte
 window['firebase'] = firebase
 
@@ -34,21 +43,17 @@ initializeFirestore(firebase, {
     : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })
 
-// connect to local firebase emulators (see firebase.json) when served on the port dedicated to the
-// e2e test stack (see tests/e2e), which is its own origin with its own storage, cache and sign-in
-// state; must precede any auth/firestore use
-import { connectAuthEmulator } from 'firebase/auth'
-import { connectFirestoreEmulator } from 'firebase/firestore'
-const EMULATOR_PORT = '3100'
-// true only for the e2e stack's own origin (see tests/e2e), never in production
+// connect to local firebase emulators (see firebase.json) when served on one of the ports dedicated
+// to the e2e test stack (see tests/e2e and USING_EMULATORS above): each lane port is its own origin
+// with its own storage, cache and sign-in state; must precede any auth/firestore use.
 // SHARED_LOCAL_HOST is the isolated origin foreign shared pages move to locally: a separate origin
 // for storage and sign-in, but the same e2e backend, so it connects too
-const USING_EMULATORS =
-  ['localhost', '127.0.0.1', SHARED_LOCAL_HOST].includes(location.hostname) && location.port == EMULATOR_PORT
+import { connectAuthEmulator } from 'firebase/auth'
+import { connectFirestoreEmulator } from 'firebase/firestore'
 if (USING_EMULATORS) {
   connectAuthEmulator(getAuth(firebase), 'http://127.0.0.1:9099', { disableWarnings: true })
   connectFirestoreEmulator(getFirestore(firebase), '127.0.0.1', 8080)
-  console.warn(`using local firebase emulators (served on port ${EMULATOR_PORT})`)
+  console.warn(`using local firebase emulators (served on port ${location.port}, project ${firebase.options.projectId})`)
 }
 
 // import/expose firebase/auth on window

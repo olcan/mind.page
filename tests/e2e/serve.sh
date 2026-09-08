@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Serves the e2e stack interactively: firebase emulators seeded with the anonymous items plus the
-# production build on http://localhost:3100 (its own origin, so storage, cache and sign-in state
+# Serves the e2e stack interactively: firebase emulators seeded with the anonymous items (every
+# lane's project, see src/e2e_lanes.js) plus the production build on http://localhost:3100 (the
+# first lane's origin and project; its own origin, so storage, cache and sign-in state
 # stay apart from sapper dev on 3000; requires a prior `sapper build`), until Ctrl-C.
 # Open http://localhost:3100/ to browse the seeded account, or run playwright against it
 # NOTE this server is for LOOKING at the seeded accounts, not for running the suite against. The

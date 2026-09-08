@@ -2,7 +2,7 @@ import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
 import { readdirSync, readFileSync } from 'fs'
 import { resolve } from 'path'
-import { firestore, install, loadAdmin, loadAnonymous } from './helpers.js'
+import { firestore, install, loadAdmin, loadAnonymous, laneProjectId } from './helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the baseline project
@@ -476,7 +476,7 @@ test('an autodep parent absent from every text tag is installed and joins the ru
       .poll(
         async () =>
           (
-            await fetch(`http://localhost:8080/v1/projects/olcanswiki/databases/(default)/documents/items/${id}`, {
+            await fetch(`http://localhost:8080/v1/projects/${laneProjectId()}/databases/(default)/documents/items/${id}`, {
               headers: { Authorization: 'Bearer owner' },
             })
           ).status,

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { FieldValue } from 'firebase-admin/firestore'
-import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp } from './helpers.js'
+import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp, lanePort, laneProjectId } from './helpers.js'
 // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
 import { SHARED_LOCAL_HOST } from '../../src/host.js'
 
@@ -489,7 +489,7 @@ test('a foreign shared page is served from the isolated origin, which clears app
     // cookies are not port-scoped
     await expect
       .poll(() => page.evaluate(() => location.origin), { timeout: 60_000 })
-      .toBe(`http://${SHARED_LOCAL_HOST}:3100`)
+      .toBe(`http://${SHARED_LOCAL_HOST}:${lanePort()}`)
     expect(new URL(page.url()).search).toBe('?shared=crawl_e2e/trap') // the url survives the move
 
     // ... and the page works normally for the anonymous visitor it is, running the owner's code
@@ -1518,7 +1518,7 @@ test('/_gc deletes exactly the previewed orphans, and an owner restored mid-conf
     // the victim reaches a durable 404 at the emulator; the survivor remains (Bearer owner is
     // the emulator admin bypass -- rules 403 unauthenticated REST, indistinguishable from present)
     const status = (id: string) =>
-      fetch(`http://localhost:8080/v1/projects/olcanswiki/databases/(default)/documents/items/${id}`, {
+      fetch(`http://localhost:8080/v1/projects/${laneProjectId()}/databases/(default)/documents/items/${id}`, {
         headers: { Authorization: 'Bearer owner' },
       }).then(r => r.status)
     await expect.poll(() => status(storeB!), { message: 'victim store durably deleted', timeout: 30_000 }).toBe(404)

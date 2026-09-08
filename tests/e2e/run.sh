@@ -13,13 +13,12 @@
 # It still starts fresh emulators, seeds, and serves the build already in `build/`. Never report a
 # SKIP_BUILD run as the gate.
 #
-# TARGETED ITERATION: a spec whose project has DEPENDENCIES drags their closure along. `editor`
-# depends on `admin`, which depends on `chromium`, so naming editor.spec.ts runs that whole closure
-# rather than its own tests; add --no-deps for just the file's own:
-#     tests/e2e/run.sh tests/e2e/editor.spec.ts --no-deps
-# `personal` has no dependencies, so naming it needs no flag:
-#     tests/e2e/run.sh tests/e2e/personal.spec.ts
-# This still builds and starts a fresh stack each time; it is the fast path that stays honest.
+# TARGETED ITERATION: naming a spec runs only its rows (every browser project is an independent
+# LANE, see src/e2e_lanes.js — there is no dependency chain, so nothing to skip with --no-deps):
+#     tests/e2e/run.sh tests/e2e/editor.spec.ts
+# The stack is the same either way: every lane's server starts and every lane's project is
+# seeded (a few seconds). This still builds and starts a fresh stack each time; it is the fast
+# path that stays honest.
 # Do NOT flip reuseExistingServer globally to avoid that (see playwright.config.ts) — a second
 # shell reaching a server started elsewhere is how a run can end up against production data.
 #

@@ -1,4 +1,5 @@
-import { expect, type Page } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
+import { E2E_BASE_PORT, laneProject } from '../../src/e2e_lanes.js'
 import { existsSync, readFileSync } from 'fs'
 import { resolve } from 'path'
 import { getApps, initializeApp } from 'firebase-admin/app'
@@ -52,7 +53,7 @@ declare global {
       column?: number // assigned by updateItemLayout, used by the column template
     }[] // internal item state
     __hideIndex: number // items past this index are hidden (search results are ranked first)
-    _user: { uid: string }
+    _user: { uid: string; full_name?: string }
     _init_time: number // 0-ish (undefined) until initialization begins
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item
     _readonly: boolean
@@ -91,17 +92,40 @@ export const PROFILE_ONLY = { uid: 'profile_e2e', displayName: 'Profile Test', c
 
 // firebase-admin against the emulators (FIREBASE_AUTH_EMULATOR_HOST, FIRESTORE_EMULATOR_HOST are set
 // by `firebase emulators:exec`); used to mint tokens and to inspect documents behind the app
+const BASE_PROJECT = 'olcanswiki'
+// the running test's LANE (src/e2e_lanes.js): its server port, from the Playwright project's
+// baseURL, and its Firebase project id on the shared emulators; the default lane outside a test
+export function lanePort(): number {
+  try {
+    return Number(new URL(test.info().project.use.baseURL ?? '').port) || E2E_BASE_PORT
+  } catch {
+    return E2E_BASE_PORT
+  }
+}
+export function laneProjectId(): string {
+  return laneProject(lanePort(), BASE_PROJECT)
+}
+// the lane's admin app: Firestore state is per lane (its own project id)
 export function admin() {
-  return getApps()[0] ?? initializeApp({ projectId: 'olcanswiki' })
+  const project = laneProjectId()
+  return getApps().find(app => app.name == project) ?? initializeApp({ projectId: project }, project)
 }
 export function firestore() {
   return getFirestore(admin())
 }
+// AUTH IS ONE SHARED NAMESPACE across the lanes: the client sdk signs in through the api-key
+// endpoint, which the auth emulator routes to its default project whatever project id the app
+// was created with, so identities (uids, display names) are immutable fixtures shared by every
+// lane and created in the BASE project; everything a lane mutates lives in its own Firestore
+// project. loadUser checks the signed-in profile against the fixture
+export function adminAuth() {
+  return getAuth(getApps().find(app => app.name == BASE_PROJECT) ?? initializeApp({ projectId: BASE_PROJECT }, BASE_PROJECT))
+}
 
 // custom token for a test user; unsigned, accepted by the auth emulator; the user record is
-// created on first use
+// created on first use (in the shared auth namespace, see adminAuth)
 export async function customToken(user: TestUser): Promise<string> {
-  const auth = getAuth(admin())
+  const auth = adminAuth()
   await auth.createUser({ ...user, emailVerified: true }).catch(e => {
     if (e.code != 'auth/uid-already-exists') throw e
   })
@@ -177,7 +201,9 @@ export async function loadAdmin(page: Page): Promise<void> {
 // signs in as a regular user and loads their personal account
 export async function loadUser(page: Page, user: TestUser) {
   await signIn(page, user, '/')
-  expect(await page.evaluate(() => window._user.uid)).toBe(user.uid)
+  // the identity the browser signed in as is the fixture the helper created (see adminAuth)
+  // (window._user exposes the auth profile's display name as full_name, see index.svelte)
+  expect(await page.evaluate(() => [window._user.uid, window._user.full_name])).toEqual([user.uid, user.displayName])
 }
 
 // installs a mind.items item via /_install and resolves to the alert message if the command failed,

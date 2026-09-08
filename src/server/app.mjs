@@ -25,7 +25,12 @@ const events = {} // recorded fs events for /watch/... requests
 import { firebaseConfig } from '../../firebase-config.js'
 import { initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
-initializeApp(firebaseConfig)
+import { laneProject } from '../e2e_lanes.js'
+// the DEFAULT admin app, shared by every server-side reader (the middleware below, the crawler
+// content in $lib/server/content.js): under the e2e stack it binds to the lane's own project id
+// (src/e2e_lanes.js: the lane is the PORT this server listens on); anywhere else PORT is not a
+// lane port and the base project applies
+initializeApp({ ...firebaseConfig, projectId: laneProject(process.env.PORT, firebaseConfig.projectId) })
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
 // see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain

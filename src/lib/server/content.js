@@ -7,9 +7,15 @@ import { getFirestore } from 'firebase-admin/firestore'
 import { marked } from 'marked'
 import sanitizeHtml from 'sanitize-html'
 import { firebaseConfig } from '../../../firebase-config.js'
+import { laneProject } from '../../e2e_lanes.js'
 
+// the default admin app is created by the server bootstrap (src/server/app.mjs), bound to the
+// lane's project id under the e2e stack; the fallback here (a standalone import) derives the
+// same binding from PORT (src/e2e_lanes.js)
 function firestore() {
-  return getFirestore(getApps()[0] ?? initializeApp(firebaseConfig))
+  return getFirestore(
+    getApps()[0] ?? initializeApp({ ...firebaseConfig, projectId: laneProject(process.env.PORT, firebaseConfig.projectId) })
+  )
 }
 
 // outside the emulator, content fetches need google credentials (adc) — and a missing credential

@@ -34,7 +34,7 @@ export const ACCOUNT_HOST = 'mind.page'
 // cache or sign-in state.
 // `*.localhost` resolves to loopback by convention (RFC 6761) with no /etc/hosts entry. it is
 // deliberately NOT a `.dev` name: that whole TLD is HSTS-preloaded, so chrome force-upgrades
-// http://<name>.dev to https and the plain-http e2e stack on port 3100 cannot answer it
+// http://<name>.dev to https and the plain-http e2e stack on its lane ports (3100…, src/e2e_lanes.js) cannot answer it
 export const SHARED_LOCAL_HOST = 'shared.localhost'
 
 // true on EITHER isolated shared-page origin. every persistence rule must use this rather than
