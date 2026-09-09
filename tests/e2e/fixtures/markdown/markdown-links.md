@@ -2,6 +2,7 @@
 [google](http://google.com)
 [***google***](http://google.com)
 [`google`](http://google.com)
+[`` google ``](http://google.com)
 [google](http://google.com "title text")
 http://google.com
 [google][1]

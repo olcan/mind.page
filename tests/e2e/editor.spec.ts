@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator } from '@playwright/test'
 import { mindbox, focusMindbox, savedId, itemText, visible } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
@@ -164,12 +164,21 @@ test('searching filters items and puts the tag in the url; escape and shift+back
   await expect(mindbox(page)).toHaveValue('')
 })
 
+// the source item of the navigation row; the /_undelete row below deletes and restores it
+const SOURCE_TEXT =
+  '#e2e_source refers to #e2e_target, [**e2e_target**/sub](#e2e_target/sub), [e2e_target/***sub***](#e2e_target/sub), ' +
+  '[e2e_target&#39;s/sub](#e2e_target/sub) and [`&amp;`/sub](#e2e_target/sub)'
+// lodash's five html escapes, the form in which a tag mark's handler receives its label
+const escapeHtml = (text: string) =>
+  text.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
+
 test('clicking a tag navigates to it, and the browser back button returns', async ({ page }) => {
   await loadAdmin(page)
-  await page.evaluate(() => {
+  await page.evaluate(source => {
     void window._create('#e2e_target the target')
-    void window._create('#e2e_source refers to #e2e_target')
-  })
+    void window._create('#e2e_target/sub the sub target')
+    void window._create(source)
+  }, SOURCE_TEXT)
   await expect.poll(() => savedId(page, '#e2e_source'), { timeout: 30_000 }).toBeTruthy()
   // items past hideIndex are not rendered, so search for the source item first
   await focusMindbox(page)
@@ -177,6 +186,58 @@ test('clicking a tag navigates to it, and the browser back button returns', asyn
   await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_source')
   await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
   const sourceId = await page.evaluate(() => window._item('#e2e_source')!.id)
+  // a markdown tag link renders its label's markup, and a click maps to a tag component through
+  // the DISPLAYED text (review link_labels 0: the raw label sent every trailing-component click
+  // of `[**foo**/bar](#foo/bar)` to `#foo`): the trailing component selects the full tag, the
+  // leading one its parent, also inside nested emphasis (the third click), and the browser back
+  // button returns to the source each time
+  const links = page.locator(`#item-${sourceId} mark[title="#e2e_target/sub"]`)
+  await expect(links).toHaveCount(4)
+  await expect(links.nth(0).locator('strong')).toHaveText('e2e_target')
+  await expect(links.nth(1).locator('em strong')).toHaveText('sub')
+  await expect(links.nth(2)).toHaveText("e2e_target's/sub") // an entity apostrophe, decoded by the browser
+  await expect(links.nth(3).locator('code')).toHaveText('&amp;') // a code span's literal entity text
+  // the label reaches the handler as a JavaScript literal inside the mark's onmousedown attribute,
+  // html-escaped for the callback's unescape (review link_labels 1: a decoded apostrophe made the
+  // handler a syntax error, and a literal `&amp;` was decoded twice): record what the handler gets
+  await page.evaluate(() => {
+    const handler = (window as any)._handleTagClick
+    ;(window as any)._handleTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {
+      ;((window as any).__reltags ??= []).push(reltag)
+      return handler(id, tag, reltag, e)
+    }
+  })
+  const received = () => page.evaluate(() => (window as any).__reltags.at(-1))
+  const clickEnd = async (mark: Locator) => {
+    const box = (await mark.boundingBox())!
+    await mark.click({ position: { x: box.width - 3, y: box.height / 2 } })
+  }
+  const back = async () => {
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue('#e2e_source')
+    await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
+  }
+  const quick = { timeout: 5_000 } // a wrong value is already there; no need to wait the default out
+  await clickEnd(links.nth(0)) // the plain trailing component, at the mark's right edge
+  await expect(mindbox(page), 'trailing component').toHaveValue('#e2e_target/sub ', quick)
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#e2e_target/sub')
+  expect(await received()).toBe(escapeHtml('e2e_target/sub'))
+  await back()
+  await links.nth(0).locator('strong').click() // on the bold leading component's own glyphs
+  await expect(mindbox(page), 'leading component').toHaveValue('#e2e_target ', quick)
+  await back()
+  // on the nested component's own glyphs (the event target is the inner element, not the mark)
+  await links.nth(1).locator('em strong').click()
+  await expect(mindbox(page), 'nested component').toHaveValue('#e2e_target/sub ', quick)
+  await back()
+  await clickEnd(links.nth(2)) // the handler compiles with the decoded apostrophe in the label
+  await expect(mindbox(page), 'entity apostrophe').toHaveValue('#e2e_target/sub ', quick)
+  expect(await received()).toBe(escapeHtml("e2e_target's/sub"))
+  await back()
+  await clickEnd(links.nth(3)) // the code label's literal entity text survives the callback boundary
+  await expect(mindbox(page), 'code label').toHaveValue('#e2e_target/sub ', quick)
+  expect(await received()).toBe(escapeHtml('&amp;/sub'))
+  await back()
   // tags render as <mark title="#tag"> with a mousedown handler (see _handleTagClick in Item.svelte)
   await page.locator(`#item-${sourceId} mark[title="#e2e_target"]`).click()
   await expect(mindbox(page)).toHaveValue('#e2e_target ') // tag searches get a trailing space
@@ -241,7 +302,7 @@ test('/_undelete restores the last deleted item', async ({ page }) => {
   await page.keyboard.press('Shift+Enter')
   await expect.poll(() => page.evaluate(() => window._exists('#e2e_source'))).toBe(true)
   await expect.poll(() => savedId(page, '#e2e_source'), { timeout: 30_000 }).toBeTruthy()
-  expect(await itemText(page, '#e2e_source')).toBe('#e2e_source refers to #e2e_target')
+  expect(await itemText(page, '#e2e_source')).toBe(SOURCE_TEXT)
 })
 
 test('attr changes reach the changed item and #_listen listeners, never bystanders', async ({ page }) => {

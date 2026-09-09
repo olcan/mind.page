@@ -87,6 +87,13 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
       await expect(page.locator(`#item-md-markdown-headings ${h}`)).toBeVisible()
     await page.evaluate(() => void (location.hash = '#markdown'))
     await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 10_000 }).toBe(FIXTURES.length)
+    // inline markup inside a link label renders as elements, never as literal markdown: the
+    // 2026-08-23 renderer activation emitted the raw label and the golden captured it that day
+    // (review link_labels 0), so a snapshot alone cannot refuse the next such update
+    const anchors = page.locator('#item-md-markdown-links a')
+    await expect(anchors.filter({ has: page.locator('code') })).toHaveCount(2)
+    await expect(anchors.filter({ has: page.locator('em strong') })).toHaveCount(1)
+    await expect(anchors.filter({ hasText: /[`*]/ })).toHaveCount(0)
     for (const slug of FIXTURES)
       await test.step(`render ${slug}`, async () => {
         const html = await renderedHtml(page, `md-${slug}`)

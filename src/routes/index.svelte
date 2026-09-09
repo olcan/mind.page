@@ -3406,15 +3406,18 @@
         e.pageY - document.documentElement.scrollTop
       )
       if (range) {
-        let tagNode = e.target as Node
-        // if target is not the tag node, it must be a highlight, so we move to the parent
-        if ((tagNode as HTMLElement).tagName != 'MARK') tagNode = tagNode.parentNode
-        // console.debug("tag click: ", range.startOffset, clickNode, tagNode.childNodes);
-        // if tag node contains highlight, we have to adjust click position
-        let pos = range.startOffset
-        for (const child of Array.from(tagNode.childNodes)) {
-          if (child.contains(range.startContainer)) break
-          pos += child.textContent.length
+        // the caret's offset in the mark's text, whatever inline elements the label renders (a
+        // search highlight, a bold component, nested emphasis): the mark's text up to the caret.
+        // (the previous walk over the mark's DIRECT children took the caret's offset within its
+        // own text node, so a click inside a nested element such as <em><strong> lost the text
+        // before it -- review link_labels 0.) a caret outside the mark counts as its end.
+        const tagNode = (e.target as Element).closest('mark') ?? (e.target as Node)
+        let pos = tagNode.textContent.length
+        if (tagNode.contains(range.startContainer)) {
+          const before = document.createRange()
+          before.setStart(tagNode, 0)
+          before.setEnd(range.startContainer, range.startOffset)
+          pos = before.toString().length
         }
         // adjust pos from rendered to full tag ...
         pos = Math.max(pos, rendered.length - suffix.length)

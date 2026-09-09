@@ -783,14 +783,19 @@
       if (count) id += '-' + count
       return `<h${depth} id="${_.escape(id)}">${this.parser.parseInline(tokens)}</h${depth}>\n`
     }
-    renderer.link = ({ href, text, title }) => {
+    // NOTE: the token's `text` is the RAW label markdown (marked's default renderer parses
+    // `tokens` for the visible content), so a label with inline markup -- `[**x**](url)`,
+    // [`x`](url), the [`` Object.keys ``](docs) links of js_table -- must render its tokens or
+    // the markup shows literally (the regression of the 2026-08-23 renderer activation `5489389`)
+    renderer.link = function ({ href, text, title, tokens }) {
+      const label_html = this.parser.parseInline(tokens)
       if (window['_shortcut_hosts']?.some(h => href.startsWith(h + '/'))) href = 'http://' + href
       if (href.startsWith('##')) {
         // fragment link
         const fragment = href.substring(1)
         return `<a href="${_.escape(fragment)}" title="${_.escape(href)}" onclick="_handleLinkClick('${id}','${_.escape(
           href
-        )}',event)">${text}</a>`
+        )}',event)">${label_html}</a>`
       } else if (href.startsWith('#')) {
         // tag link
         let tag = href
@@ -802,9 +807,24 @@
         let classNames = 'link'
         if (missingTags.has(lctag)) classNames += ' missing'
         classNames = classNames.trim()
+        // the click handler maps the caret to a tag component through the DISPLAYED text
+        // (index.svelte onTagClick: `renderTag(reltag)` must be the mark's text), so a formatted
+        // label passes its text content, not its markdown (review link_labels 0: the raw label
+        // mapped every click on the trailing component of `[**foo**/bar](#foo/bar)` to `#foo`)
+        const label_holder = document.createElement('template')
+        label_holder.innerHTML = label_html
+        const label_text = label_holder.content.textContent ?? ''
+        // the label travels as a JavaScript string literal inside an html attribute, which the
+        // browser decodes BEFORE compiling the handler: build the literal first (JSON.stringify
+        // escapes quotes and backslashes) and html-escape it as a whole. The callback unescapes
+        // its argument (the contract of the ordinary tag marks), so that is pre-applied and the
+        // callback hands back the displayed text exactly (review link_labels 1: a decoded
+        // apostrophe -- `[can&#39;t](#tag)` -- made the handler a syntax error, and a code
+        // label's literal `&amp;` reached the callback decoded twice)
+        const label_arg = _.escape(JSON.stringify(_.escape(label_text)))
         return `<mark class="${classNames}" title="${_.escape(tag)}" onmousedown="_handleTagClick('${id}','${_.escape(
           tag
-        )}','${_.escape(text)}',event)" onclick="event.preventDefault();event.stopPropagation();">${text}</mark>`
+        )}',${label_arg},event)" onclick="event.preventDefault();event.stopPropagation();">${label_html}</mark>`
       }
       // For javascript links we do not use target="_blank" because it is unnecessary, and also because in Chrome it causes the javascript to be executed on the new tab and can trigger extra history or popup blocking there.
       // NOTE: rel="opener" is NOT required for target="_blank" (a misconception recorded here earlier): it GRANTS the destination an opener relationship, so it is kept only for these owner-authored links (a separate change may drop it; model-supplied links in src/inert_markdown.ts use noopener).
@@ -812,7 +832,7 @@
       if (!href.startsWith('javascript:')) attribs = ` target="_blank" rel="opener"`
       return `<a${attribs} title="${_.escape(href)}" href="${_.escape(
         href
-      )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${text}</a>`
+      )}" onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">${label_html}</a>`
     }
     // a claimed region inside LINK/IMAGE DESTINATION syntax lands in the token's
     // href (review 186 §4.1): the app's link override _.escape()s it so the post-parse
