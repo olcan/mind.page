@@ -277,6 +277,29 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     }
   }
 
+  // the dead frame is a block inside the paragraph flow: with text on the next line, the
+  // newline's <br> after the frame only adds an empty line, so the stylesheet hides that one
+  // <br> (and only that one: a deliberate blank line keeps its spacer); a rule needs nothing,
+  // it ends its paragraph and the text after it starts a new one
+  const breaksName = '#e2e_vault_breaks'
+  await page.evaluate(text => void window._create(text), `${breaksName}\n<!--inert-->\nbreak_body\n<!--/inert-->\nbelow the region\n---\nbelow the rule\n\nafter a blank line`)
+  await page.evaluate(name => void (location.hash = name), breaksName)
+  await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.vault-result[data-inert-rendered]'), breaksName), { timeout: 15_000 }).toBe(true)
+  const breaks = await page.evaluate(name => {
+    const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+    const after = (sel: string) => {
+      const next = content.querySelector(sel)?.nextElementSibling as HTMLElement | null
+      return next ? [next.tagName, getComputedStyle(next).display] : null
+    }
+    const spacer = [...content.querySelectorAll('br')].filter(br => getComputedStyle(br).display != 'none').length
+    return { frame: after('.vault-result'), rule: after('hr'), text: content.textContent, spacer }
+  }, breaksName)
+  expect(breaks.frame, 'the <br> after the dead frame is hidden').toEqual(['BR', 'none'])
+  expect(breaks.rule?.[0], 'a rule ends its paragraph: no break follows it').toBe('P')
+  expect(breaks.text).toContain('below the region')
+  expect(breaks.text).toContain('below the rule')
+  expect(breaks.spacer, 'the other breaks (the blank line spacer among them) stay').toBeGreaterThan(0)
+
   // (c1b) encoded marker LOOKALIKE in an ordinary image stays an ordinary image
   // (review 187 §2): owner text percent-encoding a marker shape must NOT trip the raw
   // interception -- the real region still frames, and the lookalike renders as an img

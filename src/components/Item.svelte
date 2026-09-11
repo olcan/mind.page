@@ -743,7 +743,6 @@
       .join('\n')
       .replace(/\\\n/g, '')
       .replace(/\\<br>\n\n/g, '') // used inside menu items
-    //.replace(/<hr(.*?)>\s*<br>/g, '<hr$1>')
 
     // remove *_removed blocks
     text = text.replace(blockRegExp(/\S*_removed/), '')
@@ -2663,6 +2662,11 @@
 
   /* disable <br> added by marked as last child under <p> in menu items */
   .item > :global(.menu p > br:last-child) {
+    display: none;
+  }
+  /* the inert dead frame is a block inside the paragraph flow: the <br> the newline after
+     it produces only adds an empty line (a rule needs none: it ends its paragraph) */
+  .item > :global(.content .vault-result + br) {
     display: none;
   }
 
