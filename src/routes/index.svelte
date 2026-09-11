@@ -380,6 +380,8 @@
     }
     window['_labels'] = _labels
     window['_sublabels'] = _sublabels
+    // item-land seam for the todoer's task commands (see enqueueHiddenDocument)
+    window['_enqueue_hidden_document'] = enqueueHiddenDocument
     window['_host'] = hostname
     window['_url_regexp'] = urlRegExp
     window['_block_regexp'] = blockRegExp
@@ -10387,6 +10389,38 @@
     if (!initialized) throw new Error('saveHiddenItem called before initialized')
     if (anonymous) throw new Error('saveHiddenItem called on anonymous account')
     return hiddenPersistence.save(name, item)
+  }
+
+  // the TASK COMMAND enqueue (vault design notes/design/mind_task_agents.md, 2.2 and 3.1): ONE
+  // immutable encrypted hidden document per owner gesture, created at a fresh id (or the
+  // caller's id on a retry) with the SAME payload shape, encryption and publication fence as
+  // every hidden store write, but NEVER through the per-name persistence controller: a command
+  // is not a named state that adoption, merging or a later save may replace, and its wrapper
+  // name (`task_command_<id>`) is unique by construction. the write reaches the SDK's durable
+  // queue at once (an offline device's create waits for its reconnect); `written` settles on
+  // the server's acknowledgment or a terminal failure, so the caller (the todoer) can keep or
+  // clear its pending overlay and report. the size gate is the agreed app-side bound: the
+  // bridge WRITER's stored-size cap on a ciphertext (vault lib/mindpage_publisher.py
+  // MAX_STORED_BYTES; its reader imposes none), enforced HERE before anything is written and
+  // reported to the owner
+  const HIDDEN_DOCUMENT_CAP = 262144
+  async function enqueueHiddenDocument(name, item, id = null) {
+    if (!initialized) throw new Error('enqueueHiddenDocument called before initialized')
+    if (anonymous) throw new Error('enqueueHiddenDocument called on anonymous account')
+    if (typeof name != 'string' || !name) throw new Error('enqueueHiddenDocument: name required')
+    if (id != null && (typeof id != 'string' || !id)) throw new Error('enqueueHiddenDocument: invalid id')
+    const text = JSON.stringify({ name, item })
+    await acquireV0Secret(true /* new_phrase */)
+    const data = await encryptItem({ hidden: true, time: Date.now(), attr: null, text })
+    if (typeof data.cipher != 'string') throw new Error('enqueueHiddenDocument: document not encrypted')
+    if (new TextEncoder().encode(data.cipher).length > HIDDEN_DOCUMENT_CAP)
+      throw new Error(`document too large (over ${HIDDEN_DOCUMENT_CAP} encrypted bytes)`)
+    fenceV1Item(data)
+    const docId = id ?? doc(collection(getFirestore(firebase), 'items')).id
+    // setDoc AT the id: a retry with the same id after a terminal failure rewrites that document
+    // instead of creating a second one; the plaintext user field is required for creates
+    const written = setDoc(doc(getFirestore(firebase), 'items', docId), { ...data, user: user.uid })
+    return { id: docId, written }
   }
 
   function hiddenItemChangedRemotely(name, change_type) {

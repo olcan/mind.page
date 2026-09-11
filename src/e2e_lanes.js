@@ -9,7 +9,7 @@
 export const E2E_BASE_PORT = 3100
 // the first lane keeps the base port and the base project id: every single-stack reference
 // (serve.sh, the harness config, the server rows' own port) stays valid
-export const E2E_LANES = ['chromium', 'admin', 'editor', 'bridge', 'renderer', 'propagation', 'personal', 'editor2', 'contract']
+export const E2E_LANES = ['chromium', 'admin', 'editor', 'bridge', 'renderer', 'propagation', 'personal', 'editor2', 'contract', 'tasks']
 export function lanePort(lane) {
   const index = E2E_LANES.indexOf(lane)
   if (index < 0) throw new Error(`unknown e2e lane ${lane}`)
