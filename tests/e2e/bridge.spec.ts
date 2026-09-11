@@ -282,7 +282,10 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   // <br> (and only that one: a deliberate blank line keeps its spacer); a rule needs nothing,
   // it ends its paragraph and the text after it starts a new one
   const breaksName = '#e2e_vault_breaks'
-  await page.evaluate(text => void window._create(text), `${breaksName}\n<!--inert-->\nbreak_body\n<!--/inert-->\nbelow the region\n---\nbelow the rule\n\nafter a blank line`)
+  await page.evaluate(
+    text => void window._create(text),
+    `${breaksName}\n<!--inert-->\nbreak_body\n\ninner_after_blank\n<!--/inert-->\nbelow the region\n---\nbelow the rule\n\nafter a blank line\n\n<!--inert-->\nsecond_body\n<!--/inert-->\n\nafter the frame blank`
+  )
   await page.evaluate(name => void (location.hash = name), breaksName)
   await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.vault-result[data-inert-rendered]'), breaksName), { timeout: 15_000 }).toBe(true)
   const breaks = await page.evaluate(name => {
@@ -299,6 +302,29 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(breaks.text).toContain('below the region')
   expect(breaks.text).toContain('below the rule')
   expect(breaks.spacer, 'the other breaks (the blank line spacer among them) stay').toBeGreaterThan(0)
+  // the LAYOUT, in the content's line height (the app zeroes block margins, and an empty
+  // source line is one spacer line): text on the line after a frame sits on its own line with
+  // no empty line between, a blank line after a frame is exactly one empty line (the item's
+  // own paragraph spacing), and a blank line INSIDE the frame is one empty line too (the inert
+  // markdown's spacer paragraph -- its stock paragraphs sat glued under the zero margins)
+  const layout = await page.evaluate(name => {
+    const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+    const lh = parseFloat(getComputedStyle(content).lineHeight)
+    const lines = (px: number) => Math.round((px / lh) * 10) / 10
+    const [first, second] = [...content.querySelectorAll('.vault-result')] as HTMLElement[]
+    const inner = [...first.querySelector('.inert-markdown')!.children] as HTMLElement[]
+    const rect = (el: Element) => el.getBoundingClientRect()
+    return {
+      underFirst: lines(rect(first.closest('p')!).bottom - rect(first).bottom),
+      underSecond: lines(rect(second.closest('p')!.nextElementSibling!).top - rect(second).bottom),
+      inner: inner.map(el => el.tagName + ':' + el.textContent),
+      innerGap: lines(rect(inner[inner.length - 1]).top - rect(inner[0]).bottom),
+    }
+  }, breaksName)
+  expect(layout.underFirst, 'text on the next line: its own line under the frame, no empty line').toBe(1)
+  expect(layout.underSecond, 'a blank line after the frame: one empty line').toBe(1)
+  expect(layout.inner, 'a blank line inside the frame: one spacer paragraph').toEqual(['P:break_body', 'P:\u00a0', 'P:inner_after_blank'])
+  expect(layout.innerGap, 'a blank line inside the frame: one empty line').toBe(1)
 
   // (c1b) encoded marker LOOKALIKE in an ordinary image stays an ordinary image
   // (review 187 §2): owner text percent-encoding a marker shape must NOT trip the raw
