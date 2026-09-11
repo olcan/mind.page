@@ -7468,7 +7468,7 @@
   import { createV0Provenance } from '../v0_provenance'
   import Webcam from '../components/Webcam.svelte'
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
-  import { createHiddenPersistence } from '../hidden_persistence'
+  import { createHiddenPersistence, overlayForeignKeys } from '../hidden_persistence'
   import { authStateAction } from '../session'
   import { layoutItems } from '../layout'
 
@@ -10229,8 +10229,14 @@
     clone: (state: unknown) => _.cloneDeep(state),
   })
 
+  // top-level store keys another writer owns: the vault bridge's `_agent` (its task projection,
+  // design notes/design/mind_task_agents.md 3.4). a local save carries the latest applied value
+  // of these keys, never this tab's copy (see foreignKeys in hidden_persistence.ts)
+  const FOREIGN_STORE_KEYS = ['_agent']
+  const foreignStoreKeys = (name: string) => (name.startsWith('global_store_') ? FOREIGN_STORE_KEYS : [])
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,
+    foreignKeys: foreignStoreKeys,
     encryptState: state => encryptItem(state),
     // the v1 publication fence at the hidden enqueue seam (stage 3, review 92 §2)
     beforeWrite: data => fenceV1Item(data),
@@ -10454,7 +10460,17 @@
       // index, but copying it onto the owner and announcing it as a remote change would roll the
       // owner backwards — and a handler that reacts by saving would then persist that older
       // state over the queued one. the owner is synchronized when the queued change executes
-      if (hiddenPersistence.owes(name)) return
+      if (hiddenPersistence.owes(name)) {
+        // ... except the FOREIGN keys (another writer's, e.g. the bridge's `_agent`): the owner's
+        // copy of those is never newer than the delivery, so it takes them now (no callback: the
+        // owner's own change is still the one it will announce), the owed save carries them, and
+        // a render that reads them is invalidated
+        const delivered = hiddenItemsByName.get(name)?.item ?? {}
+        const owner = item(id).global_store
+        if (owner && overlayForeignKeys(owner, delivered, foreignStoreKeys(name)))
+          _item(id).invalidate_elem_cache({ force_render: true })
+        return
+      }
       const applied = hiddenItemsByName.get(name)?.item
       if (_.isEqual(item(id).global_store ?? {}, applied ?? {})) return // nothing actually changed
       // console.debug("hiddenItemChangedRemotely", name, change_type, hiddenItemsByName.get(name)?.item);

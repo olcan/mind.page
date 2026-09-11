@@ -261,6 +261,10 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     _agent: { state: { ...state, held: 'owner', reason: 'question', epoch: 1, rev: 2, updated: Date.now() } },
     _todoer: { unsnoozed: Date.now() },
   })
+  // the widget's own save (clearing the one-shot unsnooze) carries the bridge's projection as
+  // delivered, never this tab's older copy: no revert for the bridge to repair
+  await expect.poll(async () => (await serverStore(`global_store_${taskId}`))?._todoer?.unsnoozed ?? null, { timeout: 30_000 }).toBeNull()
+  expect((await serverStore(`global_store_${taskId}`))._agent.state.rev, 'the projection survives the widget\'s save').toBe(2)
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
     main: [
       [`#todo [question] ${SNIPPET}`, null, null], // the snippet drops the _log block

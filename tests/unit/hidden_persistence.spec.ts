@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { createHiddenPersistence, type HiddenPersistenceDeps } from '../../src/hidden_persistence.js'
+import { createHiddenPersistence, type HiddenPersistenceDeps, overlayForeignKeys } from '../../src/hidden_persistence.js'
 import { createHiddenIngress } from '../../src/hidden_ingress.js'
 import { planTargetSlice, type Marker } from '../../src/hidden_confirm.js'
 import {
@@ -3559,4 +3559,94 @@ test('commit effects: a RELEVANT indeterminate answer produces zero effects, and
   controller.save('n', { mine: 2 })
   for (let i = 0; i < 12; i++) await flush()
   expect(registered, 'the retry commits').toContain('k')
+})
+
+
+test('overlayForeignKeys: assignment, removal, unchanged, and a clone', () => {
+  const source = { _agent: { rev: 2, list: [1] }, _todoer: { a: 1 } }
+  const target: any = { _agent: { rev: 1 }, _todoer: { a: 2 } }
+  expect(overlayForeignKeys(target, source, ['_agent']), 'assigned').toBe(true)
+  expect(target).toEqual({ _agent: { rev: 2, list: [1] }, _todoer: { a: 2 } }) // the owner's key untouched
+  expect(target._agent, 'a clone, never an alias').not.toBe(source._agent)
+  expect(overlayForeignKeys(target, source, ['_agent']), 'unchanged').toBe(false)
+  expect(overlayForeignKeys(target, { _todoer: {} }, ['_agent']), 'removed').toBe(true)
+  expect(target).toEqual({ _todoer: { a: 2 } })
+  expect(overlayForeignKeys(target, undefined, ['_agent']), 'nothing to take, nothing held').toBe(false)
+})
+
+const FOREIGN = { foreignKeys: (name: string) => (name == 'n' ? ['_agent'] : []) }
+
+test('a save carries the foreign keys of the latest applied delivery, never the owner\'s copy', async () => {
+  // the bridge's `_agent` in a global store: the owner's in-memory copy is behind a delivery.
+  // (1) the delivery is APPLIED before the save: the acceptance takes the holder's value
+  const published: any[] = []
+  const { idx, calls, ingress, controller } = harness({
+    ...FOREIGN,
+    syncOwner: (_name, state) => void published.push(JSON.parse(JSON.stringify(state))),
+  })
+  await arrive(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 1 } } })
+  await arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 2 } } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 2 }, _agent: { rev: 1 } }), 'the owner saves its stale copy').toBe(true)
+  expect(idx.byName.get('n')!.item, 'the index keeps the applied foreign key').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 } })
+  await checkpoint()
+  const first = calls.find(c => c.op == 'update')
+  expect(first, 'the save was written').toBeDefined()
+  expect(itemOf(first!.text), 'the payload: the owner\'s keys, the delivery\'s foreign key').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 } })
+  expect(published.at(-1), 'the owner is published the payload').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 } })
+  // (2) the delivery arrives while the save is QUEUED: the attempt's payload takes it
+  const newer = arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 2 }, _agent: { rev: 3 } } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 3 }, _agent: { rev: 2 } })).toBe(true)
+  await newer
+  await checkpoint()
+  expect(itemOf(calls.filter(c => c.op == 'update').at(-1)!.text)).toEqual({ _todoer: { a: 3 }, _agent: { rev: 3 } })
+  // (3) a foreign key the delivery no longer holds is dropped, applied-before-save too
+  await arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 3 } } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 4 }, _agent: { rev: 3 } })).toBe(true)
+  await checkpoint()
+  expect(itemOf(calls.filter(c => c.op == 'update').at(-1)!.text)).toEqual({ _todoer: { a: 4 } })
+})
+
+test('a delivery during the payload\'s encryption: the retry carries its foreign key, one update issued', async () => {
+  const held = deferred<void>()
+  let builds = 0
+  const { idx, calls, ingress, controller } = harness({
+    ...FOREIGN,
+    encryptState: async state => {
+      builds++
+      if (builds == 1) await held.promise // the first build waits; the delivery lands meanwhile
+      const encrypted: any = state
+      encrypted.cipher = 'cipher:' + state.text
+      encrypted.text = null
+      encrypted.attr = null
+      return encrypted
+    },
+  })
+  await arrive(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 1 } } })
+  expect(controller.save('n', { _todoer: { a: 2 }, _agent: { rev: 1 } })).toBe(true)
+  await checkpoint()
+  expect(builds, 'the first build is held').toBe(1)
+  // the delivery OPENS while the build is held (its application waits for the name's chain,
+  // which the write owns), so the held build is refused when it resumes and a fresh one follows
+  const newer = arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 2 } } }, ingress)
+  held.resolve()
+  await newer
+  await checkpoint()
+  await checkpoint()
+  const updates = calls.filter(c => c.op == 'update')
+  expect(updates, 'one update issued').toHaveLength(1)
+  expect(itemOf(updates[0].text)).toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 } })
+  expect(builds, 'the held build was refused and rebuilt').toBe(2)
+})
+
+test('adoption: the found document\'s foreign keys win over the local snapshot', async () => {
+  const { calls, controller } = harness({
+    ...FOREIGN,
+    confirmTarget: serverAnswer([{ id: 'srv1', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 2 } } }]),
+  })
+  controller.save('n', { _todoer: { a: 2 }, _agent: { rev: 1 } })
+  await flush()
+  const updates = calls.filter(c => c.op == 'update')
+  expect(calls.filter(c => c.op == 'create')).toHaveLength(0)
+  expect(updates).toHaveLength(1)
+  expect(itemOf(updates[0].text), 'the owner\'s key, the found foreign key').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 } })
 })

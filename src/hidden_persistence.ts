@@ -62,6 +62,13 @@ export type HiddenPersistenceDeps = {
   // under keys the session no longer holds must throw HERE, before the SDK's durable mutation
   // queue accepts it. optional: v0-only adapters and harnesses may omit it
   beforeWrite?: (data: Record<string, any>) => undefined
+  // top-level keys of a name's state that ANOTHER writer owns (the vault bridge's `_agent` in
+  // a `global_store_<id>`: design mind_task_agents 3.4). the owner saves full snapshots from its
+  // in-memory copy, which can be behind a delivery that was applied to the index while a save
+  // was owed (deliveries do not touch the owner then) or that landed after the copy was taken:
+  // a save must carry the LATEST APPLIED value of these keys, never the owner's copy, or it
+  // rolls the other writer back and the two ping-pong until the copies agree. optional: no keys
+  foreignKeys?: (name: string) => string[]
   // an ordinary firestore update. it reaches the SDK's durable, ordered mutation queue as soon
   // as it is called; the promise resolves only when the server acknowledges, which offline can
   // be much later (or never, until reconnect) — so the controller must not wait on it to decide
@@ -203,6 +210,27 @@ const isNotFound = (e: any) => e?.code == 'not-found' || /NOT_FOUND/i.test(Strin
 const CANCELLED_PHRASE = 'secret phrase cancelled' // the message the production prompt rejects with
 const isCancellation = (e: any) => e?.cancelled === true || String(e?.message ?? e) == CANCELLED_PHRASE
 
+// the ownership rule for FOREIGN keys (see HiddenPersistenceDeps.foreignKeys): `target` takes
+// each key from `source` (a clone), or drops it when `source` lacks it. returns whether `target`
+// changed. shared by every place a local snapshot meets an applied or found state: save
+// acceptance, the per-attempt payload build, adoption, and the owner's owed-delivery copy
+export function overlayForeignKeys(target: any, source: any, keys: string[]): boolean {
+  let changed = false
+  for (const key of keys) {
+    if (source && key in source) {
+      const value = source[key]
+      if (!(key in target) || JSON.stringify(target[key]) !== JSON.stringify(value)) {
+        target[key] = value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+        changed = true
+      }
+    } else if (key in target) {
+      delete target[key]
+      changed = true
+    }
+  }
+  return changed
+}
+
 export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
   const chains = new Map<string, Promise<unknown>>() // per-name serialization
 
@@ -270,6 +298,8 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     const op = owed.get(pending.name)
     if (op) pending.item = cloneState(op.localIntent)
     deps.adopt(pending, found)
+    // the found document's FOREIGN keys win (adopt only defaults the missing ones)
+    overlayForeignKeys(pending.item, found.item, deps.foreignKeys?.(pending.name) ?? [])
     deps.syncOwner(pending.name, cloneState(pending.item)) // a CLONE: no adapter may alias the projection
     return undefined
   }
@@ -662,6 +692,9 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
     // temp wrapper. the rebase is moot here anyway — `state` IS a fresh clone of the baseline —
     // and the owner publication follows explicitly
     deps.adopt({ ...merged, item: state }, merged) // may hold fields the owner never saw
+    // the foreign keys are the holder's (the applied state, or what this name last accepted
+    // for it under the same rule), whatever the caller's copy says (see deps.foreignKeys)
+    overlayForeignKeys(state, merged.item, deps.foreignKeys?.(name) ?? [])
     deps.syncOwner(name, cloneState(state))
     if (deps.index().byId.get(holder.id) === holder) holder.item = state // live: keep in step
     const stamp = targetFrontier(holder.id) // what we believe the target is, before we build for it
@@ -1013,6 +1046,14 @@ export function createHiddenPersistence(deps: HiddenPersistenceDeps) {
       // for an object no longer in the live index
       const claimed = index.byName.get(name)
       let holder = claimed && index.byId.get(claimed.id) === claimed && claimed.name == name ? claimed : undefined
+      if (holder) {
+        // the caller's snapshot never carries the FOREIGN keys of a name that already has a holder:
+        // what the holder has (an applied delivery, or the last accepted state under this same
+        // rule) is what this save owes and what the index keeps (see deps.foreignKeys)
+        const foreign = deps.foreignKeys?.(name) ?? []
+        overlayForeignKeys(item, holder.item, foreign)
+        if (!readOnly) overlayForeignKeys(intent, holder.item, foreign)
+      }
       if (!holder) {
         // claim the name SYNCHRONOUSLY: readers of the index (and saving_global_store) must see
         // the store the moment it is saved, not when its task happens to run
