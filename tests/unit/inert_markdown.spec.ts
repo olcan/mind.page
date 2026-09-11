@@ -19,6 +19,29 @@ test('the grammar carrier and the entity decoder', () => {
   expect(decodeEntities('&#0; &#1114112; &#xD800; &#1;')).toBe('� � � �') // outside the domain
 })
 
+test('blank lines are spacer lines: one per empty source line, none where the source has none', () => {
+  // the app zeroes block margins, so a blank line inside the frame is the app's own spacer line
+  // (`&nbsp;<br>` in a paragraph): counted per source line between blocks of every kind, a leading
+  // run included; a trailing run is not rendered (the app trims an item's rendered tail); a
+  // newline inside a paragraph is a break; a blank line inside a code block is code
+  const spacer = '<p>&#160;<br></p>\n'
+  expect(html('one\n\ntwo')).toBe(`<div class="inert-markdown"><p>one</p>\n${spacer}<p>two</p></div>`)
+  expect(html('one\n\n\ntwo')).toBe(`<div class="inert-markdown"><p>one</p>\n${spacer}${spacer}<p>two</p></div>`)
+  expect(html('one\ntwo')).toBe('<div class="inert-markdown"><p>one<br>two</p></div>')
+  expect(html('\n\nlead\n\n')).toBe(`<div class="inert-markdown">${spacer}${spacer}<p>lead</p></div>`)
+  expect(html('# H\ntext')).toBe('<div class="inert-markdown"><h1>H</h1>\n<p>text</p></div>')
+  expect(html('## h\n\n- a\n- b\n\n```\nx\n\ny\n```\n\nend')).toBe(
+    `<div class="inert-markdown"><h2>h</h2>\n${spacer}<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n${spacer}<pre><code>x&#10;&#10;y</code></pre>\n${spacer}<p>end</p></div>`
+  )
+  expect(html('a\n\n---\n\nb')).toBe(`<div class="inert-markdown"><p>a</p>\n${spacer}<hr>\n${spacer}<p>b</p></div>`)
+  // a loose item's blank line stays in the item; a blockquote's blank line stays in the quote
+  expect(html('- a\n\n- b\n\ntext')).toBe(`<div class="inert-markdown"><ul>\n<li><p>a</p>\n${spacer}</li>\n<li><p>b</p>\n</li>\n</ul>\n${spacer}<p>text</p></div>`)
+  expect(html('- a\n\n\n- b')).toContain(`<li><p>a</p>\n${spacer}${spacer}</li>`) // exact for a longer run
+  expect(html('> a\n>\n> b')).toBe(`<div class="inert-markdown"><blockquote>\n<p>a</p>\n${spacer}<p>b</p>\n</blockquote></div>`)
+  // a container's trailing whitespace without a newline is no line (Marked lexes it as a space token)
+  expect(html('> a\n> a\n  ')).toBe('<div class="inert-markdown"><blockquote>\n<p>a<br>a</p>\n</blockquote></div>')
+})
+
 test('markdown structure renders with every text character referenced', () => {
   const out = html('## Heading\n\n- one\n- two\n\nSome *emphasis* and `code #x`.\n')
   expect(out.startsWith('<div class="inert-markdown">')).toBe(true)

@@ -2665,7 +2665,9 @@
     display: none;
   }
   /* the inert dead frame is a block inside the paragraph flow: the <br> the newline after
-     it produces only adds an empty line (a rule needs none: it ends its paragraph) */
+     it produces only adds an empty line (a rule needs none: it ends its paragraph). only that
+     break: a blank line after the frame is the line pass's spacer (&nbsp;<br>, the SECOND br),
+     which stays; blank lines INSIDE the frame are the inert markdown's own spacer paragraphs */
   .item > :global(.content .vault-result + br) {
     display: none;
   }
