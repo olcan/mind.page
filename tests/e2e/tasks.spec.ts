@@ -242,16 +242,27 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await age.click()
   expect(await page.evaluate(() => (window as any).MindBox.get())).not.toContain('<1m')
 
-  // (c) a hand-back: the bridge's marker on the text, the projection and the one-shot unsnooze
-  await rewriteText(taskId, text => text.replace('[delegated]', '[question]'))
-  await expect.poll(() => serverText(taskId), { timeout: 30_000 }).toContain(ANSWER) // still there
+  // (c) a hand-back: the bridge's marker and its _log block on the text (the block is the last
+  // content, the route tag stays at the bottom), the projection and the one-shot unsnooze
+  const LOG = '```_log\nINFO: 17:41 handed back: question\n```'
+  await rewriteText(taskId, text => text.replace('[delegated]', '[question]').replace(/\n#_agent\/vault\n$/, `\n\n${LOG}\n#_agent/vault\n`))
+  await expect.poll(() => serverText(taskId), { timeout: 30_000 }).toContain(`${ANSWER}\n\n${LOG}\n#_agent/vault\n`)
+  // the rendered item ends with the log block (its level-highlighted lines do not defeat the
+  // tail cleanup) and no empty paragraph holds the hidden tag under it
+  await page.evaluate(name => void (location.hash = name), TASK) // show the item alone
+  const content = () => page.evaluate(name => window._item(name, true)?.elem?.querySelector('.content')?.innerHTML ?? null, TASK)
+  const tail = async () => (await content())?.slice(-700) ?? null // the assertion shows the tail on failure
+  await expect.poll(tail, { timeout: 30_000 }).toMatch(/console-info">INFO: 17:41 handed back: question<\/span>\n?<\/code><\/pre>\s*$/)
+  expect(await content()).not.toMatch(/<p>(?:\s|<mark class="[^"]*hidden[^"]*"[^>]*>[^<]*<\/mark>)*<\/p>\s*(?:<mark|<pre|$)/)
+  await page.evaluate(() => void (location.hash = '')) // back to the pinned lists
+  await expect.poll(() => page.locator('.todoer-widget').count(), { timeout: 30_000 }).toBe(2)
   await writeStore(STORE, `global_store_${taskId}`, {
     _agent: { state: { ...state, held: 'owner', reason: 'question', epoch: 1, rev: 2, updated: Date.now() } },
     _todoer: { unsnoozed: Date.now() },
   })
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
     main: [
-      [`#todo [question] ${SNIPPET}`, null, null],
+      [`#todo [question] ${SNIPPET}`, null, null], // the snippet drops the _log block
       ['#todo write the release note', null, null],
     ],
     delegated: [],

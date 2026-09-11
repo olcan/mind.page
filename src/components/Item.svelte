@@ -982,15 +982,17 @@
           content = content
             .replace(/(?:\s|<br>)*$/, '')
             .replace(
-              /(?:<br>|&nbsp;|\s|<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>)*((?:<\/p>)?)$/,
+              /(?:<br>|&nbsp;|\s|<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>)*((?:<\/p>)?)$/,
               (m, sfx) => {
-                keep.push(...(m.match(/<mark class="hidden"(?:"[^"]*"|[^>"])*>\S*?<\/mark>/g) ?? []))
+                keep.push(...(m.match(/<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>/g) ?? []))
                 return sfx
               }
             )
             .replace(/<p>(?:<\/p>)?$/, '') // drop empty <p> tag, allowing unclosed <p> as well
+            // (a hidden tag's mark may carry other classes, e.g. `missing hidden`)
             // note <> should be escaped in code blocks, so we can use that to avoid matching across blocks
-            .replace(/<pre><code class="_log">([^<>]*?)<\/code><\/pre>$/s, m => (keep.push(m), ''))
+            // (the block's lines may carry level spans, see util.js)
+            .replace(/<pre><code class="_log">(?:(?!<\/pre>).)*<\/code><\/pre>$/s, m => (keep.push(m), ''))
         } while (content.length < length) // keep trying until content length is unchanged
         if (keep.length) content += '\n' + keep.join(' ') + '\n'
         return content + '</div>' + sfx
