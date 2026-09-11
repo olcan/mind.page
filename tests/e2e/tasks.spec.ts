@@ -25,7 +25,7 @@ const SECRET = secretFor(USER, PHRASE)
 const TASK = '#e2e_task'
 // the agent's inert answer (the production shape, vault design 2.1) under the owner's line, with an
 // owner amendment inside it: the raw bytes the bridge must receive and the app must never lose
-const ANSWER = '<!--inert-->\n> agent: no; the reversion needs an older cache. (owner: check the snapshot too)\n<!--/inert-->'
+const ANSWER = '<!--inert-->\nagent: no; the reversion needs an older cache. (owner: check the snapshot too)\n<!--/inert-->'
 const TASK_TEXT = `${TASK}\n#todo fix the cache\nreverts on a returning device\n${ANSWER}`
 // the row's snippet runs from the tag into the following lines (200 characters), hidden tags dropped
 const SNIPPET = 'fix the cache reverts on a returning device'
@@ -187,7 +187,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // grammar-view read, whose inert regions are tokens
   await expect.poll(() => serverText(taskId), { timeout: 30_000 }).toBe(TASK_TEXT)
   const captured = TASK_TEXT
-  expect(await read(page, TASK), 'the grammar view carries a token, not the region').not.toContain('> agent:')
+  expect(await read(page, TASK), 'the grammar view carries a token, not the region').not.toContain('agent:')
 
   // (a) the delegation
   expect(await command(page, `/delegate ${TASK}`)).toBeNull()
@@ -218,6 +218,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     const { decryptWithSecret } = await import('../../src/crypto.js')
     const wrapper = JSON.parse(JSON.parse(await decryptWithSecret(recorded.data.cipher, recorded.secret)).text)
     expect([wrapper.name, wrapper.item.kind, wrapper.item.body]).toEqual([`task_command_${wrapper.item.id}`, 'delegate', recorded.body])
+    expect(recorded.body, 'the recorded capture is the current one (RECORD_FIXTURES=1 re-records after a task text change)').toBe(captured)
   }
   // the presentation edits over the grammar view of the raw text: the marker after the tag
   // (suffix mode) and the route tag, once; the answer region survives byte for byte
