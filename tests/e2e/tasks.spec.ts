@@ -85,6 +85,18 @@ async function serverText(id: string): Promise<string | null> {
   return JSON.parse(await decryptWithSecret(data.cipher, SECRET)).text ?? null
 }
 
+// the hidden document that holds a wrapper name (to rewrite a store in place, as another tab would)
+async function storeDocId(name: string): Promise<string | null> {
+  const { decryptWithSecret } = await import('../../src/crypto.js')
+  const snap = await firestore().collection('items').where('user', '==', USER.uid).where('hidden', '==', true).get()
+  for (const doc of snap.docs) {
+    try {
+      const wrapper = JSON.parse(JSON.parse(await decryptWithSecret(doc.data().cipher, SECRET)).text)
+      if (wrapper.name == name) return doc.id
+    } catch {}
+  }
+  return null
+}
 // the store value the server holds under a wrapper name (decrypting every hidden document of
 // the account, since names live inside the ciphertext), or null when none does
 async function serverStore(name: string): Promise<any> {
@@ -272,6 +284,51 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     ],
     delegated: [],
   })
+
+  // (c2) the saved list order and another writer (2026-09-12): a tab holding part of the items
+  // (a stale device mid-sync) or an older build wrote the main list's order; this tab re-sorts
+  // to it and does NOT write it back (a delivery-caused render reproduces the delivered string);
+  // a local change (a resurfacing) writes the order with the unknown id kept in place; a store
+  // stamped by a NEWER build makes this build stop writing orders and ask for a reload
+  const otherId = (await savedId(page, OTHER))!
+  const pinId = await page.evaluate(() => {
+    const container = document.querySelector('.todoer-widget')?.closest('[data-item-id]')
+    return window._item('id:' + container?.getAttribute('data-item-id'), true)?.saved_id ?? null
+  })
+  expect(pinId, 'the pinned item is saved').toBeTruthy()
+  const PIN = `global_store_${pinId}`
+  await expect.poll(() => storeDocId(PIN), { timeout: 30_000 }).toBeTruthy() // the widget saved its order
+  const pinDoc = (await storeDocId(PIN))!
+  const pinStore = await serverStore(PIN)
+  const stale = `zzz-unknown,${otherId},${taskId}`
+  await writeStore(pinDoc, PIN, { ...pinStore, _todoer: { ...pinStore._todoer, '#todo': stale } })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([
+    '#todo write the release note',
+    `#todo [question] ${SNIPPET}`,
+  ])
+  await page.waitForTimeout(2500) // the delivered order stands (a stable final string, not a write count)
+  expect((await serverStore(PIN))._todoer['#todo'], 'the delivered order stands, the unknown id kept').toBe(stale)
+  // a local change: the bridge's resurfacing floats the task, and the widget saves the new order
+  await writeStore(STORE, `global_store_${taskId}`, {
+    _agent: { state: { ...state, held: 'owner', reason: 'question', epoch: 1, rev: 3, updated: Date.now() } },
+    _todoer: { unsnoozed: Date.now() },
+  })
+  await expect.poll(async () => (await serverStore(PIN))._todoer['#todo'], { timeout: 30_000 }).toBe(`zzz-unknown,${taskId},${otherId}`)
+  expect((await serverStore(PIN))._todoer.version, 'the writer stamps its build').toBe(1)
+  // a newer build wrote the store: this build stops writing orders and asks for a reload once
+  const newer = `${otherId},${taskId}`
+  await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': newer, version: 99 } })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe('#todo write the release note')
+  await writeStore(STORE, `global_store_${taskId}`, {
+    _agent: { state: { ...state, held: 'owner', reason: 'question', epoch: 1, rev: 4, updated: Date.now() } },
+    _todoer: { unsnoozed: Date.now() },
+  })
+  await expect.poll(() => dialogs.some(d => /reload to keep your todo order/.test(d)), { timeout: 30_000 }).toBe(true) // at least one notice; the exact count is a backfill
+  await page.waitForTimeout(2500)
+  expect((await serverStore(PIN))._todoer['#todo'], 'the newer build\'s order stands').toBe(newer)
+  // back to this build's stamp and the order the later phases expect (the task first)
+  await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}`, version: 1 } })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
 
   // (d) a re-delegation under the current epoch, then a take-back that overlays at once and
   // refuses a further delegate until acknowledged
