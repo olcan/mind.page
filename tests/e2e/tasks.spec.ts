@@ -330,6 +330,25 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}`, version: 1 } })
   await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
 
+  // (c3) the context menu on a row after a touch press is prevented (the suppression the todoer
+  // adds; whether the delayed touch drag then starts on the owner's laptop is their trial); a
+  // mouse or keyboard menu is not. The listener contract only: synthetic events, no gesture,
+  // no Sortable press
+  const rowMenu = (press: string | null, menu: Record<string, unknown>) =>
+    page.evaluate(([press, menu]) => {
+      const row = document.querySelector('.todoer-widget .list > .list-item-container') as HTMLElement
+      if (press == 'keyboard') row.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'F10', shiftKey: true }))
+      else if (press) row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerType: press }))
+      const event = 'pointerType' in menu ? new PointerEvent('contextmenu', { bubbles: true, cancelable: true, ...menu }) : new MouseEvent('contextmenu', { bubbles: true, cancelable: true })
+      row.dispatchEvent(event)
+      return event.defaultPrevented
+    }, [press, menu] as [string | null, Record<string, unknown>])
+  expect(await rowMenu('touch', {}), 'a touch press, a menu without a pointer type: prevented').toBe(true)
+  expect(await rowMenu('mouse', {}), 'a mouse press: not prevented').toBe(false)
+  expect(await rowMenu('touch', { pointerType: '' }), 'a keyboard menu (an empty pointer type) after a touch press: not prevented').toBe(false)
+  expect(await rowMenu(null, { pointerType: 'touch' }), 'the menu event\'s own touch type: prevented').toBe(true)
+  expect(await rowMenu('touch', { pointerType: 'mouse' }), 'the menu event\'s own mouse type wins over the press: not prevented').toBe(false)
+
   // (d) a re-delegation under the current epoch, then a take-back that overlays at once and
   // refuses a further delegate until acknowledged
   expect(await command(page, `/delegate ${TASK}`)).toBeNull()
