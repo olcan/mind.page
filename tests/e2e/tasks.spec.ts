@@ -18,6 +18,7 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // gesture to the agent bin is the same enqueue
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
+test.use({ hasTouch: true }) // phase (c4) sends real touch input (CDP); nothing else in the lane depends on touch
 
 const USER: TestUser = { uid: 'tasks_e2e', displayName: 'Tasks Test', email: 'tasks@e2e.test' }
 const PHRASE = 'tasks e2e phrase'
@@ -348,6 +349,93 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(await rowMenu('touch', { pointerType: '' }), 'a keyboard menu (an empty pointer type) after a touch press: not prevented').toBe(false)
   expect(await rowMenu(null, { pointerType: 'touch' }), 'the menu event\'s own touch type: prevented').toBe(true)
   expect(await rowMenu('touch', { pointerType: 'mouse' }), 'the menu event\'s own mouse type wins over the press: not prevented').toBe(false)
+
+  // (c4) a quick sideways touch grabs its row without the drag delay (the list's touch-action and
+  // the todoer's _grab_on_sideways_touch): real touch input through CDP. The first row, pressed
+  // and moved 12 px sideways, is chosen at once (the in-page clock: under the 250 ms delay),
+  // then dragged on below the second row and released, which reorders the list (the saved order
+  // flips); a touch moved down is never chosen (a scroll). A widget re-render during the press
+  // (a store change landing) replaces the list under the touch, and a starved renderer can let
+  // the delay end first, so the press is retried until it is conclusive; the order is put back
+  // for the later phases
+  const cdp = await page.context().newCDPSession(page)
+  const touch = (type: 'touchStart' | 'touchMove' | 'touchEnd' | 'touchCancel', points: { x: number; y: number }[]) =>
+    cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points })
+  const mainList = page.locator('.todoer-widget').first().locator('.list')
+  const rowBox = async (text: string) => (await mainList.locator('> .list-item-container', { hasText: text }).boundingBox())!
+  // the in-page clock: the press and the first move stamped by DOCUMENT-level capturing
+  // pointer listeners (ahead of every listener on the list: Sortable's bubbling pointerdown
+  // arms its timer later, and the todoer's capturing pointermove grabs later; a class observer
+  // runs as a microtask right after the listener that changed the class, so a stamp taken by a
+  // listener behind the todoer's would follow the choose), the choose by that class observer on
+  // the list; the grab is conclusive only when the press and the move were observed on the
+  // current list, the move came under the delay, and the row was chosen by the move (not before
+  // it, as the delay path would have it)
+  type Clock = { pressed: number; moved: number; chosen: number }
+  const probe = () =>
+    page.evaluate(() => {
+      const w = window as any
+      const list = document.querySelector('.todoer-widget .list') as HTMLElement
+      const t: Clock = { pressed: 0, moved: 0, chosen: 0 }
+      w.__touch = t
+      w.__touchOff?.()
+      const onDown = (e: PointerEvent) => e.pointerType == 'touch' && list.contains(e.target as Node) && (t.pressed = performance.now())
+      const onMove = (e: PointerEvent) => e.pointerType == 'touch' && !t.moved && list.contains(e.target as Node) && (t.moved = performance.now())
+      document.addEventListener('pointerdown', onDown, true)
+      document.addEventListener('pointermove', onMove, true)
+      w.__touchOff = () => {
+        document.removeEventListener('pointerdown', onDown, true)
+        document.removeEventListener('pointermove', onMove, true)
+      }
+      new MutationObserver(() => {
+        if (!t.chosen && list.querySelector('.sortable-chosen')) t.chosen = performance.now()
+      }).observe(list, { subtree: true, attributes: true, attributeFilter: ['class'] })
+    })
+  const probed = () => page.evaluate(() => (window as any).__touch as Clock)
+  let grabbed: Clock | null = null
+  for (let attempt = 0; attempt < 5 && !grabbed; attempt++) {
+    await probe()
+    const box = await rowBox(SNIPPET)
+    const y = box.y + box.height / 2
+    await touch('touchStart', [{ x: box.x + 40, y }])
+    await touch('touchMove', [{ x: box.x + 52, y }]) // 12 px sideways
+    const t = await probed()
+    if (t.pressed && t.moved && t.moved - t.pressed < 250 && t.chosen > t.moved) grabbed = t
+    else {
+      await touch('touchCancel', []) // no tap, no click on the row
+      await page.waitForTimeout(1000)
+    }
+  }
+  expect(grabbed, 'the row was chosen by the sideways move, under the delay').not.toBeNull()
+  {
+    // dragged on below the second row (Sortable's fallback drag follows the touch), released
+    const first = await rowBox(SNIPPET)
+    const second = await rowBox('write the release note')
+    const from = first.y + first.height / 2
+    const to = second.y + second.height
+    for (let step = 1; step <= 6; step++) {
+      await touch('touchMove', [{ x: first.x + 52, y: from + ((to - from) * step) / 6 }])
+      await page.waitForTimeout(60)
+    }
+    await page.waitForTimeout(300) // the swap's animation
+    await touch('touchEnd', [])
+  }
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await expect.poll(async () => (await serverStore(PIN))._todoer['#todo'], { timeout: 30_000 }).toBe(`${otherId},${taskId}`)
+  // a touch moved down (past the tap slop) is a scroll: never chosen, the delay notwithstanding
+  await probe()
+  {
+    const box = await rowBox('write the release note')
+    await touch('touchStart', [{ x: box.x + 40, y: box.y + box.height / 2 }])
+    await touch('touchMove', [{ x: box.x + 41, y: box.y + box.height / 2 + 24 }])
+    await page.waitForTimeout(400) // past the delay
+    const t = await probed()
+    expect([t.pressed > 0, t.moved > 0, t.chosen], 'a downward move (observed on the list) grabs nothing').toEqual([true, true, 0])
+    await touch('touchEnd', [])
+  }
+  // the order the later phases expect (the task first)
+  await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}` } })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
 
   // (d) a re-delegation under the current epoch, then a take-back that overlays at once and
   // refuses a further delegate until acknowledged
