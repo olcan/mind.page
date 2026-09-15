@@ -284,7 +284,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   const breaksName = '#e2e_vault_breaks'
   await page.evaluate(
     text => void window._create(text),
-    `${breaksName}\n<!--inert-->\nbreak_body\n\ninner_after_blank\n- item one\n- item two\n- [ ] open row\n- [x] done row\n\n- [ ] plan a\n    - [x] plan b\n<!--/inert-->\nbelow the region\n---\nbelow the rule\n\nafter a blank line\n\n<!--inert-->\nsecond_body\n<!--/inert-->\n\nafter the frame blank\n- [ ] owner row`
+    `${breaksName}\n<!--inert-->\nbreak_body\n\ninner_after_blank\n- item one\n- item two\n- [ ] open row\n- [x] done row\n\n- [ ] plan a\n    - [x] plan b\n        - [ ] plan c\n<!--/inert-->\nbelow the region\n---\nbelow the rule\n\nafter a blank line\n\n<!--inert-->\nsecond_body\n<!--/inert-->\n\nafter the frame blank\n- [ ] owner row\n- [x] owner done\n    - [ ] owner child`
   )
   await page.evaluate(name => void (location.hash = name), breaksName)
   await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.vault-result[data-inert-rendered]'), breaksName), { timeout: 15_000 }).toBe(true)
@@ -334,6 +334,17 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       boxSize: [Math.round(rect(box).width), Math.round(rect(box).height)],
       appBox: (b => [Math.round(rect(b).width), Math.round(rect(b).height)])(content.querySelector('input[type=checkbox]')!),
       tickedOpacity: getComputedStyle(ticked).opacity,
+      // the unticked boxes fade like a ticked row does, the box alone (the owner, 2026-09-15):
+      // the passive box and the app's own checkbox alike; a ticked row's box has no fade of
+      // its own (the row's applies)
+      untickedBox: getComputedStyle(first.querySelector('span.task:not(.checked)')!).opacity,
+      untickedRow: getComputedStyle(first.querySelector('span.task:not(.checked)')!.closest('li')!).opacity,
+      tickedBox: getComputedStyle(first.querySelector('span.task.checked')!).opacity,
+      appUnchecked: getComputedStyle(content.querySelector('input[type=checkbox]:not(:checked)')!).opacity,
+      appUncheckedRow: getComputedStyle(content.querySelector('input[type=checkbox]:not(:checked)')!.closest('li')!).opacity,
+      // an unticked child under a ticked parent: the parent's row fade applies, the box adds none
+      nestedUnticked: getComputedStyle(first.querySelector('li.checkbox.checked span.task:not(.checked)')!).opacity,
+      appNestedUnchecked: getComputedStyle(content.querySelector('li.checkbox.checked input[type=checkbox]:not(:checked)')!).opacity,
       tickedMark: getComputedStyle(first.querySelector('span.task.checked')!, ':after').content,
       markColor: getComputedStyle(first.querySelector('span.task.checked')!).color,
       // the all-task nested list: no bullets, the boxes pulled into the bullet's place as the app's
@@ -344,9 +355,9 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   }, breaksName)
   expect(layout.underFirst, 'text on the next line: its own line under the frame, no empty line').toBe(1)
   expect(layout.underSecond, 'a blank line after the frame: one empty line').toBe(1)
-  expect(layout.inner, 'a blank line inside the frame: the app\'s spacer at the end of the paragraph it follows').toEqual(['P:break_body', 'P:inner_after_blank', 'UL:item one item two open row done row', 'P:', 'UL:plan a plan b'])
+  expect(layout.inner, 'a blank line inside the frame: the app\'s spacer at the end of the paragraph it follows').toEqual(['P:break_body', 'P:inner_after_blank', 'UL:item one item two open row done row', 'P:', 'UL:plan a plan b plan c'])
   expect(layout.innerGap, 'a blank line inside the frame: one text line and one empty line before the next paragraph').toBe(2)
-  expect(layout.wrappers, 'exactly one list-item wrapper per row').toEqual([1, 1, 1, 1, 1, 1])
+  expect(layout.wrappers, 'exactly one list-item wrapper per row').toEqual([1, 1, 1, 1, 1, 1, 1])
   expect(layout.listColor, 'the list reads in the item\'s text color, not the bullet gray').toBe(layout.plainColor)
   expect(layout.inputs, 'task rows carry no input').toBe(0)
   expect(layout.boxSize, 'a passive box the size of the app\'s checkbox').toEqual(layout.appBox)
@@ -356,6 +367,10 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(layout.tickedMark, 'a ticked box shows the app\'s mark').toContain('✓')
   expect(layout.tickedMark, 'never the heavy check mark').not.toContain('✔')
   expect(layout.markColor, 'the mark in the text\'s own color').toBe(layout.plainColor)
+  expect([layout.untickedBox, layout.untickedRow], 'an unticked passive box fades like a ticked row, its text does not').toEqual(['0.5', '1'])
+  expect([layout.appUnchecked, layout.appUncheckedRow], 'the app\'s unchecked box likewise').toEqual(['0.5', '1'])
+  expect(layout.tickedBox, 'a ticked row\'s box: the row\'s fade alone').toBe('1')
+  expect([layout.nestedUnticked, layout.appNestedUnchecked], 'an unticked box under a ticked row: no fade of its own (the row\'s applies once)').toEqual(['1', '1'])
   expect(layout.planList, 'an all-task list has no bullets (the app\'s ul.checkbox)').toEqual(['none', true])
   expect(layout.planBox, 'its boxes sit where the app\'s own do').toBe(layout.ownerBox)
   const before = await page.evaluate(name => window._item(name, true)!.text, breaksName)
