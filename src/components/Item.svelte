@@ -75,6 +75,15 @@
   export let focused = false
   export let saving = false
   export let running = false
+  // a TASK item (a delegated todo: its store carries the bridge's `_agent.state`, vault design
+  // mind_task_agents 9.6) shows no running overlay: the blue border and the todo line's marker
+  // are its indicator, and the dimming layer with the spinner stays the chat's
+  // re-evaluated on `version` too: the store's arrival invalidates the render (a projection
+  // delivered during a running mark takes effect on the mounted item)
+  $: task = isTaskItem(running, id, version)
+  function isTaskItem(running: boolean, id: string, _version: number): boolean {
+    return !!running && !!(window as any)._item?.('id:' + id, true)?._global_store?._agent?.state
+  }
   export let admin = false
   export let fixed = false
   // hide the item label on shared pages: always for contiguous reading pages, and for the item at
@@ -1966,6 +1975,7 @@
     class:target
     class:target_context
     class:running
+    class:task
     class:admin
     class:showLogs
     class:bordered={error || failedTests || warning || running || target || pushable || previewable}
@@ -2376,6 +2386,9 @@
   .saving .loading {
     visibility: visible;
   }
+  .container.task.running:not(.saving) .loading {
+    visibility: hidden; /* a task item: the border and the marker indicate, nothing dims */
+  }
   /* remove .status div when empty */
   .loading .status:empty {
     display: none;
@@ -2520,6 +2533,27 @@
   }
   .item > :global(.content input[type='checkbox']:checked:after) {
     content: '✔︎'; /* could be: ✔︎✓ */
+  }
+  /* the inert tree's task rows (vault design mind_task_agents 9.6): a passive box styled like
+     the checkbox above, monochrome, the same size ticked or not */
+  .item > :global(.content span.task) {
+    box-sizing: border-box; /* the input's default: 20px with its border */
+    border: 1px solid #aaa;
+    border-radius: 4px;
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    color: white;
+  }
+  .item > :global(.content span.task.checked:after) {
+    content: '✔︎';
+  }
+  .item > :global(.content ul.checkbox > li > span.list-item > span.task),
+  .item > :global(.content ul.checkbox > li > span.list-item > p > span.task) {
+    margin-left: -15px;
   }
 
   /* use default top-alignment & column-spacing and for tables */

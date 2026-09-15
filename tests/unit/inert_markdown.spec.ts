@@ -19,34 +19,56 @@ test('the grammar carrier and the entity decoder', () => {
   expect(decodeEntities('&#0; &#1114112; &#xD800; &#1;')).toBe('� � � �') // outside the domain
 })
 
-test('blank lines are spacer lines: one per empty source line, none where the source has none', () => {
-  // the app zeroes block margins, so a blank line inside the frame is the app's own spacer line
-  // (`&nbsp;<br>` in a paragraph): counted per source line between blocks of every kind, a leading
-  // run included; a trailing run is not rendered (the app trims an item's rendered tail); a
-  // newline inside a paragraph is a break; a blank line inside a code block is code
+test('the app layout: spacer lines, rules, quotes, list and table closing, controls replaced', () => {
+  // the app's own line pass ahead of Marked (Item.svelte, the vault renderer's port; design
+  // 9.6): an empty source line is the app's spacer (`&nbsp;<br>` at the end of the paragraph it
+  // follows, its own paragraph after a block); a trailing or leading run is not rendered; a
+  // newline inside a paragraph is a break; a blank line inside a code block is code; a rule
+  // line is a rule even between prose lines (no setext heading); an empty quote line is the
+  // app's non-breaking space; a list or a table is closed by the line after it; CRLF is LF and
+  // the body's other control characters are the replacement character (the sentinels are the
+  // pass's alone)
   const spacer = '<p>&#160;<br></p>\n'
-  expect(html('one\n\ntwo')).toBe(`<div class="inert-markdown"><p>one</p>\n${spacer}<p>two</p></div>`)
-  expect(html('one\n\n\ntwo')).toBe(`<div class="inert-markdown"><p>one</p>\n${spacer}${spacer}<p>two</p></div>`)
+  expect(html('one\n\ntwo')).toBe('<div class="inert-markdown"><p>one<br>&#160;<br></p>\n<p>two</p></div>')
+  expect(html('one\n\n\ntwo')).toBe(`<div class="inert-markdown"><p>one<br>&#160;<br></p>\n${spacer}<p>two</p></div>`)
   expect(html('one\ntwo')).toBe('<div class="inert-markdown"><p>one<br>two</p></div>')
-  expect(html('\n\nlead\n\n')).toBe(`<div class="inert-markdown">${spacer}${spacer}<p>lead</p></div>`)
+  expect(html('\n\nlead\n\n')).toBe('<div class="inert-markdown"><p>lead</p></div>')
   expect(html('# H\ntext')).toBe('<div class="inert-markdown"><h1>H</h1>\n<p>text</p></div>')
   expect(html('## h\n\n- a\n- b\n\n```\nx\n\ny\n```\n\nend')).toBe(
-    `<div class="inert-markdown"><h2>h</h2>\n${spacer}<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n${spacer}<pre><code>x&#10;&#10;y</code></pre>\n${spacer}<p>end</p></div>`
+    `<div class="inert-markdown"><h2>h</h2>\n${spacer}<ul>\n<li><span class="list-item">a</span></li>\n<li><span class="list-item">b</span></li>\n</ul>\n${spacer}<pre><code>x&#10;&#10;y</code></pre>\n${spacer}<p>end</p></div>`
   )
-  expect(html('a\n\n---\n\nb')).toBe(`<div class="inert-markdown"><p>a</p>\n${spacer}<hr>\n${spacer}<p>b</p></div>`)
-  // a loose item's blank line stays in the item; a blockquote's blank line stays in the quote
-  expect(html('- a\n\n- b\n\ntext')).toBe(`<div class="inert-markdown"><ul>\n<li><p>a</p>\n${spacer}</li>\n<li><p>b</p>\n</li>\n</ul>\n${spacer}<p>text</p></div>`)
-  expect(html('- a\n\n\n- b')).toContain(`<li><p>a</p>\n${spacer}${spacer}</li>`) // exact for a longer run
-  expect(html('> a\n>\n> b')).toBe(`<div class="inert-markdown"><blockquote>\n<p>a</p>\n${spacer}<p>b</p>\n</blockquote></div>`)
-  // a container's trailing whitespace without a newline is no line (Marked lexes it as a space token)
-  expect(html('> a\n> a\n  ')).toBe('<div class="inert-markdown"><blockquote>\n<p>a<br>a</p>\n</blockquote></div>')
+  expect(html('a\n\n---\n\nb')).toBe(`<div class="inert-markdown"><p>a<br>&#160;<br></p>\n<hr>\n${spacer}<p>b</p></div>`)
+  expect(html('before\n---\nafter')).toBe('<div class="inert-markdown"><p>before</p>\n<hr>\n<p>after</p></div>')
+  expect(html('a\n=\nb')).toBe('<div class="inert-markdown"><p>a<br>&#61; &#160;<br>b</p></div>') // no setext heading
+  expect(html('> a\n>\n> b')).toBe('<div class="inert-markdown"><blockquote>\n<p>a<br>&#160;<br>b</p>\n</blockquote></div>')
+  expect(html('> > deep\n> up')).toBe('<div class="inert-markdown"><blockquote>\n<blockquote>\n<p>deep</p>\n</blockquote>\n<p>up</p>\n</blockquote></div>')
+  expect(html('- a\n- b\nafter list')).toBe('<div class="inert-markdown"><ul>\n<li><span class="list-item">a</span></li>\n<li><span class="list-item">b</span></li>\n</ul>\n<p>after list</p></div>')
+  expect(html('| h |\n|---|\n| c |\nafter table')).toContain('</table>\n<p>after table</p>')
+  expect(html('xy' + String.fromCharCode(13) + '\nz')).toBe('<div class="inert-markdown"><p>xy<br>z</p></div>')
+  expect(html('ctl' + String.fromCharCode(1) + 'x' + String.fromCharCode(2))).toBe('<div class="inert-markdown"><p>ctl&#65533;x&#65533;</p></div>')
+  expect(html('```\n\n\ncode blank\n\n```\n\n')).toBe('<div class="inert-markdown"><pre><code>&#10;&#10;code blank&#10;</code></pre></div>')
+})
+
+test('lists carry the app\'s list-item wrapper and task rows are passive boxes with the app\'s classes', () => {
+  // the app restores the text color on `span.list-item` (its `ul` and `ol` are bullet gray);
+  // a task row is `li.checkbox` (`.checked` when ticked, dimmed by the app) with a `span.task`
+  // box in place of a checkbox (no input, no handler); a list of task rows is `ul.checkbox`
+  const nested = html('- a\n    - b\n        - c')
+  expect(nested).toBe('<div class="inert-markdown"><ul>\n<li><span class="list-item">a<ul>\n<li><span class="list-item">b<ul>\n<li><span class="list-item">c</span></li>\n</ul>\n</span></li>\n</ul>\n</span></li>\n</ul></div>')
+  expect(html('1. one\n2. two')).toBe('<div class="inert-markdown"><ol>\n<li><span class="list-item">one</span></li>\n<li><span class="list-item">two</span></li>\n</ol></div>')
+  const tasks = html('- [ ] todo\n- [x] done\n')
+  expect(tasks).toBe(
+    '<div class="inert-markdown"><ul class="checkbox">\n<li class="checkbox"><span class="list-item"><span class="task"></span> todo</span></li>\n<li class="checkbox checked"><span class="list-item"><span class="task checked"></span> done</span></li>\n</ul></div>'
+  )
+  expect(tasks).not.toContain('<input')
+  expect(html('- [ ] task\n- plain')).toContain('<ul>\n<li class="checkbox">') // a mixed list keeps its bullets
 })
 
 test('markdown structure renders with every text character referenced', () => {
   const out = html('## Heading\n\n- one\n- two\n\nSome *emphasis* and `code #x`.\n')
   expect(out.startsWith('<div class="inert-markdown">')).toBe(true)
   expect(out).toContain('<h2>Heading</h2>')
-  expect(out).toContain('<li>one</li>')
+  expect(out).toContain('<li><span class="list-item">one</span></li>')
   expect(out).toContain('<em>emphasis</em>')
   expect(out).toContain('<code>code &#35;x</code>')
   // no raw grammar character in any text piece
@@ -75,7 +97,7 @@ test('raw html is visible text: comments in gray code typography, other html cod
   expect(html('<img src=x onerror="pwn()">')).not.toContain('onerror=')
 })
 
-test('links: only http, https and mailto become anchors (noopener); images are placeholders; tasks are static', () => {
+test('links: only http, https and mailto become anchors (noopener); images are placeholders', () => {
   expect(html('[x](https://a.b/)')).not.toContain('rel="opener"') // never an opener relationship
   expect(html('[ok](https://x.y/z?a=1&amp;b=2)')).toContain('<a href="https&#58;&#47;&#47;x&#46;y&#47;z&#63;a&#61;1&#38;b&#61;2" target="_blank" rel="noopener">ok</a>')
   expect(html('[mail](mailto:a@b.c)')).toContain('<a href="mailto&#58;a&#64;b&#46;c" target="_blank" rel="noopener">mail</a>')
@@ -86,10 +108,6 @@ test('links: only http, https and mailto become anchors (noopener); images are p
   const img = html('![alt](https://x.y/i.png)')
   expect(img).not.toContain('<img')
   expect(img).toContain('<span class="template_placeholder" title="image placeholder (not loaded, not a link)">https&#58;')
-  const tasks = html('- [ ] todo\n- [x] done\n')
-  expect(tasks).not.toContain('<input')
-  expect(tasks).toContain('&#9744; todo')
-  expect(tasks).toContain('&#9745; done')
 })
 
 test('fenced code: plain without a highlighter, filtered spans with one', () => {

@@ -535,4 +535,38 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const dragged = (await commands())[4]
   expect([dragged.wrapper.item.kind, dragged.wrapper.item.task]).toEqual(['delegate', await savedId(page, OTHER)])
   await expect.poll(async () => (await lists(page)).delegated.map(r => r[1]), { timeout: 30_000 }).toEqual(['delegate', 'delegate'])
+
+  // (h) a TASK item shows no running overlay (vault design 9.6): while its run is listed the
+  // blue border marks it, but the dimming layer with the spinner stays hidden; the
+  // classification follows the store on the SAME mounted item (a projection removed while
+  // running restores the overlay, one delivered while running hides it: review 0 B1); the
+  // other todo (no `_agent.state` in its store) keeps the chat's overlay under the same mark
+  const setRunning = (name: string, running: boolean) =>
+    page.evaluate(([name, running]) => void ((window._item(name as string, true) as any).running = running), [name, running] as const)
+  const overlay = (name: string) =>
+    page.evaluate(name => {
+      const item = window._item(name as string, true)!
+      const container = item.elem!.querySelector('.container') as HTMLElement
+      const loading = item.elem!.querySelector('.loading') as HTMLElement
+      return { running: container.classList.contains('running'), task: container.classList.contains('task'), overlay: getComputedStyle(loading).visibility }
+    }, name)
+  await page.evaluate(name => void (location.hash = name), TASK)
+  await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem, TASK), { timeout: 30_000 }).toBe(true)
+  const taskStore = await serverStore(`global_store_${taskId}`)
+  await setRunning(TASK, true)
+  await expect.poll(() => overlay(TASK), { timeout: 15_000 }).toEqual({ running: true, task: true, overlay: 'hidden' }) // the task item: marked, no overlay
+  const { _agent: _dropped, ...withoutAgent } = taskStore
+  await writeStore(STORE, `global_store_${taskId}`, withoutAgent) // the projection gone while running: the overlay is back
+  await expect.poll(() => overlay(TASK), { timeout: 15_000 }).toEqual({ running: true, task: false, overlay: 'visible' })
+  await writeStore(STORE, `global_store_${taskId}`, taskStore) // delivered again, running unchanged: hidden on the same mounted item
+  await expect.poll(() => overlay(TASK), { timeout: 15_000 }).toEqual({ running: true, task: true, overlay: 'hidden' })
+  await setRunning(TASK, false)
+  await expect.poll(() => overlay(TASK), { timeout: 15_000 }).toEqual({ running: false, task: false, overlay: 'hidden' })
+  await page.evaluate(name => void (location.hash = name), OTHER)
+  await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem, OTHER), { timeout: 30_000 }).toBe(true)
+  await setRunning(OTHER, true)
+  await expect.poll(() => overlay(OTHER), { timeout: 15_000 }).toEqual({ running: true, task: false, overlay: 'visible' }) // an ordinary item keeps the overlay
+  await setRunning(OTHER, false)
+  await expect.poll(() => overlay(OTHER), { timeout: 15_000 }).toEqual({ running: false, task: false, overlay: 'hidden' })
+
 })
