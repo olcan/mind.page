@@ -334,15 +334,15 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       boxSize: [Math.round(rect(box).width), Math.round(rect(box).height)],
       appBox: (b => [Math.round(rect(b).width), Math.round(rect(b).height)])(content.querySelector('input[type=checkbox]')!),
       tickedOpacity: getComputedStyle(ticked).opacity,
-      // the unticked boxes fade like a ticked row does, the box alone (the owner, 2026-09-15):
-      // the passive box and the app's own checkbox alike; a ticked row's box has no fade of
-      // its own (the row's applies)
+      // the unticked passive box fades like a ticked row does, the box alone (the owner,
+      // 2026-09-15); the app's own checkbox outside inert sections stays a live control at
+      // full strength; a ticked row's passive box has no fade of its own (the row's applies)
       untickedBox: getComputedStyle(first.querySelector('span.task:not(.checked)')!).opacity,
       untickedRow: getComputedStyle(first.querySelector('span.task:not(.checked)')!.closest('li')!).opacity,
       tickedBox: getComputedStyle(first.querySelector('span.task.checked')!).opacity,
       appUnchecked: getComputedStyle(content.querySelector('input[type=checkbox]:not(:checked)')!).opacity,
       appUncheckedRow: getComputedStyle(content.querySelector('input[type=checkbox]:not(:checked)')!.closest('li')!).opacity,
-      // an unticked child under a ticked parent: the parent's row fade applies, the box adds none
+      // an unticked passive child under a ticked parent: the parent's row fade applies, the box adds none
       nestedUnticked: getComputedStyle(first.querySelector('li.checkbox.checked span.task:not(.checked)')!).opacity,
       appNestedUnchecked: getComputedStyle(content.querySelector('li.checkbox.checked input[type=checkbox]:not(:checked)')!).opacity,
       tickedMark: getComputedStyle(first.querySelector('span.task.checked')!, ':after').content,
@@ -368,9 +368,9 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(layout.tickedMark, 'never the heavy check mark').not.toContain('✔')
   expect(layout.markColor, 'the mark in the text\'s own color').toBe(layout.plainColor)
   expect([layout.untickedBox, layout.untickedRow], 'an unticked passive box fades like a ticked row, its text does not').toEqual(['0.5', '1'])
-  expect([layout.appUnchecked, layout.appUncheckedRow], 'the app\'s unchecked box likewise').toEqual(['0.5', '1'])
+  expect([layout.appUnchecked, layout.appUncheckedRow], 'the app\'s own unchecked box stays a live control: no fade').toEqual(['1', '1'])
   expect(layout.tickedBox, 'a ticked row\'s box: the row\'s fade alone').toBe('1')
-  expect([layout.nestedUnticked, layout.appNestedUnchecked], 'an unticked box under a ticked row: no fade of its own (the row\'s applies once)').toEqual(['1', '1'])
+  expect([layout.nestedUnticked, layout.appNestedUnchecked], 'an unticked box under a ticked row, passive or the app\'s: no fade of its own (the row\'s applies once)').toEqual(['1', '1'])
   expect(layout.planList, 'an all-task list has no bullets (the app\'s ul.checkbox)').toEqual(['none', true])
   expect(layout.planBox, 'its boxes sit where the app\'s own do').toBe(layout.ownerBox)
   const before = await page.evaluate(name => window._item(name, true)!.text, breaksName)

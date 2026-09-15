@@ -2541,16 +2541,6 @@
     content: '\2713\FE0E';
     transform: translateY(-1px);
   }
-  /* an unticked box fades like a ticked one (whose whole row fades above), the box alone,
-     so both read as the item's passive boxes rather than as live controls (the owner,
-     2026-09-15); inside a ticked row the row's fade already applies */
-  .item > :global(.content input[type='checkbox']:not(:checked)),
-  .item > :global(.content span.task:not(.checked)) {
-    opacity: 0.5;
-  }
-  .item > :global(.content li.checkbox.checked :is(input[type='checkbox'], span.task)) {
-    opacity: 1;
-  }
   /* the inert tree's task rows (vault design mind_task_agents 9.6): a passive box styled like
      the checkbox above, monochrome, the same size ticked or not */
   .item > :global(.content span.task) {
@@ -2572,6 +2562,16 @@
   .item > :global(.content span.task.checked:after) {
     content: '\2713\FE0E';
     transform: translateY(-1px);
+  }
+  /* an unticked passive box fades like a ticked row does (above), the box alone, so the
+     inert tree's boxes read as passive either way, unlike the app's own checkboxes outside
+     inert sections, which stay live controls at full strength (the owner, 2026-09-15);
+     inside a ticked row the row's fade already applies */
+  .item > :global(.content span.task:not(.checked)) {
+    opacity: 0.5;
+  }
+  .item > :global(.content li.checkbox.checked span.task) {
+    opacity: 1;
   }
   .item > :global(.content ul.checkbox > li > span.list-item > span.task),
   .item > :global(.content ul.checkbox > li > span.list-item > p > span.task) {
