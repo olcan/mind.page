@@ -50,6 +50,19 @@ if lsof -nP -iTCP:8080 -iTCP:9099 -iTCP:4400 -sTCP:LISTEN >/dev/null 2>&1; then
   echo "stop it first (see docs/mind_page.md, Testing); nothing was started" >&2
   exit 75
 fi
+# the vendored cdn assets (vault design mind_task_agents 9.7; src/server/vendor.mjs): a lane
+# server serves the shell with its cdn origins pointed at its own `/vendor/<host>` route and
+# serves the assets from the cache under the real home, online or not, while the gate's browsers
+# refuse every remote host (playwright.config.ts); the manifest's assets are fetched into the
+# cache when online and required complete when not, and a vendor request outside the manifest
+# fails the run below with the url to record (`node tests/e2e/vendor.mjs add <url>`, host-side)
+export VENDOR_DIR="${VENDOR_DIR:-$HOME/.cache/mindpage/vendor}"
+# the browsers the gate starts outside the lanes (prerender.mjs) resolve loopback only too
+export E2E_OFFLINE=1
+node tests/e2e/vendor.mjs fill
+mkdir -p test-results
+export VENDOR_UNLISTED="$PWD/test-results/vendor_unlisted.txt"
+rm -f "$VENDOR_UNLISTED"
 # SKIP_BUILD is the quick loop above and is NOT the gate: it serves whatever `build/` holds
 if [ -n "${SKIP_BUILD:-}" ]; then
   echo "WARNING: SKIP_BUILD=1 — serving the EXISTING build/; any src/ change is invisible to this run" >&2
@@ -60,4 +73,11 @@ fi
 # argument boundaries and quoting (a --grep 'a|b' would become a shell pipeline there)
 playwright_args=''
 [ $# -gt 0 ] && printf -v playwright_args ' %q' "$@"
-firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test$playwright_args"
+status=0
+firebase emulators:exec --only auth,firestore "node tests/e2e/seed.mjs && npx playwright test$playwright_args" || status=$?
+if [ -s "$VENDOR_UNLISTED" ]; then
+  echo "cdn assets outside the vendored manifest were requested (reason, url, referer; record each with \`node tests/e2e/vendor.mjs add <url>\`):" >&2
+  sort -u "$VENDOR_UNLISTED" >&2
+  exit 1
+fi
+exit $status

@@ -100,19 +100,25 @@ const isFileRouteAllowed = req => secretMatches(presentedSecret(req), proxySecre
 
 // the SCOPED mode of a fixture server (LOCAL_ROUTES_SCOPE, set for the e2e lane servers; 7b-2a
 // review 1 R1): a server whose credential is the run's own and lives where a worker can read it
-// serves its checkout only, so its file routes serve only paths under the scope (the
-// checkout, symlinks resolved) and its proxy forwards only to loopback backends; the owner's
-// servers run unscoped
-const routesScope = process.env.LOCAL_ROUTES_SCOPE ? fs.realpathSync(process.env.LOCAL_ROUTES_SCOPE) : null
+// serves its checkouts only, so its file routes serve only paths under the scope's roots (this
+// checkout and the sibling mind.items checkout the gate's install and preview seam reads,
+// path.delimiter-separated, symlinks resolved: never the checkouts' parent, whose other
+// entries include the account mirror) and its proxy forwards only to loopback backends; the
+// owner's servers run unscoped
+const routesScopes = process.env.LOCAL_ROUTES_SCOPE
+  ? process.env.LOCAL_ROUTES_SCOPE.split(path.delimiter)
+      .filter(Boolean)
+      .map(root => fs.realpathSync(root))
+  : null
 const withinScope = target => {
-  if (!routesScope) return true
+  if (!routesScopes) return true
   let resolved
   try {
     resolved = fs.realpathSync(target)
   } catch {
     resolved = path.resolve(target)
   }
-  return resolved == routesScope || resolved.startsWith(routesScope + path.sep)
+  return routesScopes.some(root => resolved == root || resolved.startsWith(root + path.sep))
 }
 // the proxy's backend, one shared parser for the gate and the router (7b-2a review 2 B1): the
 // first path segment after /proxy/ (a collapsed scheme slash repaired), a real URL parse, no
@@ -134,7 +140,7 @@ const proxyBackend = url => {
 const isProxyBackendAllowed = url => {
   const backend = proxyBackend(url)
   if (!backend) return false
-  if (!routesScope) return true
+  if (!routesScopes) return true
   const hostname = backend.hostname.replace(/^\[|\]$/g, '')
   return hostname == 'localhost' || isLoopbackAddress(hostname)
 }
@@ -164,7 +170,7 @@ const proxyRouter = express.Router() // empty (a pass-through) until enableLocal
 
 // the unscoped servers' static assets; not constructed for a scoped one (sirv scans static/ at
 // construction in production, and the scoped reader below serves those requests itself)
-const staticAssets = routesScope
+const staticAssets = routesScopes
   ? null
   : sirv('static', {
       dev,
@@ -468,7 +474,7 @@ export function enableLocalProxy() {
     // follow redirects (instead of exposing to browser w/ potential CORS issues); NOT in the
     // scoped mode (review 2 B1): a followed redirect would leave the loopback backends the
     // scope allows, so a scoped server returns the redirect to its caller instead
-    followRedirects: !routesScope,
+    followRedirects: !routesScopes,
     // NO automatic websocket listener: with ws:true the middleware registers its own 'upgrade'
     // listener on the server, and a guard that merely destroys the client socket does NOT stop it
     // — node keeps calling later listeners, so the proxy still resolved the target, opened the

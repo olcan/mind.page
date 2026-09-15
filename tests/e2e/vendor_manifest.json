@@ -1,0 +1,53 @@
+{
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.7.0/build/styles/sunburst.min.css": {
+    "type": "text/css"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/applescript.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/coffeescript.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/glsl.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/latex.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/mathematica.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/npm/c3@0.7.2/c3.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.css": {
+    "type": "text/css"
+  },
+  "https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/npm/jstat/dist/jstat.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/npm/jstat@latest/dist/jstat.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/color.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/tex-svg.min.js": {
+    "type": "application/javascript"
+  },
+  "https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/graphvizlib.wasm": {
+    "type": "application/wasm"
+  },
+  "https://unpkg.com/@hpcc-js/wasm@0.3.11/dist/index.min.js": {
+    "type": "text/javascript"
+  }
+}

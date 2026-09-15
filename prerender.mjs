@@ -5,6 +5,7 @@
 // on the page itself. usage: node prerender.mjs [url] [--prod]  (default http://localhost:3100; a localhost
 // url targets the firestore emulator, so local captures can never touch production)
 import { chromium } from '@playwright/test'
+import { OFFLINE_BROWSER_ARGS } from './src/e2e_lanes.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { firebaseConfig } from './firebase-config.js'
@@ -18,7 +19,11 @@ if (!local && !process.argv.includes('--prod')) {
   process.exit(1)
 }
 
-const browser = await chromium.launch()
+// under the e2e gate (E2E_OFFLINE, tests/e2e/run.sh) this separate browser resolves loopback only
+// like the lanes' (src/e2e_lanes.js); a production capture stays online
+const offline = !!process.env.E2E_OFFLINE
+if (offline) console.log('prerender: browser offline (loopback only)')
+const browser = await chromium.launch({ args: offline ? OFFLINE_BROWSER_ARGS : [] })
 const page = await browser.newPage()
 await page.goto(url, { timeout: 60_000 })
 await page.getByText('Stay Anonymous', { exact: true }).click({ timeout: 60_000 })

@@ -27,3 +27,14 @@ export function laneProject(port, base) {
   const index = Number(port) - E2E_BASE_PORT
   return index > 0 ? `${base}-e2e${index}` : base
 }
+
+// the gate's browsers resolve loopback only (vault design mind_task_agents 9.7, the offline app
+// gate): Chromium's host-resolver rule as a launch argument (not request interception, which
+// disables the browser's http cache), the ip literals excluded explicitly (the rule applies to
+// them too, and the emulators are 127.0.0.1) and the localhost subdomains the app navigates to
+// (`shared.localhost`, the shared view). every lane's project applies it (playwright.config.ts),
+// and so does the frozen-render capture the gate runs (prerender.mjs under E2E_OFFLINE); the
+// explicitly live provider row overrides it at file scope (tests/e2e/admin_live.spec.ts)
+export const OFFLINE_BROWSER_ARGS = [
+  '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE *.localhost, EXCLUDE 127.0.0.1, EXCLUDE ::1',
+]

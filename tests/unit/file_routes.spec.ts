@@ -3,14 +3,15 @@ import { spawn, type ChildProcess } from 'child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'fs'
 import { createServer, request as httpRequest, type Server } from 'http'
 import { tmpdir } from 'os'
-import { join, resolve } from 'path'
+import { delimiter, dirname, join, resolve } from 'path'
 import { pathToFileURL } from 'url'
 
 // the localhost-only routes over the ACTUAL middleware, in a child node process that runs IN a
 // fixture checkout (so the static route serves the fixture's static/), under a synthetic home
 // (its own proxy secret), beside a second synthetic home with a sentinel credential, and with a
 // fresh loopback backend (vault design mind_task_agents 9.9; 7b-2a reviews 0-2). every fixture
-// server is SCOPED to its checkout (LOCAL_ROUTES_SCOPE), as the e2e lanes are: a credential a
+// server is SCOPED to its checkout and the sibling mind.items directory (LOCAL_ROUTES_SCOPE's
+// two roots), as the e2e lanes are: a credential a
 // worker can read (the child's, under the system temp directory) must open nothing of the
 // host's. no emulator, no build, no real credential; the child is killed and awaited on every
 // exit path
@@ -26,7 +27,14 @@ type Child = { child: ChildProcess; port: number }
 async function startServer(checkout: string, home: string): Promise<Child> {
   const child = spawn(process.execPath, ['--input-type=module', '-e', SERVER], {
     cwd: checkout,
-    env: { ...process.env, NO_HTTPS: '1', HOME: home, PWD: checkout, LOCAL_ROUTES_SCOPE: checkout },
+    // the scope's roots: the checkout and its sibling mind.items (the lanes' install and preview seam)
+    env: {
+      ...process.env,
+      NO_HTTPS: '1',
+      HOME: home,
+      PWD: checkout,
+      LOCAL_ROUTES_SCOPE: [checkout, join(dirname(checkout), 'mind.items')].join(delimiter),
+    },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
   try {
@@ -113,6 +121,8 @@ function fixture() {
   writeFileSync(join(other, '.mindpage', 'proxy_secret'), 'OTHER-HOME-SENTINEL-0123456789\n')
   writeFileSync(join(other, 'note.md'), 'another private note\n')
   writeFileSync(join(root, 'outside.md'), 'a note outside the checkout\n')
+  mkdirSync(join(root, 'mind.items'))
+  writeFileSync(join(root, 'mind.items', 'tester.md'), 'a sibling checkout file\n')
   writeFileSync(join(checkout, 'note.md'), 'a checkout note\n')
   writeFileSync(join(checkout, 'static', 'plain.txt'), 'a plain asset\n')
   symlinkSync(join(other, '.mindpage', 'proxy_secret'), join(checkout, 'static', 'planted.txt'))
@@ -170,7 +180,13 @@ test('the file routes take the secret, serve the checkout only, and never serve 
       status: 200,
       text: 'a checkout note\n',
     })
-    // outside the scope: refused even to the secret (a file beside the checkout, the parent)
+    // the sibling checkout, the scope's second root: refused without the secret, served with it
+    expect((await get(port, '/file/mind.items/tester.md')).status, 'the sibling, no secret').toBe(403)
+    expect(await get(port, '/file/mind.items/tester.md', auth), 'the sibling, the secret').toMatchObject({
+      status: 200,
+      text: 'a sibling checkout file\n',
+    })
+    // outside the scope: refused even to the secret (a file beside the checkouts, their parent)
     for (const path of [`/file_abs${join(f.root, 'outside.md')}`, `/file_abs${f.root}`, '/file/outside.md'])
       expect((await get(port, path, auth)).status, path).toBe(403)
     // the credentials: this server's own and another home's, refused even to the secret under

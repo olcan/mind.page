@@ -4,6 +4,7 @@
 import fs from 'fs'
 import https from 'https'
 import { enableLocalProxy, guardProxyUpgrades, middleware, server_id } from './src/server/app.mjs'
+import { vendoredAssets } from './src/server/vendor.mjs'
 import { handler } from './build/handler.js'
 
 // HOST binds the http listener to one address (the e2e lanes bind `127.0.0.1`: a worker sandbox
@@ -11,12 +12,14 @@ import { handler } from './build/handler.js'
 // mind_task_agents 9.7); unset, the listener binds every address as before
 const { PORT = 3000, HOST } = process.env
 enableLocalProxy() // local server: mount the proxy BEFORE the kit handler claims the path
+// the e2e gate's vendored cdn assets (VENDOR_DIR, see src/server/vendor.mjs): a lane server only
+if (process.env.VENDOR_DIR) middleware.use(vendoredAssets())
 middleware.use(handler) // kit handles all remaining requests (pages, assets, service worker)
-guardProxyUpgrades(
-  middleware.listen(PORT, HOST, () => {
-    console.log(`HTTP server ${server_id} listening on http://${HOST ?? 'localhost'}:${PORT}`)
-  }),
-)
+const http = middleware.listen(PORT, HOST, () => {
+  // the bound port, not the requested one: PORT=0 picks a free port (a test's throwaway server)
+  console.log(`HTTP server ${server_id} listening on http://${HOST ?? 'localhost'}:${http.address().port}`)
+})
+guardProxyUpgrades(http)
 if (!process.env.NO_HTTPS)
   guardProxyUpgrades(
     https

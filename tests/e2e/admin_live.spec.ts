@@ -15,6 +15,10 @@ import { expect, test } from '@playwright/test'
 import { install, loadAdmin } from './helpers.js'
 
 test.use({ trace: 'off' })
+// the ordinary lanes' browsers resolve loopback only (playwright.config.ts, a launch argument):
+// this explicitly live row reaches the hosted providers, so it overrides that at file scope; the
+// opt-in below and the trace rule above are unchanged
+test.use({ launchOptions: { args: [] } })
 test.setTimeout(600_000)
 // file-level EXACT opt-in: the ordinary gate must not even allocate the page fixture, and a
 // stray truthy value like '0' or 'false' must not enable paid/network calls

@@ -4,3 +4,4 @@ export const E2E_LANES: string[]
 export function lanePort(lane: string): number
 export function isLanePort(port: string | number | undefined): boolean
 export function laneProject(port: string | number | undefined, base: string): string
+export const OFFLINE_BROWSER_ARGS: string[]

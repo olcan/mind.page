@@ -9,6 +9,10 @@ import { expect, test } from '@playwright/test'
 
 test('the kdf worker bundles, loads its wasm, and derives in a real browser', async ({ page }) => {
   await page.goto('/')
+  // the hook is installed by the app's boot, which is not ordered before the load event goto
+  // waits for: with the cdn loaders served by the lane (vault task agents slice 7b-2b) the load
+  // event comes early enough to expose the race, so wait for the hook itself
+  await page.waitForFunction(() => typeof (window as any).__kdfSmoke == 'function')
   const result = await page.evaluate(() => (window as any).__kdfSmoke())
   expect(result.length, 'a 32-byte key came back through the worker').toBe(32)
   // the SAME input as the Node known-answer row, compared in FULL: "matches the Node vector" is a

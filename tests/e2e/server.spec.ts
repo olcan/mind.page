@@ -1,12 +1,13 @@
 import { expect, test } from '@playwright/test'
 import { createHmac } from 'crypto'
-import { execSync } from 'child_process'
+import { execSync, spawn } from 'child_process'
 import { existsSync, readFileSync } from 'fs'
 import { createServer, type Server } from 'http'
-import { resolve } from 'path'
+import { delimiter, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { ADMIN, ALICE, PROFILE_ONLY, firestore } from './helpers.js'
+import { ADMIN, ALICE, PROFILE_ONLY, firestore, waitForApp } from './helpers.js'
 import { E2E_LANES, lanePort, laneProject } from '../../src/e2e_lanes.js'
+import { REWRITER, VENDOR_HOSTS } from '../../src/server/vendor_shell.js'
 import { getApps, initializeApp } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 
@@ -111,7 +112,10 @@ test.describe('crawlable public pages', () => {
       })
     // capture the app's default view from the running server into the emulator (see prerender.mjs)
     try {
-      execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
+      // the capture's own browser (a separate launch, not a lane) resolves loopback only under the
+      // gate (E2E_OFFLINE, tests/e2e/run.sh): prerender.mjs says so
+      const captured = execSync('node prerender.mjs http://localhost:3100', { cwd: repo, stdio: 'pipe', timeout: 120_000 })
+      expect(captured.toString(), 'the capture browser is offline').toContain('prerender: browser offline (loopback only)')
       await expect
         .poll(async () => (await request.get('/')).text(), { timeout: 30_000, intervals: [250] })
         .toMatch(/ssr-content[^]*class="items/) // the captured items region, not the markdown fallback
@@ -271,28 +275,127 @@ test('/server_id identifies the server process', async ({ request }) => {
   expect(await (await request.get('/server_id')).text()).toBe(id)
 })
 
-test('every cdn loader precedes kit\'s bootstrap in the BUILT shell', async ({ request }) => {
+test("every cdn loader precedes kit's bootstrap in the BUILT shell, vendored by the lane", async ({ request }) => {
   // tests/unit/app_html.spec.ts pins the exact loader list and their classic/parser-blocking
   // properties in the SOURCE shell. what it cannot see is kit's bootstrap moving above them —
   // %sveltekit.head% precedes those tags, and the bootstrap is generated, not written by hand.
   // this reads the built response and is the whole remaining guarantee: it replaces a browser test
-  // that intercepted the c3 request and waited 1.5s to prove the app had not started
+  // that intercepted the c3 request and waited 1.5s to prove the app had not started.
+  // a lane server serves the shell VENDORED (src/hooks.server.js under VENDOR_DIR, see
+  // src/server/vendor_shell.js): every cdn loader of the source shell as its /vendor/<host>/ copy,
+  // none of the vendored origins left, and the rewriter once before the first loader
   const source = readFileSync(resolve(repo, 'src/app.html'), 'utf8')
-  const expected = [...source.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)].map(m => m[1])
+  const loader = /<script\b[^>]*\bsrc="(https:\/\/[^/"]+\/[^"]+|\/vendor\/[^/"]+\/[^"]+)"[^>]*>/g
+  const expected = [...source.matchAll(loader)].map(m => m[1].replace(/^https:\/\/([^/]+)\//, '/vendor/$1/'))
   expect(expected.length, 'the source shell loads cdn scripts').toBeGreaterThan(0)
+  expect(
+    expected.every(src => src.startsWith('/vendor/')),
+    'every source loader is vendored',
+  ).toBe(true)
   const html = await (await request.get('/')).text()
   const bootstrap = html.search(/\/_app\/immutable\/entry\/start\.[^"']+/)
   expect(bootstrap, "kit's generated bootstrap is present").toBeGreaterThan(-1)
   // the built external scripts must be EXACTLY the source ones — comparing the lists catches a
   // dropped loader and a build-injected extra alike, where a per-source lookup would miss the
   // second — and every one of them must still be classic, parser-blocking and above the bootstrap
-  const built = [...html.matchAll(/<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g)]
+  const built = [...html.matchAll(loader)]
   expect(built.map(m => m[1])).toEqual(expected)
+  for (const host of VENDOR_HOSTS) expect(html, `${host} is vendored`).not.toContain(`https://${host}/`)
+  expect(html.split(REWRITER).length - 1, 'the rewriter once').toBe(1)
+  expect(html.indexOf(REWRITER), 'the rewriter precedes the loaders').toBeLessThan(built[0].index!)
   for (const tag of built) {
     expect(tag[0], `${tag[1]} is still parser-blocking`).not.toMatch(/\basync\b|\bdefer\b/)
     expect(tag[0], `${tag[1]} is still a classic script`).not.toMatch(/type="module"/)
     expect(tag.index, `${tag[1]} precedes the bootstrap`).toBeLessThan(bootstrap)
   }
+})
+
+test('a plain server without VENDOR_DIR serves the shell as written', async () => {
+  // a throwaway `node server.mjs` on a free port under the LANE'S environment minus the vendoring
+  // (the run's throwaway home, the same scoped roots, the explicit loopback bind; the config
+  // gives the lane servers these, not the worker process): the cdn loaders verbatim, no /vendor/
+  // route named, no rewriter (a production build and the owner's local server are this case),
+  // and still a scoped, authenticated fixture server (a file route refuses the bare request)
+  test.setTimeout(60_000)
+  const home = process.env.E2E_HOME
+  expect(home, 'the run home (playwright.config.ts)').toBeTruthy()
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    LOCAL_ROUTES_SCOPE: [repo, resolve(process.env.MIND_ITEMS_DIR ?? join(repo, '../mind.items'))].join(delimiter),
+    HOST: '127.0.0.1',
+    NO_HTTPS: '1',
+    PORT: '0',
+    NODE_ENV: 'production',
+  }
+  delete env.VENDOR_DIR
+  delete env.VENDOR_UNLISTED
+  delete env.FIREBASE_CONFIG
+  const child = spawn('node', ['server.mjs'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  // one close promise for the startup failure and the teardown alike (a closed child never
+  // emits again; a failed launch closes without exiting); a spawn error rejects the startup too
+  const exited = new Promise<number | null>(done => child.once('close', code => done(code)))
+  try {
+    const port = await new Promise<number>((resolvePort, reject) => {
+      let out = ''
+      const seen = (chunk: Buffer) => {
+        out += chunk
+        const m = out.match(/listening on http:\/\/[^:\s]+:(\d+)/)
+        if (m) resolvePort(Number(m[1]))
+      }
+      child.stdout.on('data', seen)
+      child.stderr.on('data', seen)
+      child.once('error', reject)
+      void exited.then(code => reject(new Error(`the server exited ${code}: ${out}`)))
+      setTimeout(() => reject(new Error(`no listening line in 30s: ${out}`)), 30_000).unref()
+    })
+    const base = `http://127.0.0.1:${port}`
+    const html = await (await fetch(`${base}/`)).text()
+    const source = readFileSync(resolve(repo, 'src/app.html'), 'utf8')
+    const loader = /<script\b[^>]*\bsrc="(https:\/\/[^"]+)"[^>]*>/g
+    const expected = [...source.matchAll(loader)].map(m => m[1])
+    expect(expected.length).toBeGreaterThan(0)
+    expect([...html.matchAll(loader)].map(m => m[1])).toEqual(expected)
+    expect(html).not.toContain('/vendor/')
+    expect(html).not.toContain('data-vendor-rewriter')
+    expect((await fetch(`${base}/file/mind.page/package.json`)).status, 'authenticated').toBe(403)
+    const outside = await fetch(`${base}/file_abs${resolve(repo, '..')}`, { headers: { 'x-mindpage-local-proxy': laneSecret() } })
+    expect(outside.status, 'scoped: the checkouts\' parent is refused even to the secret').toBe(403)
+  } finally {
+    child.kill('SIGKILL')
+    await exited
+  }
+})
+
+test('item-style cdn loads reach the vendored route in the lane browser; a remote host fails', async ({ page }) => {
+  // the runtime rewriter (src/server/vendor_shell.js) turns the absolute cdn urls item code
+  // assigns (`script.src = ...` as in mind.items' load.js and todoer.js, a fetch) into the lane's
+  // route; the browser's resolver refuses every remote host (playwright.config.ts), so a load can
+  // only succeed through the route, and a script from a non-vendored host fails
+  await page.goto('/')
+  // the refusal reason of the remote load, from the browser: the resolver rule, not an http
+  // error or an unsuitable response (which would also fire onerror with networking unrestricted)
+  const failures: Record<string, string> = {}
+  page.on('requestfailed', request => (failures[request.url()] = request.failure()?.errorText ?? ''))
+  const result = await page.evaluate(async () => {
+    const load = (src: string) =>
+      new Promise<string>(done => {
+        const script = document.createElement('script')
+        script.src = src
+        script.onload = () => done('loaded ' + script.getAttribute('src'))
+        script.onerror = () => done('failed ' + script.getAttribute('src'))
+        document.head.appendChild(script)
+      })
+    const jstat = await load('https://cdn.jsdelivr.net/npm/jstat/dist/jstat.min.js')
+    const d3 = await fetch('https://cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js')
+    const remote = await load('https://example.com/nothing.js')
+    return { jstat, jstatType: typeof (window as any).jStat, d3: [d3.ok, new URL(d3.url).pathname], remote }
+  })
+  expect(result.jstat).toBe('loaded /vendor/cdn.jsdelivr.net/npm/jstat/dist/jstat.min.js')
+  expect(['function', 'object']).toContain(result.jstatType)
+  expect(result.d3).toEqual([true, '/vendor/cdn.jsdelivr.net/npm/d3@5.16.0/dist/d3.min.js'])
+  expect(result.remote).toBe('failed https://example.com/nothing.js')
+  expect(failures['https://example.com/nothing.js'], 'refused by the resolver rule').toBe('net::ERR_NAME_NOT_RESOLVED')
 })
 
 // LANES (src/e2e_lanes.js): every lane's server reads its own project. two lane projects hold
@@ -482,16 +585,34 @@ test.describe('localhost-only dev routes', () => {
     expect(await preview.text()).toContain('localStorage.getItem(')
   })
 
-  test('/file refuses a sibling checkout in the scoped lane, secret or not', async ({ request }) => {
-    // the owner's unscoped server serves the checkouts next to the repo through /file/; a lane
-    // server is scoped to its own checkout (playwright.config.ts), so the sibling is refused
+  test('/file serves the sibling mind.items checkout to the secret in the scoped lane, never the parent', async ({ request }) => {
+    // the lane server's scope has two roots (playwright.config.ts): its own checkout and the
+    // sibling mind.items checkout, the gate's install and preview seam (the app fetches the
+    // previews of installed items through /file/mind.items/...); their parent is not a root
     const sibling = resolve(repo, '../mind.items/tester.md')
     test.skip(!existsSync(sibling), 'no ../mind.items checkout')
     expect((await request.get('/file/mind.items/tester.md', { failOnStatusCode: false })).status()).toBe(403)
-    const file = await request.get('/file/mind.items/tester.md', { headers: local, failOnStatusCode: false })
-    expect(file.status()).toBe(403)
+    const file = await request.get('/file/mind.items/tester.md', { headers: local })
+    expect(file.status()).toBe(200)
+    expect(await file.text()).toBe(readFileSync(sibling, 'utf8'))
     const own = await request.get('/file/mind.page/package.json', { headers: local })
     expect(own.status()).toBe(200)
+    expect((await request.get(`/file_abs${resolve(repo, '..')}`, { headers: local, failOnStatusCode: false })).status()).toBe(403)
+  })
+
+  test("the app's own fetch carries the lane secret: the preview seam works in a lane browser", async ({ page }) => {
+    // the lane's browser origin is provisioned with the run's secret (playwright.config.ts, the
+    // storage state), and the app's fetch wrapper attaches it to the file routes, so the app's
+    // preview fetches of installed items (/file/mind.items/<name>.md) succeed as they did before
+    // the routes were authenticated (a refused preview raises a modal that blocked a tasks row)
+    test.skip(!existsSync(resolve(repo, '../mind.items/tester.md')), 'no ../mind.items checkout')
+    await page.goto('/')
+    await waitForApp(page) // the wrapper is installed by the app's boot, not by the load event
+    const statuses = await page.evaluate(async () => [
+      (await fetch('/file/mind.items/tester.md')).status,
+      (await fetch('/file/mind.page/package.json')).status,
+    ])
+    expect(statuses).toEqual([200, 200])
   })
 
   test('are not available on other hosts', async ({ request }) => {
