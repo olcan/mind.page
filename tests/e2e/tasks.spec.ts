@@ -256,6 +256,17 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await age.click()
   expect(await page.evaluate(() => (window as any).MindBox.get())).not.toContain('<1m')
 
+  // (b3) the row shows the bridge's stats when the projection carries them (vault design 9.6):
+  // workers started and the summed nominal cost after the age, the first delegation's time in
+  // the tooltip; a projection without stats shows the age alone (above)
+  const since = Date.now() - 3_600_000
+  await writeStore(STORE, `global_store_${taskId}`, { _agent: { state: { ...state, rev: 2, stats: { turns: 1, workers: 2, active: 0, cost: 1.5, since } } } })
+  await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
+    main: [['#todo write the release note', null, null]],
+    delegated: [[`<1m · 2w · $1.50 #todo [delegated] ${SNIPPET}`, null, '<1m · 2w · $1.50']],
+  })
+  expect(await age.getAttribute('title')).toBe(`${new Date(state.updated).toLocaleString()}\ndelegated ${new Date(since).toLocaleString()}`)
+
   // (c) a hand-back: the bridge's marker and its _log block on the text (the block is the last
   // content, the route tag stays at the bottom), the projection and the one-shot unsnooze
   const LOG = '```_log\nINFO: 17:41 handed back: question\n```'
