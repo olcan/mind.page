@@ -269,7 +269,9 @@ test('a delegation enqueues one command document, marks the item, and moves it t
 
   // (c) a hand-back: the bridge's marker and its _log block on the text (the block is the last
   // content, the route tag stays at the bottom), the projection and the one-shot unsnooze
-  const LOG = '```_log\nINFO: 17:41 handed back: question\n```'
+  // an INFO line is faded (the app's console-info span); an unprefixed line (a STATUS one,
+  // design 9.4) is left bare: the bright one
+  const LOG = '```_log\n17:40 proposal drafted; gates next\nINFO: 17:41 handed back: question\nINFO: 17:41 turn 1 end 2m $0.42 · total 1 turn 0w $0.42\n```'
   await rewriteText(taskId, text => text.replace('[delegated]', '[question]').replace(/\n#_agent\/vault\n$/, `\n\n${LOG}\n#_agent/vault\n`))
   await expect.poll(() => serverText(taskId), { timeout: 30_000 }).toContain(`${ANSWER}\n\n${LOG}\n#_agent/vault\n`)
   // the rendered item ends with the log block (its level-highlighted lines do not defeat the
@@ -277,7 +279,13 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(name => void (location.hash = name), TASK) // show the item alone
   const content = () => page.evaluate(name => window._item(name, true)?.elem?.querySelector('.content')?.innerHTML ?? null, TASK)
   const tail = async () => (await content())?.slice(-700) ?? null // the assertion shows the tail on failure
-  await expect.poll(tail, { timeout: 30_000 }).toMatch(/console-info">INFO: 17:41 handed back: question<\/span>\n?<\/code><\/pre>\s*$/)
+  await expect.poll(tail, { timeout: 30_000 }).toMatch(/17:40 proposal drafted; gates next\n<span class="console-info">INFO: 17:41 handed back: question<\/span>\n<span class="console-info">INFO: 17:41 turn 1 end 2m \$0\.42 · total 1 turn 0w \$0\.42<\/span>\n?<\/code><\/pre>\s*$/)
+  // and the two renderings differ in color: the INFO span faded, the bare line the block's own
+  const colors = await page.evaluate(name => {
+    const code = window._item(name, true)!.elem!.querySelector('code._log') as HTMLElement
+    return [getComputedStyle(code.querySelector('.console-info')!).color, getComputedStyle(code).color]
+  }, TASK)
+  expect(colors[0], 'an INFO line is faded, an unprefixed one is not').not.toBe(colors[1])
   expect(await content()).not.toMatch(/<p>(?:\s|<mark class="[^"]*hidden[^"]*"[^>]*>[^<]*<\/mark>)*<\/p>\s*(?:<mark|<pre|$)/)
   await page.evaluate(() => void (location.hash = '')) // back to the pinned lists
   await expect.poll(() => page.locator('.todoer-widget').count(), { timeout: 30_000 }).toBe(2)
