@@ -335,6 +335,7 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       appBox: (b => [Math.round(rect(b).width), Math.round(rect(b).height)])(content.querySelector('input[type=checkbox]')!),
       tickedOpacity: getComputedStyle(ticked).opacity,
       tickedMark: getComputedStyle(first.querySelector('span.task.checked')!, ':after').content,
+      markColor: getComputedStyle(first.querySelector('span.task.checked')!).color,
       // the all-task nested list: no bullets, the boxes pulled into the bullet's place as the app's
       planList: (ul => [getComputedStyle(ul).listStyleType, ul.classList.contains('checkbox')])(first.querySelectorAll('ul')[1] as HTMLElement),
       planBox: (box => Math.round(rect(box).left - rect(box.closest('li')!).left))(first.querySelectorAll('ul')[1].querySelector('span.task') as HTMLElement),
@@ -350,7 +351,11 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(layout.inputs, 'task rows carry no input').toBe(0)
   expect(layout.boxSize, 'a passive box the size of the app\'s checkbox').toEqual(layout.appBox)
   expect(layout.tickedOpacity, 'a ticked row dims like the app\'s').toBe('0.5')
-  expect(layout.tickedMark, 'a ticked box shows the app\'s mark').toContain('✔')
+  // the mark: a text-presentation check mark in the text's own color (the owner's choice of
+  // 2026-09-15; the earlier heavy check mark could resolve to the color emoji font's tinted glyph)
+  expect(layout.tickedMark, 'a ticked box shows the app\'s mark').toContain('✓')
+  expect(layout.tickedMark, 'never the heavy check mark').not.toContain('✔')
+  expect(layout.markColor, 'the mark in the text\'s own color').toBe(layout.plainColor)
   expect(layout.planList, 'an all-task list has no bullets (the app\'s ul.checkbox)').toEqual(['none', true])
   expect(layout.planBox, 'its boxes sit where the app\'s own do').toBe(layout.ownerBox)
   const before = await page.evaluate(name => window._item(name, true)!.text, breaksName)

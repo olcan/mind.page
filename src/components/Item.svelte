@@ -2527,12 +2527,19 @@
     justify-content: center;
   }
   .item > :global(.content input[type='checkbox']:checked) {
-    color: white;
-    /* border-color: #4af; */
-    /* background: #4af; */
+    /* the mark: the check mark U+2713 (with U+FE0E), bold, 15px, in the text's own color,
+       shifted up one pixel to sit centered in the box (the owner's choice, 2026-09-15, over
+       the heavy check mark in white, which rendered tinted on their devices); the glyph still
+       comes from whichever installed font has it (the item's font does not) */
+    color: #ddd;
+    font-family: 'Open Sans', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1;
   }
   .item > :global(.content input[type='checkbox']:checked:after) {
-    content: '✔︎'; /* could be: ✔︎✓ */
+    content: '\2713\FE0E';
+    transform: translateY(-1px);
   }
   /* the inert tree's task rows (vault design mind_task_agents 9.6): a passive box styled like
      the checkbox above, monochrome, the same size ticked or not */
@@ -2546,10 +2553,15 @@
     align-items: center;
     justify-content: center;
     vertical-align: middle;
-    color: white;
+    color: #ddd; /* the mark as the checkbox above draws it */
+    font-family: 'Open Sans', system-ui, sans-serif;
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1;
   }
   .item > :global(.content span.task.checked:after) {
-    content: '✔︎';
+    content: '\2713\FE0E';
+    transform: translateY(-1px);
   }
   .item > :global(.content ul.checkbox > li > span.list-item > span.task),
   .item > :global(.content ul.checkbox > li > span.list-item > p > span.task) {
