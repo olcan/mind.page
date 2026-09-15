@@ -5110,6 +5110,16 @@
     }
 
     if (!ignore_command) {
+      // the local proxy's per-host secret, provisioned once per browser profile (vault design
+      // mind_task_agents 9.9): `/_proxy_secret <value>` stores it in this browser's local
+      // storage, `/_proxy_secret` alone clears it; the fetch wrapper above sends it on every
+      // same-origin /proxy/ request. the value is never echoed back
+      if (/^\/_proxy_secret(\s|$)/.test(text.trim())) {
+        const value = text.trim().slice('/_proxy_secret'.length).trim()
+        if (value) localStorage.setItem(PROXY_SECRET_STORAGE_KEY, value)
+        else localStorage.removeItem(PROXY_SECRET_STORAGE_KEY)
+        return alert(value ? 'proxy secret stored for this browser profile' : 'proxy secret cleared')
+      }
       switch (text.trim()) {
         case '/_clear_cache': {
           // clears local firestore cache (see client.ts) and reloads; clearing also shuts down firestore in
@@ -7423,7 +7433,14 @@
     importV1Key,
     CipherError,
   } from '../crypto'
-  import { ACCOUNT_HOST, SHARED_HOST, isSharedOrigin, sharedOriginRedirect } from '../host.js'
+  import {
+    ACCOUNT_HOST,
+    PROXY_OPT_IN_HEADER,
+    PROXY_SECRET_STORAGE_KEY,
+    SHARED_HOST,
+    isSharedOrigin,
+    sharedOriginRedirect,
+  } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { autodepParent } from '../install_deps'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
@@ -10545,8 +10562,17 @@
   // wrap fetch to throw exceptions on HTTP errors, since they (unlike XMLHTTPRequest) do not throw exceptions or even log to console using console.error (since they also do not show up in mindpage console)
   if (isClient) {
     const _fetch = window.fetch
-    window.fetch = async function (...args) {
-      const resp = await _fetch(...args)
+    window.fetch = async function (input, init, ...rest) {
+      // the local proxy's per-host secret rides every same-origin /proxy/ request (vault design
+      // mind_task_agents 9.9; provisioned once per browser profile by /_proxy_secret); a request
+      // to anything else is untouched
+      const secret = proxySecretFor(input)
+      if (secret) {
+        const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
+        headers.set(PROXY_OPT_IN_HEADER, secret)
+        init = { ...init, headers }
+      }
+      const resp = await _fetch(input, init, ...rest)
       if (!resp.ok) {
         let body = '(no body)'
         try {
@@ -10557,6 +10583,19 @@
       }
       return resp
     }
+  }
+  // the provisioned proxy secret when `input` names a same-origin /proxy/ url, else null
+  function proxySecretFor(input) {
+    let target
+    try {
+      target = new URL(typeof input == 'string' ? input : (input?.url ?? String(input)), location.href)
+    } catch {
+      return null
+    }
+    // the proxy, and the localhost-only routes that serve host files (the same secret)
+    const local = /^\/(?:proxy|file|file_abs|watch)\//.test(target.pathname)
+    if (target.origin != location.origin || !local) return null
+    return localStorage.getItem(PROXY_SECRET_STORAGE_KEY) || null
   }
   // set up firebase log handler to count firebase errors (client only)
   // hold a (shared) web lock for the lifetime of this tab, released on close or reload, so that other

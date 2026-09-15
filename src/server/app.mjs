@@ -5,12 +5,21 @@
 import sirv from 'sirv'
 import express from 'express'
 import { createProxyMiddleware, fixRequestBody } from 'http-proxy-middleware'
+import { isProxySecretPath, loadProxySecret } from './proxy_secret.mjs'
+import { isLoopbackAddress } from '../host.js'
 import compression from 'compression'
 import cookieParser from 'cookie-parser'
 import fs from 'fs'
+import path from 'path'
 import crypto from 'crypto'
 import mime from 'mime'
-import { canonicalizeHost, getHostDir, isProxyRequestAllowed, PROXY_OPT_IN_HEADER } from '../host.js'
+import {
+  canonicalizeHost,
+  getHostDir,
+  isProxyRequestAllowed,
+  PROXY_OPT_IN_HEADER,
+  secretMatches,
+} from '../host.js'
 
 const { NODE_ENV } = process.env
 const dev = NODE_ENV === 'development' // NOTE: production for 'firebase serve'
@@ -30,7 +39,10 @@ import { laneProject } from '../e2e_lanes.js'
 // content in $lib/server/content.js): under the e2e stack it binds to the lane's own project id
 // (src/e2e_lanes.js: the lane is the PORT this server listens on); anywhere else PORT is not a
 // lane port and the base project applies
-initializeApp({ ...firebaseConfig, projectId: laneProject(process.env.PORT, firebaseConfig.projectId) })
+initializeApp({
+  ...firebaseConfig,
+  projectId: laneProject(process.env.PORT, firebaseConfig.projectId),
+})
 
 // we allow numeric path prefixes /\d/ to allow multiple same-domain web apps on same device
 // see https://stackoverflow.com/questions/51280821/multiple-pwas-in-the-same-domain
@@ -70,16 +82,76 @@ const requestHost = req =>
 // gated, whether or not the middleware would have proxied it
 const isProxyPath = url => /^\/proxy\//.test(url ?? '')
 
+// the secret presented by a request: the header, read once and STRIPPED from the request so
+// nothing forwarded (the http request, its followed redirects, a WebSocket upgrade) carries the
+// credential; a raw local tool (a Node upgrade included) sends the header, and no browser
+// WebSocket caller of the proxy exists (design review 2), so there is no query form
+const presentedSecret = req => {
+  const header = req.headers[PROXY_OPT_IN_HEADER]
+  delete req.headers[PROXY_OPT_IN_HEADER]
+  return typeof header == 'string' ? header : undefined
+}
+
+// the localhost-only routes that serve HOST FILES (/file/, /file_abs/, /watch/) require the same
+// secret (design 9.9; 7b-1 review B1: hiding the credential alone leaves other worker-hidden
+// files readable through an unsandboxed server): a request without it is refused before any
+// path is resolved, and the credential's own paths are refused under every alias besides
+const isFileRouteAllowed = req => secretMatches(presentedSecret(req), proxySecret)
+
+// the SCOPED mode of a fixture server (LOCAL_ROUTES_SCOPE, set for the e2e lane servers; 7b-2a
+// review 1 R1): a server whose credential is the run's own and lives where a worker can read it
+// serves its checkout only, so its file routes serve only paths under the scope (the
+// checkout, symlinks resolved) and its proxy forwards only to loopback backends; the owner's
+// servers run unscoped
+const routesScope = process.env.LOCAL_ROUTES_SCOPE ? fs.realpathSync(process.env.LOCAL_ROUTES_SCOPE) : null
+const withinScope = target => {
+  if (!routesScope) return true
+  let resolved
+  try {
+    resolved = fs.realpathSync(target)
+  } catch {
+    resolved = path.resolve(target)
+  }
+  return resolved == routesScope || resolved.startsWith(routesScope + path.sep)
+}
+// the proxy's backend, one shared parser for the gate and the router (7b-2a review 2 B1): the
+// first path segment after /proxy/ (a collapsed scheme slash repaired), a real URL parse, no
+// user information (refused rather than parsed twice); null refuses the request
+const proxyBackend = url => {
+  const spelled = (url ?? '')
+    .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)?.[1]
+    ?.replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
+  if (!spelled) return null
+  let parsed
+  try {
+    parsed = new URL(spelled)
+  } catch {
+    return null
+  }
+  if (parsed.username || parsed.password) return null
+  return parsed
+}
+const isProxyBackendAllowed = url => {
+  const backend = proxyBackend(url)
+  if (!backend) return false
+  if (!routesScope) return true
+  const hostname = backend.hostname.replace(/^\[|\]$/g, '')
+  return hostname == 'localhost' || isLoopbackAddress(hostname)
+}
+
 // the local-proxy gate in ONE place, so the http path and the upgrade path cannot drift. it reads
 // the whole request (see isProxyRequestAllowed): the peer address, the request host, the origin,
-// fetch metadata and an explicit opt-in header for local tools that are not browsers
+// fetch metadata, and the per-host secret every caller must present (vault design
+// mind_task_agents 9.7 and 9.9; the secret is consumed here and never forwarded)
+let proxySecret // loaded by enableLocalProxy: the gate refuses everything until then
 const isProxyAllowed = (req, socket) =>
   isProxyRequestAllowed({
     address: (socket ?? req.socket)?.remoteAddress,
     host: req.headers['host'],
     origin: req.headers['origin'],
     secFetchSite: req.headers['sec-fetch-site'],
-    optIn: req.headers[PROXY_OPT_IN_HEADER] === '1',
+    presented: presentedSecret(req),
+    secret: proxySecret,
     secure: Boolean((socket ?? req.socket)?.encrypted),
   })
 
@@ -90,16 +162,47 @@ const isProxyAllowed = (req, socket) =>
 let proxy
 const proxyRouter = express.Router() // empty (a pass-through) until enableLocalProxy runs
 
+// the unscoped servers' static assets; not constructed for a scoped one (sirv scans static/ at
+// construction in production, and the scoped reader below serves those requests itself)
+const staticAssets = routesScope
+  ? null
+  : sirv('static', {
+      dev,
+      // maxAge: 365 * 24 * 3600, // cache for up to 1y (disabled in dev mode)
+      dotfiles: true, // allow requests for .DS_Store to avoid 404 preventing "app" treatment on Android
+    })
+
+// an asset of the computed icon routes: in the scoped mode its target is checked like any other
+const sendAsset = (res, target) => (withinScope(target) ? res.sendFile(target) : res.status(403).type('text/plain').send('not served'))
+
 const scoped = express.Router()
 scoped.use(
   proxyRouter,
 
   compression({ threshold: 0 }),
-  sirv('static', {
-    dev,
-    // maxAge: 365 * 24 * 3600, // cache for up to 1y (disabled in dev mode)
-    dotfiles: true, // allow requests for .DS_Store to avoid 404 preventing "app" treatment on Android
-  }),
+  // the scoped mode's static assets (review 2 B2, reviews 3-4): the file actually served is
+  // selected HERE (the request's own path, or a directory's index.html), resolved, checked
+  // against the scope and served; sirv, whose own selection follows symlinks and picks index and
+  // extension candidates the request did not name, serves the unscoped servers only
+  (req, res, next) => {
+    if (staticAssets) return staticAssets(req, res, next)
+    let target
+    try {
+      target = path.join(process.cwd(), 'static', decodeURIComponent(req.path))
+    } catch {
+      return res.status(400).type('text/plain').send('bad path')
+    }
+    const selected = [target, path.join(target, 'index.html')].find(candidate => {
+      try {
+        return fs.statSync(candidate).isFile()
+      } catch {
+        return false
+      }
+    })
+    if (!selected) return next()
+    if (!withinScope(selected)) return res.status(403).type('text/plain').send('not served')
+    res.sendFile(selected, { dotfiles: 'allow' })
+  },
 
   // serve dynamic manifest, favicon.ico, apple-touch-icon (in case browser does not load main page or link tags)
   // NOTE: /favicon.ico requests are NOT being sent to 'ssr' function by firebase hosting meaning it can ONLY be served statically OR redirected, so we redirect to /icon.png for now (see config in firebase.json).
@@ -150,19 +253,27 @@ scoped.use(
         ],
       })
     } else if (req.path == '/apple-touch-icon.png') {
-      res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
+      sendAsset(res, process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/favicon.ico') {
-      res.sendFile(process.env['PWD'] + '/static/' + hostdir + req.path)
+      sendAsset(res, process.env['PWD'] + '/static/' + hostdir + req.path)
     } else if (req.path == '/icon.png') {
-      res.sendFile(process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
+      sendAsset(res, process.env['PWD'] + '/static/' + hostdir + '/favicon.ico')
     } else if (req.path == '/.well-known/appspecific/com.chrome.devtools.json') {
       res.status(204).end() // chrome devtools probes this on every load; a 404 is noise in dev logs
     } else if (req.path == '/server_id') {
       res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
-      res.sendFile(process.env['PWD'].replace('/mind.page', req.path.slice(5)))
+      if (!isFileRouteAllowed(req)) return res.status(403).type('text/plain').send('not served')
+      const target = process.env['PWD'].replace('/mind.page', req.path.slice(5))
+      if (isProxySecretPath(target) || !withinScope(target))
+        return res.status(403).type('text/plain').send('not served')
+      res.sendFile(target)
     } else if (hostname == 'localhost' && req.path.startsWith('/file_abs/')) {
+      if (!isFileRouteAllowed(req)) return res.status(403).type('text/plain').send('not served')
       const abspath = req.path.slice(9)
+      // the proxy's credential is never served, under any alias of its path (design 9.9)
+      if (isProxySecretPath(abspath) || !withinScope(abspath))
+        return res.status(403).type('text/plain').send('not served')
       // res.sendFile(abspath)
       fs.readFile(abspath, 'utf8', (err, data) => {
         if (err) {
@@ -174,6 +285,7 @@ scoped.use(
         }
       })
     } else if (hostname == 'localhost' && req.path.startsWith('/watch/') && chokidar) {
+      if (!isFileRouteAllowed(req)) return res.status(403).type('text/plain').send('not served')
       const [, client_id, req_path] = req.path.match(/^\/watch\/(\d+?)(\/.+)$/) ?? []
       if (!client_id || !req_path) {
         console.warn('invalid watch path ' + req.path)
@@ -303,6 +415,9 @@ app.set('trust proxy', true) // trust first proxy for ip, see https://stackoverf
 // property of the current frontend topology, not of the code)
 export function enableLocalProxy() {
   if (proxy) return // idempotent: server.mjs starts both an http and an https server
+  // the per-host secret first (design 9.9): created under this HOME when missing; a server that
+  // cannot read one does not come up with an open proxy
+  proxySecret = loadProxySecret({ create: true })
   // the generic proxy is LOCAL-ONLY. it returns an arbitrary backend's body and content type
   // under our own origin, which makes it, on any deployed host:
   //   - an attacker-controlled same-origin document: a backend returning HTML with script became
@@ -331,12 +446,9 @@ export function enableLocalProxy() {
       return path
     },
     router: req => {
-      const backend = req.url
-        .match(/^\/proxy\/((?:http|ws)s?:\/\/?[^/?#]+)/)
-        .pop()
-        .replace(/((?:http|ws)s?:\/)([^/])/, '$1/$2') // in case double-forward-slash was dropped
-      // console.debug('proxying to', backend)
-      return backend
+      // the same parse as the gate's (review 2 B1): the destination is what was authorized
+      const backend = proxyBackend(req.url)
+      return `${backend.protocol}//${backend.host}`
     },
     on: {
       proxyReq: (proxyReq, req) => {
@@ -353,7 +465,10 @@ export function enableLocalProxy() {
       },
       // error: (error, req, res, target) => console.error(error),
     },
-    followRedirects: true, // follow redirects (instead of exposing to browser w/ potential CORS issues)
+    // follow redirects (instead of exposing to browser w/ potential CORS issues); NOT in the
+    // scoped mode (review 2 B1): a followed redirect would leave the loopback backends the
+    // scope allows, so a scoped server returns the redirect to its caller instead
+    followRedirects: !routesScope,
     // NO automatic websocket listener: with ws:true the middleware registers its own 'upgrade'
     // listener on the server, and a guard that merely destroys the client socket does NOT stop it
     // — node keeps calling later listeners, so the proxy still resolved the target, opened the
@@ -364,7 +479,7 @@ export function enableLocalProxy() {
   })
   proxyRouter.use((req, res, next) => {
     if (!isProxyPath(req.url)) return next()
-    if (isProxyAllowed(req)) return next()
+    if (isProxyAllowed(req) && isProxyBackendAllowed(req.url)) return next()
     res.status(403).type('text/plain').send('proxy is not available')
   }, proxy)
 }
@@ -375,7 +490,7 @@ export function guardProxyUpgrades(server) {
     // the ORIGIN matters as much as the address here: a WebSocket has no CORS response gate, so
     // a hostile page's handshake to 127.0.0.1 completed and the outbound request happened even
     // though the page could never read the reply
-    if (!isProxyAllowed(req, socket)) return socket.destroy()
+    if (!isProxyAllowed(req, socket) || !isProxyBackendAllowed(req.url)) return socket.destroy()
     if (!proxy) return socket.destroy() // no proxy on this server: refuse, never leave it hanging
     proxy.upgrade(req, socket, head) // no optional call: a missing upgrade must fail loudly
   })

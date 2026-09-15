@@ -15,6 +15,17 @@ import { getFirestore } from 'firebase-admin/firestore'
 
 const repo = resolve(fileURLToPath(new URL('.', import.meta.url)), '../..')
 
+// the local proxy's per-host secret (vault design mind_task_agents 9.7 and 9.9): the lane servers
+// run under the run's THROWAWAY home (playwright.config.ts, E2E_HOME) and created their secret
+// there, so it is this run's own, never the owner's: sending it, and a retained failure trace
+// holding it, disclose nothing reusable. read when a test needs it, never at import (a fresh
+// home has none until a server started)
+function laneSecret(): string {
+  const home = process.env.E2E_HOME
+  if (!home) throw new Error('E2E_HOME is unset: the lane servers run under a throwaway home (playwright.config.ts)')
+  return readFileSync(resolve(home, '.mindpage', 'proxy_secret'), 'utf8').trim()
+}
+
 // session fields serialized into the page by the server load (see +page.server.js)
 function preloaded(html: string): Record<string, string> {
   const fields = [...html.matchAll(/(server_name|server_ip|client_ip)\s*:\s*"((?:[^"\\]|\\.)*)"/g)]
@@ -389,7 +400,15 @@ test.describe('cors proxy', () => {
           return res.end()
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ method: req.method, url: req.url, type: req.headers['content-type'] ?? null, body }))
+        res.end(
+          JSON.stringify({
+            method: req.method,
+            url: req.url,
+            type: req.headers['content-type'] ?? null,
+            body,
+            secret_header: req.headers['x-mindpage-local-proxy'] ?? null, // must never arrive
+          }),
+        )
       })
     })
     await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', resolve))
@@ -399,30 +418,63 @@ test.describe('cors proxy', () => {
   test.afterAll(() => new Promise<void>(resolve => backend.close(() => resolve())))
 
   // these are NON-BROWSER callers (playwright's request context sends no Origin and no fetch
-  // metadata), which round-20 finding 4 makes fail closed — a browser omits Origin too, so absence
-  // is not evidence of a local tool. they opt in explicitly, exactly as a local script must
-  const local = { 'x-mindpage-local-proxy': '1' }
+  // metadata); every caller, browser or not, presents the lane's secret, which the gate consumes:
+  // the backend never sees it
+  let local: Record<string, string>
+  test.beforeAll(() => {
+    local = { 'x-mindpage-local-proxy': laneSecret() }
+  })
 
-  test('forwards requests with their path, query and body', async ({ request }) => {
+  test('forwards requests with their path, query and body, the secret consumed', async ({ request }) => {
     const get = await request.get(`/proxy/${origin}/echo?x=1`, { headers: local })
     expect(get.status()).toBe(200)
-    expect(await get.json()).toMatchObject({ method: 'GET', url: '/echo?x=1' })
+    expect(await get.json()).toMatchObject({ method: 'GET', url: '/echo?x=1', secret_header: null })
     const post = await request.post(`/proxy/${origin}/echo`, { data: { a: 1 }, headers: local })
     expect(await post.json()).toMatchObject({ method: 'POST', url: '/echo', type: 'application/json', body: '{"a":1}' })
   })
 
-  test('follows backend redirects and tolerates a collapsed scheme slash', async ({ request }) => {
+  test('returns a backend redirect unfollowed (the scoped lane) and tolerates a collapsed scheme slash', async ({
+    request,
+  }) => {
+    // the lane servers are SCOPED (playwright.config.ts): a redirect is returned to the caller
+    // rather than followed (it could leave the loopback backends the scope allows); the
+    // owner's unscoped servers keep following redirects
     const redirected = await request.get(`/proxy/${origin}/redirect`, { maxRedirects: 0, headers: local })
-    expect(redirected.status()).toBe(200) // followed by the proxy, not by this client
-    expect(await redirected.json()).toMatchObject({ url: '/echo?from=redirect' })
+    expect(redirected.status()).toBe(302)
+    expect(redirected.headers()['location']).toBe('/echo?from=redirect')
     const collapsed = await request.get(`/proxy/${origin.replace('://', ':/')}/echo`, { headers: local })
     expect(await collapsed.json()).toMatchObject({ url: '/echo' })
+  })
+
+  test('refuses an absent or wrong secret whatever the headers say', async ({ request }) => {
+    // vault design mind_task_agents 9.9: forged browser metadata does not authorize forwarding
+    const cases: Record<string, string>[] = [
+      {},
+      { 'x-mindpage-local-proxy': '1' }, // the pre-secret opt-in value
+      { 'x-mindpage-local-proxy': 'wrong' },
+      { 'x-mindpage-local-proxy': local['x-mindpage-local-proxy'] + 'x' },
+      { 'sec-fetch-site': 'same-origin' },
+      { origin: 'http://localhost:3100', 'sec-fetch-site': 'same-origin' },
+    ]
+    for (const headers of cases) {
+      const refused = await request.get(`/proxy/${origin}/echo`, { headers, failOnStatusCode: false })
+      expect(refused.status(), JSON.stringify(Object.keys(headers))).toBe(403)
+    }
   })
 })
 
 test.describe('localhost-only dev routes', () => {
-  test('/file_abs serves local files and /preview a localStorage viewer', async ({ request }) => {
-    const abs = await request.get(`/file_abs${resolve(repo, 'package.json')}`)
+  // the routes that serve HOST FILES take the proxy's secret (design 9.9; the alias and
+  // credential cases run over the actual middleware in tests/unit/file_routes.spec.ts)
+  let local: Record<string, string>
+  test.beforeAll(() => {
+    local = { 'x-mindpage-local-proxy': laneSecret() }
+  })
+
+  test('/file_abs serves local files to the secret and /preview a localStorage viewer', async ({ request }) => {
+    const refused = await request.get(`/file_abs${resolve(repo, 'package.json')}`, { failOnStatusCode: false })
+    expect(refused.status(), 'no secret').toBe(403)
+    const abs = await request.get(`/file_abs${resolve(repo, 'package.json')}`, { headers: local })
     expect(abs.status()).toBe(200)
     expect(await abs.text()).toBe(readFileSync(resolve(repo, 'package.json'), 'utf8'))
     const preview = await request.get('/preview')
@@ -430,17 +482,32 @@ test.describe('localhost-only dev routes', () => {
     expect(await preview.text()).toContain('localStorage.getItem(')
   })
 
-  test('/file serves files from checkouts next to the repo', async ({ request }) => {
+  test('/file refuses a sibling checkout in the scoped lane, secret or not', async ({ request }) => {
+    // the owner's unscoped server serves the checkouts next to the repo through /file/; a lane
+    // server is scoped to its own checkout (playwright.config.ts), so the sibling is refused
     const sibling = resolve(repo, '../mind.items/tester.md')
     test.skip(!existsSync(sibling), 'no ../mind.items checkout')
-    const file = await request.get('/file/mind.items/tester.md')
-    expect(file.status()).toBe(200)
-    expect(await file.text()).toBe(readFileSync(sibling, 'utf8'))
+    expect((await request.get('/file/mind.items/tester.md', { failOnStatusCode: false })).status()).toBe(403)
+    const file = await request.get('/file/mind.items/tester.md', { headers: local, failOnStatusCode: false })
+    expect(file.status()).toBe(403)
+    const own = await request.get('/file/mind.page/package.json', { headers: local })
+    expect(own.status()).toBe(200)
   })
 
   test('are not available on other hosts', async ({ request }) => {
-    const res = await request.get(`/file_abs${resolve(repo, 'package.json')}`, { headers: { Host: 'mind.page' } })
+    const res = await request.get(`/file_abs${resolve(repo, 'package.json')}`, {
+      headers: { Host: 'mind.page', ...local },
+    })
     expect(res.status()).toBe(404)
+  })
+
+  test('never serve the proxy secret, secret or not', async ({ request }) => {
+    const secretPath = resolve(process.env.E2E_HOME!, '.mindpage', 'proxy_secret')
+    for (const headers of [{}, local]) {
+      const res = await request.get(`/file_abs${secretPath}`, { headers, failOnStatusCode: false })
+      expect(res.status()).toBe(403)
+      expect((await res.text()).includes(local['x-mindpage-local-proxy'])).toBe(false)
+    }
   })
 })
 
@@ -459,15 +526,17 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
     .find(i => i && i.family == 'IPv4' && !i.internal)?.address
   const seen: string[] = []
   const sockets: any[] = []
+  const secret = laneSecret()
   const backend = http.createServer((_req, res) => res.end('ok'))
   backend.on('upgrade', (req, socket) => {
-    seen.push(`${req.url} cookie=${req.headers.cookie ?? 'none'}`)
+    // the header the gate consumed must never arrive (recorded by name, asserted below)
+    seen.push(`${req.url} cookie=${req.headers.cookie ?? 'none'} secret=${req.headers['x-mindpage-local-proxy'] ?? 'none'}`)
     sockets.push(socket)
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
   })
   await new Promise<void>(resolve => backend.listen(0, '127.0.0.1', () => resolve()))
   const port = (backend.address() as any).port // dynamic: a fixed port collides across runs
-  const upgrade = (host: string, origin?: string) =>
+  const upgrade = (host: string, origin?: string, withSecret = true) =>
     new Promise<string>(resolve => {
       const timer = setTimeout(() => resolve('timeout'), 4_000)
       const done = (outcome: string) => {
@@ -483,6 +552,7 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
           Upgrade: 'websocket',
           Cookie: '__session=victim-cookie',
           ...(origin ? { Origin: origin } : {}),
+          ...(withSecret ? { 'x-mindpage-local-proxy': secret } : {}),
         },
       })
       req.on('upgrade', (_res, socket) => {
@@ -501,6 +571,9 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
       'upgraded'
     )
     expect(seen.length, 'the backend served the allowed upgrade').toBe(1)
+    expect(seen[0], 'the secret header was consumed before the upgrade').toContain(' secret=none')
+    // same-origin WITHOUT the secret: refused (vault design mind_task_agents 9.9)
+    expect(await upgrade('127.0.0.1', 'http://127.0.0.1:3100', false), 'no secret').toMatch(/^refused:/)
     // REFUSED, all from a loopback process: a hostile page, and two origins that differ from the
     // request's own only by host or by port. comparing hostnames alone accepted both of the latter.
     // a timeout is NOT accepted as equivalent to a refusal — it cannot tell "gate closed" from
@@ -508,12 +581,15 @@ test('a rejected WebSocket upgrade never reaches the backend', async () => {
     expect(await upgrade('127.0.0.1', 'https://attacker.example'), 'foreign origin').toMatch(/^refused:/)
     expect(await upgrade('127.0.0.1', 'http://localhost:3100'), 'host mismatch').toMatch(/^refused:/)
     expect(await upgrade('127.0.0.1', 'http://127.0.0.1:9999'), 'port mismatch').toMatch(/^refused:/)
-    // a browser can omit Origin entirely (GET/HEAD navigations, no-cors): absence must fail closed
-    expect(await upgrade('127.0.0.1'), 'no origin at all').toMatch(/^refused:/)
+    // a browser can omit Origin entirely (GET/HEAD navigations, no-cors): without the secret,
+    // absence fails closed; with it, the caller is a local tool and the upgrade proxies
+    expect(await upgrade('127.0.0.1', undefined, false), 'no origin, no secret').toMatch(/^refused:/)
+    expect(await upgrade('127.0.0.1'), 'no origin, the secret: a local tool').toBe('upgraded')
     if (lan) expect(await upgrade(lan, 'http://127.0.0.1:3100'), 'non-loopback caller').toMatch(/^refused:/)
     // ONE quiet window for every rejected probe above, rather than one per probe
     await new Promise(resolve => setTimeout(resolve, 1_500))
-    expect(seen, 'the backend saw nothing from any rejected caller').toHaveLength(1)
+    expect(seen, 'the backend saw nothing from any rejected caller').toHaveLength(2)
+    expect(seen.every(line => line.endsWith(' secret=none')), 'no upgrade carried the header').toBe(true)
   } finally {
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => backend.close(() => resolve()))
@@ -550,11 +626,15 @@ test('the generic proxy refuses every caller that is not a same-origin local one
       req.on('error', () => resolve(0))
     })
   try {
-    // ALLOWED: a same-origin browser request, and a local tool that opts in explicitly
-    expect(await proxied('127.0.0.1', { 'sec-fetch-site': 'same-origin' }), 'same-origin').toBe(200)
-    expect(await proxied('127.0.0.1', { 'x-mindpage-local-proxy': '1' }), 'explicit local opt-in').toBe(200)
+    // ALLOWED: a same-origin browser request and a local tool, each with the lane's secret
+    const auth = { 'x-mindpage-local-proxy': laneSecret() }
+    expect(await proxied('127.0.0.1', { 'sec-fetch-site': 'same-origin', ...auth }), 'same-origin').toBe(200)
+    expect(await proxied('127.0.0.1', auth), 'a local tool with the secret').toBe(200)
     expect(seen).toHaveLength(2)
     seen.length = 0
+    // REFUSED: the secret missing or the pre-secret opt-in value, whatever else is claimed
+    expect(await proxied('127.0.0.1', { 'sec-fetch-site': 'same-origin' }), 'same-origin, no secret').toBe(403)
+    expect(await proxied('127.0.0.1', { 'x-mindpage-local-proxy': '1' }), 'the old opt-in value').toBe(403)
     // REFUSED: THE reproduced exploit — cross-site, no Origin, carrying our cookie. a top-level
     // navigation of this shape would serve attacker html under our own local origin
     expect(
@@ -565,16 +645,18 @@ test('the generic proxy refuses every caller that is not a same-origin local one
     expect(await proxied('127.0.0.1', {}), 'neither origin nor fetch metadata: fail closed').toBe(403)
     expect(await proxied('127.0.0.1', { origin: 'https://attacker.example' }), 'foreign origin').toBe(403)
     if (lan)
-      // spoofed forwarding headers must not help: the gate never reads them
+      // a non-loopback caller cannot even connect: the lane server binds 127.0.0.1 alone
+      // (vault design mind_task_agents 9.7); the gate's own address check is the unit table's
       expect(
         await proxied(lan, {
           'x-forwarded-for': '127.0.0.1',
           'x-forwarded-host': 'localhost',
           host: 'localhost',
           'sec-fetch-site': 'same-origin',
+          ...auth,
         }),
         'a non-loopback caller, whatever it claims in headers'
-      ).toBe(403)
+      ).toBe(0)
     expect(seen, 'the backend saw nothing from any refused caller').toEqual([])
   } finally {
     await new Promise<void>(resolve => backend.close(() => resolve()))

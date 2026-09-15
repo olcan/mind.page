@@ -1,5 +1,24 @@
 import { defineConfig, devices } from '@playwright/test'
+import { mkdtempSync } from 'fs'
+import { tmpdir } from 'os'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { E2E_LANES, lanePort } from './src/e2e_lanes.js'
+
+// the lane servers run under a THROWAWAY home (vault design mind_task_agents 9.9): the local
+// proxy's per-host secret they create there is the run's own, never the owner's, so the tests
+// may send it and a retained failure trace may hold it. that credential lives where a worker
+// can read it (the system temp directory), so the lane servers run SCOPED (LOCAL_ROUTES_SCOPE:
+// the file routes serve this checkout only, the proxy forwards to loopback backends only) and
+// serve their checkout only; the tests find the secret through E2E_HOME, and the
+// global teardown removes the directory after the run
+// created ONCE per run, by the runner process; the worker processes evaluate this config again
+// and inherit the runner's E2E_HOME (and E2E_HOME_OWNED, set only by the creator, so the
+// teardown removes exactly the directory this run created and never a supplied one)
+const E2E_HOME = process.env.E2E_HOME ?? mkdtempSync(join(tmpdir(), 'mindpage-e2e-home-'))
+if (!process.env.E2E_HOME) process.env.E2E_HOME_OWNED = E2E_HOME
+process.env.E2E_HOME = E2E_HOME
+const REPO = dirname(fileURLToPath(import.meta.url))
 
 // a browser lane: the e2e test dir, one worker, Desktop Chrome, the lane's own baseURL
 const lane = (name: string, extra: object) => ({
@@ -14,7 +33,8 @@ const lane = (name: string, extra: object) => ({
 // served by `node server.mjs`, one server per LANE (src/e2e_lanes.js): every browser project is a
 // lane with its own port and its own project id on the shared emulators, so the lanes overlap
 // freely and only the rows inside a lane are serial (a one-worker cap per project)
-const WRITE_SPECS = /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract|tasks)\.spec\.ts/
+const WRITE_SPECS =
+  /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract|tasks)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -56,8 +76,18 @@ export default defineConfig({
   // earlier tests get faster or reorder. never reuse: a server started against an older build
   // would serve it to the whole run, which is how a stale bundle passed a round of client-side
   // changes (see tests/e2e/run.sh)
+  globalTeardown: './tests/e2e/global_teardown.ts',
   webServer: E2E_LANES.map(name => ({
-    command: `env -u FIREBASE_CONFIG NO_HTTPS=1 PORT=${lanePort(name)} CONTENT_CACHE_MS=100 NODE_ENV=production node server.mjs`,
+    command: 'env -u FIREBASE_CONFIG node server.mjs', // FIREBASE_CONFIG: see the note above
+    env: {
+      HOME: E2E_HOME,
+      LOCAL_ROUTES_SCOPE: REPO,
+      NO_HTTPS: '1',
+      HOST: '127.0.0.1',
+      PORT: String(lanePort(name)),
+      CONTENT_CACHE_MS: '100',
+      NODE_ENV: 'production',
+    },
     url: `http://localhost:${lanePort(name)}/server_id`,
     reuseExistingServer: false,
     timeout: 30_000,

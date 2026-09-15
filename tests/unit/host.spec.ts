@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import {
   SHARED_HOST,
+  secretMatches,
   SHARED_LOCAL_HOST,
   getHostDir,
   isProxyRequestAllowed,
@@ -118,7 +119,8 @@ test('loopback detection covers every form node reports, and nothing else', () =
 // non-browser caller — browsers omit it on GET/HEAD navigations and no-cors requests, which is the
 // dangerous case — and comparing only the origin's HOSTNAME ignores scheme and port, so any page on
 // any port of an allowed name qualified. review reproduced both against the previous code
-const ALLOWED = { address: '127.0.0.1', host: 'localhost:3100', secure: false }
+const SECRET = 'test-secret-0123456789abcdef'
+const ALLOWED = { address: '127.0.0.1', host: 'localhost:3100', secure: false, presented: SECRET, secret: SECRET }
 test('the proxy gate reads the whole request, not an address and a hostname', () => {
   const allow = (over: Record<string, unknown>) => isProxyRequestAllowed({ ...ALLOWED, ...over })
   // full origin equality: scheme, host AND port
@@ -129,12 +131,12 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
   expect(allow({ origin: 'https://attacker.example' }), 'foreign origin').toBe(false)
   expect(allow({ origin: 'null' }), 'opaque origin').toBe(false)
   expect(
-    isProxyRequestAllowed({ address: '::1', host: '[::1]:3100', secure: false, origin: 'http://[::1]:3100' }),
+    isProxyRequestAllowed({ ...ALLOWED, address: '::1', host: '[::1]:3100', origin: 'http://[::1]:3100' }),
     'ipv6 literal, matching'
   ).toBe(true)
   expect(
     isProxyRequestAllowed({
-      address: '127.0.0.1',
+      ...ALLOWED,
       host: 'local.dev:443',
       secure: true,
       origin: 'https://local.dev:443',
@@ -146,9 +148,8 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
   // people's code there is the whole point of it
   expect(
     isProxyRequestAllowed({
-      address: '127.0.0.1',
+      ...ALLOWED,
       host: 'shared.localhost:3100',
-      secure: false,
       origin: 'http://shared.localhost:3100',
     }),
     'the local isolated origin is proxy-free'
@@ -158,10 +159,20 @@ test('the proxy gate reads the whole request, not an address and a hostname', ()
   expect(allow({ secFetchSite: 'cross-site' }), 'THE reproduced exploit: cross-site, no Origin').toBe(false)
   expect(allow({ secFetchSite: 'same-site' }), 'same-site is not same-origin').toBe(false)
   expect(allow({ secFetchSite: 'none' }), 'user-initiated navigation').toBe(false)
-  // neither: fail CLOSED unless a local tool opts in with a header no page can set on a
-  // navigation or a no-cors request
-  expect(allow({}), 'no origin, no fetch metadata').toBe(false)
-  expect(allow({ optIn: true }), 'explicit local opt-in').toBe(true)
+  // neither: a local tool with the secret (no browser metadata to check)
+  expect(allow({}), 'no origin, no fetch metadata, the secret').toBe(true)
+  // the secret is required on EVERY path (vault design mind_task_agents 9.9): forged browser
+  // headers do not authorize forwarding, and an absent, empty, or wrong secret fails closed
+  for (const presented of [undefined, '', '1', 'wrong', SECRET + 'x', SECRET.slice(1)]) {
+    expect(allow({ presented, origin: 'http://localhost:3100' }), `same origin, secret ${presented}`).toBe(false)
+    expect(allow({ presented, secFetchSite: 'same-origin' }), `same-origin metadata, secret ${presented}`).toBe(false)
+    expect(allow({ presented }), `no metadata, secret ${presented}`).toBe(false)
+  }
+  expect(allow({ secret: undefined }), 'a server without a secret proxies for nobody').toBe(false)
+  expect(allow({ secret: '' }), 'an empty server secret proxies for nobody').toBe(false)
+  expect(secretMatches(SECRET, SECRET), 'the comparison').toBe(true)
+  expect(secretMatches(SECRET, SECRET.toUpperCase()), 'case matters').toBe(false)
+  expect(secretMatches(1 as any, '1'), 'a non-string never matches').toBe(false)
   // the address and the request host are both still required to be local
   expect(allow({ address: '10.0.0.5', origin: 'http://localhost:3100' }), 'non-loopback peer').toBe(false)
   for (const host of ['localhost.attacker.example', 'local.dev.attacker.example', '192.168.86.101', 'mind.page'])

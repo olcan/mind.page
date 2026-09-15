@@ -120,20 +120,40 @@ export function sharedOriginRedirect({
 // shared pages, and the proxy must refuse the code that runs there
 const LOCAL_REQUEST_HOSTS = ['localhost', 'local.dev', 'localhost.dev']
 
-// the header a non-browser local tool sends to opt in. a cross-origin page cannot set it on a
-// navigation or a `no-cors` request, so it cannot be used to smuggle one past the gate
+// the header every proxy caller sends, carrying the per-host secret (vault design
+// mind_task_agents 9.7 and 9.9: a raw client with forged browser headers and no secret is
+// refused; a cross-origin page cannot set the header on a navigation or a `no-cors` request, so
+// it cannot smuggle one past the gate either); consumed locally and stripped before anything is
+// forwarded. the localhost-only file routes take the same header
 export const PROXY_OPT_IN_HEADER = 'x-mindpage-local-proxy'
 
-export function isProxyRequestAllowed({ address, host, origin, secFetchSite, optIn, secure }) {
+// the browser's local storage key for the provisioned secret (`/_proxy_secret <value>`)
+export const PROXY_SECRET_STORAGE_KEY = 'mindpage_proxy_secret'
+
+// the gate reads the whole request: the peer address and the request host must be local, a
+// browser's request must be same-origin (full origin equality, or the fetch metadata when
+// there is no Origin), and EVERY caller must present the secret (`presented`) that matches the
+// server's (`secret`); an absent, empty, or wrong secret fails closed, whatever the headers say
+export function isProxyRequestAllowed({ address, host, origin, secFetchSite, presented, secret, secure }) {
   if (!isLoopbackAddress(address)) return false
   if (!host) return false
   const hostname = String(host)
     .replace(/:\d+$/, '')
     .replace(/^\[|\]$/g, '')
   if (!(LOCAL_REQUEST_HOSTS.includes(hostname) || isLoopbackAddress(hostname))) return false
+  if (!secretMatches(presented, secret)) return false
   if (origin) return origin === `${secure ? 'https' : 'http'}://${host}` // full origin equality
   if (secFetchSite) return secFetchSite === 'same-origin'
-  return optIn === true // fail closed
+  return true // a local tool with the secret: no browser metadata to check
+}
+
+// a constant-time comparison of the presented secret with the server's; both must be non-empty
+export function secretMatches(presented, secret) {
+  if (typeof presented != 'string' || typeof secret != 'string' || !presented || !secret) return false
+  if (presented.length != secret.length) return false
+  let diff = 0
+  for (let i = 0; i < secret.length; i++) diff |= presented.charCodeAt(i) ^ secret.charCodeAt(i)
+  return diff == 0
 }
 
 // true for any loopback remote address, in every form node reports one: IPv4 127.0.0.0/8 (not
