@@ -555,6 +555,25 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect([dragged.wrapper.item.kind, dragged.wrapper.item.task]).toEqual(['delegate', await savedId(page, OTHER)])
   await expect.poll(async () => (await lists(page)).delegated.map(r => r[1]), { timeout: 30_000 }).toEqual(['delegate', 'delegate'])
 
+  // (i) the plain-text form (vault design 2.2): `/delegate <text>` creates the todo as /todo
+  // does and delegates it once its save names it (the command's task is the new item's saved
+  // id, the capture its created text), the command consumed (no retry offered: a retry would
+  // create a second todo); the created item's id is a reference, a re-delegation as in (d)
+  expect(await command(page, '/delegate check the backups')).toBeNull()
+  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(6)
+  const plain = (await commands())[5]
+  const plainId = plain.wrapper.item.task as string
+  expect(plain.wrapper.item).toEqual({ task: plainId, id: plain.wrapper.item.id, kind: 'delegate', epoch: 0, at: plain.wrapper.item.at, body: '#todo check the backups' })
+  expect([taskId, thirdId, await savedId(page, OTHER)], 'a new item').not.toContain(plainId)
+  await expect.poll(() => serverText(plainId), { timeout: 30_000 }).toBe('#todo [delegated] check the backups\n#_agent/vault\n')
+  await expect.poll(async () => (await lists(page)).delegated, { timeout: 30_000 }).toContainEqual(['? #todo [delegated] check the backups', 'delegate', '?'])
+  await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { timeout: 10_000 }).toBe('')
+  expect(await command(page, `/delegate ${plainId}`)).toBeNull()
+  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(7)
+  expect((await commands())[6].wrapper.item.task).toBe(plainId)
+  const rows = await lists(page)
+  expect([...rows.main, ...rows.delegated].filter(r => r[0].includes(plainId)), 'no todo made of the id').toEqual([])
+
   // (h) a TASK item shows no running overlay (vault design 9.6): while its run is listed the
   // blue border marks it, but the dimming layer with the spinner stays hidden; the
   // classification follows the store on the SAME mounted item (a projection removed while
