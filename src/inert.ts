@@ -263,7 +263,8 @@ export function inertCandidateSpan(candidate: InertCandidate): string {
 // isVaultRouted with the identical roots table and fail-closed semantics (design §2.1):
 // computed from the scanner's grammar view with the app's global tag parser, never
 // resolved item state, so a route inside a claimed region is invisible.
-const VAULT_ROOTS = ['#agent/vault', '#_agent/vault', '#agent/native', '#_agent/native']
+// (the legacy #agent/native root retired 2026-09-18 with the bridge's alias: no item under it remains)
+const VAULT_ROOTS = ['#agent/vault', '#_agent/vault']
 export function isVaultRouted(rawText: string): boolean {
   const tags: string[] = (parseTags(scanInert(rawText).grammarText.toLowerCase()) as { raw: string[] }).raw
   return tags.some(tag => VAULT_ROOTS.some(root => tag === root || tag.startsWith(root + '/')))

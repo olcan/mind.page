@@ -257,8 +257,8 @@ test('isVaultRouted: exact roots and descendants over the INERT grammar view', (
   expect(isVaultRouted('#agent/vaultish\nhello')).toBe(false) // slash boundary
   expect(isVaultRouted('note about #agent/openai')).toBe(false)
   // review 186: legacy roots, case, relative tags, and extra slashes pinned
-  expect(isVaultRouted('#agent/native\nhello')).toBe(true) // legacy root
-  expect(isVaultRouted('#_agent/native/x\nhello')).toBe(true) // legacy descendant
+  expect(isVaultRouted('#agent/native\nhello')).toBe(false) // the legacy root, retired 2026-09-18
+  expect(isVaultRouted('#_agent/native/x\nhello')).toBe(false) // its descendant neither
   expect(isVaultRouted('#AGENT/Vault\nhello')).toBe(true) // lowercased before parse
   expect(isVaultRouted('#/vault\nhello')).toBe(false) // relative tags never route raw
   expect(isVaultRouted('#//agent/vault\nhello')).toBe(false) // ditto deeper relative
