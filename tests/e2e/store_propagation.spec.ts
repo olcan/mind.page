@@ -15,8 +15,9 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // store change IN PLACE (a synchronous `true` from _on_global_store_change, the contract of
 // hiddenItemChangedRemotely in index.svelte) keeps its rendered element and its render version
 // through a foreign delivery and through its own save with the re-render opted out
-// (save_global_store({ invalidate_elem_cache: false })), while B's version advanced in (a). the
-// mutation pins are recorded in the review request, not automated
+// (save_global_store({ invalidate_elem_cache: false })), while A's version, the on-screen
+// dependent the delivery of (a) re-renders, advanced there. the mutation pins are recorded in the
+// review request, not automated
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 
@@ -68,8 +69,9 @@ const rendered = (page: Page, name: string) =>
 
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
 
-// the render version the app stamps on an item's element (Item.svelte afterUpdate): a forced
-// re-render increments it and replaces the element's children
+// the render version the app stamps on the first child of an item's on-screen .item element
+// (Item.svelte afterUpdate; null for an item without one): a forced re-render increments it and
+// replaces the element's children
 const renderVersion = (page: Page, name: string) =>
   page.evaluate(name => {
     const item = window._item(name, true)
@@ -193,13 +195,16 @@ test('a store change re-renders the owner and the items that template it', async
       return stable
     })
     .toBe(true)
-  const bVersion = await renderVersion(page, B)
+  // A, created last, is the item on screen here (B has no element of its own: the view shows the
+  // item created last, and rendered() draws B through _render_item), so A is the render the
+  // delivery is seen to force: its version must advance (contrast (d))
+  const aVersion = await renderVersion(page, A)
+  expect(aVersion).not.toBeNull()
   await writeStore(`global_store_${bId}`, { v: 1 })
   await expect.poll(() => rendered(page, B), { timeout: 30_000 }).toContain('v=1')
   await expect.poll(() => rendered(page, A), { timeout: 30_000 }).toContain('v=1')
   expect(await updateTimes([aId, bId])).toEqual(before)
-  // the delivery re-rendered B (no handler of its own took the render over; contrast (d))
-  await expect.poll(() => renderVersion(page, B), { timeout: 30_000 }).not.toEqual(bVersion)
+  await expect.poll(() => renderVersion(page, A), { timeout: 30_000 }).not.toEqual(aVersion)
 
   // (b) a local write through B's real saving accessor reaches A once the server holds it
   await page.evaluate(([B]) => void (window._item(B)!.global_store.v = 2), [B] as const)
@@ -257,10 +262,10 @@ test('a store change re-renders the owner and the items that template it', async
     .toBe(true)
   const spanState = () =>
     page.evaluate(([G]) => {
-      const span = window._item(G)!.elem.querySelector('.v') as HTMLElement | null
+      const span = (window._item(G)!.elem?.querySelector('.v') ?? null) as HTMLElement | null
       return span ? [span.dataset.mark ?? null, span.textContent] : null
     }, [G] as const)
-  await page.evaluate(([G]) => void ((window._item(G)!.elem.querySelector('.v') as HTMLElement).dataset.mark = 'kept'), [G] as const)
+  await page.evaluate(([G]) => void ((window._item(G)!.elem!.querySelector('.v') as HTMLElement).dataset.mark = 'kept'), [G] as const)
   await writeStore(`global_store_${gId}`, { v: 1 })
   await expect.poll(() => rendered(page, G), { timeout: 30_000 }).toContain('v=1')
   await new Promise(resolve => setTimeout(resolve, 2500)) // past the forced render's delay
