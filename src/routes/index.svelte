@@ -10495,20 +10495,28 @@
 
       // invoke _on_global_store_change(id, true) on all listener (or self) items
       // NOTE: "deletions" of hidden item correspond to a change to empty store {}
+      // the OWNER's handler can take the render over: a synchronous `true` says it updated the
+      // item's rendering in place (an element it holds rewritten, as #vault's tables), and the
+      // forced re-render below is skipped; that re-render replaces the item's DOM and runs its
+      // scripts only afterwards, so an item that fills its elements by script collapsed for a
+      // frame at every delivery. any other value, a promise (an async item's handler), a
+      // listener's result, or a throw leaves the re-render as it was; a local save opts out
+      // through save_global_store({ invalidate_elem_cache: false }) instead
+      let rendered = false
       items.forEach(item => {
         if (!item.listen && item.id != id) return // must be listener or self
         if (!itemDefinesFunction(item, '_on_global_store_change')) return
-        Promise.resolve(
-          _item(item.id).eval(`_on_global_store_change('${id}',true)`, {
-            trigger: item.listen ? 'listen' : 'change',
-            async: item.deepasync, // run async if item is async or has async deps
-            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-          })
-        ).catch(e => {}) // already logged
+        const result = _item(item.id).eval(`_on_global_store_change('${id}',true)`, {
+          trigger: item.listen ? 'listen' : 'change',
+          async: item.deepasync, // run async if item is async or has async deps
+          async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+        })
+        if (item.id == id && result === true) rendered = true
+        Promise.resolve(result).catch(e => {}) // already logged
       })
 
-      // invalidate element cache and force re-render
-      _item(id).invalidate_elem_cache({ force_render: true })
+      // invalidate element cache and force re-render, unless the owner rendered the change itself
+      if (!rendered) _item(id).invalidate_elem_cache({ force_render: true })
       return
     }
   }

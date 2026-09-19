@@ -11,8 +11,12 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // local write through B's real saving accessor reaches A once the server holds it; (c) an
 // item-and-store pair delivered in the two controlled orders, store observed before item and
 // item observed before store, with an observable barrier between the two writes, pins the
-// eventual output of the pair and of an embedding parent. the mutation pins are recorded in the
-// review request, not automated
+// eventual output of the pair and of an embedding parent; (d) an owner whose handler renders its
+// store change IN PLACE (a synchronous `true` from _on_global_store_change, the contract of
+// hiddenItemChangedRemotely in index.svelte) keeps its rendered element and its render version
+// through a foreign delivery and through its own save with the re-render opted out
+// (save_global_store({ invalidate_elem_cache: false })), while B's version advanced in (a). the
+// mutation pins are recorded in the review request, not automated
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 
@@ -63,6 +67,29 @@ const rendered = (page: Page, name: string) =>
   }, name)
 
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
+
+// the render version the app stamps on an item's element (Item.svelte afterUpdate): a forced
+// re-render increments it and replaces the element's children
+const renderVersion = (page: Page, name: string) =>
+  page.evaluate(name => {
+    const item = window._item(name, true)
+    return item ? (document.getElementById('item-' + item.id)?.firstElementChild?.getAttribute('_version') ?? null) : null
+  }, name)
+
+// an owner that renders its own store into an element it holds, from its change handler, and
+// says so (the value the app reads; nothing else re-renders it)
+const inPlaceOwnerText = (label: string) =>
+  [
+    `${label} <span class="v">v=null</span>`,
+    '```js_removed',
+    'function _on_global_store_change(id, remote) {',
+    '  if (id != _this.id) return',
+    "  const span = _this.elem?.querySelector('.v')",
+    "  if (span) span.textContent = 'v=' + JSON.stringify(_this._global_store.v ?? null)",
+    '  return true',
+    '}',
+    '```',
+  ].join('\n')
 
 // the app's hidden document shape (encryptItem of {hidden, time, attr: null, text} plus user),
 // encrypted v0 with the account's stored secret, which the default-on reader accepts
@@ -166,10 +193,13 @@ test('a store change re-renders the owner and the items that template it', async
       return stable
     })
     .toBe(true)
+  const bVersion = await renderVersion(page, B)
   await writeStore(`global_store_${bId}`, { v: 1 })
   await expect.poll(() => rendered(page, B), { timeout: 30_000 }).toContain('v=1')
   await expect.poll(() => rendered(page, A), { timeout: 30_000 }).toContain('v=1')
   expect(await updateTimes([aId, bId])).toEqual(before)
+  // the delivery re-rendered B (no handler of its own took the render over; contrast (d))
+  await expect.poll(() => renderVersion(page, B), { timeout: 30_000 }).not.toEqual(bVersion)
 
   // (b) a local write through B's real saving accessor reaches A once the server holds it
   await page.evaluate(([B]) => void (window._item(B)!.global_store.v = 2), [B] as const)
@@ -203,4 +233,47 @@ test('a store change re-renders the owner and the items that template it', async
   await writeStore(`global_store_${E_ID}`, { v: 9 })
   await expect.poll(() => rendered(page, eName), { timeout: 30_000 }).toContain('v=9')
   await expect.poll(() => rendered(page, '#e2e_prop_f'), { timeout: 30_000 }).toContain('v=9')
+
+  // (d) an owner that renders its store change in place is not re-rendered: the element it
+  // rewrote and its render version survive a foreign delivery (the forced re-render, due one
+  // second after it, never comes) and its own save with the re-render opted out
+  const G = '#e2e_prop_g'
+  await page.evaluate(text => void window._create(text), inPlaceOwnerText(G))
+  await expect.poll(() => savedId(page, G), { timeout: 30_000 }).toBeTruthy()
+  const gId = (await savedId(page, G))!
+  // a new item's renders settle first (the id change after its first save is one more render)
+  let gVersion: string | null = null
+  await expect
+    .poll(
+      async () => {
+        const first = await renderVersion(page, G)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        const second = await renderVersion(page, G)
+        if (first !== null && first === second) gVersion = second
+        return first !== null && first === second
+      },
+      { timeout: 30_000 }
+    )
+    .toBe(true)
+  const spanState = () =>
+    page.evaluate(([G]) => {
+      const span = window._item(G)!.elem.querySelector('.v') as HTMLElement | null
+      return span ? [span.dataset.mark ?? null, span.textContent] : null
+    }, [G] as const)
+  await page.evaluate(([G]) => void ((window._item(G)!.elem.querySelector('.v') as HTMLElement).dataset.mark = 'kept'), [G] as const)
+  await writeStore(`global_store_${gId}`, { v: 1 })
+  await expect.poll(() => rendered(page, G), { timeout: 30_000 }).toContain('v=1')
+  await new Promise(resolve => setTimeout(resolve, 2500)) // past the forced render's delay
+  expect(await spanState()).toEqual(['kept', 'v=1']) // the same element, rewritten in place
+  expect(await renderVersion(page, G)).toEqual(gVersion)
+  await page.evaluate(([G]) => {
+    const item = window._item(G)! as any
+    item._global_store.v = 2
+    item.save_global_store({ invalidate_elem_cache: false })
+  }, [G] as const)
+  await expect.poll(() => serverStore(`global_store_${gId}`), { timeout: 30_000 }).toEqual({ v: 2 })
+  await expect.poll(() => rendered(page, G), { timeout: 30_000 }).toContain('v=2')
+  await new Promise(resolve => setTimeout(resolve, 2500))
+  expect(await spanState()).toEqual(['kept', 'v=2'])
+  expect(await renderVersion(page, G)).toEqual(gVersion)
 })
