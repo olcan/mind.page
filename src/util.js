@@ -10,11 +10,13 @@ export { canonicalizeHost, getHostDir } from './host.js'
 // one character of a url in ALREADY-ESCAPED html, given the raw rule's character class `char`
 // (a source string). in escaped text a character a url cannot contain arrives as an ENTITY
 // whose letters and `;` pass the raw classes, so `&quot;` was absorbed whole and the link
-// carried the closing quote of a quoted title (2026-09-20). here an `&` matches ONLY as a
-// complete entity: `&amp;` (a real `&` in a query string) and the apostrophe forms stay INSIDE
-// the url -- they denote characters the raw rule allows -- while every other entity (`&quot;`,
-// `&lt;`, `&gt;`, anything unrecognized) ENDS it, never half-consumed whatever class follows
-export const escapedUrlEntity = '&(?:amp|apos|#0*39|#[xX]0*27);'
+// carried the closing quote of a quoted title (2026-09-20). here an `&` is a url character ONLY
+// in `&amp;`, the escaped form of a real `&` (query strings depend on it): every other entity
+// (`&quot;`, `&#34;`, `&lt;`, `&gt;`, the apostrophe forms, anything unrecognized) ENDS the url
+// and is never half-consumed by the class that follows. note an unencoded `'` is legal in a url
+// (RFC 3986) and the RAW rule keeps it, so `&#39;` ends the url where a raw `'` would not: the
+// closing quote of a single-quoted title is the common case, `%27` the usual form in a url
+export const escapedUrlEntity = '&amp;'
 export const escapedUrlChar = char => `(?:${escapedUrlEntity}|(?!&)${char})`
 
 export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,."]/, escaped = false } = {}) {

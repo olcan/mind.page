@@ -64,8 +64,9 @@ test("a caller's own last-character class excludes the quote as the default does
 // util.js, the todoer's rows and the modal all match urls in text that is already escaped, where
 // the closing quote is `&quot;`: its letters pass the body class and its `;` passes the editor's
 // last-character class, so the whole entity rode into the highlighted url and the owner still
-// saw the quote inside the link after the raw-case fix (2026-09-20). `escaped: true` matches an
-// `&` only as a COMPLETE entity, so no entity is ever half-consumed
+// saw the quote inside the link after the raw-case fix (2026-09-20). `escaped: true` reads an
+// `&` as a url character only in `&amp;`, so no entity is ever half-consumed and only a real
+// `&` (the one query strings depend on) stays inside the url
 const markEscaped = (text: string, options = {}): string =>
   text.replace(urlRegExp({ escaped: true, ...options }), (m: string, pfx: string, url: string) => `${pfx}«${url}»`)
 
@@ -81,6 +82,22 @@ test('an escaped closing quote ends the url', () => {
   // the other characters the raw rule excludes, in their escaped form
   expect(markEscaped(_.escape('see https://example.com/a<b'))).toBe('see «https://example.com/a»&lt;b')
   expect(markEscaped(_.escape('see https://example.com/a>b'))).toBe('see «https://example.com/a»&gt;b')
+  // the numeric forms of the quote too (marked leaves an already-escaped entity as written)
+  expect(markEscaped('see https://example.com/a&#34;b')).toBe('see «https://example.com/a»&#34;b')
+  expect(markEscaped('see https://example.com/a&#x22;b')).toBe('see «https://example.com/a»&#x22;b')
+})
+
+test('an escaped apostrophe ends the url', () => {
+  // the closing quote of a SINGLE-quoted title rode in the same way `&quot;` did: only `&amp;`
+  // is a url character here (lodash and marked write `&#39;`, highlight.js `&#x27;`). an
+  // unencoded `'` inside a url (`%27` is the usual form) therefore ends the escaped link early,
+  // where the raw rule -- unchanged, an apostrophe is legal in a url -- keeps it
+  expect(markEscaped(_.escape("on X: 'humor https://t.co/ojSOHeMFT2' / X"))).toBe(
+    'on X: &#39;humor «https://t.co/ojSOHeMFT2»&#39; / X'
+  )
+  expect(markEscaped('see https://example.com/a&#x27;b')).toBe('see «https://example.com/a»&#x27;b')
+  expect(markEscaped('see https://example.com/a&apos;b')).toBe('see «https://example.com/a»&apos;b')
+  expect(mark("on X: 'humor https://t.co/ojSOHeMFT2' / X")).toBe("on X: 'humor «https://t.co/ojSOHeMFT2'» / X")
 })
 
 test('an escaped ampersand stays inside the url', () => {
@@ -92,10 +109,29 @@ test('an escaped ampersand stays inside the url', () => {
   expect(markEscaped(_.escape('see https://example.com/a&'), { suffix: EDITOR_SUFFIX })).toBe(
     'see «https://example.com/a&amp;»'
   )
-  // an apostrophe is a legal url character, so its entity stays inside as the raw character does
-  // (lodash and marked write `&#39;`, highlight.js `&#x27;`)
-  expect(markEscaped(_.escape("see https://example.com/o'brien end"))).toBe('see «https://example.com/o&#39;brien» end')
-  expect(markEscaped('see https://example.com/o&#x27;brien end')).toBe('see «https://example.com/o&#x27;brien» end')
+})
+
+// the editor overlay's own function, READ FROM THE COMPONENT and evaluated here (as the modal's
+// is below), so the reported line goes through the REAL highlight path: updateTextDivs feeds it
+// `_.escape(line)`, and the overlay kept showing the closing `&quot;` inside the highlighted url
+// after the raw-text fix of rounds 1+2 -- the report this round started from
+const highlightLinks: (text: string) => string = (() => {
+  const source = readFileSync(new URL('../../src/components/Editor.svelte', import.meta.url), 'utf8')
+  const picked = source.match(/\n {2}function highlightLinks\(text\) \{[\s\S]*?\n {2}\}\n/)
+  if (!picked) throw new Error('function highlightLinks not found in Editor.svelte')
+  return new Function('urlRegExp', `${picked[0]}\nreturn highlightLinks`)(urlRegExp)
+})()
+
+test('the editor overlay highlights the reported line without the closing quote', () => {
+  expect(highlightLinks(_.escape(IMPORTED))).toContain('humor <span class="link">https://t.co/ojSOHeMFT2</span>&quot; / X')
+  // a real `&` in a query string keeps the whole url highlighted, query and all
+  expect(highlightLinks(_.escape('see https://example.com/q?a=1&b=2&c=3 end'))).toBe(
+    'see <span class="link">https://example.com/q?a=1&amp;b=2&amp;c=3</span> end'
+  )
+  // trailing punctuation stays out of the highlight, as it did before
+  expect(highlightLinks(_.escape('see https://example.com/a, end'))).toBe(
+    'see <span class="link">https://example.com/a</span>, end'
+  )
 })
 
 test('the raw rule is untouched by the escaped option', () => {
