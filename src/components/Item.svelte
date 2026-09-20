@@ -1056,11 +1056,12 @@
       const lines = log.split('\n')
       let summary = '<span class="log-triangle">▼</span>'
       lines.forEach(line => {
+        // a `_`-prefixed level (a neutralized WARNING or ERROR of the bridge's task log) gets INFO's dot
         const type = line.match(/^ERROR:/)
           ? 'error'
           : line.match(/^WARNING:/)
             ? 'warn'
-            : line.match(/^INFO:/)
+            : line.match(/^(?:INFO|_[A-Z]+):/)
               ? 'info'
               : line.match(/^DEBUG:/)
                 ? 'debug'

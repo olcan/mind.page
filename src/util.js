@@ -67,6 +67,8 @@ export function highlight(code, language) {
       .replace(/^(ERROR:.+?)(; STACK:|$)/gm, '<span class="console-error">$1</span>$2')
       .replace(/^(WARNING:.*)$/gm, '<span class="console-warn">$1</span>')
       .replace(/^(INFO:.*)$/gm, '<span class="console-info">$1</span>')
+      // a `_`-prefixed level (a neutralized WARNING or ERROR of the bridge's task log) is faded like INFO
+      .replace(/^(_[A-Z]+:.*)$/gm, '<span class="console-info">$1</span>')
       .replace(/^(DEBUG:.*)$/gm, '<span class="console-debug">$1</span>')
       .replace(/(; STACK:.+)$/gm, '<span class="console-debug">$1</span>')
   } else if (language == '_output') {
