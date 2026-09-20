@@ -1,6 +1,6 @@
 <script lang="ts">
   const marked = globalThis['marked'] // imported (and set up) in client.ts
-  import { numberWithCommas } from '../util.js'
+  import { escapedUrlChar, escapedUrlEntity, numberWithCommas } from '../util.js'
   import { eventKey } from '../event_key'
   import type { FullAutoFill } from 'svelte/elements'
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
@@ -316,11 +316,15 @@
     // replace naked urls w/ links <a href="$1" target="_blank">$1</a>
     // similar to replaceURLs in Item.svelte but applied _after_ markdown->html conversion
     // means this can replace urls e.g. in code blocks
-    return text.replace(/(^|.?)(https?:\/\/[^\s)<"]*)/g, (m, pfx, url) => {
+    // the markdown->html conversion escapes the text, so the url characters are the escaped-html
+    // ones (escapedUrlChar in util.js): a closing `&quot;` ends the url, an `&amp;` stays in it
+    const url_regex = new RegExp(`(^|.?)(https?:\\/\\/${escapedUrlChar('[^\\s)<"]')}*)`, 'g')
+    const entity_end = new RegExp(`${escapedUrlEntity}$`)
+    return text.replace(url_regex, (m, pfx, url) => {
       // try to maintain html attributes, other url strings, etc
       if (pfx.match(/[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
-      // move certain suffixes out of url into suffix
-      let sfx = url.match(/(?:[\.,;:]|:\d+:\d+)$/)?.pop() ?? ''
+      // move certain suffixes out of url into suffix (the `;` of a kept entity is not one)
+      let sfx = entity_end.test(url) ? '' : (url.match(/(?:[\.,;:]|:\d+:\d+)$/)?.pop() ?? '')
       if (sfx) url = url.slice(0, -sfx.length)
       try {
         let obj = new URL(url)

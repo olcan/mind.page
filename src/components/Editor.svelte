@@ -173,7 +173,7 @@
       .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
       .replace(
         // same as in link_urls above, see comments there
-        urlRegExp({ suffix: /[^\s)<>:,."]/ }),
+        urlRegExp({ suffix: /[^\s)<>:,."]/, escaped: true }),
         (m, pfx, href) => pfx + `<span class="link">${href}</span>`
       )
   }
@@ -338,9 +338,11 @@
 
     // linkify urls & tags in comments (regexes from util.js)
     // we allow semi-colon in tail of url to avoid breaking html entities (which are ok for display in editor)
-    // note for simplicity we do not yet have a separate url regex for escaped html
     // the last character excludes " like the default class does (never part of a url; the body class stops before one)
-    const link_urls = text => text.replace(urlRegExp({ suffix: /[^\s)<>:,."]/ }), (m, pfx, url) => `${pfx}<a>${url}</a>`)
+    // `escaped` is the rule for html-escaped text: an `&` matches only as a complete entity, so a
+    // closing `&quot;` ends the url instead of riding into it letters-and-`;` first
+    const link_urls = text =>
+      text.replace(urlRegExp({ suffix: /[^\s)<>:,."]/, escaped: true }), (m, pfx, url) => `${pfx}<a>${url}</a>`)
     const link_tags = text => text.replace(/(^|\s|\()(#[^#\s<>&,.;:!"'`(){}\[\]]+)/g, '$1<a>$2</a>')
     highlights.querySelectorAll('.hljs-comment').forEach(comments => {
       comments.innerHTML = link_tags(link_urls(comments.innerHTML))

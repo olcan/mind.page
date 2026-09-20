@@ -1570,9 +1570,10 @@
     })
 
     // linkify urls & tags in code comments (regexes from util.js, labeling logic from replaceURLs in toHTML)
+    // the comments are html-escaped (highlight.js output), so we use the escaped-html rule
     const host_base = location.host
     const link_urls = text =>
-      text.replace(urlRegExp(), (m, pfx, href) => {
+      text.replace(urlRegExp({ escaped: true }), (m, pfx, href) => {
         let { host, pathname, search, hash } = new URL(href)
         // drop suffix of host shared with host_base
         for (let i = 0; i < host.length; i++) {

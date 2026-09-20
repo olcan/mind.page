@@ -7,14 +7,29 @@ export function numberWithCommas(x) {
 
 export { canonicalizeHost, getHostDir } from './host.js'
 
-export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,."]/ } = {}) {
+// one character of a url in ALREADY-ESCAPED html, given the raw rule's character class `char`
+// (a source string). in escaped text a character a url cannot contain arrives as an ENTITY
+// whose letters and `;` pass the raw classes, so `&quot;` was absorbed whole and the link
+// carried the closing quote of a quoted title (2026-09-20). here an `&` matches ONLY as a
+// complete entity: `&amp;` (a real `&` in a query string) and the apostrophe forms stay INSIDE
+// the url -- they denote characters the raw rule allows -- while every other entity (`&quot;`,
+// `&lt;`, `&gt;`, anything unrecognized) ENDS it, never half-consumed whatever class follows
+export const escapedUrlEntity = '&(?:amp|apos|#0*39|#[xX]0*27);'
+export const escapedUrlChar = char => `(?:${escapedUrlEntity}|(?!&)${char})`
+
+export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,."]/, escaped = false } = {}) {
   shortcut_hosts ??= window._shortcut_hosts ?? []
   let shortcut_host_alts = shortcut_hosts.map(h => _.escapeRegExp(h + '/')).join('|')
   if (shortcut_host_alts) shortcut_host_alts += '|'
   // an unencoded " is never part of a url (RFC 3986), so it is excluded like < and > from every
   // part of the match: a url followed by a closing quote ends before the quote
+  // `escaped: true` reads ALREADY-ESCAPED html, where those characters arrive as entities that
+  // the raw classes admit letter by letter (see escapedUrlChar above); the raw rule is unchanged
+  const chars = escaped ? escapedUrlChar : char => char
   return new RegExp(
-    prefix.source + `((?:${shortcut_host_alts}[a-z][-a-z0-9\\+\\.]*://[^\\s)<>"/]+/?)[^\\s)<>:"]*${suffix.source})`,
+    prefix.source +
+      `((?:${shortcut_host_alts}[a-z][-a-z0-9\\+\\.]*://${chars('[^\\s)<>"/]')}+/?)` +
+      `${chars('[^\\s)<>:"]')}*${chars(suffix.source)})`,
     'gi'
   )
 }
@@ -58,7 +73,8 @@ export function highlight(code, language) {
   const link_urls = text =>
     text.replace(
       // we allow @ prefix due to use in stack traces in some browsers
-      urlRegExp({ prefix: /(^|\s|\(|@)/ }),
+      // the code is html-escaped before this runs (both branches below), so the rule is too
+      urlRegExp({ prefix: /(^|\s|\(|@)/, escaped: true }),
       (m, pfx, href) =>
         `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
     )
