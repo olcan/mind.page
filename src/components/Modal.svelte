@@ -315,7 +315,7 @@
     // replace naked urls w/ links <a href="$1" target="_blank">$1</a>
     // similar to replaceURLs in Item.svelte but applied _after_ markdown->html conversion
     // means this can replace urls e.g. in code blocks
-    return text.replace(/(^|.?)(https?:\/\/[^\s)<]*)/g, (m, pfx, url) => {
+    return text.replace(/(^|.?)(https?:\/\/[^\s)<"]*)/g, (m, pfx, url) => {
       // try to maintain html attributes, other url strings, etc
       if (pfx.match(/[="'`:]$/)) return m // : can be from generated urls, e.g. blob:http://localhost//...
       // move certain suffixes out of url into suffix

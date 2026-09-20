@@ -41,3 +41,19 @@ test('trailing punctuation and a closing parenthesis stay out of the url as befo
     'see «https://example.com/x», then «https://example.com/y». («https://example.com/z») or «https://example.com/w»:'
   )
 })
+
+// the one custom last-character class in the app: the editor overlay's highlightLinks, its
+// comment linkifier link_urls (Editor.svelte) and insertZWSP (zwsp.ts) admit `;` (an html
+// entity's end, fine for display in the editor). the body class stops before a `"`, so a
+// last-character class that admits the quote takes a closing quote as the url's last character
+// (`https://t.co/ojSOHeMFT2"` matched whole, 2026-09-20): the callers' exact class, pinned here
+const EDITOR_SUFFIX = /[^\s)<>:,."]/
+
+test("a caller's own last-character class excludes the quote as the default does", () => {
+  const markEditor = (text: string): string =>
+    text.replace(urlRegExp({ suffix: EDITOR_SUFFIX }), (m: string, pfx: string, url: string) => `${pfx}«${url}»`)
+  expect(markEditor(IMPORTED)).toContain('humor «https://t.co/ojSOHeMFT2»" / X')
+  // the class's own difference stays: a `;` ends the default's url, not the editor's
+  expect(markEditor('see https://example.com/a&amp;')).toBe('see «https://example.com/a&amp;»')
+  expect(mark('see https://example.com/a&amp;')).toBe('see «https://example.com/a&amp»;')
+})

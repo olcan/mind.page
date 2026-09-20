@@ -13,7 +13,7 @@ import { urlRegExp } from './util.js'
 
 // inserts ZWSPs into long url runs; `insertions` (if given) records each pre-insertion offset
 export function insertZWSP(text: string, insertions: number[] | null = null): string {
-  return text.replace(urlRegExp({ suffix: /[^\s)<>:,.]/ }), (m: string, pfx: string, _url: string, offset: number) => {
+  return text.replace(urlRegExp({ suffix: /[^\s)<>:,."]/ }), (m: string, pfx: string, _url: string, offset: number) => {
     offset += pfx.length
     let [_, scheme, url] = _url.match(/^((?:.+?:\/\/)?)(.+)$/)! // always matches: _url is nonempty
     offset += scheme.length

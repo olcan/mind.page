@@ -57,3 +57,10 @@ test('zwspOffset maps raw offsets so sliced selections strip back to the raw ran
   // out-of-range raw offsets clamp to the augmented length
   expect(zwspOffset(aug, TODO.length + 100)).toBe(aug.length)
 })
+
+test('a closing quote after a url is not part of it: no ZWSP lands after the quote', () => {
+  // insertZWSP passes its own last-character class to urlRegExp; it must exclude `"` as the
+  // default does (the body class stops before a quote, so a class admitting it took the closing
+  // quote as the url's last character and the insertion landed after the quote)
+  expect(insertZWSP('see https://t.co/ab" / X')).toBe('see https://t.co/ab" / X')
+})
