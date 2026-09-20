@@ -7,6 +7,7 @@ test('a `_`-prefixed level (a neutralized WARNING or ERROR) is faded like INFO',
   const g = globalThis as Record<string, unknown>
   g.window = { hljs: {}, _shortcut_hosts: [] }
   g._ = createRequire(import.meta.url)('lodash')
+  // @ts-expect-error util.js is plain js (the app's client lib) without a declaration file
   const { highlight } = await import('../../src/util.js')
   const lines = [
     'ERROR: 17:41 turn failed',
