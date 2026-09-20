@@ -7,12 +7,14 @@ export function numberWithCommas(x) {
 
 export { canonicalizeHost, getHostDir } from './host.js'
 
-export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,.]/ } = {}) {
+export function urlRegExp({ shortcut_hosts = null, prefix = /(^|\s|\()/, suffix = /[^\s)<>:;,."]/ } = {}) {
   shortcut_hosts ??= window._shortcut_hosts ?? []
   let shortcut_host_alts = shortcut_hosts.map(h => _.escapeRegExp(h + '/')).join('|')
   if (shortcut_host_alts) shortcut_host_alts += '|'
+  // an unencoded " is never part of a url (RFC 3986), so it is excluded like < and > from every
+  // part of the match: a url followed by a closing quote ends before the quote
   return new RegExp(
-    prefix.source + `((?:${shortcut_host_alts}[a-z][-a-z0-9\\+\\.]*://[^\\s)<>/]+/?)[^\\s)<>:]*${suffix.source})`,
+    prefix.source + `((?:${shortcut_host_alts}[a-z][-a-z0-9\\+\\.]*://[^\\s)<>"/]+/?)[^\\s)<>:"]*${suffix.source})`,
     'gi'
   )
 }
