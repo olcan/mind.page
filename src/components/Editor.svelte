@@ -40,6 +40,7 @@
     skipExclusions,
   } from '../util.js'
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
+  import { eventKey } from '../event_key'
   import { inertCandidateSpan, scanInert } from '../inert'
 
   const placeholder = ' '
@@ -452,7 +453,7 @@
 
   function onKeyDown(e: any) {
     onEditorKeyDown(e)
-    let key = e.code || e.key // for android compatibility
+    let key = eventKey(e) // physical code, except a character on a remapped keycode
     if (!key) return // can be empty for pencil input on ios
     // console.debug('Editor.onKeyDown:', e, key)
 
@@ -802,7 +803,7 @@
   }
 
   function onKeyUp(e: any) {
-    const key = e.code || e.key // for android compatibility
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
     if (!key) return // can be empty for pencil input on ios
 
     // console.debug('Editor.onKeyUp', e, key)

@@ -37,6 +37,7 @@
   const _ = globalThis['_'] // imported in client.ts
   import { Jumper } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
+  import { eventKey } from '../event_key'
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
   export let items = []
@@ -5054,7 +5055,7 @@
     return_alerts = false
   ) {
     editorText = text // in case invoked without setting editorText
-    const key = e?.code || e?.key
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
     window['_mindbox_event'] = e
     window['_mindbox_return'] = undefined // set on non-empty returns for MindBox.create
     if (cancelled) {
@@ -9705,7 +9706,7 @@
 
   function onKeyDown(e: KeyboardEvent) {
     if (!e.metaKey) focus() // focus on keydown, except when cmd-modified, e.g. for cmd-tilde
-    const key = e.code || e.key // for android compatibility
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
     if (!key) return // can be empty for pencil input on ios
     // console.debug("window.onKeyDown:", e, key)
 
@@ -10085,7 +10086,7 @@
   }
 
   function onKeyUp(e: KeyboardEvent) {
-    const key = e.code || e.key // for android compatibility
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
     if (!key) return // can be empty for pencil input on ios
     // console.debug("window.onKeyUp:", e, key)
     e.stopPropagation()

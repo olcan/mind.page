@@ -1,6 +1,7 @@
 <script lang="ts">
   const marked = globalThis['marked'] // imported (and set up) in client.ts
   import { numberWithCommas } from '../util.js'
+  import { eventKey } from '../event_key'
   import type { FullAutoFill } from 'svelte/elements'
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
 
@@ -259,7 +260,7 @@
   }
 
   function onKeyDown(e: KeyboardEvent) {
-    const key = e.code || e.key // for android compatibility
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
     // NOTE: modal is on top of the page and handles ALL key events
     if (!_visible) return // ignore if not visible
 

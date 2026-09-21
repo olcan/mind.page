@@ -141,6 +141,40 @@ test('failed _tests rank, border, and log with dedup; relog after a healthy inte
   await page.keyboard.press('Escape')
 })
 
+test('dictated text types into the mindbox: a character on a remapped keycode is not Escape', async ({
+  page,
+}) => {
+  // A virtual keyboard (dictation through `wtype`) types each character on a spare PHYSICAL
+  // keycode, starting at 9, which is Escape: the first character of every transcription arrives
+  // with `code: 'Escape'`, the next with `Digit1`, `Digit2`, ... Reading `code` first made the
+  // editor cancel that keystroke and blur itself after two or three characters, losing the rest
+  // of the transcription (issues/Dictated Text Triggers Escape And Blurs The Editor). Chromium's
+  // raw key dispatch sets `code` and `key` independently, which is exactly that shape.
+  await loadAdmin(page)
+  await focusMindbox(page)
+  await mindbox(page).fill('')
+  const session = await page.context().newCDPSession(page)
+  // the codes wtype climbs through, compressed: the point is that `code` and `key` disagree
+  const codes = ['Escape', 'Digit1', 'Digit2', 'Digit3', 'Backspace', 'Tab', 'Enter', 'ArrowUp']
+  // the FIRST character is a surrogate pair on the Escape keycode: the shape a code-unit count
+  // would miss, taking the cancel branch again (review 0)
+  const text = '😀Testing'
+  for (const [index, character] of [...text].entries()) {
+    await session.send('Input.dispatchKeyEvent', {
+      type: 'keyDown', // carries the text, as a virtual keyboard's keystroke does
+      code: codes[index], // the remapped PHYSICAL key, unrelated to the character
+      key: character,
+      text: character,
+      unmodifiedText: character,
+    })
+    await session.send('Input.dispatchKeyEvent', { type: 'keyUp', code: codes[index], key: character })
+  }
+  await expect(mindbox(page)).toHaveValue(text) // every character, none cancelled
+  await expect(mindbox(page)).toBeFocused() // and the editor never blurred
+  await page.keyboard.press('Escape') // a REAL escape still cancels and blurs
+  await expect(mindbox(page)).not.toBeFocused()
+})
+
 test('searching filters items and puts the tag in the url; escape and shift+backspace clear', async ({ page }) => {
   await loadAdmin(page)
   await focusMindbox(page)
