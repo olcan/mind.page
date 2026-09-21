@@ -7,7 +7,11 @@ import { createRequire } from 'node:module'
 // match urls with urlRegExp, which reads the browser globals `window._shortcut_hosts` and
 // lodash `_` at CALL time; stub both before the calls below -- no other browser surface is touched
 ;(globalThis as any).window = { _shortcut_hosts: [] }
-;(globalThis as any)._ = createRequire(import.meta.url)('lodash')
+// the module reads the global `_` at call time; keep a local handle too -- the escaped-html
+// cases below escape their own input the way the callers do, and a bare `_` is a UMD global
+// here (TS2686 under `npm run check:tests`)
+const lodash = createRequire(import.meta.url)('lodash')
+;(globalThis as any)._ = lodash
 
 // @ts-expect-error util.js is plain js (the app's client lib) without a declaration file
 import { escapedUrlChar, escapedUrlEntity, urlRegExp } from '../../src/util.js'
@@ -71,17 +75,17 @@ const markEscaped = (text: string, options = {}): string =>
   text.replace(urlRegExp({ escaped: true, ...options }), (m: string, pfx: string, url: string) => `${pfx}«${url}»`)
 
 test('an escaped closing quote ends the url', () => {
-  const escaped = _.escape(IMPORTED) // exactly what Editor.svelte's updateTextDivs feeds highlightLinks
+  const escaped = lodash.escape(IMPORTED) // exactly what Editor.svelte's updateTextDivs feeds highlightLinks
   expect(escaped).toContain('humor https://t.co/ojSOHeMFT2&quot; / X')
   // the editor overlay's own options (highlightLinks and its comment link_urls)
   expect(markEscaped(escaped, { suffix: EDITOR_SUFFIX })).toContain('humor «https://t.co/ojSOHeMFT2»&quot; / X')
   // the default class (Item.svelte's comment linkifier, the `_log`/`_output` highlighter)
   expect(markEscaped(escaped)).toContain('humor «https://t.co/ojSOHeMFT2»&quot; / X')
   // an entity ends the AUTHORITY too, before any path
-  expect(markEscaped(_.escape('see https://example.com"x'))).toBe('see «https://example.com»&quot;x')
+  expect(markEscaped(lodash.escape('see https://example.com"x'))).toBe('see «https://example.com»&quot;x')
   // the other characters the raw rule excludes, in their escaped form
-  expect(markEscaped(_.escape('see https://example.com/a<b'))).toBe('see «https://example.com/a»&lt;b')
-  expect(markEscaped(_.escape('see https://example.com/a>b'))).toBe('see «https://example.com/a»&gt;b')
+  expect(markEscaped(lodash.escape('see https://example.com/a<b'))).toBe('see «https://example.com/a»&lt;b')
+  expect(markEscaped(lodash.escape('see https://example.com/a>b'))).toBe('see «https://example.com/a»&gt;b')
   // the numeric forms of the quote too (marked leaves an already-escaped entity as written)
   expect(markEscaped('see https://example.com/a&#34;b')).toBe('see «https://example.com/a»&#34;b')
   expect(markEscaped('see https://example.com/a&#x22;b')).toBe('see «https://example.com/a»&#x22;b')
@@ -92,7 +96,7 @@ test('an escaped apostrophe ends the url', () => {
   // is a url character here (lodash and marked write `&#39;`, highlight.js `&#x27;`). an
   // unencoded `'` inside a url (`%27` is the usual form) therefore ends the escaped link early,
   // where the raw rule -- unchanged, an apostrophe is legal in a url -- keeps it
-  expect(markEscaped(_.escape("on X: 'humor https://t.co/ojSOHeMFT2' / X"))).toBe(
+  expect(markEscaped(lodash.escape("on X: 'humor https://t.co/ojSOHeMFT2' / X"))).toBe(
     'on X: &#39;humor «https://t.co/ojSOHeMFT2»&#39; / X'
   )
   expect(markEscaped('see https://example.com/a&#x27;b')).toBe('see «https://example.com/a»&#x27;b')
@@ -101,19 +105,19 @@ test('an escaped apostrophe ends the url', () => {
 })
 
 test('an escaped ampersand stays inside the url', () => {
-  const escaped = _.escape('see https://example.com/q?a=1&b=2&c=3 end')
+  const escaped = lodash.escape('see https://example.com/q?a=1&b=2&c=3 end')
   expect(escaped).toBe('see https://example.com/q?a=1&amp;b=2&amp;c=3 end')
   expect(markEscaped(escaped)).toBe('see «https://example.com/q?a=1&amp;b=2&amp;c=3» end')
   // a TRAILING entity is kept whole under both classes, though the default one excludes its `;`
-  expect(markEscaped(_.escape('see https://example.com/a&'))).toBe('see «https://example.com/a&amp;»')
-  expect(markEscaped(_.escape('see https://example.com/a&'), { suffix: EDITOR_SUFFIX })).toBe(
+  expect(markEscaped(lodash.escape('see https://example.com/a&'))).toBe('see «https://example.com/a&amp;»')
+  expect(markEscaped(lodash.escape('see https://example.com/a&'), { suffix: EDITOR_SUFFIX })).toBe(
     'see «https://example.com/a&amp;»'
   )
 })
 
 // the editor overlay's own function, READ FROM THE COMPONENT and evaluated here (as the modal's
 // is below), so the reported line goes through the REAL highlight path: updateTextDivs feeds it
-// `_.escape(line)`, and the overlay kept showing the closing `&quot;` inside the highlighted url
+// `lodash.escape(line)`, and the overlay kept showing the closing `&quot;` inside the highlighted url
 // after the raw-text fix of rounds 1+2 -- the report this round started from
 const highlightLinks: (text: string) => string = (() => {
   const source = readFileSync(new URL('../../src/components/Editor.svelte', import.meta.url), 'utf8')
@@ -123,13 +127,13 @@ const highlightLinks: (text: string) => string = (() => {
 })()
 
 test('the editor overlay highlights the reported line without the closing quote', () => {
-  expect(highlightLinks(_.escape(IMPORTED))).toContain('humor <span class="link">https://t.co/ojSOHeMFT2</span>&quot; / X')
+  expect(highlightLinks(lodash.escape(IMPORTED))).toContain('humor <span class="link">https://t.co/ojSOHeMFT2</span>&quot; / X')
   // a real `&` in a query string keeps the whole url highlighted, query and all
-  expect(highlightLinks(_.escape('see https://example.com/q?a=1&b=2&c=3 end'))).toBe(
+  expect(highlightLinks(lodash.escape('see https://example.com/q?a=1&b=2&c=3 end'))).toBe(
     'see <span class="link">https://example.com/q?a=1&amp;b=2&amp;c=3</span> end'
   )
   // trailing punctuation stays out of the highlight, as it did before
-  expect(highlightLinks(_.escape('see https://example.com/a, end'))).toBe(
+  expect(highlightLinks(lodash.escape('see https://example.com/a, end'))).toBe(
     'see <span class="link">https://example.com/a</span>, end'
   )
 })
@@ -139,6 +143,26 @@ test('the raw rule is untouched by the escaped option', () => {
   // a literal `&quot;` typed in RAW text is url characters, as it was: the item text and the
   // editor's textarea are raw (Item.svelte's replaceURLs, insertZWSP, the logger's log rule)
   expect(mark('see https://example.com/a&quot;b')).toBe('see «https://example.com/a&quot;b»')
+})
+
+// only highlightLinks is evaluated above, so nothing else would notice a call site quietly
+// losing `escaped: true` -- and that is exactly the failure mode of this bug, which survived a
+// whole round because every witness fed the rule RAW text. the inventory of call sites, pinned:
+// which text each one reads is a property of the CALLER, not of the rule
+test('every call site reads the text it actually gets: escaped or raw', () => {
+  // [file, calls that must pass `escaped: true`, calls that must not]
+  const sites: [string, number, number][] = [
+    ['src/util.js', 1, 0], // the `_log`/`_output` highlighter, over `_.escape(code)`
+    ['src/components/Editor.svelte', 2, 0], // highlightLinks and the comment link_urls, over `_.escape(line)`
+    ['src/components/Item.svelte', 1, 1], // the code-comment linkifier, over hljs output; replaceURLs is RAW item text
+    ['src/zwsp.ts', 0, 1], // insertZWSP, over the raw textarea
+  ]
+  for (const [file, escaped, raw] of sites) {
+    const source = readFileSync(new URL('../../' + file, import.meta.url), 'utf8')
+    // every call but the definition (`function urlRegExp(`), with its options object if any
+    const calls = [...source.matchAll(/(?<!function )urlRegExp\((\{[\s\S]*?\})?\)/g)].map(m => m[1] ?? '')
+    expect({ file, escaped: calls.filter(o => o.includes('escaped: true')).length, raw: calls.filter(o => !o.includes('escaped: true')).length }).toEqual({ file, escaped, raw })
+  }
 })
 
 // the modal linkifies the html marked produced (Modal.svelte's replaceNakedURLs), with its own
