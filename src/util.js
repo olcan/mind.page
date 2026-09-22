@@ -77,8 +77,11 @@ export function highlight(code, language) {
       // we allow @ prefix due to use in stack traces in some browsers
       // the code is html-escaped before this runs (both branches below), so the rule is too
       urlRegExp({ prefix: /(^|\s|\(|@)/, escaped: true }),
-      (m, pfx, href) =>
-        `${pfx}<a href="${_.escape(href)}" title="${_.escape(href)}" target="_blank">${_.escape(href)}</a>`
+      // the match is a substring of that escaped html (its `&amp;` IS the escaped `&`, the only
+      // entity the escaped rule keeps inside a url), so it is interpolated as it stands: escaping
+      // it again wrote `&amp;amp;` into href, title and label, and the browser opened the url with
+      // the parameter `amp;b` instead of `b` (2026-09-21)
+      (m, pfx, href) => `${pfx}<a href="${href}" title="${href}" target="_blank">${href}</a>`
     )
   // NOTE: if we return without running the code through hljs, we need to ensure html-escaping
   if (language == '_log') {

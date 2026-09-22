@@ -14,7 +14,7 @@ const lodash = createRequire(import.meta.url)('lodash')
 ;(globalThis as any)._ = lodash
 
 // @ts-expect-error util.js is plain js (the app's client lib) without a declaration file
-import { escapedUrlChar, escapedUrlEntity, urlRegExp } from '../../src/util.js'
+import { escapedUrlChar, escapedUrlEntity, highlight, urlRegExp } from '../../src/util.js'
 
 // each url the rule matches in `text`, marked in place as «url» (the text around it stays)
 const mark = (text: string): string => text.replace(urlRegExp(), (m: string, pfx: string, url: string) => `${pfx}«${url}»`)
@@ -194,4 +194,42 @@ test('the modal links escaped html without taking the closing quote or breaking 
   expect(replaceNakedURLs('<p>see https://example.com/a, end</p>')).toBe(
     '<p>see <a href="https://example.com/a" target="_blank">https://example.com/a</a>, end</p>'
   )
+})
+
+// the code-comment linkifier of Item.svelte (the same pick as highlightLinks above): its anchor
+// for a url matched in already-escaped html, with the page host and lodash it reads at call time
+const commentLinkUrls: (text: string) => string = (() => {
+  const source = readFileSync(new URL('../../src/components/Item.svelte', import.meta.url), 'utf8')
+  const picked = source.match(/\n {4}const link_urls = text =>\n {6}text\.replace\(urlRegExp\(\{ escaped: true \}\)[\s\S]*?\n {6}\}\)\n/)
+  if (!picked) throw new Error('const link_urls not found in Item.svelte')
+  return new Function('urlRegExp', 'host_base', '_', `${picked[0]}\nreturn link_urls`)(urlRegExp, 'mind.page', lodash)
+})()
+
+test('an already-escaped href is not escaped again', () => {
+  // both linkifiers match urls in ALREADY-ESCAPED html, so the `&amp;` inside a match is the
+  // escaped `&` (the one entity the escaped rule keeps in a url). escaping the match again wrote
+  // `&amp;amp;` into href and title, and the browser opened `?a=1&amp;b=2`: the parameter `amp;b`
+  // instead of `b` on hover, copy-link and open-in-new-tab (2026-09-21, issues/Escaped Url Entity
+  // Backfills); the app's own click handler unescapes once, so only it ever saw the right url
+  const url = 'https://example.com/q?a=1&amp;b=2' // the escaped form, as the attribute must carry it
+  expect(commentLinkUrls(lodash.escape('see https://example.com/q?a=1&b=2 end'))).toBe(
+    `see <a href="${url}" target="_blank" rel="noopener noreferrer" title="${url}" data-link-click>example.com/…</a> end`
+  )
+  // a configured shortcut host's label carries the PARSED path, plain text: escaped once (an
+  // unescaped `/a&notebook` rendered as `/a¬ebook`, review 0)
+  ;(globalThis as any).window._shortcut_hosts = ['example.com']
+  const shortcut = 'https://example.com/a&amp;notebook'
+  expect(commentLinkUrls(lodash.escape('see https://example.com/a&notebook end'))).toBe(
+    `see <a href="${shortcut}" target="_blank" rel="noopener noreferrer" title="${shortcut}" data-link-click>example.com/a&amp;notebook</a> end`
+  )
+  ;(globalThis as any).window._shortcut_hosts = []
+  // the `_log`/`_output` highlighter escapes the code itself, then links; its label is the url too
+  ;(globalThis as any).window.hljs = {} // present: the `_log`/`_output` branches never call it
+  expect(highlight('see https://example.com/q?a=1&b=2 end', '_output')).toBe(
+    `see <a href="${url}" title="${url}" target="_blank">${url}</a> end`
+  )
+  expect(highlight('INFO: see https://example.com/q?a=1&b=2', '_log')).toBe(
+    `<span class="console-info">INFO: see <a href="${url}" title="${url}" target="_blank">${url}</a></span>`
+  )
+  delete (globalThis as any).window.hljs
 })

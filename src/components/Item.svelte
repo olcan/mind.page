@@ -1574,7 +1574,8 @@
     const host_base = location.host
     const link_urls = text =>
       text.replace(urlRegExp({ escaped: true }), (m, pfx, href) => {
-        let { host, pathname, search, hash } = new URL(href)
+        // the match is escaped html (its `&amp;` is the escaped `&`): the real url for parsing
+        let { host, pathname, search, hash } = new URL(_.unescape(href))
         // drop suffix of host shared with host_base
         for (let i = 0; i < host.length; i++) {
           if (host_base.endsWith(host.substring(i))) {
@@ -1586,13 +1587,18 @@
         if (!pathname && !host) host = host_base // do not allow empty host + path
         let label = host + ((pathname + search + hash).length > 1 ? '/…' : '')
         if (window['_shortcut_hosts']?.includes(host)) label = host + pathname + (search + hash ? '/…' : '')
-        // NOTE: no inline handler. `_.escape` is HTML escaping, and an event-handler attribute
-        // is compiled AFTER character references are decoded, so an owner url containing a quote
-        // used to close the javascript string and run its own expression on click. the anchor
-        // carries data only; its listener is attached from the DOM below (linkifyComments)
+        // NOTE: no inline handler. HTML escaping does not protect an event-handler attribute,
+        // which is compiled AFTER character references are decoded, so an owner url containing a
+        // quote used to close the javascript string and run its own expression on click. the
+        // anchor carries data only; its listener is attached from the DOM below (linkifyComments).
+        // the href is interpolated as it stands: it is already escaped html (a quote or `<` in it
+        // arrives as an entity, which ends the url), and escaping it again wrote `&amp;amp;` into
+        // href and title, so hover, copy-link and open-in-new-tab carried `amp;b` for `b`. the label
+        // is the other way round: derived from the PARSED url, it is plain text (a shortcut host's
+        // label carries the path), so it is escaped once here (2026-09-21)
         return (
-          `${pfx}<a href="${_.escape(href)}" target="_blank" rel="noopener noreferrer" ` +
-          `title="${_.escape(href)}" data-link-click>${label}</a>`
+          `${pfx}<a href="${href}" target="_blank" rel="noopener noreferrer" ` +
+          `title="${href}" data-link-click>${_.escape(label)}</a>`
         )
       })
     const link_tags = text =>
