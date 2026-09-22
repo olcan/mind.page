@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { createHmac } from 'crypto'
 import { execSync, spawn } from 'child_process'
-import { existsSync, readFileSync } from 'fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
 import { createServer, type Server } from 'http'
 import { delimiter, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
@@ -363,6 +364,64 @@ test('a plain server without VENDOR_DIR serves the shell as written', async () =
     expect(outside.status, 'scoped: the checkouts\' parent is refused even to the secret').toBe(403)
   } finally {
     child.kill('SIGKILL')
+    await exited
+  }
+})
+
+test('/file names a sibling checkout by its scope root when the cwd has none', async () => {
+  // the file and watch routes map `/file/<name>/...` to the cwd's sibling `<name>` (the owner's
+  // layout); under the scoped mode a scope root of that name wins, so a lane server started in
+  // a checkout whose sibling is absent (a worktree with mind.page alone, the gate given
+  // MIND_ITEMS_DIR) serves the previews of installed items instead of refusing them, which
+  // raised a modal that blocked a tasks row (2026-09-21). A throwaway server: its PWD a path
+  // beside no mind.items, its scope this checkout plus a temporary mind.items
+  test.setTimeout(60_000)
+  const home = process.env.E2E_HOME
+  expect(home, 'the run home (playwright.config.ts)').toBeTruthy()
+  const scratch = mkdtempSync(join(tmpdir(), 'lane-sibling-'))
+  const items = join(scratch, 'mind.items')
+  mkdirSync(items)
+  writeFileSync(join(items, 'probe.md'), 'served from the scope root\n')
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    HOME: home,
+    PWD: join(scratch, 'elsewhere', 'mind.page'), // the cwd-derived sibling does not exist
+    LOCAL_ROUTES_SCOPE: [repo, items].join(delimiter),
+    HOST: '127.0.0.1',
+    NO_HTTPS: '1',
+    PORT: '0',
+    NODE_ENV: 'production',
+  }
+  delete env.VENDOR_DIR
+  delete env.VENDOR_UNLISTED
+  delete env.FIREBASE_CONFIG
+  const child = spawn('node', ['server.mjs'], { cwd: repo, env, stdio: ['ignore', 'pipe', 'pipe'] })
+  const exited = new Promise<number | null>(done => child.once('close', code => done(code)))
+  try {
+    const port = await new Promise<number>((resolvePort, reject) => {
+      let out = ''
+      const seen = (chunk: Buffer) => {
+        out += chunk
+        const m = out.match(/listening on http:\/\/[^:\s]+:(\d+)/)
+        if (m) resolvePort(Number(m[1]))
+      }
+      child.stdout.on('data', seen)
+      child.stderr.on('data', seen)
+      child.once('error', reject)
+      void exited.then(code => reject(new Error(`the server exited ${code}: ${out}`)))
+      setTimeout(() => reject(new Error(`no listening line in 30s: ${out}`)), 30_000).unref()
+    })
+    const base = `http://127.0.0.1:${port}`
+    const local = { 'x-mindpage-local-proxy': laneSecret() }
+    const sibling = await fetch(`${base}/file/mind.items/probe.md`, { headers: local })
+    expect(sibling.status, 'the sibling by its scope root').toBe(200)
+    expect(await sibling.text()).toBe('served from the scope root\n')
+    const own = await fetch(`${base}/file/mind.page/package.json`, { headers: local })
+    expect(own.status, 'this checkout by its scope root').toBe(200)
+    expect((await fetch(`${base}/file/mind.items/probe.md`)).status, 'still authenticated').toBe(403)
+    expect((await fetch(`${base}/file/elsewhere/mind.items/probe.md`, { headers: local })).status, 'no other name').toBe(403)
+  } finally {
+    child.kill('SIGTERM')
     await exited
   }
 })

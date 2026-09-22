@@ -1612,7 +1612,10 @@
         // attach listeners from the DOM: the anchors above carry data attributes only, so no
         // owner-controlled value is ever compiled as javascript
         comments.querySelectorAll('a[data-link-click]').forEach((a: any) => {
-          a.onclick = e => window['_handleLinkClick'](id, a.getAttribute('href'), e)
+          // the handler unescapes its href once; the DOM attribute is the real url, so it is
+          // escaped once on the way in and a url whose text carries a literal `&amp;` reaches
+          // the app as written (2026-09-21, the anchor's own escaping used to compensate)
+          a.onclick = e => window['_handleLinkClick'](id, _.escape(a.getAttribute('href')), e)
         })
         comments.querySelectorAll('a[data-tag-click]').forEach((a: any) => {
           const tag = a.getAttribute('data-tag-click')

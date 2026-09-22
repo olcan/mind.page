@@ -120,6 +120,18 @@ const withinScope = target => {
   }
   return routesScopes.some(root => resolved == root || resolved.startsWith(root + path.sep))
 }
+// the checkout a file or watch route names by its first segment (`/file/mind.items/<f>`, the
+// app's preview of an installed item; `/file/mind.page/<f>`): the cwd's sibling by default (the
+// owner's layout, external/mind.page beside external/mind.items). Under the scoped mode a scope
+// root of that name wins, so a lane server in a checkout whose sibling is absent (a worktree
+// with mind.page alone) serves the mind.items the gate names (MIND_ITEMS_DIR) instead of
+// answering the preview with `not served`, which raised a modal that blocked a tasks row
+// (2026-09-21)
+const siblingPath = rel => {
+  const [, name, rest = ''] = rel.match(/^\/([^/]+)(\/.*)?$/) ?? []
+  const root = name && routesScopes?.find(root => path.basename(root) == name)
+  return root ? root + rest : process.env['PWD'].replace('/mind.page', rel)
+}
 // the proxy's backend, one shared parser for the gate and the router (7b-2a review 2 B1): the
 // first path segment after /proxy/ (a collapsed scheme slash repaired), a real URL parse, no
 // user information (refused rather than parsed twice); null refuses the request
@@ -270,7 +282,7 @@ scoped.use(
       res.status(200).contentType('text/plain').send(server_id)
     } else if (hostname == 'localhost' && req.path.startsWith('/file/')) {
       if (!isFileRouteAllowed(req)) return res.status(403).type('text/plain').send('not served')
-      const target = process.env['PWD'].replace('/mind.page', req.path.slice(5))
+      const target = siblingPath(req.path.slice(5))
       if (isProxySecretPath(target) || !withinScope(target))
         return res.status(403).type('text/plain').send('not served')
       res.sendFile(target)
@@ -298,7 +310,7 @@ scoped.use(
         res.status(400).send('invalid watch path ' + req.path)
         return
       }
-      const watch_path = process.env['PWD'].replace('/mind.page', req_path)
+      const watch_path = siblingPath(req_path)
       const key = client_id + ':' + watch_path
       if (!events[key]) {
         events[key] = []

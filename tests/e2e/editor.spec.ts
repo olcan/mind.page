@@ -500,3 +500,40 @@ test('the run button works on an installed item whose input blocks are all hidde
   expect(runText).toContain('js_input_removed')
   expect(runText).not.toContain('_removed_removed')
 })
+
+test('a code comment link reaches the app handler with its url as written', async ({ page }) => {
+  // the comment linkifier's anchors carry the url as escaped html and hand the DOM attribute to
+  // _handleLinkClick, which unescapes it once: a url whose text carries a literal `&amp;` used
+  // to arrive decoded once too many (2026-09-21, issues/Escaped Url Entity Backfills)
+  await loadAdmin(page)
+  const plain = 'https://example.com/q?a=1&b=2'
+  const literal = 'https://example.com/lit?x=1&amp;y=2'
+  await page.evaluate(
+    ([plain, literal]) =>
+      window._create(['#e2e_comment_link', '```js', `// see ${plain} and ${literal}`, 'const x = 1', '```'].join('\n')),
+    [plain, literal]
+  )
+  await expect.poll(() => savedId(page, '#e2e_comment_link'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => void (location.hash = '#e2e_comment_link')) // bring it up so it renders
+  const anchors = page.locator('.hljs-comment a[data-link-click]')
+  await expect(anchors).toHaveCount(2, { timeout: 30_000 })
+  expect(await anchors.evaluateAll(as => as.map(a => a.getAttribute('href')))).toEqual([plain, literal])
+  // the handler's contract: it unescapes the href it is handed once, then calls the app's
+  // onLinkClick with it; the interception applies that same unescape, so the assertion is on
+  // what the app receives
+  const received = await page.evaluate(() => {
+    const w = window as any
+    const calls: string[] = []
+    const original = w._handleLinkClick
+    w._handleLinkClick = (_id: string, href: string, e: MouseEvent) => {
+      calls.push(w._.unescape(href))
+      e.stopPropagation()
+      e.preventDefault()
+    }
+    for (const a of document.querySelectorAll('.hljs-comment a[data-link-click]'))
+      a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    w._handleLinkClick = original
+    return calls
+  })
+  expect(received, 'each url as the app receives it, the literal entity included').toEqual([plain, literal])
+})
