@@ -66,7 +66,7 @@ const lane = (name: string, extra: object) => ({
 // lane with its own port and its own project id on the shared emulators, so the lanes overlap
 // freely and only the rows inside a lane are serial (a one-worker cap per project)
 const WRITE_SPECS =
-  /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract|tasks)\.spec\.ts/
+  /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract|tasks|lifecycle)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -99,6 +99,9 @@ export default defineConfig({
     lane('editor2', { testMatch: /editor2\.spec\.ts/ }),
     lane('contract', { testMatch: /renderer_contract\.spec\.ts/ }),
     lane('tasks', { testMatch: /tasks\.spec\.ts/ }), // the task-agents todoer rows over a dedicated account
+    // the page-cache restore rows: they write as admin, reload the page, and one of them kills the
+    // page's Firestore client with a real pagehide
+    lane('lifecycle', { testMatch: /lifecycle\.spec\.ts/ }),
   ],
   // one server per lane, started by playwright (see the lane note above). FIREBASE_CONFIG (set by
   // firebase emulators:exec) must be removed, since server.ts takes it to mean running on cloud

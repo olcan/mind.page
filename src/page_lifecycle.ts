@@ -2,22 +2,28 @@
 // navigation, and on iOS every background tab Safari suspends (WebKit's page-suspension SPI runs
 // the same BackForwardCache::suspendPage path, which fires the event whether or not the page is
 // otherwise cacheable) — receives `pagehide` first, and the Firestore SDK's own pagehide handler
-// (IndexedDbPersistence.attachWindowUnloadHook, @firebase/firestore 4.17) leaves its client dead
-// right there. the handler marks the client zombied on every browser, then takes one of two
-// branches: on an iPhone WebKit browser (isSafari(): a UA with `Safari` and without `Chrome`, that
-// also matches /(?:Version|Mobile)\/1[456]/ — every iPhone WebKit browser does, through the frozen
-// `Mobile/15E148` token; iPad Safari sends a desktop UA and takes the other branch) it puts the
-// async queue in restricted mode with the queued work purged, so every later operation returns a
-// promise that never settles and the shutdown() the handler enqueues next is swallowed by that
-// same guard: persistence stays open, which is the branch's point (WebKit bug 226547); on every
-// other browser the queue stays live and that shutdown() runs (SimpleDb closed, the primary lease
-// released, the client metadata deleted, the visibility handler and the metadata refresher
-// removed). on every browser the multi-tab WebStorageSharedClientState shuts down at pagehide too
-// (its `storage` listener removed). nothing registers `pageshow`: a restored page keeps the item
-// set it was hidden with, receives no snapshot and no listener error, and can save nothing —
-// silently, until a reload. the SDK's restart is terminate() plus a fresh initializeFirestore();
-// the app reloads instead, since every listener and the item state would need rebuilding, and the
-// restore decides one of three things:
+// (IndexedDbPersistence.attachWindowUnloadHook, @firebase/firestore 4.17) takes one of two
+// branches on its client right there, by the UA. first, on every browser, it marks the client
+// zombied (a localStorage entry the other tabs read as "closed without finishing its cleanup").
+// the RESTRICTED branch — isSafari(), a UA with `Safari` and without `Chrome`, that also matches
+// /(?:Version|Mobile)\/1[456]/: every iPhone WebKit browser, Safari, Chrome and Firefox alike,
+// through the frozen `Mobile/15E148` token (none of them carries `Chrome`), and Safari 14, 15
+// and 16 on Mac and iPad through `Version/1[456]` — puts the async queue in restricted mode with
+// the queued work purged: every later operation returns a promise that never settles, the
+// shutdown() the handler enqueues next included, so persistence stays open (the branch's point,
+// WebKit bug 226547) and the zombie mark stays. the SHUTDOWN branch — every other UA: Chromium
+// and Firefox anywhere, Safari on Mac and iPad outside 14-16 — keeps the queue live and runs that
+// shutdown() on it: the metadata refresher cancelled, the visibility and pagehide handlers
+// detached, the primary lease released and the client metadata deleted in one IndexedDB
+// transaction, SimpleDb closed, and, once that transaction committed, the zombie mark removed
+// again (it covers a shutdown the page freeze cuts short); the queue and the connection live on,
+// so a later write can still settle, while the tab is out of the multi-tab protocol for good. on
+// every browser the multi-tab WebStorageSharedClientState shuts down at pagehide too (its
+// `storage` listener and its client entry removed). nothing registers `pageshow`: a restored
+// page keeps the item set it was hidden with, receives no snapshot and no listener error, and on
+// the restricted branch can save nothing — silently, until a reload. the SDK's restart is
+// terminate() plus a fresh initializeFirestore(); the app reloads instead, since every listener
+// and the item state would need rebuilding, and the restore decides one of three things:
 // - `none`: an ordinary load's pageshow (not persisted), or a client on the memory cache (the
 //   shared origin, see client-globals.ts), which installs no pagehide handler and survives;
 // - `reload`: nothing unsaved — reload at once, the fastest way back to a live client;

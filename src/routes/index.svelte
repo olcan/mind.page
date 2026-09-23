@@ -3617,8 +3617,20 @@
     skipScrollForPopState = false
   }
 
+  // an edit is unsaved when an item's text differs from its saved text or when its OPEN editor
+  // holds typed text: the editor writes the textarea into item.editorText live (ZWSP-augmented,
+  // see Editor.svelte onInput), while item.text is assigned only when editing ends
+  // (onItemEditing), so the first test alone is false mid-edit. the one predicate behind the tab
+  // close's discard prompt (onBeforeUnload) and the page-cache restore's (onPageShow)
+  function unsaved(item) {
+    return (
+      item.text != item.savedText ||
+      (item.editing && item.editorText != null && removeZWSP(item.editorText) != item.text)
+    )
+  }
+
   function onBeforeUnload(e) {
-    if (items.every(item => item.text == item.savedText)) return
+    if (!items.some(unsaved)) return
     const msg = 'Discard unsaved changes?'
     // see https://stackoverflow.com/a/7317311
     e.returnValue = msg // gecko + ie
@@ -3627,21 +3639,17 @@
 
   // THE PAGE-CACHE RESTORE (see src/page_lifecycle.ts, table-tested): the browser fired pagehide
   // when it parked this page (a back navigation; on iOS every background tab Safari suspends),
-  // and the Firestore SDK's own pagehide handler left its client dead: zombied on every browser,
-  // then either shut down (persistence closed, the primary lease released: every browser but
-  // iPhone WebKit) or stuck in a restricted queue with persistence left open (iPhone WebKit, the
-  // SDK's WebKit-bug branch, where every later operation hangs) — no snapshot, no listener error
-  // and no save can come from it now, so the restored page would silently keep the item set it
-  // was hidden with. the SDK's restart is terminate() plus a fresh client; the app reloads instead
-  // (every listener and the item state would need rebuilding): at once, or after asking when an
-  // edit is unsaved (the reload discards it; the dead client could never have saved it either)
+  // and the Firestore SDK's own pagehide handler took one of its two branches on the client: on
+  // an iPhone WebKit browser, and on Safari 14-16 on Mac or iPad, it left the client in a
+  // restricted queue with persistence open, where every later operation hangs without a word
+  // (the SDK's WebKit-bug branch); on every other browser it ran shutdown() — the primary lease
+  // released, the client metadata deleted, SimpleDb closed, this tab out of the multi-tab
+  // protocol. no snapshot, no listener error and no save can be relied on from it now, so the
+  // restored page would silently keep the item set it was hidden with. the SDK's restart is
+  // terminate() plus a fresh client; the app reloads instead (every listener and the item state
+  // would need rebuilding): at once, or after asking when an edit is unsaved (the reload discards
+  // it; the dead client could never have saved it either)
   function onPageShow(e: PageTransitionEvent) {
-    // an edit is unsaved when an item's text differs from its saved text (the beforeunload
-    // predicate) or when its OPEN editor holds typed text: the editor writes the textarea into
-    // item.editorText live (ZWSP-augmented, see Editor.svelte onInput), while item.text is
-    // assigned only when editing ends (onItemEditing), so the first test alone is false mid-edit
-    const unsaved = item =>
-      item.text != item.savedText || (item.editing && item.editorText != null && removeZWSP(item.editorText) != item.text)
     const action = restoreAction({
       persisted: e.persisted,
       persistentCache: !isSharedOrigin(hostname), // the memory cache installs no pagehide handler (see client-globals.ts)
@@ -6989,6 +6997,10 @@
 
   function editItem(index: number) {
     items[index].editing = true
+    // as onItemEditing when a click opens the editor: the editor's text starts as the item's, and
+    // unsaved() reads it as the open editor's typed text (an undefined one binds as '' and would
+    // read as an edit of the whole item with nothing typed)
+    items[index].editorText = items[index].text
     editingItems.push(index)
   }
 

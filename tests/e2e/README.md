@@ -57,10 +57,10 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 
 ## Tests
 
-Tests run as eleven projects (see `playwright.config.ts`): `unit` (no browser) and ten browser
+Tests run as twelve projects (see `playwright.config.ts`): `unit` (no browser) and eleven browser
 LANES — `chromium` (the shared-fixture baseline lane: not read-only, its server tests mutate
 anonymous and prerender state its render tests inspect, which is why it stays serial inside),
-`admin`, `editor`, `bridge`, `renderer`, `propagation`, `personal`, `editor2`, `contract` and `tasks` — each capped to one worker,
+`admin`, `editor`, `bridge`, `renderer`, `propagation`, `personal`, `editor2`, `contract`, `tasks` and `lifecycle` — each capped to one worker,
 all running at once (one worker per project). Lanes no longer depend on each other: each has its
 own project id and its own copy of the seed, so there is no chain and nothing for `--no-deps` to
 skip; naming one spec runs only its rows (every lane's server still starts and every lane's
@@ -132,6 +132,13 @@ Notes on driving the app from tests:
   signed-out visitor, each compared to `__snapshots__/markdown.spec.ts/<slug>.html`. To view and
   edit the corpus, run `npm run test:e2e:serve` and open that url: saving a fixture file re-seeds
   it and the app applies it live. Add a case by adding a file.
+- `lifecycle.spec.ts` - the page-cache restore (`src/page_lifecycle.ts`, `onPageShow` in
+  `index.svelte`), on its own `lifecycle` lane: three rows dispatch the restore's own event (a
+  persisted `pageshow`; chromium runs with the back/forward cache disabled) and pin the reload, the
+  prompt over an unsaved edit and the prompt over an open editor's typed text; the fourth row,
+  under an iPhone UA, dispatches a real `pagehide` so the Firestore SDK's own handler takes its
+  restricted branch, and witnesses the dead client (a write that never settles, silently) and the
+  live one the reload brings back.
 
 Each item's golden is reviewed like any diff: if a change is intended, run `test:e2e:update` and
 commit the updated snapshot files.

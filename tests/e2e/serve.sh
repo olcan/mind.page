@@ -13,7 +13,7 @@ cd "$(dirname "$0")/../.."
 [ -d /opt/homebrew/opt/openjdk/bin ] && export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
 export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--dns-result-order=ipv4first" # see deploy_mind_page.sh
 # ONE emulator stack per machine (vault design mind_task_agents 9.7): the fixed ports (the
-# emulators 8080/9099/4400/9150, the lane servers 3100-3109) are shared by every session and
+# emulators 8080/9099/4400/9150, the lane servers 3100-3110) are shared by every session and
 # every worker sandbox on this host, so the whole run holds a kernel advisory lock (held by
 # this process and by any child that inherits the descriptor: an orphaned child keeps it, and
 # the next run waits until it is gone or the wait runs out) for a bounded wait on a running one; an
