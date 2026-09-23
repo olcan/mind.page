@@ -56,6 +56,7 @@ declare global {
     __hideIndex: number // items past this index are hidden (search results are ranked first)
     _user: { uid: string; full_name?: string }
     _init_time: number // 0-ish (undefined) until initialization begins
+    _restored_reload_at?: number // the stamp of the page-cache restore that reloaded this page (see src/page_lifecycle.ts)
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item
     _readonly: boolean
     firebase: {

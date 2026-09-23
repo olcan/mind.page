@@ -3627,20 +3627,32 @@
 
   // THE PAGE-CACHE RESTORE (see src/page_lifecycle.ts, table-tested): the browser fired pagehide
   // when it parked this page (a back navigation; on iOS every background tab Safari suspends),
-  // and the Firestore SDK's own pagehide handler shut its client down for good — no snapshot, no
-  // listener error and no save can come from it now, so the restored page would silently keep
-  // the item set it was hidden with. reload is the only recovery: at once, or after asking when
-  // an edit is unsaved (the reload discards it; the dead client could never have saved it either)
+  // and the Firestore SDK's own pagehide handler left its client dead: zombied on every browser,
+  // then either shut down (persistence closed, the primary lease released: every browser but
+  // iPhone WebKit) or stuck in a restricted queue with persistence left open (iPhone WebKit, the
+  // SDK's WebKit-bug branch, where every later operation hangs) — no snapshot, no listener error
+  // and no save can come from it now, so the restored page would silently keep the item set it
+  // was hidden with. the SDK's restart is terminate() plus a fresh client; the app reloads instead
+  // (every listener and the item state would need rebuilding): at once, or after asking when an
+  // edit is unsaved (the reload discards it; the dead client could never have saved it either)
   function onPageShow(e: PageTransitionEvent) {
+    // an edit is unsaved when an item's text differs from its saved text (the beforeunload
+    // predicate) or when its OPEN editor holds typed text: the editor writes the textarea into
+    // item.editorText live (ZWSP-augmented, see Editor.svelte onInput), while item.text is
+    // assigned only when editing ends (onItemEditing), so the first test alone is false mid-edit
+    const unsaved = item =>
+      item.text != item.savedText || (item.editing && item.editorText != null && removeZWSP(item.editorText) != item.text)
     const action = restoreAction({
       persisted: e.persisted,
       persistentCache: !isSharedOrigin(hostname), // the memory cache installs no pagehide handler (see client-globals.ts)
-      unsaved: !items.every(item => item.text == item.savedText),
+      unsaved: items.some(unsaved),
     })
     if (action == 'none') return
     console.warn('restored from the page cache: the local data store shut down at pagehide (reload to resume sync)')
     const reload = () => {
-      sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())) // noted in the reloaded page's init log
+      try {
+        sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())) // noted in the reloaded page's init log
+      } catch {} // storage access can throw (Safari's "Block All Cookies"); the diagnostic never gates the recovery
       location.reload()
     }
     if (action == 'reload') return reload()
@@ -3651,11 +3663,19 @@
       { confirm: 'Reload', cancel: 'Later', onConfirm: reload }
     )
   }
-  // the reload a restore made says so in this load's init log (the owner's confirmation on a
-  // phone, where the restore itself leaves no trace)
-  if (isClient && sessionStorage.getItem(RESTORED_RELOAD_KEY)) {
-    sessionStorage.removeItem(RESTORED_RELOAD_KEY)
-    init_log('reloaded after a page-cache restore (the restored page had lost its local data store at pagehide)')
+  // the reload a restore made says so in this load's init log (console.debug: on a phone, readable
+  // only through a tethered Web Inspector) and leaves its stamp on window._restored_reload_at
+  // (readable from any console, or an item), since the restore itself leaves no trace
+  if (isClient) {
+    let restored: string | null = null
+    try {
+      restored = sessionStorage.getItem(RESTORED_RELOAD_KEY)
+      if (restored) sessionStorage.removeItem(RESTORED_RELOAD_KEY)
+    } catch {} // storage access can throw (Safari's "Block All Cookies"); the diagnostic never gates the load
+    if (restored) {
+      window['_restored_reload_at'] = Number(restored)
+      init_log('reloaded after a page-cache restore (the restored page had lost its local data store at pagehide)')
+    }
   }
 
   function resetUser() {
@@ -7491,6 +7511,7 @@
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
   import { attrSaveStep, settleCorpus, WELCOME_CONFIRMATION_TIMEOUT_MS } from '../welcome'
   import { restoreAction, RESTORED_RELOAD_KEY } from '../page_lifecycle'
+  import { removeZWSP } from '../zwsp'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
