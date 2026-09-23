@@ -3625,11 +3625,16 @@
   function unsaved(item) {
     return (
       item.text != item.savedText ||
-      (item.editing && item.editorText != null && removeZWSP(item.editorText) != item.text)
+      // both sides stripped: a legacy item's stored text can carry a ZWSP (every save path strips them now)
+      (item.editing && item.editorText != null && removeZWSP(item.editorText) != removeZWSP(item.text))
     )
   }
 
+  // set by the page-cache restore's reload (onPageShow): the discard was confirmed in its modal, or nothing was unsaved
+  let reloading_after_restore = false
+
   function onBeforeUnload(e) {
+    if (reloading_after_restore) return // no browser discard prompt on top of the restore's own
     if (!items.some(unsaved)) return
     const msg = 'Discard unsaved changes?'
     // see https://stackoverflow.com/a/7317311
@@ -3661,6 +3666,7 @@
       try {
         sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())) // noted in the reloaded page's init log
       } catch {} // storage access can throw (Safari's "Block All Cookies"); the diagnostic never gates the recovery
+      reloading_after_restore = true // the reload's beforeunload must not prompt again (see onBeforeUnload)
       location.reload()
     }
     if (action == 'reload') return reload()

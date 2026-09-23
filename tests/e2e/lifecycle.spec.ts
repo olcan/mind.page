@@ -48,6 +48,18 @@ async function deleteSettled(page: Page, name: string) {
   await expect.poll(async () => (await firestore().doc(`items/${id}`).get()).exists, { timeout: 30_000 }).toBe(false)
 }
 
+// the browser's own dialogs, by type, as they open (a beforeunload discard prompt would be one):
+// playwright accepts an unhandled beforeunload dialog itself, which is why no row ever saw one,
+// and handles nothing once a listener is attached, so this one accepts them
+function dialogs(page: Page): string[] {
+  const seen: string[] = []
+  page.on('dialog', dialog => {
+    seen.push(dialog.type())
+    void dialog.accept()
+  })
+  return seen
+}
+
 test('a restored page reloads itself, and the reload notes the restore in its init log', async ({ page }) => {
   await loadAnonymous(page)
   const before = await page.evaluate(() => window._init_time)
@@ -78,8 +90,10 @@ test('with an unsaved edit the restore asks first, and Reload then reloads', asy
   await expect(page.locator('.button.cancel', { hasText: /^Later$/ })).toBeVisible()
   expect(await page.evaluate(() => window._init_time), 'no reload while asking').toBe(before)
   const load = page.waitForEvent('load')
+  const seen = dialogs(page) // the modal's Reload confirmed the discard: the browser must not ask again
   await reload.click().catch(() => {}) // the confirm reloads on mousedown; the click's tail may find the page gone
   await load
+  expect(seen, 'no browser discard prompt after the modal').toEqual([])
   await reloaded(page)
   expect(await page.evaluate(() => window._init_time), 'a new initialization').toBeGreaterThan(before)
 })
@@ -144,8 +158,8 @@ test('with an open editor holding typed text the restore asks first, and Later k
 // back at the price the modal names — the write the dead client never sent is gone. what it does
 // not prove: that the iPhone fires the pagehide when it suspends a tab (WebKit's side, see
 // src/page_lifecycle.ts). the app's own UA switch (isIOS in index.svelte: navigator.platform, or
-// `Mac` in the UA plus a touch document) stays off in this touchless desktop chromium, so the
-// steps run the desktop code paths
+// `Mac` in the UA plus a touch document) stays off in this touchless desktop chromium, asserted
+// in the row, so the steps run the desktop code paths
 test.describe('under an iPhone UA', () => {
   test.use({
     userAgent:
@@ -160,20 +174,38 @@ test.describe('under an iPhone UA', () => {
     const AFTER = '#e2e_dead_client/after a write that settles on the reloaded client'
     await loadAdmin(page)
     const before = await page.evaluate(() => window._init_time)
-    // the CONTROL: a write that settles first, so the "never settles" below is not a slow emulator
+    // the app's own UA switch stays off: the steps run the desktop code paths (isIOS's inputs as the
+    // app reads them; the UA override leaves navigator.platform and the touchless document the host's)
+    expect(
+      await page.evaluate(
+        () =>
+          ['iPad Simulator', 'iPhone Simulator', 'iPod Simulator', 'iPad', 'iPhone', 'iPod'].includes(navigator.platform) ||
+          (navigator.userAgent.includes('Mac') && 'ontouchend' in document)
+      ),
+      'isIOS off'
+    ).toBe(false)
+    // the CONTROL: a write that settles first, timed, so the "never settles" below is not a slow
+    // emulator: the dead write's wait is derived from what the control needed
+    const started = Date.now()
     await page.evaluate(text => void window._create(text), CONTROL)
     await expect.poll(() => saveState(page, '#e2e_dead_client/control'), { timeout: 30_000 }).toEqual({
       saving: false,
       savedText: CONTROL,
     })
-    // the SDK's own pagehide handler runs here: the zombie mark, then (this UA) the restricted queue
-    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
+    const controlMs = Date.now() - started
+    // listening before the pagehide: an error thrown inside the SDK's handler counts too
     const errors: string[] = []
     page.on('pageerror', e => errors.push(String(e)))
     page.on('console', msg => void (msg.type() == 'error' && errors.push(msg.text())))
+    // the SDK's own pagehide handler runs here: the zombie mark, then (this UA) the restricted queue
+    await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
     await page.evaluate(text => void window._create(text), DEAD)
-    await page.waitForTimeout(5_000) // the bound: the control settled in a fraction of it
-    expect(await saveState(page, '#e2e_dead_client/dead'), 'the write never settles').toEqual({ saving: true, savedText: '' })
+    const waitMs = Math.max(5_000, 5 * controlMs) // at least five times what the control needed, by construction
+    await page.waitForTimeout(waitMs)
+    expect(
+      await saveState(page, '#e2e_dead_client/dead'),
+      `the write never settles (control settled in ${controlMs} ms, waited ${waitMs} ms)`
+    ).toEqual({ saving: true, savedText: '' })
     await expect(page.locator('.background.visible'), 'no modal').toBeHidden()
     expect(errors, 'no error').toEqual([])
     // the restore: the hung write is an unsaved edit, so the app asks first; Reload reloads
@@ -181,8 +213,10 @@ test.describe('under an iPhone UA', () => {
     const reload = page.locator('.button.confirm', { hasText: /^Reload$/ })
     await expect(reload).toBeVisible()
     const load = page.waitForEvent('load')
+    const seen = dialogs(page) // the modal's Reload confirmed the discard: the browser must not ask again
     await reload.click().catch(() => {}) // the confirm reloads on mousedown; the click's tail may find the page gone
     await load
+    expect(seen, 'no browser discard prompt after the modal').toEqual([])
     await waitForApp(page) // signed in, the reload asks no anonymous choice
     expect(await page.evaluate(() => window._init_time), 'a new initialization').toBeGreaterThan(before)
     // the live client: the write the dead client never sent is gone, the control is there, and a
