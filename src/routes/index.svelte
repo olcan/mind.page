@@ -3625,6 +3625,39 @@
     return msg // gecko + webkit, safari, chrome, etc
   }
 
+  // THE PAGE-CACHE RESTORE (see src/page_lifecycle.ts, table-tested): the browser fired pagehide
+  // when it parked this page (a back navigation; on iOS every background tab Safari suspends),
+  // and the Firestore SDK's own pagehide handler shut its client down for good — no snapshot, no
+  // listener error and no save can come from it now, so the restored page would silently keep
+  // the item set it was hidden with. reload is the only recovery: at once, or after asking when
+  // an edit is unsaved (the reload discards it; the dead client could never have saved it either)
+  function onPageShow(e: PageTransitionEvent) {
+    const action = restoreAction({
+      persisted: e.persisted,
+      persistentCache: !isSharedOrigin(hostname), // the memory cache installs no pagehide handler (see client-globals.ts)
+      unsaved: !items.every(item => item.text == item.savedText),
+    })
+    if (action == 'none') return
+    console.warn('restored from the page cache: the local data store shut down at pagehide (reload to resume sync)')
+    const reload = () => {
+      sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())) // noted in the reloaded page's init log
+      location.reload()
+    }
+    if (action == 'reload') return reload()
+    _modal(
+      `MindPage was restored from the browser's page cache, which shut down its local data store: ` +
+        `changes made elsewhere no longer arrive, and edits can no longer be saved from this page. ` +
+        `Copy any unsaved edits, then reload.`,
+      { confirm: 'Reload', cancel: 'Later', onConfirm: reload }
+    )
+  }
+  // the reload a restore made says so in this load's init log (the owner's confirmation on a
+  // phone, where the restore itself leaves no trace)
+  if (isClient && sessionStorage.getItem(RESTORED_RELOAD_KEY)) {
+    sessionStorage.removeItem(RESTORED_RELOAD_KEY)
+    init_log('reloaded after a page-cache restore (the restored page had lost its local data store at pagehide)')
+  }
+
   function resetUser() {
     user = null
     // NOTE: we do not modify secret since resetUser() is used for initialization in onAuthStateChanged
@@ -7457,6 +7490,7 @@
   import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
   import { attrSaveStep, settleCorpus, WELCOME_CONFIRMATION_TIMEOUT_MS } from '../welcome'
+  import { restoreAction, RESTORED_RELOAD_KEY } from '../page_lifecycle'
   import {
     buildHiddenIndex,
     classifyInvalidHidden,
@@ -10955,6 +10989,7 @@
   on:unhandledrejection={onError}
   on:popstate={onPopState}
   on:beforeunload={onBeforeUnload}
+  on:pageshow={onPageShow}
 />
 
 <!-- increase list item padding on android, otherwise too small -->
