@@ -607,4 +607,52 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await setRunning(OTHER, false)
   await expect.poll(() => overlay(OTHER), { timeout: 15_000 }).toEqual({ running: false, task: false, overlay: 'hidden' })
 
+  // (j) projects (the vault's notes/design/mind_project_agent.md 2.4, 2.7, 4): a PROJECT asking
+  // sits in the MAIN list while agent-held (its work continues); the owner answers through the
+  // main widget's delegate (a command document, the overlay to the delegated list) and takes it
+  // back with /takeback (the overlay to the main list); a bound CHILD (its projection carries
+  // `parent`) stays in the delegated list when owner-held, marked ↳ with its parent in the
+  // tooltip, and the owner accepts its proposal by an unchanged re-delegation (the command
+  // document carries the capture as the server holds it); a take-back on the child overlays it
+  // into the main list at once
+  await page.evaluate(name => void (location.hash = ''), '')
+  const childId = (await savedId(page, OTHER))!
+  // the bridge's projections acknowledge every command the earlier phases left pending (the
+  // take-back of (d), the drag of (f)), so the overlay yields to the projection's placement
+  const ackedFor = async (id: string) => Object.fromEntries((await commands()).filter(c => c.wrapper.item.task == id).map(c => [c.wrapper.item.id, 'consumed']))
+  const asking = { held: 'agent', reason: 'question', epoch: 3, rev: 9, updated: Date.now(), worktree: null, phase: 'idle', acked: await ackedFor(taskId), project: true, stats: { turns: 4, workers: 2, active: 1, cost: 3.5, since: 1, unknown: 0, sub: 0, children: 1 } }
+  await writeStore(STORE, `global_store_${taskId}`, { ...taskStore, _agent: { state: asking } })
+  const childState = { held: 'owner', reason: 'proposal', epoch: 1, rev: 2, updated: Date.now(), worktree: null, phase: 'idle', acked: await ackedFor(childId), parent: taskId }
+  await writeStore('e2e-child-store', `global_store_${childId}`, { _agent: { state: childState } })
+  // the rows' texts (the delegated widget prefixes its age mark; the other todo carries the
+  // marker phase (f) wrote): a row is matched by its text's end and its pending mark
+  const PROJECT_ROW = `#todo [delegated] ${SNIPPET}`
+  const CHILD_ROW = '↳ #todo [delegated] write the release note'
+  const has = (rows: Row[], text: string, pending: string | null) => rows.filter(r => r[0].endsWith(text) && r[1] == pending).length == 1 // exactly one row
+  await expect.poll(async () => has((await lists(page)).main, PROJECT_ROW, null), { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => has((await lists(page)).delegated, CHILD_ROW, null), { timeout: 30_000 }).toBe(true)
+  const placed = await lists(page) // the other todos of the lane sit where they sat
+  expect(placed.main.some(r => r[0].endsWith(CHILD_ROW))).toBe(false)
+  expect(placed.delegated.some(r => r[0].endsWith(PROJECT_ROW))).toBe(false)
+  const childRow = page.locator('.todoer-widget').nth(1).locator('.list > .list-item-container', { hasText: 'write the release note' })
+  expect(await childRow.getAttribute('title')).toMatch(/^child of .*fix the cache/)
+  const before = (await commands()).length
+  expect(await command(page, `/delegate ${TASK}`)).toBeNull() // the answer: the overlay to delegated
+  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(before + 1)
+  await expect.poll(async () => has((await lists(page)).delegated, PROJECT_ROW, 'delegate'), { timeout: 30_000 }).toBe(true)
+  expect(await command(page, `/takeback ${TASK}`)).toBeNull() // reclaimed: the overlay to main
+  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(before + 2)
+  await expect.poll(async () => has((await lists(page)).main, PROJECT_ROW, 'takeback'), { timeout: 30_000 }).toBe(true)
+  // the child: an unchanged re-delegation is its acceptance (the capture as the server holds it)
+  const childText = (await serverText(childId))!
+  const known = new Set((await commands()).map(c => c.wrapper.item.id)) // the commands so far
+  expect(await command(page, `/delegate ${OTHER}`)).toBeNull()
+  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(before + 3)
+  const accept = (await commands()).find(c => !known.has(c.wrapper.item.id))! // the new one
+  expect([accept.wrapper.item.task, accept.wrapper.item.kind]).toEqual([childId, 'delegate'])
+  expect([accept.wrapper.item.epoch, accept.wrapper.item.body]).toEqual([1, childText])
+  await expect.poll(async () => has((await lists(page)).delegated, CHILD_ROW, 'delegate'), { timeout: 30_000 }).toBe(true)
+  expect(await command(page, `/takeback ${OTHER}`)).toBeNull() // the owner reclaims the child
+  await expect.poll(async () => has((await lists(page)).main, CHILD_ROW, 'takeback'), { timeout: 30_000 }).toBe(true)
+  expect(has((await lists(page)).main, PROJECT_ROW, 'takeback')).toBe(true)
 })
