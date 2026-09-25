@@ -5426,7 +5426,17 @@
             // for commands we provide whitespace-split args as additional arguments
             const cmd_args = [args, ...args.split(/\s+/)].map(arg => `\`${arg}\``)
 
-            if (cmd == '/_zoom') {
+            if (cmd == '/device') {
+              // name this browser profile's device for the instances listing (the #status item):
+              // kept in localStorage (shared by every tab of this origin in the profile) and sent
+              // with every instance update, the next one at once; without a name, cleared
+              const device_name = text.replace(/^\/\w+/, '').trim().slice(0, 64) // the raw name, unescaped, bounded
+              if (device_name) localStorage.setItem('mindpage_device_name', device_name)
+              else localStorage.removeItem('mindpage_device_name')
+              instance.device_name = device_name || null
+              updateInstance()
+              return
+            } else if (cmd == '/_zoom') {
               if (args) localStorage.setItem('mindpage_zoom', args)
               else localStorage.removeItem('mindpage_zoom')
               zoom = args // will affect next checkLayout call
@@ -7638,6 +7648,9 @@
         update_time: 0, // set at each update
         focus_time: 0, // set whenever focus_time is set
         user_agent: navigator.userAgent,
+        // the device's name for the instances listing (#status), set with /device per browser
+        // profile (localStorage is per origin and profile, so every tab of the app shares it)
+        device_name: localStorage.getItem('mindpage_device_name') || null,
         client_ip, // public ip
         server_ip, // server local ip
         server_name: server_name, // server local (host) name
@@ -8370,6 +8383,9 @@
       if (!instanceId) return setTimeout(task, 1000) // instance id not set yet, try again in 1s
       if (instanceId != instance.user + '-' + instance.init_time) console.error('inconsistent instance id/info')
       if (instance.focus_time != focus_time) console.error('inconsistent instance info (focus_time)')
+      // the device name is the profile's shared preference (/device in any tab of this origin):
+      // re-read at every publication, so a sibling tab's change reaches this record too
+      instance.device_name = localStorage.getItem('mindpage_device_name') || null
       instance.update_time = Date.now()
       // console.debug('updated instance')
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instance)
@@ -9673,6 +9689,8 @@
             zoom = localStorage.getItem('mindpage_zoom')
             checkLayout() // check layout for remote zoom change
           }
+          // a sibling tab's /device: republish this instance's record at once (else within 60s)
+          if (instance.device_name != (localStorage.getItem('mindpage_device_name') || null)) updateInstance()
           checkFocus()
         }
         setTimeout(expandMacros, 250) // expand macros every 250ms (+ macro time)

@@ -1676,3 +1676,48 @@ test('/_gc deletes exactly the previewed orphans, and an owner restored mid-conf
       if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
   }
 })
+
+test('/device names this browser profile for the instances listing, in every open tab, at once and across a reload', async ({ page }) => {
+  // the instance record's device_name (the #status item shows it in place of the public ip): set
+  // with /device per browser profile (localStorage, shared by every tab of the origin), re-read at
+  // every instance publication and republished at once by the issuing tab and, through the storage
+  // event, by its sibling tabs (review 4 B1: a sibling's cached record must not keep the old
+  // name); a reload keeps it; /device without a name clears it. The records are found in the
+  // instances listing by each tab's init time (the listener includes the tab's own writes before
+  // they sync); a missing record is reported, never read as a cleared name
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const sibling = await page.context().newPage() // a second tab of the same profile, open BEFORE the naming
+  try {
+    await sibling.goto('/')
+    await waitForApp(sibling)
+    const siblingInit = await sibling.evaluate(() => window._init_time)
+    const named = (init: number) =>
+      page.evaluate(init => {
+        const record = ((window as any)._instances as any[]).find(i => i.init_time === init)
+        return record === undefined ? 'no record' : record.device_name
+      }, init)
+    const own = () => page.evaluate(() => window._init_time).then(named)
+    const other = () => named(siblingInit)
+    const device = (text: string) =>
+      page.evaluate(async text => await (window._create(text, { command: true, return_alerts: true }) as any), text)
+    await expect.poll(other, { message: 'the sibling publishes a nameless record', timeout: 30_000 }).toBeNull()
+    expect(await device('/device e2e laptop'), 'the command returns no alert').toBeFalsy()
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_device_name'))).toBe('e2e laptop')
+    await expect.poll(own, { message: 'the own record carries the name', timeout: 30_000 }).toBe('e2e laptop')
+    await expect.poll(other, { message: 'the sibling republishes with the name (the storage event)', timeout: 30_000 }).toBe('e2e laptop')
+    expect(await device('/device e2e desk'), 'a rename returns no alert').toBeFalsy()
+    await expect.poll(own, { message: 'the own record renamed', timeout: 30_000 }).toBe('e2e desk')
+    await expect.poll(other, { message: 'the sibling renamed', timeout: 30_000 }).toBe('e2e desk')
+    await page.reload()
+    await waitForApp(page)
+    await expect.poll(own, { message: 'the name survives a reload', timeout: 30_000 }).toBe('e2e desk')
+    expect(await device('/device'), 'clearing returns no alert').toBeFalsy()
+    expect(await page.evaluate(() => localStorage.getItem('mindpage_device_name'))).toBeNull()
+    await expect.poll(own, { message: 'the own record is republished without a name', timeout: 30_000 }).toBeNull()
+    await expect.poll(other, { message: 'the sibling republishes without a name', timeout: 30_000 }).toBeNull()
+  } finally {
+    await sibling.close()
+  }
+})
