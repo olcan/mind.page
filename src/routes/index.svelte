@@ -5435,6 +5435,8 @@
               else localStorage.removeItem('mindpage_device_name')
               instance.device_name = device_name || null
               updateInstance()
+              lastEditorChangeTime = 0 // disable debounce even if editor focused
+              onEditorChange('') // clear the command from the editor, as /_zoom does
               return
             } else if (cmd == '/_zoom') {
               if (args) localStorage.setItem('mindpage_zoom', args)
