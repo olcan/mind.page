@@ -349,6 +349,14 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // back to this build's stamp and the order the later phases expect (the task first)
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}`, version: 1 } })
   await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
+  // ... and the tab's OWN copy of the store carries the stamp back: a delivery is not copied
+  // onto the item while the tab owes a save for that store, and a copy left at the newer stamp
+  // refuses every later order save silently (the notice shows once), which could explain a
+  // reorder below that never persisted (seen once, 2026-09-25; the copy's state at that failure
+  // was not captured). a timeout here is a failure to investigate, never to retry around
+  await expect
+    .poll(() => page.evaluate(id => (window._item('id:' + id, true) as any)?._global_store?._todoer?.version, pinId), { timeout: 30_000 })
+    .toBe(1)
 
   // (c3) the context menu on a row after a touch press is prevented (the suppression the todoer
   // adds; whether the delayed touch drag then starts on the owner's laptop is their trial); a
@@ -411,36 +419,95 @@ test('a delegation enqueues one command document, marks the item, and moves it t
       }).observe(list, { subtree: true, attributes: true, attributeFilter: ['class'] })
     })
   const probed = () => page.evaluate(() => (window as any).__touch as Clock)
-  let grabbed: Clock | null = null
-  for (let attempt = 0; attempt < 5 && !grabbed; attempt++) {
-    await probe()
-    const box = await rowBox(SNIPPET)
-    const y = box.y + box.height / 2
-    await touch('touchStart', [{ x: box.x + 40, y }])
-    await touch('touchMove', [{ x: box.x + 52, y }]) // 12 px sideways
-    const t = await probed()
-    if (t.pressed && t.moved && t.moved - t.pressed < 250 && t.chosen > t.moved) grabbed = t
-    else {
-      await touch('touchCancel', []) // no tap, no click on the row
-      await page.waitForTimeout(1000)
+  const grab = async (text: string) => {
+    let grabbed: Clock | null = null
+    for (let attempt = 0; attempt < 5 && !grabbed; attempt++) {
+      await probe()
+      const box = await rowBox(text)
+      const y = box.y + box.height / 2
+      await touch('touchStart', [{ x: box.x + 40, y }])
+      await touch('touchMove', [{ x: box.x + 52, y }]) // 12 px sideways
+      const t = await probed()
+      if (t.pressed && t.moved && t.moved - t.pressed < 250 && t.chosen > t.moved) grabbed = t
+      else {
+        await touch('touchCancel', []) // no tap, no click on the row
+        await page.waitForTimeout(1000)
+      }
     }
+    expect(grabbed, `the ${text} row was chosen by the sideways move, under the delay`).not.toBeNull()
   }
-  expect(grabbed, 'the row was chosen by the sideways move, under the delay').not.toBeNull()
-  {
-    // dragged on below the second row (Sortable's fallback drag follows the touch), released
-    const first = await rowBox(SNIPPET)
-    const second = await rowBox('write the release note')
-    const from = first.y + first.height / 2
-    const to = second.y + second.height
+  // the grabbed row dragged to a point in six moves (Sortable's fallback drag follows the touch)
+  // and released, with a render of EVERY widget injected at the second move (2026-09-25): a
+  // store delivery does this under the full gate's load, and Sortable keeps the drag's state in
+  // variables shared by all its instances, so the delegated widget's re-render, which destroys
+  // its Sortables, ended the main list's drag without its events: the ghost row stayed in the
+  // list, unchoose never came and the widget kept its dragging class for good (the row's one
+  // failure in every full gate). the todoer now defers every widget's render while any widget
+  // drags and runs them at the release; the first move started the drag, so by the second the
+  // dragging widget and both widgets' pending renders are observable
+  type Point = { x: number; y: number }
+  const dragTo = async (from: Point, to: Point | (() => Promise<Point>)) => {
+    // the first move past Sortable's fallback tolerance starts the drag, which changes the
+    // widget's layout (the bins show, the list narrows): a target inside a bin is resolved then
+    await touch('touchMove', [{ x: from.x + 8, y: from.y }])
+    await page.waitForTimeout(60)
+    const target = typeof to == 'function' ? await to() : to
     for (let step = 1; step <= 6; step++) {
-      await touch('touchMove', [{ x: first.x + 52, y: from + ((to - from) * step) / 6 }])
+      await touch('touchMove', [{ x: from.x + ((target.x - from.x) * step) / 6, y: from.y + ((target.y - from.y) * step) / 6 }])
       await page.waitForTimeout(60)
+      if (step == 2) {
+        await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
+        expect(
+          await page.evaluate(() => ({
+            dragging: document.querySelectorAll('.todoer-widget.dragging').length,
+            pending: [...document.querySelectorAll('.todoer-widget')].filter(w => (w as any)._renderPendingDragging).length,
+          })),
+          'the injected render found the drag on and deferred both widgets'
+        ).toEqual({ dragging: 1, pending: 2 })
+      }
     }
     await page.waitForTimeout(300) // the swap's animation
     await touch('touchEnd', [])
   }
+  await grab(SNIPPET)
+  {
+    // dragged on below the second row, released: the list reorders
+    const first = await rowBox(SNIPPET)
+    const second = await rowBox('write the release note')
+    await dragTo({ x: first.x + 52, y: first.y + first.height / 2 }, { x: first.x + 52, y: second.y + second.height })
+  }
   await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  // the drag ended whole: no ghost or chosen row left behind (Sortable's plain hidden clone
+  // would be a third row in the list assertion above), no widget still dragging, the deferred
+  // renders run at the release
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => ({
+          leftovers: document.querySelectorAll('.todoer-widget .sortable-fallback, .todoer-widget .sortable-ghost, .todoer-widget .sortable-chosen').length,
+          dragging: document.querySelectorAll('.todoer-widget.dragging').length,
+        })),
+      { timeout: 10_000 }
+    )
+    .toEqual({ leftovers: 0, dragging: 0 })
   await expect.poll(async () => (await serverStore(PIN))._todoer['#todo'], { timeout: 30_000 }).toBe(`${otherId},${taskId}`)
+  // a drop INTO A BIN with a render deferred carries no order hint (review 0): the row is outside
+  // the list at the release, and a cancelled snooze restores it, so a hint recorded then (the
+  // list without it) would put it first at the rebuild and persist that; the order stands
+  await grab(SNIPPET)
+  {
+    const row = await rowBox(SNIPPET)
+    await dragTo({ x: row.x + 52, y: row.y + row.height / 2 }, async () => {
+      const bin = (await page.locator('.todoer-widget').first().locator('.snooze.bin').boundingBox())!
+      return { x: bin.x + bin.width / 2, y: bin.y + bin.height / 2 }
+    })
+  }
+  await expect(page.locator('.snooze-modal')).toBeVisible({ timeout: 10_000 })
+  await page.keyboard.press('Escape') // no snooze time: the row is restored
+  await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 10_000 })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await page.waitForTimeout(2500) // a stable final string, not a write count (as in (c2))
+  expect((await serverStore(PIN))._todoer['#todo'], 'the order stands after the cancelled bin drop').toBe(`${otherId},${taskId}`)
   // a touch moved down (past the tap slop) is a scroll: never chosen, the delay notwithstanding
   await probe()
   {
