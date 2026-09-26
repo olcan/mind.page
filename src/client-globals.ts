@@ -161,11 +161,16 @@ import { marked, Marked } from 'marked' // ~36K
 import { markedHighlight } from 'marked-highlight'
 // vendored: the package is unmaintained with peer marked <16 (see src/vendor)
 import markedExtendedTables from './vendor/marked-extended-tables.js' // ~3K
+import { wikiLinkExtension } from './wiki_links.js'
 window['Marked'] = Marked // for local instance, see https://marked.js.org/using_advanced#instance
 window['markedHighlight'] = markedHighlight
 window['markedExtendedTables'] = markedExtendedTables
 marked.use(markedExtendedTables())
-window['marked'] = marked // global instance w/ extended tables enabled
+// wiki links (src/wiki_links.ts): item code that parses markdown through the global instance
+// gets the links under the account's setting, which the getter reads at parse time (inert
+// without one)
+marked.use({ extensions: [wikiLinkExtension(() => window['_wiki_links'] ?? null)] })
+window['marked'] = marked // global instance w/ extended tables and wiki links enabled
 
 // import/expose jupyter services under window.jupyter
 import { KernelManager, SessionManager, ServerConnection } from '@jupyterlab/services' // ~250K

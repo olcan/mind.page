@@ -110,6 +110,22 @@ test('links: only http, https and mailto become anchors (noopener); images are p
   expect(img).toContain('<span class="template_placeholder" title="image placeholder (not loaded, not a link)">https&#58;')
 })
 
+test('wiki links: the app-built anchor under the setting, text without it or for a refused target', () => {
+  // the one exception of the policy (design wiki_links 2.7): the extension reads the setting from
+  // window at parse time; the anchor is built from the tokenized target under the carrier
+  const g = globalThis as any
+  g.window = { _wiki_links: { url: 'x://h/f', root: '/r' } }
+  try {
+    const out = html('see [[docs/x|the guide]] and [[../x]] and `[[code]]`')
+    expect(out).toContain('<a href="x&#58;&#47;&#47;h&#47;f&#63;path&#61;docs&#37;2Fx&#38;root&#61;&#37;2Fr" title="docs&#47;x" data-wiki-link>the guide</a>')
+    expect(out).toContain('and &#91;&#91;&#46;&#46;&#47;x&#93;&#93; and <code>&#91;&#91;code&#93;&#93;</code>') // refused: text; code: code
+    expect(out).not.toMatch(/target=|rel=|\son\w+=/)
+  } finally {
+    delete g.window
+  }
+  expect(html('see [[docs/x]]')).toContain('see &#91;&#91;docs&#47;x&#93;&#93;') // unconfigured: text
+})
+
 test('fenced code: plain without a highlighter, filtered spans with one', () => {
   expect(html('```\n#!x <<m>>\n```\n')).toContain('<pre><code>&#35;&#33;x &#60;&#60;m&#62;&#62;</code></pre>')
   const fake = {

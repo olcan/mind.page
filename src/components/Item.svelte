@@ -52,6 +52,7 @@
     destroyElem,
     hash as _hash,
   } from '../util.js'
+  import { wikiLinkExtension, wikiLinkRegExp } from '../wiki_links'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
   import {
@@ -569,6 +570,15 @@
     const grandParentLabel = label.replace(/\/[^\/]*?\/[^\/]*$/, '')
     const grandParentLabelText = labelText.replace(/\/[^\/]*?\/[^\/]*$/, '')
 
+    // wiki links (src/wiki_links.ts; design wiki_links 2.3): under the account's setting every
+    // wiki-shaped span outside code is MASKED for the line pass (the tag, url and math rewrites
+    // would otherwise turn a `#tag` or a url inside the span into markup that the extension can
+    // only show as text) and restored right after it, for the Marked extension registered
+    // below; the exclusions are the tag pass's (code spans, html, macros), so a span inside
+    // inline code keeps its brackets
+    const wikiConfig = window['_wiki_links'] ?? null
+    const wikiMasked: string[] = []
+    const wikiMaskRegex = wikiConfig ? new RegExp(tagRegexExclusions + '|' + wikiLinkRegExp().source, 'gs') : null
     let insideBlock = false
     let lastLine = ''
     let wrapMath = m =>
@@ -597,6 +607,12 @@
           lastLine = line
           return str
         }
+
+        // mask wiki links (see wikiMaskRegex above); an exclusion match has no groups
+        if (wikiMaskRegex)
+          str = str.replace(wikiMaskRegex, (m, embed) =>
+            embed === undefined ? m : `\u0000wiki${wikiMasked.push(m) - 1}\u0000`
+          )
 
         // suffix html lines with \n for proper treatment in markdown parser
         const html_line = str.match(/^\s*<\/?\w.*>\s*$/)
@@ -752,6 +768,8 @@
       .join('\n')
       .replace(/\\\n/g, '')
       .replace(/\\<br>\n\n/g, '') // used inside menu items
+    // restore the masked wiki links for the extension
+    if (wikiMasked.length) text = text.replace(/\u0000wiki(\d+)\u0000/g, (m, n) => wikiMasked[+n])
 
     // remove *_removed blocks
     text = text.replace(blockRegExp(/\S*_removed/), '')
@@ -859,6 +877,9 @@
       return false
     }
     marked.use({ renderer }) // note a bare renderer instance is silently ignored by marked.use
+    // the wiki links extension (src/wiki_links.ts), only under the setting: an unconfigured
+    // account renders exactly as before
+    if (wikiConfig) marked.use({ extensions: [wikiLinkExtension(() => wikiConfig)] })
     // the INERT extension (bridge reviews 182-184): an inline tokenizer for the grammar
     // markers of THIS render's claimed regions. Marked runs inline tokenizers wherever it
     // lexes ORDINARY TEXT (a paragraph, list item, blockquote, heading, table cell) but
@@ -1048,6 +1069,7 @@
     // add onclick handler to html links
     text = text.replace(/<a\s(?:"[^"]*"|[^>"])*?href\s*=\s*"(.*?)"(?:"[^"]*"|[^>"])*>/gi, function (m, href) {
       if (m.match(/onclick/i)) return m // link has custom onclick handler
+      if (m.match(/data-wiki-link/i)) return m // a wiki link carries data only; wired in afterUpdate
       return m.substring(0, m.length - 1) + ` onclick="_handleLinkClick('${id}','${_.escape(href)}',event)">`
     })
 
@@ -1642,6 +1664,15 @@
         }
         return ret // preserve return value to avoid confusion
       }
+    })
+
+    // wiki links (src/wiki_links.ts; design wiki_links 2.4): the anchor carries data only; its
+    // click stops at the anchor and soft-touches the item like any link click, and its default
+    // action stays, so the browser navigates in place and hands the url to the editor with no
+    // tab in between (a target would leave an empty tab behind); the inert frames' anchors are
+    // covered too (populated at the top of this update)
+    itemdiv.querySelectorAll('a[data-wiki-link]').forEach((a: any) => {
+      a.onclick = e => window['_handleLinkClick'](id, _.escape(a.getAttribute('href')), e)
     })
 
     // invoke global function _highlight (if it exists) w/ elements of class _highlight_*

@@ -38,6 +38,7 @@
   import { Jumper } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
   import { eventKey } from '../event_key'
+  import { parseWikiLinksConfig, wikiLinkHtml, wikiLinkRegExp } from '../wiki_links'
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
   export let items = []
@@ -405,6 +406,37 @@
     window['_decrypt_item'] = decryptItem
     window['_render_item'] = renderItem
     window['_parse_tags'] = parseTags
+    // wiki links (src/wiki_links.ts; design: the vault's notes/design/wiki_links.md): the
+    // account's setting, applied through the setter alone (an item's #_init hook before the
+    // first render, its welcome and store-change hooks after; the value lives in that item's
+    // global store). The config is validated here, and a CHANGE bumps every item's version, so
+    // the html cache, the memoized expansion and any retained element of every item, rendered
+    // now or shown later, miss; an equal value changes nothing. Returns the accepted config,
+    // null for a clearing, undefined for a refused value (which is kept out)
+    window['_wiki_links'] = null
+    window['_wiki_links_epoch'] = 0 // the number of applied changes (a witness reads it)
+    window['_set_wiki_links'] = (value: unknown) => {
+      const config = value == null ? null : parseWikiLinksConfig(value)
+      if (value != null && !config) {
+        console.error('wiki links: refused config', value)
+        return undefined
+      }
+      if (_.isEqual(config, window['_wiki_links'])) return config
+      window['_wiki_links'] = config
+      window['_wiki_links_epoch']++
+      items.forEach(item => {
+        invalidateElemCache(item.id)
+        item.version++
+      })
+      if (processed) items = items // trigger svelte render
+      return config
+    }
+    // the ONE anchor form and the grammar for renderers outside the app (the todoer's rows, the
+    // #vault item's cells, the projection renderer): null without the setting or for a refused
+    // target, so the caller keeps its text
+    window['_wiki_link_html'] = (target: string, text?: string | null, options?: { refs?: boolean }) =>
+      wikiLinkHtml(window['_wiki_links'], target, text, options)
+    window['_wiki_link_regexp'] = wikiLinkRegExp
     // the vault routing predicate (bridge design §2.1): the TRUSTED framework consults
     // this before any web-provider work and again before web publication -- a vault
     // marker suppresses web dispatch, and an in-flight web run must not publish into a

@@ -8,7 +8,7 @@
 // tag (the real /vault request shape); a second visible #agent/vault label would make
 // _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
-import { firestore, loadAdmin, waitForApp } from './helpers.js'
+import { firestore, install, loadAdmin, waitForApp } from './helpers.js'
 
 test('a canonical reply renders as inert markdown: structure, admitted links, literal grammar', async ({ page }) => {
   // design §2.2a amended 2026-09-05 (owner): the dead frame shows the decoded body as Markdown
@@ -115,7 +115,14 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
           const allowed = ['DIV', 'P', 'PRE', 'CODE', 'SPAN', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'EM', 'STRONG', 'DEL', 'HR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']
           if (!allowed.includes(el.tagName)) return true
           if ([...el.attributes].some(a => a.name.startsWith('on'))) return true
-          return el.tagName == 'A' && !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
+          if (el.tagName != 'A') return false
+          // the wiki links exception (design wiki_links 2.7): the app-built anchor under the
+          // setting, its href the configured handler's query, no target or rel
+          if (el.hasAttribute('data-wiki-link')) {
+            const config = (window as any)._wiki_links
+            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+          }
+          return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
         }).length,
         frameText: item?.elem?.querySelector('.vault-result')?.textContent ?? '',
         frameChildren: item?.elem?.querySelector('.vault-result')?.children.length ?? -1,
@@ -246,7 +253,14 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
           const allowed = ['DIV', 'P', 'PRE', 'CODE', 'SPAN', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'EM', 'STRONG', 'DEL', 'HR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']
           if (!allowed.includes(el.tagName)) return true
           if ([...el.attributes].some(a => a.name.startsWith('on'))) return true
-          return el.tagName == 'A' && !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
+          if (el.tagName != 'A') return false
+          // the wiki links exception (design wiki_links 2.7): the app-built anchor under the
+          // setting, its href the configured handler's query, no target or rel
+          if (el.hasAttribute('data-wiki-link')) {
+            const config = (window as any)._wiki_links
+            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+          }
+          return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
         }).length,
         // review 186 §4.1: a marker must never survive into a URL attribute (raw or
         // percent-encoded -- the ascii 'vault_result_v1:' substring survives encodeURI)
@@ -757,4 +771,222 @@ test('/run copies only the real input, not a candidate-nested one', async ({ pag
   } finally {
     await cleanup()
   }
+})
+// the wiki links (src/wiki_links.ts; design: the vault's notes/design/wiki_links.md): the owner's
+// text and a reply's inert frame under the account's setting, set and cleared in the page without
+// an edit (the setter re-renders every item, a hidden one's cache included), the anchor's shape and
+// its click path (the click stops at the anchor and keeps its default, verified with a synthetic
+// cancelable click whose default the test itself cancels, so no external application launches)
+test('wiki links: the owner text and the inert frame link under the setting, on, off, on', async ({ page }) => {
+  await loadAdmin(page)
+  const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' }
+  const href = (path: string) => `${config.url}?path=${encodeURIComponent(path)}&root=${encodeURIComponent(config.root)}`
+  await page.evaluate(() => {
+    window._create('#e2e_wiki_hidden the hidden one [[docs/z]]')
+    window._create('#e2e_wiki_owner see [[docs/x]] and [[notes/A&B|see #topic]] and `[[docs/code]]` and [[../etc/passwd]] and [[/abs]]')
+    window._create(
+      "#e2e_wiki_reply reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nsee [[docs/y|guide]] and [[../x]] and [x](https://h/)\n<!--/inert-->"
+    )
+  })
+  const shown = async (name: string) => {
+    await page.evaluate(name => void (location.hash = name), name)
+    await expect.poll(() => page.evaluate(name => !!window._item(name, true)?.elem?.querySelector('.content'), name), { timeout: 15_000 }).toBe(true)
+  }
+  // the anchors of an item's content (a frame's included) and the text of the content
+  const state = (name: string) =>
+    page.evaluate(name => {
+      const content = window._item(name, true)?.elem?.querySelector('.content') as HTMLElement
+      return {
+        text: content?.textContent ?? '',
+        anchors: [...(content?.querySelectorAll('a[data-wiki-link]') ?? [])].map((a: any) => ({
+          href: a.getAttribute('href'),
+          title: a.getAttribute('title'),
+          text: a.textContent,
+          html: a.innerHTML,
+          attributes: [...a.attributes].map((x: Attr) => x.name).sort(),
+          wired: typeof a.onclick == 'function',
+        })),
+        marks: [...(content?.querySelectorAll('a[data-wiki-link] mark') ?? [])].length,
+        code: [...(content?.querySelectorAll('code') ?? [])].map(c => c.textContent),
+        // the frame audit of the rows above (design 2.7), over these rows' frames
+        frameViolations: [...(content?.querySelectorAll('.vault-result *') ?? [])].filter(el => {
+          const allowed = ['DIV', 'P', 'PRE', 'CODE', 'SPAN', 'A', 'UL', 'OL', 'LI', 'BLOCKQUOTE', 'EM', 'STRONG', 'DEL', 'HR', 'BR', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD']
+          if (!allowed.includes(el.tagName)) return true
+          if ([...el.attributes].some(a => a.name.startsWith('on'))) return true
+          if (el.tagName != 'A') return false
+          if (el.hasAttribute('data-wiki-link')) {
+            const config = (window as any)._wiki_links
+            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+          }
+          return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
+        }).length,
+      }
+    }, name)
+  await shown('#e2e_wiki_hidden') // rendered and cached without the setting
+  await shown('#e2e_wiki_owner')
+  const off = await state('#e2e_wiki_owner')
+  expect(off.anchors, 'without the setting: no anchor').toEqual([])
+  expect(off.text).toContain('[[docs/x]]') // literal, as before
+  expect(off.text).toContain('[[../etc/passwd]]')
+  // ON: the setter, no edit
+  expect(await page.evaluate(config => (window as any)._set_wiki_links(config), config)).toEqual(config)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
+  const on = await state('#e2e_wiki_owner')
+  expect(on.anchors).toEqual([
+    { href: href('docs/x'), title: 'docs/x', text: 'docs/x', html: 'docs/x', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
+    { href: href('notes/A&B'), title: 'notes/A&B', text: 'see #topic', html: 'see #topic', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
+  ])
+  expect(on.marks, 'no tag mark inside an anchor').toBe(0)
+  expect(on.code, 'the code span keeps its brackets').toContain('[[docs/code]]')
+  expect(on.text, 'a refused target stays literal').toContain('[[../etc/passwd]] and [[/abs]]')
+  // the click path: the click stops at the anchor (the item does not open its editor) and keeps
+  // its default (the test's own listener, registered after the app's, cancels it and records)
+  const click = await page.evaluate(() => {
+    const a = window._item('#e2e_wiki_owner', true)!.elem!.querySelector('a[data-wiki-link]') as HTMLAnchorElement
+    const seen: any = { bubbled: false }
+    document.body.addEventListener('click', () => (seen.bubbled = true), { once: true })
+    a.addEventListener(
+      'click',
+      e => {
+        seen.stopped = e.cancelBubble
+        seen.defaultPrevented = e.defaultPrevented
+        e.preventDefault() // never hand the url to a handler here
+      },
+      { once: true }
+    )
+    a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    seen.editing = !!document.querySelector('#e2e_wiki_owner textarea, .container.editing')
+    return seen
+  })
+  expect(click).toEqual({ bubbled: false, stopped: true, defaultPrevented: false, editing: false })
+  // the inert frame: the app-built anchor, the refused reference and the web link as before
+  await shown('#e2e_wiki_reply')
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelector('.vault-result a[data-wiki-link]') != null), { timeout: 15_000 }).toBe(true)
+  const reply = await state('#e2e_wiki_reply')
+  expect(reply.anchors).toEqual([{ href: href('docs/y'), title: 'docs/y', text: 'guide', html: 'guide', attributes: ['data-wiki-link', 'href', 'title'], wired: true }])
+  expect(reply.text).toContain('and [[../x]] and')
+  expect(reply.frameViolations, 'the frame holds only the policy html, the wiki anchor included').toBe(0)
+  expect(
+    await page.evaluate(() => {
+      const frame = window._item('#e2e_wiki_reply', true)!.elem!.querySelector('.vault-result')!
+      const web = frame.querySelector('a:not([data-wiki-link])')!
+      return [web.getAttribute('href'), web.getAttribute('target'), web.getAttribute('rel')]
+    })
+  ).toEqual(['https://h/', '_blank', 'noopener'])
+  // the hidden item, cached before the setting: its cache missed
+  await shown('#e2e_wiki_hidden')
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_hidden', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+  expect((await state('#e2e_wiki_hidden')).anchors[0].href).toBe(href('docs/z'))
+  // OFF again: literal text, no anchor, without an edit; a refused config leaves the setting
+  expect(await page.evaluate(() => (window as any)._set_wiki_links({ url: 'h/f' }))).toBeUndefined()
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual(config)
+  expect(await page.evaluate(() => (window as any)._set_wiki_links(null))).toBeNull()
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_hidden', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+  await shown('#e2e_wiki_owner')
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+  expect((await state('#e2e_wiki_owner')).text).toContain('[[docs/x]]')
+  await shown('#e2e_wiki_reply') // the already-rendered reply: its frame re-rendered without the anchor
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+  expect((await state('#e2e_wiki_reply')).text).toContain('see [[docs/y|guide]] and')
+  expect(await page.evaluate(() => (window as any)._wiki_links_epoch)).toBe(2)
+  // ON again: both back, without an edit
+  expect(await page.evaluate(config => (window as any)._set_wiki_links(config), config)).toEqual(config)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+  expect((await state('#e2e_wiki_reply')).anchors[0].href).toBe(href('docs/y'))
+  await shown('#e2e_wiki_owner')
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
+  expect(await page.evaluate(() => (window as any)._wiki_links_epoch)).toBe(3)
+})
+
+// the settings item (mind.items wiki_links; design 2.6): installed and rendered, its command saves
+// the setting to its store and applies it; after a reload the setting is applied BEFORE the first
+// render (the item's init hook: the setter's calls are recorded with the app's `__rendered` flag by
+// an init script; that flag says the initial rendering COMPLETED, so the evidence is the first
+// call's false flag together with the app's order, `initItems()` before `processed` and the first
+// `renderRange`, and the pin that removes the item's init block and fails this row), and the
+// welcome reapplication of an equal value changes nothing (the epoch).
+// loadAdmin is the admin-as-anonymous mode, whose global store is backed by the local store, so
+// the reload covers the first render of a device that holds the setting, not the store's
+// travel to another device (a backfill)
+test('wiki links: the settings item, its command, the store, and the first render after a reload', async ({ page }) => {
+  await loadAdmin(page)
+  // the item renders without an error indication (it declares no dependency, so it evaluates
+  // no macro): the app's diagnostics (src/item_errors.ts: `macro error in item`, the item's
+  // `error indication` line) recorded from before the install, and its error elements
+  const errors: string[] = []
+  page.on('console', m => {
+    if (/macro error in item #?wiki_links|\[#wiki_links\] error indication/.test(m.text())) errors.push(m.text())
+  })
+  expect(await install(page, 'wiki_links')).toBeNull()
+  await page.evaluate(() => void (location.hash = '#wiki_links'))
+  await expect.poll(() => page.evaluate(() => window._item('#wiki_links')?.elem?.querySelector('.content')?.textContent ?? ''), { timeout: 15_000 }).toContain('/wiki_links')
+  expect(await page.evaluate(() => window._item('#wiki_links')!.elem!.querySelectorAll('.content .macro-error, .content .console-error, .content mark.missing, .content .error').length)).toBe(0)
+  expect(errors).toEqual([])
+  // the command's feedback is the item's alert (window.alert: a native dialog here, recorded
+  // and dismissed; Playwright dismisses an unhandled one silently); any other dialog is accepted,
+  // as Playwright does unhandled (the app's beforeunload prompt on the reload below: dismissing
+  // it would cancel the reload)
+  const alerts: string[] = []
+  page.on('dialog', dialog => {
+    if (dialog.type() != 'alert') {
+      void dialog.accept()
+      return
+    }
+    alerts.push(dialog.message())
+    void dialog.dismiss()
+  })
+  await page.evaluate(() => void window._create('#e2e_wiki_startup see [[docs/s]] here'))
+  const command = async (text: string) => {
+    const before = alerts.length
+    await page.evaluate(text => void window._create(text, { command: true }), text)
+    await expect.poll(() => alerts.length, { message: text, timeout: 15_000 }).toBeGreaterThan(before)
+    return alerts[alerts.length - 1]
+  }
+  expect(await command('/wiki_links')).toContain('wiki links: off')
+  expect(await command('/wiki_links h/f /r')).toContain('refused h/f /r') // nothing applied, nothing saved
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+  expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/file under /Users/o c/v')
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+  // the store carries the accepted config (saved through the item's store)
+  await expect.poll(() => page.evaluate(() => JSON.stringify((window._item('#wiki_links') as any)._global_store.wiki_links)), { timeout: 15_000 }).toBe(
+    JSON.stringify({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+  // every item saved before the reload (the app guards navigation with a beforeunload prompt
+  // while a save is pending; the dialog handler above accepts one anyway)
+  await expect.poll(() => page.evaluate(() => (window as any)._server_confirmed), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 60_000 }).toBe(0)
+  // the setter's calls of the next load, each with the app's rendered flag at the call (the
+  // property is trapped before the app defines it; the app assigns the setter once, at its init)
+  await page.addInitScript(() => {
+    const calls: Array<{ rendered: unknown; value: unknown }> = []
+    let real: any
+    Object.defineProperty(window, '_set_wiki_links', {
+      configurable: true,
+      get: () =>
+        real &&
+        ((value: unknown) => {
+          calls.push({ rendered: (window as any).__rendered, value })
+          return real(value)
+        }),
+      set: fn => void (real = fn),
+    })
+    ;(window as any).__wikiSetterCalls = calls
+  })
+  await page.reload()
+  await waitForApp(page)
+  // the first render sees the setting: the init hook applied it (epoch 1) before any render
+  const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' }
+  expect(await page.evaluate(() => [(window as any)._wiki_links_epoch, (window as any)._wiki_links])).toEqual([1, config])
+  expect(await page.evaluate(() => (window as any).__wikiSetterCalls[0]), 'the init hook applied the store before the first render').toEqual({ rendered: false, value: config })
+  await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+  // the welcome's reapplication of the same value: a second call, no change
+  await expect.poll(() => page.evaluate(() => (window as any).__wikiSetterCalls.length), { timeout: 30_000 }).toBeGreaterThanOrEqual(2)
+  expect(await page.evaluate(() => (window as any).__wikiSetterCalls.slice(1).map((c: any) => c.value))).toEqual([config])
+  expect(await page.evaluate(() => (window as any)._wiki_links_epoch), 'an equal reapplication changes nothing').toBe(1)
+  expect(await command('/wiki_links off')).toContain('wiki links: off')
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
 })
