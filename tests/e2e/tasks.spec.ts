@@ -760,4 +760,28 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(await command(page, `/takeback ${OTHER}`)).toBeNull() // the owner reclaims the child
   await expect.poll(async () => has((await lists(page)).main, CHILD_ROW, 'takeback'), { timeout: 30_000 }).toBe(true)
   expect(has((await lists(page)).main, PROJECT_ROW, 'takeback')).toBe(true)
+
+  // (k) a row's click targets its item by NAME (the app's: the unique label when it has one,
+  // else the id reference), since the app lists a target's children and navigates them under
+  // its label only; the re-render its search causes marks the clicked row selected. The click
+  // lands at the row's right end, past its text (a mark carries its own tag click)
+  const mainRow = (text: string) => page.locator('.todoer-widget').first().locator('.list > .list-item-container', { hasText: text })
+  const clickRow = async (text: string) => {
+    const row = mainRow(text).locator('.list-item')
+    const box = (await row.boundingBox())!
+    await row.click({ position: { x: box.width - 8, y: box.height / 2 } })
+  }
+  const boxText = () => page.evaluate(() => (window as any).MindBox.get().trim())
+  const selectedRow = () => page.evaluate(() => document.querySelector('.todoer-widget .list-item-container.selected')?.getAttribute('data-id') ?? null)
+  await clickRow('write the release note')
+  await expect.poll(boxText, { timeout: 10_000 }).toBe(OTHER) // the unique label
+  await expect.poll(selectedRow, { timeout: 10_000 }).toBe(await page.evaluate(name => window._item(name, true)!.id, OTHER))
+  // two todos sharing the label #todo have no unique label: the id reference
+  for (const text of ['#todo twin one', '#todo twin two']) await page.evaluate(text => void window._create(text), text)
+  await expect(mainRow('twin one')).toHaveCount(1)
+  await expect(mainRow('twin two')).toHaveCount(1)
+  const twinId = (await mainRow('twin one').getAttribute('data-id'))!
+  await clickRow('twin one')
+  await expect.poll(boxText, { timeout: 10_000 }).toBe('id:' + twinId)
+  await expect.poll(selectedRow, { timeout: 10_000 }).toBe(twinId)
 })
