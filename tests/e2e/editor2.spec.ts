@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { mindbox, focusMindbox, savedId, itemText, visible } from './editor_helpers.js'
 import { firestore, loadAdmin } from './helpers.js'
 
@@ -252,5 +252,53 @@ test('an invalid image src fails without holding the page loading overlay, and r
     badimg ??= await savedId(page, '#e2e_badimg').catch(() => null)
     slowimg ??= await savedId(page, '#e2e_slowimg').catch(() => null)
     for (const id of [badimg, slowimg]) if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
+
+// A SECOND TAB OF THE SHARED PERSISTENT CACHE CONFIRMS ON ITS OWN (2026-09-25): a secondary tab's
+// snapshots come through the primary tab's cache, and firebase-js-sdk issue 8314 (10.12.1) once
+// kept them at fromCache true for good, so a docs claim of 2026-09-23 had `_server_confirmed` never
+// turning true there; that was fixed upstream (PR 8339) before the SDK in use, and this row pins
+// it, since item code gates its store writes on the flag (the todoer's order save and unsnooze
+// sweep): the second tab is a SECONDARY (the first tab's fresh lease keeps it from the primary
+// lease; the SDK logs "Client is eligible for a primary lease" at its debug level when a client
+// BECOMES primary, which the first tab does and the second never does), yet its first snapshot is
+// current, its flag turns true and its welcome settles by the confirmation, not the timeout
+const sdkLogs = (page: Page) =>
+  page.addInitScript(() => {
+    // the SDK's own debug log, captured through the app's firebase.onLog hook as soon as the app
+    // exposes it, before the client's persistence starts (its lease attempt runs every 4 s)
+    const timer = setInterval(() => {
+      const fb = (window as any).firebase
+      if (!fb?.onLog || !fb?.firestore?.setLogLevel) return
+      clearInterval(timer)
+      const sdk: string[] = ((window as any).__sdk_logs = [])
+      fb.firestore.setLogLevel('debug')
+      fb.onLog((e: { message: string }) => sdk.push(e.message), { level: 'debug' })
+    }, 1)
+  })
+const becamePrimary = (page: Page) =>
+  page.evaluate(() => {
+    const sdk: string[] = (window as any).__sdk_logs ?? []
+    return { tried: sdk.some(m => /updateClientMetadataAndTryBecomePrimary/.test(m)), became: sdk.some(m => /Client is eligible for a primary lease/.test(m)) }
+  })
+
+test('a second tab sharing the persistent cache, a secondary, confirms on its own', async ({ page }) => {
+  await sdkLogs(page)
+  await loadAdmin(page)
+  await expect.poll(() => page.evaluate(() => window._server_confirmed), { timeout: 30_000 }).toBe(true)
+  expect(await becamePrimary(page), 'the first tab took the primary lease').toEqual({ tried: true, became: true })
+  const other = await page.context().newPage() // a second tab: same origin, same indexeddb
+  try {
+    const logs: string[] = []
+    other.on('console', msg => logs.push(msg.text()))
+    await sdkLogs(other)
+    await loadAdmin(other)
+    await expect.poll(() => other.evaluate(() => window._server_confirmed), { timeout: 30_000 }).toBe(true)
+    expect(await becamePrimary(other), 'the second tab tried and stayed a secondary').toEqual({ tried: true, became: false })
+    expect(logs.join('\n'), 'confirmed by a current server revision of its own').toMatch(/server-confirmed corpus/)
+    expect(logs.join('\n'), 'the welcome settled by the confirmation').toMatch(/corpus settled: confirmed/)
+  } finally {
+    await other.close()
   }
 })

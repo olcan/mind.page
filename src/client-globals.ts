@@ -104,6 +104,7 @@ import {
   onSnapshot,
   terminate,
   clearIndexedDbPersistence,
+  setLogLevel, // the SDK's own log level: setLogLevel('debug') shows its lease and stream decisions (a tethered Web Inspector on a phone)
 } from 'firebase/firestore' // ~262K
 Object.assign((firebase['firestore'] = {}), {
   getFirestore,
@@ -125,6 +126,7 @@ Object.assign((firebase['firestore'] = {}), {
   onSnapshot,
   terminate,
   clearIndexedDbPersistence,
+  setLogLevel,
 })
 
 // import/expose firebase/storage on window
