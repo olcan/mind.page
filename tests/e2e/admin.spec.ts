@@ -161,8 +161,13 @@ test('an autodep parent absent from every text tag is installed and joins the ru
     const json = (status: number, body: unknown) =>
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) })
     if (path == 'commits') {
-      const file = url.searchParams.get('path') ?? ''
-      if (!(file in files)) return json(200, [])
+      // the updater resolves an embed-bearing item's ref to a commit with a PATH-LESS query first
+      // (updater.js check_updates since the updater key change of 2026-09-23) and reads each path
+      // at that commit: the repo's head commit for no path, the path's commit for a served file,
+      // nothing for a file the repo lacks (the fixture answered every path-less query with
+      // nothing, so the row failed with `no commit at olcan/autodep.test/master` until 2026-09-25)
+      const file = url.searchParams.get('path')
+      if (file != null && !(file in files)) return json(200, [])
       return json(200, [{ sha, commit: { message: 'synthetic', author: { date: new Date().toISOString() } } }])
     }
     if (path.startsWith('commits/')) {
@@ -343,7 +348,14 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   expect(accepted.pushable, 'pushable cleared after a completed update').toBe(false)
   // the success MARKER published once per accepted write (review 145 §4: without
   // this, deleting the success assignment would still pass the phase)
-  expect(JSON.parse(accepted.marker), 'marker equals the accepted updates').toEqual({ last_update: updates3 })
+  const marker = JSON.parse(accepted.marker)
+  expect(marker.last_update, 'marker equals the accepted updates').toEqual(updates3)
+  // the CERTIFICATION beside them (updater.js completion_marker, 2026-09-23) names the commit a
+  // COMPLETE check read every path at, keyed to the finding object that check returned; this row
+  // drives update_item with its own finding, which no check certified, so the field is an
+  // explicit null (kept as such: a marker without the field would inherit a stored certification)
+  expect(marker.certified, 'a caller-supplied finding is not certified').toBeNull()
+  expect(Object.keys(marker).sort(), 'the marker\'s two fields').toEqual(['certified', 'last_update'])
   // the CAPABILITY FENCE (review 146 §3/§4): the live wrapper reports the boolean
   // acceptance contract, and a capability-absent proxy fails closed without its writer
   // ever being called (the in-function fence precedes token/staging work by source
