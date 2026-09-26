@@ -2237,7 +2237,11 @@
       const dispatchTime = Date.now()
       update_dom().then(() => {
         if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
-        const textarea = activeEditItem ? textArea(indexFromId.get(activeEditItem)) : null
+        // the edited item can be gone by now (a child created by Ctrl+Enter and deleted at once
+        // with Ctrl+Backspace): its id resolves to no index, and there is nothing to scroll to
+        const index = indexFromId.get(activeEditItem)
+        if (index == undefined) return
+        const textarea = textArea(index)
         if (textarea && (!textarea.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)) {
           // console.debug('scrolling to edit item')
           textarea.focus() // ensure focus on textarea
@@ -7119,7 +7123,12 @@
   }
 
   function textArea(index: number): HTMLTextAreaElement {
-    return document.getElementById('textarea-' + (index < 0 ? 'mindbox' : items[index].id)) as HTMLTextAreaElement
+    if (index < 0) return document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    // a missing index (past the end after a deletion) has no textarea and never throws; a stale
+    // numeric index can still name another live item, so callers that outlive an item resolve
+    // its id first (the layout's edit-scroll callback, restoreItemEditor)
+    const item = items[index]
+    return item ? (document.getElementById('textarea-' + item.id) as HTMLTextAreaElement) : null
   }
 
   function onPrevItem(inc = -1) {

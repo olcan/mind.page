@@ -140,6 +140,11 @@
     run: boolean = false,
     e: KeyboardEvent = null
   ) => {}
+  // the parent reads the index on a focus only (a blur clears its focused item). The blur of a
+  // deleted item's textarea fires while its DOM is removed, when Svelte 5 has already paused
+  // (inerted) the component: reading the `index` prop then, a derived of a paused component,
+  // logs Svelte's derived_inert warning, so the blur passes -1 and does not read the `index` prop
+  // (the callback prop itself is still read; its parent value is stable, so that read is safe)
   export let onFocused = (index: number, focused: boolean) => {}
   export let onEdited = (index: number, text: string) => {}
   export let onEditorKeyDown = (e: KeyboardEvent) => {}
@@ -2080,7 +2085,7 @@
         {onSave}
         {onPrev}
         {onNext}
-        onFocused={focused => onFocused(index, focused)}
+        onFocused={focused => onFocused(focused ? index : -1, focused)}
         onEdited={text => onEdited(index, text)}
         {onEditorKeyDown}
         {onEscape}

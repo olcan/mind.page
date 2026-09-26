@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { focusMindbox, mindbox } from './editor_helpers.js'
 import { firestore, loadAdmin, loadAnonymous, waitForApp } from './helpers.js'
+import { savedId } from './editor_helpers.js'
 
 // the PAGE-CACHE RESTORE (see src/page_lifecycle.ts and onPageShow in index.svelte): the browser
 // fires pagehide when it parks a page in its back/forward cache (a back navigation; on iOS every
@@ -249,4 +250,61 @@ test('the live server signal drops while offline and rises with the reconnect; t
     await page.context().setOffline(false)
   }
   await expect.poll(() => page.evaluate(() => window._server_current), { timeout: 60_000 }).toBe(true)
+})
+
+// a child created by Ctrl+Enter on a unique label (`<label>/0`, editing and focused) and deleted at
+// once by Ctrl+Backspace (2026-09-26, the owner's report): the child's textarea blurs while its DOM
+// is removed, with its component already paused, and reading the `index` prop there logged
+// Svelte's derived_inert warning; and the layout's edit-scroll callback, dispatched while the child
+// was focused and run after two animation frames, resolved the deleted id to `items[undefined].id`
+// (an uncaught TypeError in a promise). The frames are HELD across the delete so that callback runs
+// against the deleted child on purpose, whatever the machine's timing
+test('a child created by Ctrl+Enter and deleted at once by Ctrl+Backspace leaves no error and no warning', async ({ page }) => {
+  await loadAdmin(page)
+  const seen = dialogs(page)
+  const errors: string[] = []
+  page.on('pageerror', err => errors.push(err.message))
+  const warnings: string[] = []
+  page.on('console', msg => void (msg.type() == 'warning' && warnings.push(msg.text())))
+  const PARENT = '#e2e_parent'
+  const CHILD = `${PARENT}/0`
+  await page.evaluate(text => void window._create(text), `${PARENT}\nthe parent of a child`)
+  await expect.poll(() => savedId(page, PARENT), { timeout: 30_000 }).toBeTruthy()
+  // the parent targeted by name, the box blurred (a todoer row click): Ctrl+Enter goes to the window
+  await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), PARENT)
+  await page.waitForTimeout(500)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('Control+Enter')
+  await expect.poll(() => page.evaluate(child => (document.activeElement as HTMLTextAreaElement)?.value?.startsWith(child) ?? false, CHILD), { timeout: 10_000 }).toBe(true)
+  await expect.poll(() => savedId(page, CHILD), { timeout: 30_000 }).toBeTruthy()
+  const childId = (await savedId(page, CHILD))!
+  await page.waitForTimeout(1000) // the creation's own layouts settle (250 ms retries while editing)
+  // hold the animation frames: update_dom (the app's only requestAnimationFrame user) resolves
+  // only when they run, so every callback it dispatches from here stays pending
+  await page.evaluate(() => {
+    const w = window as any
+    w.__held = []
+    w.__raf = w.requestAnimationFrame
+    w.requestAnimationFrame = (cb: FrameRequestCallback) => (w.__held.push(cb), 0)
+  })
+  // the child grows past the layout threshold: the layout that follows (250 ms after the last edit
+  // settles for 500 ms) sees the focused child and dispatches the edit-scroll callback
+  await page.keyboard.type('\n'.repeat(20))
+  await page.waitForTimeout(1500)
+  expect(await page.evaluate(() => (window as any).__held.length), 'a layout dispatched while the child was focused').toBeGreaterThan(0)
+  await page.keyboard.press('Control+Backspace') // the delete from the child's own editor
+  await expect.poll(() => page.evaluate(child => window._item(child, true)?.id ?? null, CHILD), { timeout: 10_000 }).toBeNull()
+  await expect.poll(async () => (await firestore().doc(`items/${childId}`).get()).exists, { timeout: 30_000 }).toBe(false)
+  // the held frames run now: the pending callback meets the deleted child
+  await page.evaluate(() => {
+    const w = window as any
+    w.requestAnimationFrame = w.__raf
+    for (const cb of w.__held.splice(0)) cb(performance.now())
+  })
+  await page.waitForTimeout(1000)
+  expect(errors, 'no page error').toEqual([])
+  expect(warnings.filter(w => w.includes('derived_inert')), 'no inert-derived read').toEqual([])
+  expect(await page.evaluate(() => (window as any).MindBox.get().trim()), 'the parent targeted again').toBe(PARENT)
+  expect(seen, 'no dialog').toEqual([])
+  await deleteSettled(page, PARENT)
 })
