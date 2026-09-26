@@ -231,3 +231,22 @@ test.describe('under an iPhone UA', () => {
     for (const name of ['#e2e_dead_client/control', '#e2e_dead_client/after']) await deleteSettled(page, name)
   })
 })
+
+// THE LIVE SERVER SIGNAL (2026-09-26): `_server_confirmed` is sticky (one current server
+// revision applied), so a tab that lost its stream keeps it; `_server_current` follows the
+// latest items snapshot instead and drops when the SDK notices the dead stream (it raises a
+// metadata-only snapshot from the cache once its online state goes offline, within seconds of
+// the first failed request), rising again with the catch-up. item code that writes a store
+// from its copies waits for both (the todoer's order save and unsnooze sweep)
+test('the live server signal drops while offline and rises with the reconnect; the confirmation stays', async ({ page }) => {
+  await loadAnonymous(page)
+  await expect.poll(() => page.evaluate(() => [window._server_confirmed, window._server_current]), { timeout: 30_000 }).toEqual([true, true])
+  await page.context().setOffline(true)
+  try {
+    await expect.poll(() => page.evaluate(() => window._server_current), { timeout: 30_000 }).toBe(false)
+    expect(await page.evaluate(() => window._server_confirmed), 'the confirmation is sticky').toBe(true)
+  } finally {
+    await page.context().setOffline(false)
+  }
+  await expect.poll(() => page.evaluate(() => window._server_current), { timeout: 60_000 }).toBe(true)
+})

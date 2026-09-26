@@ -446,7 +446,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // drags and runs them at the release; the first move started the drag, so by the second the
   // dragging widget and both widgets' pending renders are observable
   type Point = { x: number; y: number }
-  const dragTo = async (from: Point, to: Point | (() => Promise<Point>)) => {
+  const dragTo = async (from: Point, to: Point | (() => Promise<Point>), { inject = true } = {}) => {
     // the first move past Sortable's fallback tolerance starts the drag, which changes the
     // widget's layout (the bins show, the list narrows): a target inside a bin is resolved then
     await touch('touchMove', [{ x: from.x + 8, y: from.y }])
@@ -455,7 +455,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     for (let step = 1; step <= 6; step++) {
       await touch('touchMove', [{ x: from.x + ((target.x - from.x) * step) / 6, y: from.y + ((target.y - from.y) * step) / 6 }])
       await page.waitForTimeout(60)
-      if (step == 2) {
+      if (step == 2 && inject) {
         await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
         expect(
           await page.evaluate(() => ({
@@ -508,6 +508,44 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
   await page.waitForTimeout(2500) // a stable final string, not a write count (as in (c2))
   expect((await serverStore(PIN))._todoer['#todo'], 'the order stands after the cancelled bin drop').toBe(`${otherId},${taskId}`)
+  // a drag while the save must WAIT (an unconfirmed corpus here; a dead stream or a resume hold
+  // alike) keeps its order through the renders meanwhile (2026-09-26: the order hint stays until
+  // a save persists it) and is persisted once the wait ends; the flag is the app's own window
+  // property, put back afterwards
+  await page.evaluate(() => void (window._server_confirmed = false))
+  await grab(SNIPPET)
+  {
+    const first = await rowBox(SNIPPET) // the second row now: dragged back above the first
+    const other = await rowBox('write the release note')
+    await dragTo({ x: first.x + 52, y: first.y + first.height / 2 }, { x: first.x + 52, y: other.y }, { inject: false }) // no render during this drag: the hint is recorded regardless
+  }
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([`#todo [question] ${SNIPPET}`, '#todo write the release note'])
+  // two renders before any save: the hint outlives the first (a hint consumed by one render lost the drag at the next)
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
+    await page.waitForTimeout(1200)
+  }
+  expect((await lists(page)).main.map(r => r[0]), 'the drag survives the renders while its save waits').toEqual([`#todo [question] ${SNIPPET}`, '#todo write the release note'])
+  expect((await serverStore(PIN))._todoer['#todo'], 'nothing written while the save waits').toBe(`${otherId},${taskId}`)
+  await page.evaluate(() => void (window._server_confirmed = true))
+  await expect.poll(async () => (await serverStore(PIN))._todoer['#todo'], { timeout: 30_000 }).toBe(`${taskId},${otherId}`)
+  // a plain PRESS AND RELEASE on a row without a move (a click, minus the row's own click handler:
+  // Sortable's pointerdown on the list and its mouseup on the document, the listener contract as
+  // in (c3)) fires unchoose without a drag and saves nothing, and records no order hint (review
+  // 0): a hint recorded then outlived the click, and the next remote reorder's render applied it
+  // and persisted it over the newer order
+  await page.evaluate(text => {
+    const row = [...document.querySelectorAll('.todoer-widget .list > .list-item-container')].find(r => r.textContent!.includes(text)) as HTMLElement
+    const box = row.getBoundingClientRect()
+    const at = { clientX: box.left + 40, clientY: box.top + box.height / 2 }
+    row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, buttons: 1, pointerType: 'mouse', isPrimary: true, ...at }))
+    document.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0, ...at }))
+  }, SNIPPET)
+  await page.waitForTimeout(500)
+  await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${otherId},${taskId}` } })
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await page.waitForTimeout(2500)
+  expect((await serverStore(PIN))._todoer['#todo'], 'the remote reorder stands after a click without a drag').toBe(`${otherId},${taskId}`)
   // a touch moved down (past the tap slop) is a scroll: never chosen, the delay notwithstanding
   await probe()
   {

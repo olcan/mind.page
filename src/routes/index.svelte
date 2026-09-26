@@ -429,6 +429,14 @@
     // FALSE until a current server revision of the account has been applied (see
     // markServerConfirmed): item code comparing texts with an external source waits for it
     window['_server_confirmed'] = false
+    // the LIVE counterpart (2026-09-26, see src/live_signal.ts): whether the latest items
+    // snapshot came from the server (not the cache) AND its application landed. every receipt
+    // drops it (a cache receipt: the SDK noticed a dead stream; a server receipt: its changes
+    // are not applied yet), and a server receipt's sealed application raises it through the
+    // same ordered lease as the confirmation, only while it is still the latest receipt and the
+    // ingress runs. the confirmation above stays sticky; item code that writes a store from its
+    // copies waits for both (the todoer's housekeeping writers)
+    window['_server_current'] = false
     window['_grammar'] = {
       version: 2,
       edit: window['_vault_edit'],
@@ -7540,6 +7548,7 @@
   import { adoptFreshFixedSecret, adoptValidatedSecret, resolveFixedOwnerSecret } from '../secret'
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
   import { attrSaveStep, settleCorpus, WELCOME_CONFIRMATION_TIMEOUT_MS } from '../welcome'
+  import { raisesLiveSignal, receiveSnapshot, type Receipt } from '../live_signal'
   import { restoreAction, RESTORED_RELOAD_KEY } from '../page_lifecycle'
   import { removeZWSP } from '../zwsp'
   import {
@@ -7830,6 +7839,7 @@
   function stopIngress(reason: string, active?: { cause: unknown }) {
     if (ingressStopped) return // first false-to-true transition only
     ingressStopped = true
+    window['_server_current'] = false // no further application will land (see src/live_signal.ts)
     console.warn(`hidden ingress STOPPED for this page: ${reason} (reload to recover)`)
     ingressStopWaiters.stop(new Error(`hidden ingress stopped: ${reason}`)) // releases held delivery waiters
     // 0. the corpus first: a held server read or phrase prompt must release its caller, boundary
@@ -7908,6 +7918,7 @@
     resolveServerConfirmed()
   }
   let resolveServerConfirmed: () => void = () => {}
+  let latestReceipt: Receipt = { n: 0, current: false } // the latest items snapshot's receipt (src/live_signal.ts)
   const serverConfirmation = new Promise<void>(resolve => (resolveServerConfirmed = resolve))
   // the corpus SETTLES once for the page (see settleCorpus in src/welcome.ts): the server
   // confirmation, or no confirmation to wait for now — offline, or the timeout on a slow link.
@@ -7941,6 +7952,7 @@
     confirmsServer?: boolean
   }) {
     const lease = hiddenIngress.reserveAuthority(policy == 'candidate')
+    const receipt = latestReceipt // this callback's receipt (the reservation runs in its turn)
     if (policy == 'revoke') {
       // EDGE-TRIGGERED level: a cached revision that strips USABLE authority is a live loss and
       // warns; one arriving while authority is already unusable (startup's fail-closed posture,
@@ -7983,6 +7995,12 @@
       // rebuild completed) and this one's own application landed — never at receipt, and never
       // from a failed attempt
       if (outcome == 'seal' && confirmsServer) void lease.done.then(markServerConfirmed)
+      // THE LIVE SIGNAL rides the same turn: a sealed server receipt raises it once its ordered
+      // effect is consumed, unless a newer receipt or a stop came first (src/live_signal.ts)
+      if (outcome == 'seal' && receipt.current)
+        void lease.done.then(() => {
+          if (raisesLiveSignal({ applied: receipt, latest: latestReceipt, stopped: ingressStopped })) window['_server_current'] = true
+        })
     }
     return { settle, revoke, lease }
   }
@@ -9207,6 +9225,10 @@
               // wait for the server, because prefetched same-id copies are superseded by it
               prefetchSucceeded: !!prefetchedHiddenDocs,
             }
+            // the live signal drops at every receipt (see its declaration and src/live_signal.ts);
+            // the receipt this lease will report its application for is captured below
+            latestReceipt = receiveSnapshot(latestReceipt, facts.fromCache)
+            window['_server_current'] = false
             const decision = snapshotDecision(facts)
             const action = decision.action
             // a current server revision: once applied (in lease order, see reserveHiddenAuthority)
