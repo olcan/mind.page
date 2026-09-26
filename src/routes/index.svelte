@@ -5459,7 +5459,12 @@
           if (text.match(/^\/\w+/)) {
             // NOTE: text is untrimmed, so no whitespace before /
             const cmd = text.match(/^\/\w+/)[0]
-            let args = text
+            // the editor's textarea holds an AUGMENTED value (src/zwsp.ts: zero-width spaces inside
+            // long url runs so they can wrap); every save path strips them, and so does a command's
+            // argument list: `/wiki_links vscode-insiders://olcan.auto-open-obsidian/file` once
+            // reached its handler with a U+200B after `olcan.`, `auto-open-` and `obsidian/`, and
+            // the editor launched by that url never saw a valid extension id (2026-09-26)
+            let args = removeZWSP(text)
               .replace(/^\/\w+/, '')
               .replace(/[`\\$]/g, '\\$&')
               .trim()

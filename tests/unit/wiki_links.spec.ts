@@ -96,6 +96,16 @@ test('the config: a handler url with a scheme and no query, an optional root', (
     url: 'vscode://olcan.auto-open-obsidian/file',
   })
   expect(parseWikiLinksConfig({ url: 'x+y.z-1://h', root: null })).toEqual({ url: 'x+y.z-1://h' })
+  // the editor's zero-width spaces (U+200B, inserted into long url runs after `.`, `-` and `/`)
+  // are dropped from both values, so the url an account stored before the command path stripped
+  // them (the live one of 2026-09-26) still resolves; every other character is the value's own,
+  // a zero-width joiner (a joined emoji in a directory name), a non-joiner or a byte-order mark
+  // included (review 3: deleting those would select a different directory)
+  expect(
+    parseWikiLinksConfig({ url: 'vscode-insiders://olcan.\u200bauto-open-\u200bobsidian/\u200bfile', root: '/Users/olcan/\u200bvault' })
+  ).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/olcan/vault' })
+  for (const root of ['/Users/olcan/dev\u{1F469}\u200D\u{1F4BB}', '/Users/olcan/a\u200cb', '/Users/olcan/\ufeffvault'])
+    expect(parseWikiLinksConfig({ url: 'x://h/f', root }), JSON.stringify(root)).toEqual({ url: 'x://h/f', root })
   for (const value of [
     null,
     'x://h',

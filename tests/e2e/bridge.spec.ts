@@ -9,6 +9,7 @@
 // _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
 import { firestore, install, loadAdmin, waitForApp } from './helpers.js'
+import { focusMindbox, mindbox } from './editor_helpers.js'
 
 test('a canonical reply renders as inert markdown: structure, admitted links, literal grammar', async ({ page }) => {
   // design §2.2a amended 2026-09-05 (owner): the dead frame shows the decoded body as Markdown
@@ -946,6 +947,29 @@ test('wiki links: the settings item, its command, the store, and the first rende
   expect(await command('/wiki_links h/f /r')).toContain('refused h/f /r') // nothing applied, nothing saved
   expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
   expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/file under /Users/o c/v')
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+  // the command TYPED into the mindbox, as the owner runs it: the editor augments the long url
+  // with zero-width spaces (src/zwsp.ts; the precondition is asserted, or the row proves nothing),
+  // and the command's arguments must not carry them (2026-09-26: the stored url held three, and
+  // the editor launched by it never saw a valid extension id)
+  await page.evaluate(() => void (window as any)._set_wiki_links(null))
+  const typed = async (line: string) => {
+    // the textarea sits behind a backdrop until focused (a refused command leaves it focused)
+    if (!(await mindbox(page).evaluate(el => document.activeElement === el))) await focusMindbox(page)
+    await mindbox(page).fill(line)
+    await expect.poll(() => mindbox(page).inputValue(), { message: 'the editor augments the url' }).toContain('\u200b')
+    const before = alerts.length
+    await page.keyboard.press('Shift+Enter') // the mindbox's run key (see Editor.svelte and editor.spec.ts)
+    await expect.poll(() => alerts.length, { message: `${line} answered`, timeout: 15_000 }).toBeGreaterThan(before)
+    return alerts[alerts.length - 1]
+  }
+  // a REFUSED url (a query) echoes the argument the handler received: clean only when the command
+  // boundary stripped the augmentation (the parser's own normalization never sees a refusal's echo)
+  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file?q=1 /Users/o c/v')).toBe(
+    '/wiki_links: refused vscode-insiders://olcan.auto-open-obsidian/file?q=1 /Users/o c/v (a url is <scheme>://<host>/<path> without a query)'
+  )
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file /Users/o c/v')).toBe('wiki links: vscode-insiders://olcan.auto-open-obsidian/file under /Users/o c/v')
   expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
   // the store carries the accepted config (saved through the item's store)
   await expect.poll(() => page.evaluate(() => JSON.stringify((window._item('#wiki_links') as any)._global_store.wiki_links)), { timeout: 15_000 }).toBe(

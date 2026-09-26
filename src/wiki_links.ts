@@ -121,9 +121,15 @@ export function wikiLinkExtension(
 // non-empty text without control characters; without it the handler uses its own roots);
 // other keys are dropped, anything else is null
 const URL_FORM = /^[a-z][a-z0-9+.-]*:\/\/[^\s"'<>?#]+$/i
+// the editor's augmentation (src/zwsp.ts inserts U+200B, and only U+200B, into long url runs so
+// they wrap) is dropped from both values: a value stored before the command path stripped it
+// holds those characters. Nothing else is touched: a zero-width joiner in a root (a joined
+// emoji in a directory name) or a byte-order mark is that name, not the editor's
 export function parseWikiLinksConfig(value: unknown): WikiLinksConfig | null {
   if (!value || typeof value != 'object') return null
-  const { url, root } = value as Record<string, unknown>
+  let { url, root } = value as Record<string, unknown>
+  if (typeof url == 'string') url = url.replaceAll('\u200b', '')
+  if (typeof root == 'string') root = root.replaceAll('\u200b', '')
   if (typeof url != 'string' || !URL_FORM.test(url)) return null
   if (root === undefined || root === null || root === '') return { url }
   if (typeof root != 'string' || /[\u0000-\u001f\u007f]/.test(root)) return null
