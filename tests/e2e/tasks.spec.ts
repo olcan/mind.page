@@ -35,6 +35,9 @@ const SNIPPET = 'fix the cache reverts on a returning device'
 const RECORD = process.env.RECORD_FIXTURES === '1'
 const OTHER = '#e2e_other'
 const OTHER_TEXT = `${OTHER}\n#todo write the release note`
+// a NAMED todo's row starts with its label (the todoer, 2026-09-26: the unique label the row's
+// click targets, which a snippet from the #todo tag on never shows), then the snippet
+const OTHER_ROW = `${OTHER} #todo write the release note`
 const FIXTURE = resolve('tests/e2e/fixtures/task_command.json')
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
@@ -194,7 +197,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(() => savedId(page, TASK), { timeout: 30_000 }).toBeTruthy()
   await expect.poll(() => savedId(page, OTHER), { timeout: 30_000 }).toBeTruthy()
   const taskId = (await savedId(page, TASK))!
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0]).sort()).toEqual([`#todo ${SNIPPET}`, '#todo write the release note'])
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]).sort()).toEqual([OTHER_ROW, `${TASK} #todo ${SNIPPET}`]) // sorted: the labels lead the texts
   expect((await lists(page)).delegated).toEqual([])
   // the capture is the RAW text the server holds (the answer region included), not the app's
   // grammar-view read, whose inert regions are tokens
@@ -238,8 +241,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(() => serverText(taskId), { timeout: 30_000 }).toBe(`${TASK}\n#todo [delegated] fix the cache\nreverts on a returning device\n${ANSWER}\n#_agent/vault\n`)
   // the overlay: the item leaves the main list and shows delegated, pending, with no age yet
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
-    main: [['#todo write the release note', null, null]],
-    delegated: [[`? #todo [delegated] ${SNIPPET}`, 'delegate', '?']],
+    main: [[OTHER_ROW, null, null]],
+    delegated: [[`? ${TASK} #todo [delegated] ${SNIPPET}`, 'delegate', '?']],
   })
 
   // (b) the bridge acknowledges: the projection written behind the app settles the overlay
@@ -247,8 +250,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const state = { held: 'agent', reason: 'delegated', epoch: 0, rev: 1, updated: Date.now(), worktree: null, phase: 'idle', acked: { [delegate.wrapper.item.id]: 'consumed' } }
   await writeStore(STORE, `global_store_${taskId}`, { _agent: { state } })
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
-    main: [['#todo write the release note', null, null]],
-    delegated: [[`<1m #todo [delegated] ${SNIPPET}`, null, '<1m']],
+    main: [[OTHER_ROW, null, null]],
+    delegated: [[`<1m ${TASK} #todo [delegated] ${SNIPPET}`, null, '<1m']],
   })
   // the age keeps its absolute-time tooltip and is not a tag (no search on click)
   const age = page.locator('.todoer-widget').nth(1).locator('mark.age')
@@ -262,8 +265,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const since = Date.now() - 3_600_000
   await writeStore(STORE, `global_store_${taskId}`, { _agent: { state: { ...state, rev: 2, stats: { turns: 1, workers: 2, active: 0, cost: 1.5, since } } } })
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
-    main: [['#todo write the release note', null, null]],
-    delegated: [[`<1m · 2w · $1.50 #todo [delegated] ${SNIPPET}`, null, '<1m · 2w · $1.50']],
+    main: [[OTHER_ROW, null, null]],
+    delegated: [[`<1m · 2w · $1.50 ${TASK} #todo [delegated] ${SNIPPET}`, null, '<1m · 2w · $1.50']],
   })
   expect(await age.getAttribute('title')).toBe(`${new Date(state.updated).toLocaleString()}\ndelegated ${new Date(since).toLocaleString()}`)
 
@@ -299,8 +302,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect((await serverStore(`global_store_${taskId}`))._agent.state.rev, 'the projection survives the widget\'s save').toBe(2)
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
     main: [
-      [`#todo [question] ${SNIPPET}`, null, null], // the snippet drops the _log block
-      ['#todo write the release note', null, null],
+      [`${TASK} #todo [question] ${SNIPPET}`, null, null], // the snippet drops the _log block
+      [OTHER_ROW, null, null],
     ],
     delegated: [],
   })
@@ -323,8 +326,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const stale = `zzz-unknown,${otherId},${taskId}`
   await writeStore(pinDoc, PIN, { ...pinStore, _todoer: { ...pinStore._todoer, '#todo': stale } })
   await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([
-    '#todo write the release note',
-    `#todo [question] ${SNIPPET}`,
+    OTHER_ROW,
+    `${TASK} #todo [question] ${SNIPPET}`,
   ])
   await page.waitForTimeout(2500) // the delivered order stands (a stable final string, not a write count)
   expect((await serverStore(PIN))._todoer['#todo'], 'the delivered order stands, the unknown id kept').toBe(stale)
@@ -338,7 +341,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // a newer build wrote the store: this build stops writing orders and asks for a reload once
   const newer = `${otherId},${taskId}`
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': newer, version: 99 } })
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe('#todo write the release note')
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(OTHER_ROW)
   await writeStore(STORE, `global_store_${taskId}`, {
     _agent: { state: { ...state, held: 'owner', reason: 'question', epoch: 1, rev: 4, updated: Date.now() } },
     _todoer: { unsnoozed: Date.now() },
@@ -348,7 +351,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect((await serverStore(PIN))._todoer['#todo'], 'the newer build\'s order stands').toBe(newer)
   // back to this build's stamp and the order the later phases expect (the task first)
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}`, version: 1 } })
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`${TASK} #todo [question] ${SNIPPET}`)
   // ... and the tab's OWN copy of the store carries the stamp back: a delivery is not copied
   // onto the item while the tab owes a save for that store, and a copy left at the newer stamp
   // refuses every later order save silently (the notice shows once), which could explain a
@@ -476,7 +479,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     const second = await rowBox('write the release note')
     await dragTo({ x: first.x + 52, y: first.y + first.height / 2 }, { x: first.x + 52, y: second.y + second.height })
   }
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([OTHER_ROW, `${TASK} #todo [question] ${SNIPPET}`])
   // the drag ended whole: no ghost or chosen row left behind (Sortable's plain hidden clone
   // would be a third row in the list assertion above), no widget still dragging, the deferred
   // renders run at the release
@@ -505,7 +508,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect(page.locator('.snooze-modal')).toBeVisible({ timeout: 10_000 })
   await page.keyboard.press('Escape') // no snooze time: the row is restored
   await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 10_000 })
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([OTHER_ROW, `${TASK} #todo [question] ${SNIPPET}`])
   await page.waitForTimeout(2500) // a stable final string, not a write count (as in (c2))
   expect((await serverStore(PIN))._todoer['#todo'], 'the order stands after the cancelled bin drop').toBe(`${otherId},${taskId}`)
   // a drag while the save must WAIT (an unconfirmed corpus here; a dead stream or a resume hold
@@ -519,13 +522,13 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     const other = await rowBox('write the release note')
     await dragTo({ x: first.x + 52, y: first.y + first.height / 2 }, { x: first.x + 52, y: other.y }, { inject: false }) // no render during this drag: the hint is recorded regardless
   }
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([`#todo [question] ${SNIPPET}`, '#todo write the release note'])
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([`${TASK} #todo [question] ${SNIPPET}`, OTHER_ROW])
   // two renders before any save: the hint outlives the first (a hint consumed by one render lost the drag at the next)
   for (let i = 0; i < 2; i++) {
     await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
     await page.waitForTimeout(1200)
   }
-  expect((await lists(page)).main.map(r => r[0]), 'the drag survives the renders while its save waits').toEqual([`#todo [question] ${SNIPPET}`, '#todo write the release note'])
+  expect((await lists(page)).main.map(r => r[0]), 'the drag survives the renders while its save waits').toEqual([`${TASK} #todo [question] ${SNIPPET}`, OTHER_ROW])
   expect((await serverStore(PIN))._todoer['#todo'], 'nothing written while the save waits').toBe(`${otherId},${taskId}`)
   await page.evaluate(() => void (window._server_confirmed = true))
   await expect.poll(async () => (await serverStore(PIN))._todoer['#todo'], { timeout: 30_000 }).toBe(`${taskId},${otherId}`)
@@ -543,7 +546,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   }, SNIPPET)
   await page.waitForTimeout(500)
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${otherId},${taskId}` } })
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual(['#todo write the release note', `#todo [question] ${SNIPPET}`])
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0]), { timeout: 30_000 }).toEqual([OTHER_ROW, `${TASK} #todo [question] ${SNIPPET}`])
   await page.waitForTimeout(2500)
   expect((await serverStore(PIN))._todoer['#todo'], 'the remote reorder stands after a click without a drag').toBe(`${otherId},${taskId}`)
   // a touch moved down (past the tap slop) is a scroll: never chosen, the delay notwithstanding
@@ -559,7 +562,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   }
   // the order the later phases expect (the task first)
   await writeStore(pinDoc, PIN, { ...(await serverStore(PIN)), _todoer: { ...(await serverStore(PIN))._todoer, '#todo': `${taskId},${otherId}` } })
-  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`#todo [question] ${SNIPPET}`)
+  await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`${TASK} #todo [question] ${SNIPPET}`)
 
   // (d) a re-delegation under the current epoch, then a take-back that overlays at once and
   // refuses a further delegate until acknowledged
@@ -580,8 +583,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(takeback.wrapper.item).toEqual({ task: taskId, id: takeback.wrapper.item.id, kind: 'takeback', epoch: 1, at: takeback.wrapper.item.at })
   await expect.poll(async () => await lists(page), { timeout: 30_000 }).toEqual({
     main: [
-      [`#todo [delegated] ${SNIPPET}`, 'takeback', null],
-      ['#todo write the release note', null, null],
+      [`${TASK} #todo [delegated] ${SNIPPET}`, 'takeback', null],
+      [OTHER_ROW, null, null],
     ],
     delegated: [],
   })
@@ -731,8 +734,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore('e2e-child-store', `global_store_${childId}`, { _agent: { state: childState } })
   // the rows' texts (the delegated widget prefixes its age mark; the other todo carries the
   // marker phase (f) wrote): a row is matched by its text's end and its pending mark
-  const PROJECT_ROW = `#todo [delegated] ${SNIPPET}`
-  const CHILD_ROW = '↳ #todo [delegated] write the release note'
+  const PROJECT_ROW = `${TASK} #todo [delegated] ${SNIPPET}`
+  const CHILD_ROW = `↳ ${OTHER} #todo [delegated] write the release note` // the prefix, then the label
   const has = (rows: Row[], text: string, pending: string | null) => rows.filter(r => r[0].endsWith(text) && r[1] == pending).length == 1 // exactly one row
   await expect.poll(async () => has((await lists(page)).main, PROJECT_ROW, null), { timeout: 30_000 }).toBe(true)
   await expect.poll(async () => has((await lists(page)).delegated, CHILD_ROW, null), { timeout: 30_000 }).toBe(true)
@@ -780,6 +783,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   for (const text of ['#todo twin one', '#todo twin two']) await page.evaluate(text => void window._create(text), text)
   await expect(mainRow('twin one')).toHaveCount(1)
   await expect(mainRow('twin two')).toHaveCount(1)
+  // unnamed, their rows start with the snippet itself (the labeled rows above start with the label)
+  expect((await lists(page)).main.map(r => r[0]).filter(t => t.includes('twin')).sort()).toEqual(['#todo twin one', '#todo twin two'])
   const twinId = (await mainRow('twin one').getAttribute('data-id'))!
   await clickRow('twin one')
   await expect.poll(boxText, { timeout: 10_000 }).toBe('id:' + twinId)
