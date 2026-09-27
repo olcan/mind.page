@@ -612,3 +612,65 @@ test('vault routing: start, completion, and catch fences suppress web dispatch',
     await cleanup()
   }
 })
+
+test('the autodep tag applies to descendants only, order-independently, before and after a reload', async ({ page }) => {
+  // 2026-09-27 (the vault's autodep reviews 0-1): an item's own #_autodep never makes it adopt
+  // its label-prefix parent; a uniquely labeled STRICT ancestor's tag does. The runtime graph
+  // is recomputed from the ancestors' raw tags at every pass, so a nested carrier that the
+  // descendant scan visits BEFORE its parent (the tab iterates the newest item first, so the
+  // carrier is created AFTER the middle level; the order asserted below) drops its parent the
+  // moment the root's tag goes, regains it when the tag returns, drops it when the root is
+  // renamed (the old label's subtree recomputed too) and regains it when the name returns; a
+  // reload agrees
+  await loadAdmin(page)
+  const idOf = (name: string) => page.evaluate(n => (window._item(n, true) as any)?.id ?? null, name)
+  const depsOf = (name: string) => page.evaluate(n => (window._item(n, true) as any)?.dependencies ?? null, name)
+  const create = async (text: string) => {
+    await page.evaluate(text => void window._create(text), text)
+    const name = text.split(/\s/)[0]
+    await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, name), { timeout: 30_000 }).toBeTruthy()
+  }
+  await create('#e2e_ad #_autodep the root carrier')
+  await create('#e2e_ad/b the middle level, no tag of its own')
+  await create('#e2e_ad/b/c #_autodep a nested carrier, created after the middle: iterated before it')
+  const root = await idOf('#e2e_ad')
+  const middle = await idOf('#e2e_ad/b')
+  const nested = await idOf('#e2e_ad/b/c')
+  const order = await page.evaluate(ids => ids.map(id => window.__items.findIndex(item => item.id == id)), [nested, middle])
+  expect(order[0], 'the precondition: the scan visits the nested carrier before the middle').toBeLessThan(order[1])
+  expect(await depsOf('#e2e_ad'), 'the root carrier adopts no parent (its dependencies are its tags alone)').not.toContain(middle)
+  expect(await depsOf('#e2e_ad/b'), 'the middle adopts the root (a carrying ancestor)').toContain(root)
+  expect(await depsOf('#e2e_ad/b/c'), 'the nested carrier adopts the middle (the root carries)').toContain(middle)
+  const setRoot = async (text: string) => {
+    await page.evaluate(([id, text]) => (window._item(id, true) as any).write(text, ''), [root, text] as const)
+    // the write persisted before anything reads the server again (the reload below)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(id => {
+            const item = window.__items.find(item => item.id == id)!
+            return !item.saving && item.savedText
+          }, root),
+        { timeout: 30_000 }
+      )
+      .toBe(text)
+  }
+  await setRoot('#e2e_ad the root, its tag removed')
+  await expect.poll(() => depsOf('#e2e_ad/b'), { timeout: 10_000 }).toEqual([])
+  expect(await depsOf('#e2e_ad/b/c'), 'no carrying ancestor: the nested carrier drops its parent (its own tag is for its descendants)').not.toContain(middle)
+  await setRoot('#e2e_ad #_autodep the root, its tag back')
+  await expect.poll(() => depsOf('#e2e_ad/b'), { timeout: 10_000 }).toContain(root)
+  expect(await depsOf('#e2e_ad/b/c'), 'the tag back: the nested carrier adopts the middle again').toContain(middle)
+  // the root renamed, its tag kept: the old label's subtree has no carrying ancestor any more
+  await setRoot('#e2e_zd #_autodep the root, renamed')
+  await expect.poll(() => depsOf('#e2e_ad/b'), { timeout: 10_000 }).toEqual([])
+  expect(await depsOf('#e2e_ad/b/c'), 'the carrier renamed away: the nested carrier drops its parent').not.toContain(middle)
+  await setRoot('#e2e_ad #_autodep the root, its name back')
+  await expect.poll(() => depsOf('#e2e_ad/b'), { timeout: 10_000 }).toContain(root)
+  expect(await depsOf('#e2e_ad/b/c'), 'the name back: the nested carrier adopts the middle again').toContain(middle)
+  await page.reload()
+  await loadAdmin(page)
+  const middleAfter = await idOf('#e2e_ad/b')
+  expect(await depsOf('#e2e_ad/b/c'), 'the initialization pass agrees').toContain(middleAfter)
+  expect(await depsOf('#e2e_ad/b'), 'the middle still adopts the root').toContain(await idOf('#e2e_ad'))
+})

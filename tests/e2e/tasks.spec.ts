@@ -793,11 +793,12 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // (l) the child-customization hook (the vault's notes/design/mind_task_chat.md, section 3):
   // the todoer's _init (an #_init item, run at load) defines window._customize_child, and the
   // app calls it after it allocates a child's label (Ctrl+Enter on a unique label): a child of
-  // a #todo becomes a TASK CHAT, its label retained, the route tag beside it and the first user
-  // turn on the next line, the caret collapsed at the end so the first typed character extends
-  // the turn;
-  // a child of that chat continues it (the parent's label as a hidden tag); any other parent's
-  // child stays as the app makes it (the suffix selected)
+  // a #todo becomes a TASK CHAT, its label retained, the route tag and #_autodep beside it and
+  // the first user turn on the next line, the caret collapsed at the end so the first typed
+  // character extends the turn; the tag applies to the chat's DESCENDANTS (2026-09-27): the
+  // chat itself does not depend on the todo, while a child of it depends on it by label prefix
+  // and continues it with no hidden tag; any other parent's child stays as the app makes it
+  // (the suffix selected)
   expect(await page.evaluate(() => typeof (window as any)._customize_child)).toBe('function')
   const editorState = () =>
     page.evaluate(() => {
@@ -820,14 +821,21 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(text => void window._create(text), `${CHATTY}\n#todo chat about me`)
   await expect.poll(() => savedId(page, CHATTY), { timeout: 30_000 }).toBeTruthy()
   const chat = await createChild(CHATTY)
-  const CHAT_TEXT = `${CHATTY}/0 #_chat/vault\n<<user>> `
+  const CHAT_TEXT = `${CHATTY}/0 #_chat/vault #_autodep\n<<user>> `
   expect(chat).toEqual({ value: CHAT_TEXT, start: CHAT_TEXT.length, end: CHAT_TEXT.length })
   await page.keyboard.type('how is it going?')
   expect((await editorState())!.value, 'the first typed character extends the turn').toBe(CHAT_TEXT + 'how is it going?')
   await page.keyboard.press('Control+Enter') // done: saved as the task's chat (no bridge in this lane: it stays pending)
   await expect.poll(() => savedId(page, `${CHATTY}/0`), { timeout: 30_000 }).toBeTruthy()
+  // the carrier adopts no parent: the chat's dependencies are the route item's closure, never
+  // the todo (the ids as this tab holds them: an item created here keeps its temporary id
+  // until the tab reloads, so the comparison is by the tab's own item handles)
+  const idOf = (name: string) => page.evaluate(n => (window._item(n, true) as any)?.id ?? null, name)
+  const chatDeps = await page.evaluate(name => (window._item(name, true) as any)?.dependencies ?? null, `${CHATTY}/0`)
+  expect(chatDeps, 'the chat depends on the route item').toContain(await idOf('#chat/vault'))
+  expect(chatDeps, 'the chat does not depend on the todo').not.toContain(await idOf(CHATTY))
   const continued = await createChild(`${CHATTY}/0`)
-  const CONTINUED = `${CHATTY}/0/0 #_${CHATTY.slice(1)}/0\n<<user>> `
+  const CONTINUED = `${CHATTY}/0/0\n<<user>> `
   const shapes = await page.evaluate(name => {
     const p = window._item(name, true) as any
     return JSON.stringify({ tags: p?.tags, hidden: p?.tags_hidden, label: p?.label, text: p?.text, deps: p?.dependencies })
@@ -840,13 +848,27 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const plainChild = await createChild(PLAIN)
   expect(plainChild, 'the suffix selected, as the app makes it').toEqual({ value: `${PLAIN}/0 `, start: PLAIN.length + 1, end: PLAIN.length + 3 })
   await page.keyboard.press('Escape')
-  // an ordinary item BENEATH the task chat by label prefix alone (no tag, no user turn): the
-  // app gives it no chat dependency (its prefix ancestors are not autodep), so it is not a chat
-  // and its child stays as the app makes it (the real dependency behavior the hook reads)
+  // an item BENEATH the task chat by label prefix alone (no tag, no user turn): the chat carries
+  // #_autodep, so the app makes the chat its first dependency (a descendant adopts its parent)
+  // and it is a chat item by the dependency rule; its child continues it with no hidden tag
+  // (the real dependency behavior the hook reads)
   const UNDER = `${CHATTY}/0/plain`
-  await page.evaluate(text => void window._create(text), `${UNDER}\nnotes under the chat, not a chat`)
+  await page.evaluate(text => void window._create(text), `${UNDER}\nnotes under the chat`)
   await expect.poll(() => savedId(page, UNDER), { timeout: 30_000 }).toBeTruthy()
-  expect(await page.evaluate(name => (window._item(name, true) as any)?.dependencies ?? null, UNDER), 'no dependency').toEqual([])
+  const underDeps = await page.evaluate(name => (window._item(name, true) as any)?.dependencies ?? null, UNDER)
+  expect(underDeps, 'the descendant depends on the chat').toContain(await idOf(`${CHATTY}/0`))
   const underChild = await createChild(UNDER)
-  expect(underChild, 'not a chat: the suffix selected').toEqual({ value: `${UNDER}/0 `, start: UNDER.length + 1, end: UNDER.length + 3 })
+  const UNDER_CHILD = `${UNDER}/0\n<<user>> `
+  expect(underChild, 'a chat by dependency: continued').toEqual({ value: UNDER_CHILD, start: UNDER_CHILD.length, end: UNDER_CHILD.length })
+  await page.keyboard.press('Escape')
+  // a chat made BEFORE the tag (no #_autodep): its child needs the explicit parent tag
+  const LEGACY = '#e2e_legacy'
+  await page.evaluate(text => void window._create(text), `${LEGACY}\n#todo an older todo`)
+  await expect.poll(() => savedId(page, LEGACY), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(text => void window._create(text), `${LEGACY}/0 #_chat/vault\n<<user>> made before the tag`)
+  await expect.poll(() => savedId(page, `${LEGACY}/0`), { timeout: 30_000 }).toBeTruthy()
+  const legacyChild = await createChild(`${LEGACY}/0`)
+  const LEGACY_CHILD = `${LEGACY}/0/0 #_${LEGACY.slice(1)}/0\n<<user>> `
+  expect(legacyChild, 'no autodep ancestor: the parent named').toEqual({ value: LEGACY_CHILD, start: LEGACY_CHILD.length, end: LEGACY_CHILD.length })
+  await page.keyboard.press('Escape')
 })

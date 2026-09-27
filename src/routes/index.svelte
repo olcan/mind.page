@@ -3900,6 +3900,15 @@
       generation
     )
 
+  // whether an item adopts its immediate label-prefix parent as its first dependency: some
+  // uniquely labeled STRICT ancestor carries #_autodep (the raw tags, never a cached flag)
+  function adoptsParent(item) {
+    return item.labelPrefixes.some(pfx => {
+      const ids = idsFromLabel.get(pfx)
+      return ids?.length == 1 && __item(ids[0]).tagsRaw.includes('#_autodep')
+    })
+  }
+
   function itemDeps(index, deps = [], missing_deps = undefined) {
     let item = items[index]
     if (deps.includes(item.id)) return deps
@@ -4010,7 +4019,7 @@
           const ids = idsFromLabel.get(tag)
           if (!ids?.length) return null
           if (ids.length > 1) return 'ambiguous'
-          return { autodep: !!__item(ids[0]).autodep }
+          return { autodep: !!(__item(ids[0]).autodepRoot || __item(ids[0]).autodep) } // carries or adopts
         },
         fetchRawTags: async tag => {
           let data
@@ -4282,26 +4291,27 @@
     // autodep affects itemDeps (used below) to treat parent as first dependency
     // note the flag itself does NOT depend on dependencies/dependents
     // it should be computed outside update_deps (e.g. for init before separate pass for deps)
+    // the #_autodep tag applies to the carrier's DESCENDANTS (2026-09-27, as documented: the
+    // item and its descendants become the first dependency of their children): an item's own
+    // tag never makes it adopt its label-prefix parent; `autodep` (adopts the parent) is true
+    // when a uniquely labeled STRICT ancestor carries the tag, computed from the ancestors' raw
+    // tags alone (order-independent: a descendant scan that visits a nested carrier before its
+    // parent must not read a stale inherited flag, autodep review 0), and `autodepRoot`
+    // (carries the tag) is what the change guards below key on for the descendants
     const prev_autodep = item.autodep // for change propagation to descendants
-    item.autodep =
-      item.tagsRaw.includes('#_autodep') ||
-      item.labelPrefixes.some(pfx => {
-        const ids = idsFromLabel.get(pfx)
-        return ids?.length == 1 && __item(ids[0]).autodep
-      })
-    // propagate changes in autodep OR label to descendants
-    if (item.autodep != prev_autodep || item.label != prevLabel) {
-      const prefix = item.label + '/'
+    const prev_autodep_root = item.autodepRoot
+    item.autodepRoot = item.tagsRaw.includes('#_autodep')
+    item.autodep = adoptsParent(item)
+    // propagate changes in autodep (adopted or carried) OR label to descendants: those of the
+    // current label, and of the previous one on a label change (their carrying ancestor left
+    // them; each recomputed from its own ancestors' raw tags, autodep review 1)
+    if (item.autodep != prev_autodep || item.autodepRoot != prev_autodep_root || item.label != prevLabel) {
+      const prefixes = [item.label + '/']
+      if (prevLabel && prevLabel != item.label) prefixes.push(prevLabel + '/')
       for (let descendant of items) {
-        if (!descendant.label || descendant.label.length <= prefix.length || !descendant.label.startsWith(prefix))
+        if (!descendant.label || !prefixes.some(prefix => descendant.label.length > prefix.length && descendant.label.startsWith(prefix)))
           continue // skip non-descendant
-        descendant.autodep =
-          item.autodep ||
-          descendant.tagsRaw.includes('#_autodep') ||
-          descendant.labelPrefixes.some(pfx => {
-            const ids = idsFromLabel.get(pfx)
-            return ids?.length == 1 && __item(ids[0]).autodep
-          })
+        descendant.autodep = adoptsParent(descendant)
       }
     }
 
@@ -4371,6 +4381,7 @@
         !item.dependents ||
         item.label != prevLabel ||
         item.autodep != prev_autodep ||
+        item.autodepRoot != prev_autodep_root ||
         item.deephash != prevDeepHash
       ) {
         item.dependents = []
@@ -4378,8 +4389,8 @@
           if (depindex == index) return // skip self
           const was_dependent = depitem.deps.includes(item.id) // was dependent w/ prevLabel?
           let is_dependent = was_dependent
-          if (item.label != prevLabel || item.autodep != prev_autodep) {
-            // label or autodep changed, need to update dependencies
+          if (item.label != prevLabel || item.autodep != prev_autodep || item.autodepRoot != prev_autodep_root) {
+            // label or autodep (adopted or carried) changed, need to update dependencies
             depitem.deps = itemDeps(depindex)
             is_dependent = depitem.deps.includes(item.id)
           }
@@ -8339,14 +8350,11 @@
       item.missingTags = item.tagsVisible
         .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
         .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
-      // initialize autodep based on labels & tags (initialized above)
+      // initialize autodep based on labels & tags (initialized above): the tag applies to
+      // the carrier's descendants (an own tag adopts no parent, see itemTextChanged)
       // changes are handled in itemTextChanged (w/ update_deps==true)
-      item.autodep =
-        item.tagsRaw.includes('#_autodep') ||
-        item.labelPrefixes.some(pfx => {
-          const ids = idsFromLabel.get(pfx)
-          return ids?.length == 1 && __item(ids[0]).tagsRaw.includes('#_autodep')
-        })
+      item.autodepRoot = item.tagsRaw.includes('#_autodep')
+      item.autodep = adoptsParent(item)
       // initialize deps, deephash, missing tags/labels
       // changes are handled in itemTextChanged (w/ update_deps==true)
       item.deps = itemDeps(index)

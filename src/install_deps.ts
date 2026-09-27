@@ -1,7 +1,8 @@
 // install-time closure of the runtime autodep parent dependency. the runtime dependency graph
 // (itemDeps in src/routes/index.svelte) treats an item's label-prefix parent as its FIRST
-// dependency when the item is autodep — its own raw tags include '#_autodep', or any uniquely
-// labeled ancestor's do (the flag inherits down the label hierarchy). both install-time
+// dependency when the item is autodep — a uniquely labeled STRICT ancestor's raw tags include
+// '#_autodep' (the tag applies to the carrier's descendants, never to the carrier itself,
+// 2026-09-27; a carrier still inherits from a carrying ancestor of its own). both install-time
 // dependency loops historically walked text tags only, so an autodep parent absent from the
 // text never got installed and the installed closure under-approximated the runtime graph.
 // this module is the correction: it decides, from the item text being installed plus local
@@ -11,8 +12,8 @@ export type LocalAncestor = { autodep: boolean } | 'ambiguous' | null
 
 export type AutodepDeps = {
   // resolves a tag against locally installed items: null if no item carries the label,
-  // 'ambiguous' if more than one does, else the unique item's runtime autodep flag (which
-  // already incorporates that item's own ancestors)
+  // 'ambiguous' if more than one does, else whether the unique item makes ITS descendants
+  // adopt their parent: it carries the tag, or adopts (a carrying ancestor of its own)
   local: (tag: string) => LocalAncestor
   // raw tags of the (lowercased) repo text backing a label-prefix tag, or null if no such file;
   // called at most once per tag per autodepParent call
@@ -46,7 +47,9 @@ export async function autodepParent(deps: AutodepDeps, label: string, rawTags: s
     if (!fetched.has(tag)) fetched.set(tag, await deps.fetchRawTags(tag))
     return fetched.get(tag) ?? null
   }
-  let autodep = rawTags.includes('#_autodep')
+  // the item's OWN #_autodep tag applies to its descendants, not to itself (2026-09-27): only an
+  // ancestor's tag (carried, or adopted from a further ancestor) makes the parent a dependency
+  let autodep = false
   let repoChain = true // repo discovery open: all longer prefixes locally absent and repo-present
   for (const pfx of prefixes) {
     if (autodep) break

@@ -3,7 +3,8 @@ import { autodepParent, labelPrefixes, type AutodepDeps, type LocalAncestor } fr
 
 // schedules for the install-time autodep parent (see src/install_deps.ts). the runtime graph
 // (itemDeps) adds a label-prefix parent as first dependency for autodep items, with the flag
-// inherited from uniquely labeled ancestors; the install loops historically walked text tags
+// inherited from uniquely labeled ancestors (the carrier's own tag applies to its descendants,
+// never to itself, 2026-09-27); the install loops historically walked text tags
 // only, and this module is what closes the installed closure over that edge. these tests pin the flag walk
 // (own tags, local ancestors, repo ancestors, ambiguity), the parent resolution, and the
 // at-most-one-fetch-per-tag contract
@@ -31,10 +32,10 @@ test('a top-level label has no parent and fetches nothing', async () => {
   expect(fetches).toEqual([])
 })
 
-test('own #_autodep tag installs the immediate parent from the repo, fetched once', async () => {
-  const { deps, fetches } = harness({ repo: { '#a/b': [] } })
-  expect(await autodepParent(deps, '#a/b/c', ['#x', '#_autodep'])).toBe('#a/b')
-  expect(fetches).toEqual(['#a/b']) // flag settled by own tags; only the parent lookup fetches
+test('an own #_autodep tag installs no parent: the tag applies to the descendants', async () => {
+  const { deps, fetches } = harness({ repo: { '#a/b': [], '#a': [] } })
+  expect(await autodepParent(deps, '#a/b/c', ['#x', '#_autodep'])).toBe(null)
+  expect(fetches).toEqual(['#a/b', '#a']) // the ancestors' tags decide; none carries it
 })
 
 test('the flag inherits from the immediate parent repo text', async () => {
@@ -116,10 +117,11 @@ test('a local autodep ancestor past an ambiguous boundary still resolves the par
   expect(fetches).toEqual(['#a/b/c'])
 })
 
-test('own #_autodep returns an installed immediate parent even with a false flag', async () => {
-  // the item is autodep by its own tags; the parent joins the runtime graph as-is, no fetch
+test('own #_autodep with an installed parent that is not autodep installs nothing', async () => {
+  // the item's own tag counts for its descendants only; the installed parent's flag (false:
+  // it neither carries nor adopts) decides, no fetch
   const { deps, fetches } = harness({ local: { '#a': { autodep: false } } })
-  expect(await autodepParent(deps, '#a/b', ['#_autodep'])).toBe('#a')
+  expect(await autodepParent(deps, '#a/b', ['#_autodep'])).toBe(null)
   expect(fetches).toEqual([])
 })
 
