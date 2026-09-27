@@ -10409,9 +10409,10 @@
   })
 
   // top-level store keys another writer owns: the vault bridge's `_agent` (its task projection,
-  // design notes/design/mind_task_agents.md 3.4). a local save carries the latest applied value
-  // of these keys, never this tab's copy (see foreignKeys in hidden_persistence.ts)
-  const FOREIGN_STORE_KEYS = ['_agent']
+  // design notes/design/mind_task_agents.md 3.4) and `_task_chat` (a task chat's snapshots, design
+  // notes/design/mind_task_chat.md 2.4). a local save carries the latest applied value of these
+  // keys, never this tab's copy (see foreignKeys in hidden_persistence.ts)
+  const FOREIGN_STORE_KEYS = ['_agent', '_task_chat']
   const foreignStoreKeys = (name: string) => (name.startsWith('global_store_') ? FOREIGN_STORE_KEYS : [])
   const hiddenPersistence = createHiddenPersistence({
     index: hiddenIndex,

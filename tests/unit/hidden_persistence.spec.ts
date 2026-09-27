@@ -3606,6 +3606,34 @@ test('a save carries the foreign keys of the latest applied delivery, never the 
   expect(itemOf(calls.filter(c => c.op == 'update').at(-1)!.text)).toEqual({ _todoer: { a: 4 } })
 })
 
+test('the bridge\'s task-chat subtree is a foreign key beside its task projection: a save carries both as applied', async () => {
+  // the vault bridge's `_task_chat` (a task chat's snapshots, design notes/design/mind_task_chat.md
+  // 2.4) joins `_agent` in FOREIGN_STORE_KEYS: the owner's in-memory copy is behind a delivery.
+  // (1) the delivery is APPLIED before the save: the acceptance takes the holder's value of BOTH
+  const both = { foreignKeys: (name: string) => (name == 'n' ? ['_agent', '_task_chat'] : []) }
+  const { idx, calls, ingress, controller } = harness(both)
+  const chat = (runs: number[]) => ({ v: 1, task: 't', snapshots: Object.fromEntries(runs.map(r => [`r${r}`, { v: 1, at: r }])) })
+  await arrive(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 1 }, _task_chat: chat([1]) } })
+  await arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 1 }, _agent: { rev: 2 }, _task_chat: chat([1, 2]) } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 2 }, _agent: { rev: 1 }, _task_chat: chat([1]) }), 'the owner saves its stale copy').toBe(true)
+  expect(idx.byName.get('n')!.item, 'the index keeps the applied foreign keys').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 }, _task_chat: chat([1, 2]) })
+  await checkpoint()
+  const first = calls.find(c => c.op == 'update')
+  expect(first, 'the save was written').toBeDefined()
+  expect(itemOf(first!.text), 'the payload: the owner\'s key, the delivery\'s foreign keys').toEqual({ _todoer: { a: 2 }, _agent: { rev: 2 }, _task_chat: chat([1, 2]) })
+  // (2) the delivery arrives while the save is QUEUED (the owed save): the attempt's payload takes both
+  const newer = arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 2 }, _agent: { rev: 3 }, _task_chat: chat([1, 2, 3]) } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 3 }, _agent: { rev: 2 }, _task_chat: chat([1]) })).toBe(true)
+  await newer
+  await checkpoint()
+  expect(itemOf(calls.filter(c => c.op == 'update').at(-1)!.text)).toEqual({ _todoer: { a: 3 }, _agent: { rev: 3 }, _task_chat: chat([1, 2, 3]) })
+  // (3) the subtree the delivery no longer holds is dropped from the save too
+  await arriveModified(controller, idx, { id: 'doc0', name: 'n', item: { _todoer: { a: 3 }, _agent: { rev: 3 } } }, ingress)
+  expect(controller.save('n', { _todoer: { a: 4 }, _agent: { rev: 3 }, _task_chat: chat([1]) })).toBe(true)
+  await checkpoint()
+  expect(itemOf(calls.filter(c => c.op == 'update').at(-1)!.text)).toEqual({ _todoer: { a: 4 }, _agent: { rev: 3 } })
+})
+
 test('a delivery during the payload\'s encryption: the retry carries its foreign key, one update issued', async () => {
   const held = deferred<void>()
   let builds = 0
