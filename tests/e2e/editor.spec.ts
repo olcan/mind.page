@@ -175,6 +175,121 @@ test('dictated text types into the mindbox: a character on a remapped keycode is
   await expect(mindbox(page)).not.toBeFocused()
 })
 
+test('a focus Chrome dispatches no event for leaves the mindbox painted as it is', async ({ page }) => {
+  // The textarea is hidden behind its backdrop until focused, so the Editor's focus wrapper makes it
+  // visible before the native focus and the focus event then sets the state behind every
+  // class:focused binding (the root's, the backdrop's, the buttons'). While the page has no system
+  // focus Chrome moves document.activeElement for a programmatic focus or blur without an event (the
+  // element's focus event waits for the page's own focus), and a focus that does not take dispatches
+  // nothing, so the wrapper's old way, the ROOT's `focused` class added ahead of the event, outlived
+  // the state after such a focus: an unfocused mindbox painted as focused, its backdrop in the
+  // header's own background with the unfocused transparent border, an empty box invisible (the
+  // owner's report of 2026-09-27). A minimized headless window with Playwright's focus emulation off
+  // reproduces Chrome's silent moves, the window focus on restore, the deferred element focus, and
+  // the blur a focused box gets when the page loses its system focus.
+  await loadAdmin(page)
+  const painted = () =>
+    page.evaluate(() => {
+      const has = (selector: string) => document.querySelector(selector)!.classList.contains('focused')
+      const textarea = document.getElementById('textarea-mindbox')!
+      return {
+        root: has('.header .editor .editor'),
+        backdrop: has('.header .backdrop'),
+        buttons: has('.header .buttons'),
+        textarea: getComputedStyle(textarea).visibility,
+        active: document.activeElement === textarea,
+      }
+    })
+  // the wrapped focus, counting the textarea's focus and blur events it dispatches
+  const wrappedFocus = () =>
+    page.evaluate(() => {
+      const textarea = document.getElementById('textarea-mindbox')!
+      let events = 0
+      const count = () => events++
+      textarea.addEventListener('focus', count)
+      textarea.addEventListener('blur', count)
+      textarea.focus()
+      textarea.removeEventListener('focus', count)
+      textarea.removeEventListener('blur', count)
+      return { events, active: document.activeElement === textarea }
+    })
+  const unfocused = { root: false, backdrop: false, buttons: false, textarea: 'hidden', active: false }
+  const focused = { root: true, backdrop: true, buttons: true, textarea: 'visible', active: true }
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  expect(await painted(), 'the box before').toEqual(unfocused)
+  const cdp = await page.context().newCDPSession(page)
+  const { windowId } = await cdp.send('Browser.getWindowForTarget')
+  const away = async () => {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } })
+    await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'no system focus' }).toBe(false)
+  }
+  const back = async () => {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+    await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'system focus back' }).toBe(true)
+  }
+  try {
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+    // the app's own moves while away: the wrapped focus (activeElement set, no event) then a blur
+    await away()
+    expect(await wrappedFocus(), 'the premise: a focus without an event').toEqual({ events: 0, active: true })
+    // painted unfocused, the textarea visible (transparent) for the focus the page has yet to deliver
+    expect(await painted(), 'the box while away, the textarea silently focused').toEqual({ ...unfocused, textarea: 'visible', active: true })
+    const silentBlur = await page.evaluate(() => {
+      const textarea = document.getElementById('textarea-mindbox')!
+      let events = 0
+      const count = () => events++
+      textarea.addEventListener('blur', count)
+      textarea.blur()
+      textarea.removeEventListener('blur', count)
+      return { events, after: document.activeElement?.tagName }
+    })
+    expect(silentBlur, 'the premise: a blur without an event').toEqual({ events: 0, after: 'BODY' })
+    // the residue: the textarea stays visible (transparent) until the page's focus, the paint unfocused
+    expect(await painted(), 'the box while away, silently blurred').toEqual({ ...unfocused, textarea: 'visible' })
+    await back() // the window focus, no element focus: the residue cleared
+    expect(await painted(), 'the box once the page regains focus').toEqual(unfocused)
+    // a focus that does not take (here a disabled textarea) dispatches nothing either: reconciled at once
+    const refused = await page.evaluate(() => {
+      const textarea = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      textarea.disabled = true
+      textarea.focus()
+      const active = document.activeElement === textarea
+      textarea.disabled = false
+      return active
+    })
+    expect(refused, 'the premise: the focus refused').toBe(false)
+    expect(await painted(), 'the box after a refused focus').toEqual(unfocused)
+    // a textarea still active when the page regains focus gets the deferred focus event: focused for real
+    await away()
+    expect(await wrappedFocus(), 'the premise again: a focus without an event').toEqual({ events: 0, active: true })
+    await back()
+    await expect.poll(painted, { message: 'the box after the deferred focus' }).toEqual(focused)
+    await page.keyboard.press('Escape') // the editor's own cancel blurs it
+    await expect(mindbox(page)).not.toBeFocused()
+    expect(await painted(), 'the box blurred after the deferred focus').toEqual(unfocused)
+    // a focused box losing the system focus (a window switch, browser find): the blur is dispatched with
+    // the element still active, and the textarea must hide (a visible one is matched by find-in-page)
+    await focusMindbox(page)
+    expect(await painted(), 'the box focused before the system blur').toEqual(focused)
+    await away()
+    await expect.poll(painted, { message: 'the box after the system blur' }).toEqual(unfocused)
+    await back() // the app restores its last focused element 250 ms after the window's focus
+    await expect.poll(painted, { message: 'the box restored by the app after the system blur' }).toEqual(focused)
+    await page.keyboard.press('Escape')
+    await expect(mindbox(page)).not.toBeFocused()
+    expect(await painted(), 'the box blurred after the restore').toEqual(unfocused)
+  } finally {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+  }
+  // the real path: a click focuses the box, escape blurs it, every class following
+  await focusMindbox(page)
+  expect(await painted(), 'the box focused').toEqual(focused)
+  await page.keyboard.press('Escape')
+  await expect(mindbox(page)).not.toBeFocused()
+  expect(await painted(), 'the box blurred').toEqual(unfocused)
+})
+
 test('searching filters items and puts the tag in the url; escape and shift+backspace clear', async ({ page }) => {
   await loadAdmin(page)
   await focusMindbox(page)

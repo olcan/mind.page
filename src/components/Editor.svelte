@@ -1045,14 +1045,36 @@
       }
     }, highlightDebounceTime)
   }
+  // the textarea is `visibility: hidden` behind its backdrop until the editor is focused (find-in-page
+  // must not match its text twice, see onBackdropClick), so it cannot take a programmatic focus on its
+  // own: the focus wrapper in onMount makes it visible FIRST through its inline style, and the focus
+  // event then sets `focused`, which every class:focused binding (the root, the backdrop, the
+  // buttons) follows. The wrapper used to add the ROOT's `focused` class instead, which also painted
+  // the backdrop as focused while the state was still false: Chrome dispatches no focus or blur event
+  // for a programmatic change while the page has no system focus (the element's focus event waits for
+  // the page's own focus, a blur in between is silent), and a focus that does not take dispatches
+  // nothing, so that class outlived the state and an unfocused mindbox was painted as focused, its
+  // backdrop in the header's own background with the unfocused transparent border, an empty box
+  // invisible (2026-09-27). The inline visibility affects the textarea alone: set before the wrapped
+  // focus and reconciled to the textarea being the active element right after it (a refused focus
+  // drops it) and on the window's focus (a textarea still active regains it and gets its own focus
+  // event right after; the residue of a silent blur while away is cleared here, harmless to the
+  // paint until then), and cleared on the textarea's blur unconditionally, since the page's focus
+  // loss dispatches the blur while the element stays active and a hidden textarea is what keeps
+  // find-in-page from matching its text twice.
+  function syncFocusVisibility() {
+    if (!textarea) return
+    textarea.style.visibility = document.activeElement === textarea ? 'visible' : ''
+  }
   onMount(() => {
-    // replace textarea.focus/ w/ custom method that sets .editor.focused
+    // replace textarea.focus w/ custom method that makes the textarea visible first (see syncFocusVisibility)
     // otherwise textarea can be invisible, preventing focus
     const _focus = textarea.focus
     textarea.focus = () => {
       if (!editor) return
-      editor.classList.add('focused')
+      textarea.style.visibility = 'visible'
       _focus.call(textarea)
+      syncFocusVisibility()
     }
     // set up listener for selection changes (does not capture all, see comment in onSelectionChange)
     document.addEventListener('selectionchange', onSelectionChange)
@@ -1088,7 +1110,10 @@
     on:copy={onCopy}
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
-    on:blur={() => onFocused((focused = false))}
+    on:blur={() => {
+      onFocused((focused = false))
+      textarea.style.visibility = '' // hidden again, active element or not (see syncFocusVisibility)
+    }}
     autocapitalize="off"
     {spellcheck}
     disabled={!editable}
@@ -1107,7 +1132,7 @@
 </div>
 
 <!-- update editor on window resize (height changes due to text reflow) -->
-<svelte:window on:resize={updateTextDivs} />
+<svelte:window on:resize={updateTextDivs} on:focus={syncFocusVisibility} />
 
 <!-- update editor on window resize (height changes due to text reflow) -->
 <style>
