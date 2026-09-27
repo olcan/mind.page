@@ -789,4 +789,63 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await clickRow('twin one')
   await expect.poll(boxText, { timeout: 10_000 }).toBe('id:' + twinId)
   await expect.poll(selectedRow, { timeout: 10_000 }).toBe(twinId)
+
+  // (l) the child-customization hook (the vault's notes/design/mind_task_chat.md, section 3):
+  // the todoer's _init (an #_init item, run at load) defines window._customize_child, and the
+  // app calls it after it allocates a child's label (Ctrl+Enter on a unique label): a child of
+  // a #todo becomes a TASK CHAT, its label retained, the route tag and the first user turn
+  // appended, the caret collapsed at the end so the first typed character extends the turn;
+  // a child of that chat continues it (the parent's label as a hidden tag); any other parent's
+  // child stays as the app makes it (the suffix selected)
+  expect(await page.evaluate(() => typeof (window as any)._customize_child)).toBe('function')
+  const editorState = () =>
+    page.evaluate(() => {
+      const box = document.activeElement as HTMLTextAreaElement
+      return box?.tagName == 'TEXTAREA' ? { value: box.value, start: box.selectionStart, end: box.selectionEnd } : null
+    })
+  const createChild = async (parent: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), parent)
+    await page.waitForTimeout(500)
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+    await page.keyboard.press('Control+Enter')
+    await expect.poll(async () => (await editorState())?.value?.startsWith(parent + '/') ?? false, { timeout: 10_000 }).toBe(true)
+    return (await editorState())!
+  }
+  // the chat lineage the hook reads is the app's own: the #chat root (autodep, so its
+  // label-prefixed items depend on it) and the #chat/vault route item, as an account has them
+  for (const text of ['#chat #_autodep\nconfig', '#chat/vault #_agent/vault\ncommand item']) await page.evaluate(text => void window._create(text), text)
+  await expect.poll(() => savedId(page, '#chat/vault'), { timeout: 30_000 }).toBeTruthy()
+  const CHATTY = '#e2e_chatty'
+  await page.evaluate(text => void window._create(text), `${CHATTY}\n#todo chat about me`)
+  await expect.poll(() => savedId(page, CHATTY), { timeout: 30_000 }).toBeTruthy()
+  const chat = await createChild(CHATTY)
+  const CHAT_TEXT = `${CHATTY}/0\n#_chat/vault\n<<user>> `
+  expect(chat).toEqual({ value: CHAT_TEXT, start: CHAT_TEXT.length, end: CHAT_TEXT.length })
+  await page.keyboard.type('how is it going?')
+  expect((await editorState())!.value, 'the first typed character extends the turn').toBe(CHAT_TEXT + 'how is it going?')
+  await page.keyboard.press('Control+Enter') // done: saved as the task's chat (no bridge in this lane: it stays pending)
+  await expect.poll(() => savedId(page, `${CHATTY}/0`), { timeout: 30_000 }).toBeTruthy()
+  const continued = await createChild(`${CHATTY}/0`)
+  const CONTINUED = `${CHATTY}/0/0\n#_${CHATTY.slice(1)}/0\n<<user>> `
+  const shapes = await page.evaluate(name => {
+    const p = window._item(name, true) as any
+    return JSON.stringify({ tags: p?.tags, hidden: p?.tags_hidden, label: p?.label, text: p?.text, deps: p?.dependencies })
+  }, `${CHATTY}/0`)
+  expect(continued, shapes).toEqual({ value: CONTINUED, start: CONTINUED.length, end: CONTINUED.length })
+  await page.keyboard.press('Escape')
+  const PLAIN = '#e2e_plain'
+  await page.evaluate(text => void window._create(text), `${PLAIN}\nnot a todo, not a chat`)
+  await expect.poll(() => savedId(page, PLAIN), { timeout: 30_000 }).toBeTruthy()
+  const plainChild = await createChild(PLAIN)
+  expect(plainChild, 'the suffix selected, as the app makes it').toEqual({ value: `${PLAIN}/0 `, start: PLAIN.length + 1, end: PLAIN.length + 3 })
+  await page.keyboard.press('Escape')
+  // an ordinary item BENEATH the task chat by label prefix alone (no tag, no user turn): the
+  // app gives it no chat dependency (its prefix ancestors are not autodep), so it is not a chat
+  // and its child stays as the app makes it (the real dependency behavior the hook reads)
+  const UNDER = `${CHATTY}/0/plain`
+  await page.evaluate(text => void window._create(text), `${UNDER}\nnotes under the chat, not a chat`)
+  await expect.poll(() => savedId(page, UNDER), { timeout: 30_000 }).toBeTruthy()
+  expect(await page.evaluate(name => (window._item(name, true) as any)?.dependencies ?? null, UNDER), 'no dependency').toEqual([])
+  const underChild = await createChild(UNDER)
+  expect(underChild, 'not a chat: the suffix selected').toEqual({ value: `${UNDER}/0 `, start: UNDER.length + 1, end: UNDER.length + 3 })
 })
