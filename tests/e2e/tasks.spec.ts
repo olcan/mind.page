@@ -793,8 +793,9 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // (l) the child-customization hook (the vault's notes/design/mind_task_chat.md, section 3):
   // the todoer's _init (an #_init item, run at load) defines window._customize_child, and the
   // app calls it after it allocates a child's label (Ctrl+Enter on a unique label): a child of
-  // a #todo becomes a TASK CHAT, its label retained, the route tag and the first user turn
-  // appended, the caret collapsed at the end so the first typed character extends the turn;
+  // a #todo becomes a TASK CHAT, its label retained, the route tag beside it and the first user
+  // turn on the next line, the caret collapsed at the end so the first typed character extends
+  // the turn;
   // a child of that chat continues it (the parent's label as a hidden tag); any other parent's
   // child stays as the app makes it (the suffix selected)
   expect(await page.evaluate(() => typeof (window as any)._customize_child)).toBe('function')
@@ -819,14 +820,14 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(text => void window._create(text), `${CHATTY}\n#todo chat about me`)
   await expect.poll(() => savedId(page, CHATTY), { timeout: 30_000 }).toBeTruthy()
   const chat = await createChild(CHATTY)
-  const CHAT_TEXT = `${CHATTY}/0\n#_chat/vault\n<<user>> `
+  const CHAT_TEXT = `${CHATTY}/0 #_chat/vault\n<<user>> `
   expect(chat).toEqual({ value: CHAT_TEXT, start: CHAT_TEXT.length, end: CHAT_TEXT.length })
   await page.keyboard.type('how is it going?')
   expect((await editorState())!.value, 'the first typed character extends the turn').toBe(CHAT_TEXT + 'how is it going?')
   await page.keyboard.press('Control+Enter') // done: saved as the task's chat (no bridge in this lane: it stays pending)
   await expect.poll(() => savedId(page, `${CHATTY}/0`), { timeout: 30_000 }).toBeTruthy()
   const continued = await createChild(`${CHATTY}/0`)
-  const CONTINUED = `${CHATTY}/0/0\n#_${CHATTY.slice(1)}/0\n<<user>> `
+  const CONTINUED = `${CHATTY}/0/0 #_${CHATTY.slice(1)}/0\n<<user>> `
   const shapes = await page.evaluate(name => {
     const p = window._item(name, true) as any
     return JSON.stringify({ tags: p?.tags, hidden: p?.tags_hidden, label: p?.label, text: p?.text, deps: p?.dependencies })
