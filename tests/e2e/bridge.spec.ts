@@ -58,6 +58,19 @@ test('a canonical reply renders as inert markdown: structure, admitted links, li
     ['https://example.com/x?a=1&b=2', '_blank', 'noopener'],
   ])
   expect(shape.text).toContain('bad (javascript:window._pwned=9)')
+  // a REAL click inside the frame (mousedown, mouseup, click: the item's click handler rejects a
+  // click without a recent mousedown) opens no editor (the owner, 2026-09-27); the frame's text
+  // stays selectable and its links wired as before
+  const elemId = await page.evaluate(() => window._item('#e2e_inert_md', true)!.elem!.id)
+  await page.locator(`[id="${elemId}"] .vault-result h2`).click()
+  await page.waitForTimeout(300)
+  expect(
+    await page.evaluate(id => ({
+      editing: !!document.querySelector(`[id="${id}"] textarea, .container.editing`),
+      frame: !!document.querySelector(`[id="${id}"] .vault-result h2`),
+    }), elemId),
+    'no editor after a click inside the inert frame'
+  ).toEqual({ editing: false, frame: true })
   expect(shape.text).toContain('<<not_a_macro>>')
   expect(shape.code).toBe('const x = 1 // note')
   expect(shape.marks).toBe(0)
@@ -390,7 +403,8 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(layout.planBox, 'its boxes sit where the app\'s own do').toBe(layout.ownerBox)
   const before = await page.evaluate(name => window._item(name, true)!.text, breaksName)
   await page.locator('.vault-result span.task').first().click()
-  await expect.poll(() => page.evaluate(name => !!window._item(name, true)!.elem!.querySelector('.container.editing'), breaksName), { timeout: 15_000 }).toBe(true) // the click opened the item for editing, as any click does
+  await page.waitForTimeout(300) // a passive box: no editor either (the owner, 2026-09-27: a click inside a frame opens none)
+  expect(await page.evaluate(name => !!window._item(name, true)!.elem!.querySelector('.container.editing'), breaksName), 'no editor from a click in the frame').toBe(false)
   expect(await page.evaluate(name => window._item(name, true)!.text, breaksName), 'the text is untouched: the box is passive').toBe(before)
 
   // (c1b) encoded marker LOOKALIKE in an ordinary image stays an ordinary image
@@ -855,11 +869,23 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
       },
       { once: true }
     )
+    a.focus() // as a real click focuses the anchor before its handler runs
+    seen.focusedBefore = document.activeElement === a
+    seen.outlineFocused = getComputedStyle(a).outlineStyle // the ring the app disables
     a.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    seen.focusedAfter = document.activeElement === a // the handler blurs it (owner, 2026-09-27)
     seen.editing = !!document.querySelector('#e2e_wiki_owner textarea, .container.editing')
     return seen
   })
-  expect(click).toEqual({ bubbled: false, stopped: true, defaultPrevented: false, editing: false })
+  expect(click).toEqual({
+    bubbled: false,
+    stopped: true,
+    defaultPrevented: false,
+    editing: false,
+    focusedBefore: true,
+    outlineFocused: 'none',
+    focusedAfter: false,
+  })
   // the inert frame: the app-built anchor, the refused reference and the web link as before
   await shown('#e2e_wiki_reply')
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelector('.vault-result a[data-wiki-link]') != null), { timeout: 15_000 }).toBe(true)

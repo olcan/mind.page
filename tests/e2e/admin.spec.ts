@@ -106,16 +106,20 @@ test('/test passes for all installed items', async ({ page }) => {
 })
 
 test('/vault creates a tagged request item without breaking the agent framework', async ({ page }) => {
-  // the vault "provider" (#agent/vault) is an agent item like every #agent/* item: the framework
-  // starts it as an agent on change events (e.g. a request item created as its dependent), and
-  // start_agent fatals unless the item carries a (deliberately inert) js_input block -- a doc-only
-  // item shipped exactly that bug, caught only in a live account. this covers the /vault command,
-  // the explicit #_agent/vault tag on request items (the vault bridge parses item text only), and
-  // the agent-framework contract (the tombstones at the old names are inspected statically)
+  // the vault "provider" (#agent/vault) is an agent item like every #agent/* item, but it has
+  // NO js_input block (nothing runs web-side), so the framework does not start it on change
+  // events (a request item created as its dependent): a block-less agent item is passive (the
+  // owner's rule, 2026-09-27; before it, an inert block existed only because start_agent fatals
+  // without one, and a doc-only item shipped exactly that bug, caught only in a live account).
+  // this covers the /vault command, the explicit #_agent/vault tag on request items (the vault
+  // bridge parses item text only), the passive policy, and the agent-framework contract (the
+  // tombstones at the old names are inspected statically)
   const errors: string[] = []
+  const starts: string[] = [] // the framework's own debug lines about #agent/vault
   page.on('console', m => {
     const match = m.text().match(/^\[(#[^\]]+)\] Error: (.*)$/s)
     if (match) errors.push(`${match[1]}: ${match[2].slice(0, 160)}`)
+    if (/starting agent #agent\/vault/.test(m.text())) starts.push(m.text().slice(0, 160))
   })
   await loadAdmin(page)
   // the framework must have arrived via dependency resolution (providers -> agent/chat -> agent):
@@ -126,9 +130,64 @@ test('/vault creates a tagged request item without breaking the agent framework'
   const text = () => page.evaluate(() => window._item('#chat/vault/0', true)?.text ?? '')
   await expect.poll(text, { message: 'request item #chat/vault/0' }).toContain('<<user>> hello bridge')
   expect(await text()).toContain('#_agent/vault') // explicit tag for the text-parsing vault bridge
-  // let the agent framework react to the change (start_agent on #agent/vault must not fatal)
-  await page.waitForTimeout(2_000)
+  // let the agent framework react to the change: #agent/vault has no js_input block, so the
+  // framework does NOT start it for the request item (the owner, 2026-09-27: the auto-start
+  // marked the inert provider running, which lifted it under every new vault chat); it says so
+  // once, and the provider stays idle and out of the active agents map
+  await expect
+    .poll(() => starts.some(line => /not starting agent #agent\/vault for modified dependent #chat\/vault\/0 \(no js_input block\)/.test(line)), { timeout: 10_000, message: 'the suppression line' })
+    .toBe(true)
   expect(errors, errors.join('\n')).toEqual([])
+  expect(starts.filter(line => !/not starting/.test(line)), 'never started').toEqual([])
+  expect(
+    await page.evaluate(() => ({
+      running: !!(window._item('#agent/vault', true) as any)?.running,
+      active: Object.keys((window._item('#agent', true) as any)?._global_store?.agents ?? {}),
+    }))
+  ).toEqual({ running: false, active: [] })
+})
+
+test('a role header asks before it truncates the chat below it', async ({ page }) => {
+  // the #chat item's delimiter macro renders a role header whose click removes every message
+  // below it and reruns the chat from the kept last user message: a destructive rewrite the
+  // owner confirms first (2026-09-27); the chat's DESCENDANT chats (a continuation builds on
+  // this transcript) are named in the dialog and deleted with it; Cancel leaves everything, OK
+  // truncates and deletes, and a header with nothing below it only says so
+  await loadAdmin(page)
+  // the replies carry a name, as the bridge's do (a bare `<<agent>>` is the value, not the macro)
+  const text = "#chat/vault/1 #_agent/vault\n<<user>> first\n<<agent('e2e')>>\nreply\n<<user>> second\n<<agent('e2e')>>\nlater\n"
+  await page.evaluate(text => void window._create(text), text)
+  const item = () => page.evaluate(() => window._item('#chat/vault/1', true)?.text ?? '')
+  await expect.poll(item, { message: 'the chat item' }).toContain('<<user>> second')
+  // a continuation below it (#chat is autodep: the label prefix is its parent chat)
+  await page.evaluate(() => void window._create('#chat/vault/1/0\n<<user>> deeper'))
+  await expect.poll(() => page.evaluate(() => window._item('#chat/vault/1/0', true)?.dependencies?.includes(window._item('#chat/vault/1', true)!.id) ?? false), { timeout: 15_000 }).toBe(true)
+  await page.evaluate(() => void (location.hash = '#chat/vault/1')) // shown, its headers rendered
+  await expect
+    .poll(() => page.evaluate(() => window._item('#chat/vault/1', true)?.elem?.querySelectorAll('.message .label').length ?? 0), { timeout: 15_000 })
+    .toBe(4)
+  const elemId = await page.evaluate(() => window._item('#chat/vault/1', true)!.elem!.id)
+  const labels = page.locator(`[id="${elemId}"] .message .label`)
+  await expect(labels).toHaveCount(4)
+  await labels.nth(1).click() // the first agent header: itself and everything below go
+  const modal = page.locator('.modal')
+  const asked = 'Remove 3 messages below this user message, and the chat below it inheriting them (#chat/vault/1/0 with 1 message)? 4 messages in total. The chat continues from there.'
+  await expect(modal).toContainText(asked)
+  await modal.locator('.button.cancel').click()
+  await expect(modal).toBeHidden() // closed (the component stays mounted)
+  expect(await item(), 'Cancel: the text stays').toBe(text)
+  expect(await page.evaluate(() => window._exists('#chat/vault/1/0')), 'Cancel: the continuation stays').toBe(true)
+  await labels.nth(1).click()
+  await expect(modal).toContainText(asked)
+  await modal.locator('.button.confirm').click()
+  await expect.poll(item, { message: 'OK: the messages below are gone' }).toBe('#chat/vault/1 #_agent/vault\n<<user>> first')
+  await expect.poll(() => page.evaluate(() => window._exists('#chat/vault/1/0')), { message: 'OK: the continuation is deleted' }).toBe(false)
+  await expect(labels).toHaveCount(1)
+  await labels.first().click() // a user header with nothing below it
+  await expect(modal).toContainText('nothing to remove below this message')
+  await page.locator('.background.visible').click({ position: { x: 4, y: 4 } }) // an alert has no buttons: its background closes it
+  await expect(modal).toBeHidden()
+  expect(await item()).toBe('#chat/vault/1 #_agent/vault\n<<user>> first')
 })
 
 test('an autodep parent absent from every text tag is installed and joins the runtime graph', async ({ page }) => {

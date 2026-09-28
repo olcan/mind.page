@@ -186,6 +186,10 @@
     if ((e.target as HTMLElement).closest('.loading')) return
     // ignore clicks on inputs or buttons
     if (e.target.closest('input, button')) return
+    // ignore clicks inside an inert frame (a canonical reply's dead frame, src/inert.ts): its
+    // text is read and selected, its links are wired, and a click on it opens no editor (the
+    // owner, 2026-09-27: a stray click in a long reply kept opening the item's editor)
+    if (e.target.closest('.vault-result')) return
     // console.debug(e.target);
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest('[_clickable]')
@@ -1677,7 +1681,13 @@
     // tab in between (a target would leave an empty tab behind); the inert frames' anchors are
     // covered too (populated at the top of this update)
     itemdiv.querySelectorAll('a[data-wiki-link]').forEach((a: any) => {
-      a.onclick = e => window['_handleLinkClick'](id, _.escape(a.getAttribute('href')), e)
+      a.onclick = e => {
+        window['_handleLinkClick'](id, _.escape(a.getAttribute('href')), e)
+        // the anchor keeps no focus: the owner saw a bright border on a clicked link now and
+        // then (2026-09-27); no app style draws one, so by inference it is the browser's focus
+        // ring on the anchor, shown when the window comes back from the editor application
+        a.blur()
+      }
     })
 
     // invoke global function _highlight (if it exists) w/ elements of class _highlight_*
@@ -2844,6 +2854,10 @@
     max-height: 100%;
     min-width: 0; /* enable images to shrink, e.g. in a flex row */
     vertical-align: middle;
+  }
+  .item > :global(.content a[data-wiki-link]:focus),
+  .item > :global(.content a[data-wiki-link]:focus-visible) {
+    outline: none; /* no focus ring on a wiki link (the owner, 2026-09-27); its click blurs it too */
   }
   .item > :global(.content .vault-result) {
     white-space: normal; /* the inert markdown carries its own structure (pre-wrap for the invalid placeholder is moot) */
