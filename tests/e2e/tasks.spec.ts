@@ -827,6 +827,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect((await editorState())!.value, 'the first typed character extends the turn').toBe(CHAT_TEXT + 'how is it going?')
   await page.keyboard.press('Control+Enter') // done: saved as the task's chat (no bridge in this lane: it stays pending)
   await expect.poll(() => savedId(page, `${CHATTY}/0`), { timeout: 30_000 }).toBeTruthy()
+  const box = () => page.evaluate(() => (window as any).MindBox.get())
+  await expect.poll(box, { message: 'the box navigates to the new chat (its label, then a space)' }).toBe(`${CHATTY}/0 `)
   // the carrier adopts no parent: the chat's dependencies are the route item's closure, never
   // the todo (the ids as this tab holds them: an item created here keeps its temporary id
   // until the tab reloads, so the comparison is by the tab's own item handles)
@@ -841,7 +843,13 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     return JSON.stringify({ tags: p?.tags, hidden: p?.tags_hidden, label: p?.label, text: p?.text, deps: p?.dependencies })
   }, `${CHATTY}/0`)
   expect(continued, shapes).toEqual({ value: CONTINUED, start: CONTINUED.length, end: CONTINUED.length })
-  await page.keyboard.press('Escape')
+  // saved: the box navigates to the continuation too, although its label is followed by a
+  // newline, not a space (the owner, 2026-09-27: the box was cleared, and the child's ancestry
+  // with it)
+  await page.keyboard.type('deeper')
+  await page.keyboard.press('Control+Enter')
+  await expect.poll(() => savedId(page, `${CHATTY}/0/0`), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(box, { message: 'the box navigates to the continuation' }).toBe(`${CHATTY}/0/0 `)
   const PLAIN = '#e2e_plain'
   await page.evaluate(text => void window._create(text), `${PLAIN}\nnot a todo, not a chat`)
   await expect.poll(() => savedId(page, PLAIN), { timeout: 30_000 }).toBeTruthy()

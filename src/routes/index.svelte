@@ -6174,13 +6174,17 @@
     items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     itemTextChanged(0, text)
 
-    // if editor text starts with a label (tag), keep it to maintain context for new item
+    // if editor text starts with a label (tag), keep it to maintain context for new item: the
+    // label followed by a space (or ending the text), or by a NEWLINE (a child hook may put the
+    // rest of the child on its own line; the box still navigates to the child)
+    const newLabel = items[0].labelText
+    const startsWithLabel =
+      !!newLabel && ((editorText + ' ').startsWith(newLabel + ' ') || editorText.startsWith(newLabel + '\n'))
     editorText =
       e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
       !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
-      items[0].labelText &&
-      (editorText + ' ').startsWith(items[0].labelText + ' ')
-        ? items[0].labelText + ' '
+      startsWithLabel
+        ? newLabel + ' '
         : ''
 
     // hideIndex++; // show one more item
