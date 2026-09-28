@@ -721,9 +721,13 @@
               reltag = '#' + tag.substring(grandParentLabel.length)
 
             // shorten selected label to its context label (i.e. closest existing ancestor name)
-            // always include short (2-digits or less) numeric label suffixes (e.g. .../99/9/9) to help disambiguate
+            // always include short (2-digits or less) numeric label suffixes (e.g. .../99/9/9) to help disambiguate,
+            // but collapse the leading run of /0 segments (the main branch of a chain) to the last one: a
+            // chain of continuations reads #…/0 at any depth, a branch keeps its deviation, #…/1/0/0
+            const shortened = (base: string) =>
+              '#…' + tag.substring(base.replace(/(?:\/\d\d?)+$/, '').length).replace(/^(?:\/0)+(?=\/)/, '')
             if (lctag == label && contextLabel && (matchingTerms.has(lctag) || matchingTermsSecondary.has(lctag)))
-              reltag = '#…' + tag.substring(contextLabel.replace(/(?:\/\d\d?)+$/, '').length)
+              reltag = shortened(contextLabel)
 
             // shorten prefix-matching labels, including short numeric suffix (see comment above)
             if (
@@ -733,7 +737,7 @@
               label[firstTerm.length] == '/' &&
               label.substring(0, firstTerm.length) == firstTerm
             )
-              reltag = '#…' + tag.substring(firstTerm.replace(/(?:\/\d\d?)+$/, '').length)
+              reltag = shortened(firstTerm)
             return (
               `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
               `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(

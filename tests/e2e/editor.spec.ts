@@ -652,3 +652,57 @@ test('a code comment link reaches the app handler with its url as written', asyn
   })
   expect(received, 'each url as the app receives it, the literal entity included').toEqual([plain, literal])
 })
+
+test('a chain of continuations shortens to its last segment; a branch keeps its deviation', async ({ page }) => {
+  // the label shortening against the context keeps short numeric suffixes to disambiguate
+  // (.../99/9/9) and, since 2026-09-28, collapses the leading run of /0 segments (the main branch
+  // of a chain) to the last one: a chain of any depth reads #…/0, a branch keeps its deviation
+  await loadAdmin(page)
+  const labels = [
+    '#e2e_deep', '#e2e_deep/0', '#e2e_deep/0/0', '#e2e_deep/0/0/0', '#e2e_deep/0/0/0/0',
+    '#e2e_deep/0/0/1', '#e2e_deep/0/0/1/0', '#e2e_deep/0/0/1/0/0',
+    '#e2e_deep/99', '#e2e_deep/99/9', '#e2e_deep/99/9/9', '#e2e_deep/98', '#e2e_deep/98/9', '#e2e_deep/98/9/9',
+  ]
+  await page.evaluate(labels => { for (const label of labels) void window._create(label + ' item') }, labels)
+  await expect.poll(() => savedId(page, '#e2e_deep/98/9/9'), { timeout: 30_000 }).toBeTruthy()
+  // the rendered labels of the listed items, by their full label (the mark's text carries the
+  // ellipsis and the suffix; the leading # is rendered outside it)
+  const shown = () =>
+    page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.container mark.label')].map((m: any) => [m.title, m.textContent])))
+  const navigate = async (name: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await expect.poll(async () => (await shown())[name] ?? null, { timeout: 15_000 }).not.toBeNull()
+    return shown()
+  }
+  const chain = await navigate('#e2e_deep/0/0/0/0')
+  expect(chain['#e2e_deep/0/0/0/0'], 'the target: the last segment only').toBe('…/0')
+  expect([chain['#e2e_deep/0'], chain['#e2e_deep/0/0'], chain['#e2e_deep/0/0/0']], 'the chain above it: the same').toEqual(['…/0', '…/0', '…/0'])
+  const branch = await navigate('#e2e_deep/0/0/1/0/0')
+  expect(branch['#e2e_deep/0/0/1/0/0'], 'a branch keeps its deviation and what follows').toBe('…/1/0/0')
+  expect([branch['#e2e_deep/0/0/1'], branch['#e2e_deep/0/0/1/0']]).toEqual(['…/1', '…/1/0'])
+  const nines = await navigate('#e2e_deep/99/9/9')
+  expect(nines['#e2e_deep/99/9/9'], 'the disambiguating short suffixes are kept as before').toBe('…/99/9/9')
+  expect((await navigate('#e2e_deep/98/9/9'))['#e2e_deep/98/9/9']).toBe('…/98/9/9')
+  // the other shortening site: a query for an ancestor lists its descendants shortened against
+  // the query (the prefix match; a narrow query, so the listing is not cut at the hide index);
+  // the same collapse there, and both nines distinct
+  const listed = async (query: string, key: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), query)
+    // the listing is cut at the hide index: show more until the descendant is rendered
+    await expect
+      .poll(
+        async () => {
+          const found = (await shown())[key] ?? null
+          if (found == null) await page.evaluate(() => document.querySelector('.toggle.show')?.dispatchEvent(new Event('click')))
+          return found
+        },
+        { timeout: 15_000 }
+      )
+      .not.toBeNull()
+    return shown()
+  }
+  const under = await listed('#e2e_deep/0/0', '#e2e_deep/0/0/1/0/0')
+  expect([under['#e2e_deep/0/0/0/0'], under['#e2e_deep/0/0/1/0/0']]).toEqual(['…/0', '…/1/0/0'])
+  expect((await listed('#e2e_deep/99', '#e2e_deep/99/9/9'))['#e2e_deep/99/9/9']).toBe('…/99/9/9')
+  expect((await listed('#e2e_deep/98', '#e2e_deep/98/9/9'))['#e2e_deep/98/9/9']).toBe('…/98/9/9')
+})
