@@ -788,3 +788,25 @@ test("the MindBox's focus wrapper forwards preventScroll: a restore keeps the pa
   await expect(page.locator('#textarea-mindbox')).toBeFocused()
   expect(await scrollTop(), 'no scroll with preventScroll').toBe(before)
 })
+
+test('no link on the page shows a focus ring', async ({ page }) => {
+  // the ring showed on a link after the window returned from another app (the owner, 2026-09-29);
+  // the rule is the page's, so an ordinary link of an item and one outside every item lose it alike
+  await loadAdmin(page)
+  await page.evaluate(() => void window._create('#e2e_link_ring see [the proposal](https://example.com/proposal)'))
+  await expect.poll(() => savedId(page, '#e2e_link_ring'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => (window as any).MindBox.set('#e2e_link_ring', { scroll: true }))
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_link_ring', true)?.elem?.querySelector('a[href*="example.com"]')), { timeout: 15_000 }).toBe(true)
+  const rings = await page.evaluate(() => {
+    const ring = (a: HTMLAnchorElement) => {
+      a.focus()
+      return [document.activeElement === a, getComputedStyle(a).outlineStyle]
+    }
+    const inItem = window._item('#e2e_link_ring', true)!.elem!.querySelector('a[href*="example.com"]') as HTMLAnchorElement
+    const outside = document.body.appendChild(Object.assign(document.createElement('a'), { href: 'https://example.com/outside', textContent: 'outside' }))
+    const result = { inItem: ring(inItem), outside: ring(outside) }
+    outside.remove()
+    return result
+  })
+  expect(rings).toEqual({ inItem: [true, 'none'], outside: [true, 'none'] })
+})

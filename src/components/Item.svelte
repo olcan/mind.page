@@ -2859,10 +2859,6 @@
     min-width: 0; /* enable images to shrink, e.g. in a flex row */
     vertical-align: middle;
   }
-  .item > :global(.content a[data-wiki-link]:focus),
-  .item > :global(.content a[data-wiki-link]:focus-visible) {
-    outline: none; /* no focus ring on a wiki link (the owner, 2026-09-27); its click blurs it too */
-  }
   .item > :global(.content .vault-result) {
     white-space: normal; /* the inert markdown carries its own structure (pre-wrap for the invalid placeholder is moot) */
     overflow-wrap: anywhere;

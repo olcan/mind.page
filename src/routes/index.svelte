@@ -11444,6 +11444,13 @@
   :global(*) {
     font-variant-ligatures: none;
   }
+  /* no focus ring on any link of the page (the owner, 2026-09-29: the ring showed on links after the
+     window returned from another app, the todoer rows' proposal links among them; first the wiki
+     links alone, 2026-09-27) */
+  :global(a:focus),
+  :global(a:focus-visible) {
+    outline: none;
+  }
   :global(b, strong) {
     font-weight: 700;
   }
