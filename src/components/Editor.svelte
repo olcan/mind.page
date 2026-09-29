@@ -799,8 +799,8 @@
       return
     }
 
-    // insert images on Alt+Cmd+i
-    if (key == 'KeyI' && e.metaKey && e.shiftKey) {
+    // insert images on Shift+Cmd+I, or Ctrl+Alt+I (Ctrl+Shift+I is the browsers' devtools)
+    if (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey))) {
       e.preventDefault()
       insertImages()
     }

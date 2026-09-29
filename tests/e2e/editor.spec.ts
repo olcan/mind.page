@@ -742,3 +742,35 @@ test('ctrl+arrows at the edges of an item editor jump to the neighboring items, 
   await page.keyboard.press('Escape') // nothing edited: the editors close
   await expect(page.locator(`#textarea-${first}`)).toBeHidden()
 })
+
+test('ctrl+alt+i opens the image dialog like shift+cmd+i, in an item editor and from the window', async ({ page }) => {
+  // the image shortcut's Ctrl form (2026-09-28): Ctrl+Shift+I is the browsers' devtools, so Ctrl+Alt+I
+  await loadAdmin(page)
+  await page.evaluate(() => void window._create('#e2e_image_key item'))
+  await expect.poll(() => savedId(page, '#e2e_image_key'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => (window as any).MindBox.set('#e2e_image_key', { scroll: true }))
+  const id = await page.evaluate(() => window._item('#e2e_image_key', true)!.id)
+  await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000 }).toBe(true)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  // the modal component stays mounted with its last content: visibility is the signal, and its
+  // Cancel button the way out (the dialog's own; the editor keeps the focus)
+  const modal = page.locator('.modal')
+  const cancel = modal.getByText('Cancel', { exact: true })
+  await page.keyboard.press('Control+Alt+KeyI')
+  await expect(modal, 'the image dialog from the editor').toBeVisible()
+  await expect(modal).toContainText('Select images')
+  await cancel.click()
+  await expect(modal).toBeHidden()
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('Control+Alt+KeyI') // from the window: a new image item's dialog
+  await expect(modal, 'the image dialog from the window').toBeVisible()
+  await expect(modal).toContainText('Select images')
+  await cancel.click()
+  await expect(modal).toBeHidden()
+})

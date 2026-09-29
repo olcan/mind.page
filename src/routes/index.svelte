@@ -10300,7 +10300,7 @@
       (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (key == 'KeyS' && (e.metaKey || e.ctrlKey)) ||
       (key == 'Slash' && (e.metaKey || e.ctrlKey)) ||
-      (key == 'KeyI' && e.metaKey && e.shiftKey) ||
+      (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey))) ||
       key == 'ArrowUp' /*&& e.metaKey*/ ||
       (key == 'ArrowDown' && (e.metaKey || e.ctrlKey)) ||
       key == 'Backspace' ||
@@ -10322,8 +10322,8 @@
         onEditorDone(editorText, e, false, e.metaKey || e.ctrlKey /*run*/)
       }
 
-      // create new image item on image shortcut
-      if (key == 'KeyI' && e.metaKey && e.shiftKey) {
+      // create new image item on image shortcut (Shift+Cmd+I, or Ctrl+Alt+I)
+      if (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey))) {
         editor.insertImages(true)
       }
     }
