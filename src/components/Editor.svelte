@@ -721,12 +721,14 @@
       return
     }
 
-    if (key == 'ArrowUp' && e.metaKey && textarea.selectionEnd == 0) {
+    // jump to the previous/next item from the edges of the text: Cmd on a Mac, and Ctrl too, since
+    // Super+arrows belong to the window manager on Linux (and Ctrl+arrows have no caret meaning here)
+    if (key == 'ArrowUp' && (e.metaKey || e.ctrlKey) && textarea.selectionEnd == 0) {
       e.preventDefault()
       onPrev()
       return
     }
-    if (key == 'ArrowDown' && e.metaKey && textarea.selectionStart == textarea.value.length) {
+    if (key == 'ArrowDown' && (e.metaKey || e.ctrlKey) && textarea.selectionStart == textarea.value.length) {
       e.preventDefault()
       onNext()
       return

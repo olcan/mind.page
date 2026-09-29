@@ -10302,7 +10302,7 @@
       (key == 'Slash' && (e.metaKey || e.ctrlKey)) ||
       (key == 'KeyI' && e.metaKey && e.shiftKey) ||
       key == 'ArrowUp' /*&& e.metaKey*/ ||
-      (key == 'ArrowDown' && e.metaKey) ||
+      (key == 'ArrowDown' && (e.metaKey || e.ctrlKey)) ||
       key == 'Backspace' ||
       key == 'Delete' ||
       key == 'Tab' ||

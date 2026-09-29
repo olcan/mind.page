@@ -706,3 +706,39 @@ test('a chain of continuations shortens to its last segment; a branch keeps its 
   expect((await listed('#e2e_deep/99', '#e2e_deep/99/9/9'))['#e2e_deep/99/9/9']).toBe('…/99/9/9')
   expect((await listed('#e2e_deep/98', '#e2e_deep/98/9/9'))['#e2e_deep/98/9/9']).toBe('…/98/9/9')
 })
+
+test('ctrl+arrows at the edges of an item editor jump to the neighboring items, like cmd+arrows', async ({ page }) => {
+  // Cmd+↑ at the start and Cmd+↓ at the end of an item's text open the previous/next item's
+  // editor; Ctrl does the same since 2026-09-28 (Super+arrows belong to the window manager on
+  // Linux, where the browser reports Super as Meta)
+  await loadAdmin(page)
+  for (const label of ['#e2e_jump/a', '#e2e_jump/b']) await page.evaluate(label => void window._create(label + ' item'), label)
+  await expect.poll(() => savedId(page, '#e2e_jump/b'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => (window as any).MindBox.set('#e2e_jump', { scroll: true }))
+  const ids = () => page.evaluate(() => [...document.querySelectorAll('.container[data-item-id]')].map(c => c.getAttribute('data-item-id')!))
+  const [aId, bId] = await Promise.all(['#e2e_jump/a', '#e2e_jump/b'].map(name => page.evaluate(n => window._item(n, true)!.id, name)))
+  await expect.poll(async () => (await ids()).filter(id => id == aId || id == bId).length, { timeout: 15_000 }).toBe(2)
+  // the jumps follow the RANK order (the item view's position), whichever it is; the listing lays the
+  // ranked items out in columns, so the DOM order is not it
+  const ranked = await page.evaluate(ids => ids.map(id => [id, (window._item(id, true) as any).position as number] as const), [aId, bId])
+  const [first, second] = ranked.sort((x, y) => x[1] - y[1]).map(([id]) => id)
+  // a click on the first item's text opens its editor; End moves the caret to the end of its one line
+  const paragraph = page.locator(`#item-${first} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(page.locator(`#textarea-${first}`)).toBeFocused()
+  const caret = (id: string, at: 'start' | 'end') =>
+    page.evaluate(([id, at]) => {
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      const pos = at == 'end' ? t.value.length : 0
+      t.setSelectionRange(pos, pos)
+    }, [id, at] as const)
+  await caret(first, 'end')
+  await page.keyboard.press('Control+ArrowDown')
+  await expect(page.locator(`#textarea-${second}`), 'the next item opened for editing and focused').toBeFocused()
+  await caret(second, 'start')
+  await page.keyboard.press('Control+ArrowUp')
+  await expect(page.locator(`#textarea-${first}`), 'and back to the previous one').toBeFocused()
+  await page.keyboard.press('Escape') // nothing edited: the editors close
+  await expect(page.locator(`#textarea-${first}`)).toBeHidden()
+})
