@@ -10375,8 +10375,10 @@
     if (focused && !was_focused) {
       onFocused() // handle change to focused=true
       // note delayed dispatch seems necessary in case there is a pending click that will update focus, e.g. when clicking inside editor after a find-on-page that temporarily removes focus from the page (to the browser)
+      // the restore keeps the caret only: a native focus scrolls the element into view (centered), which
+      // threw away the scroll position of a page scrolled with the caret in the MindBox (2026-09-28)
       setTimeout(() => {
-        lastFocusedElem?.focus()
+        lastFocusedElem?.focus({ preventScroll: true })
         lastFocusedElem = null
       }, 250)
     }
@@ -10416,7 +10418,7 @@
     focused = true
     onFocused() // handle change to focused=true
     // see comment below; for cmd-tilde this works with an additional touch or keydown, but it does NOT allow single-touch switching, even if dispatched, and even if we disable touchstart/mousedown events and also focus on their targets below
-    lastFocusedElem?.focus()
+    lastFocusedElem?.focus({ preventScroll: true })
     lastFocusedElem = null
   }
 
