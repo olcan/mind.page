@@ -1071,11 +1071,13 @@
   onMount(() => {
     // replace textarea.focus w/ custom method that makes the textarea visible first (see syncFocusVisibility)
     // otherwise textarea can be invisible, preventing focus
+    // the wrapper forwards the focus options: the window's focus restore passes { preventScroll: true }
+    // so the page keeps its scroll position (a native focus scrolls the element into view)
     const _focus = textarea.focus
-    textarea.focus = () => {
+    textarea.focus = (options?: FocusOptions) => {
       if (!editor) return
       textarea.style.visibility = 'visible'
-      _focus.call(textarea)
+      _focus.call(textarea, options)
       syncFocusVisibility()
     }
     // set up listener for selection changes (does not capture all, see comment in onSelectionChange)

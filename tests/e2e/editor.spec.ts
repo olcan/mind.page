@@ -774,3 +774,17 @@ test('ctrl+alt+i opens the image dialog like shift+cmd+i, in an item editor and 
   await cancel.click()
   await expect(modal).toBeHidden()
 })
+
+test("the MindBox's focus wrapper forwards preventScroll: a restore keeps the page's scroll position", async ({ page }) => {
+  // the window's focus restore (after a workspace switch) focuses the last focused element with
+  // { preventScroll: true }; the Editor's own focus wrapper (visibility first, then the native focus)
+  // must pass the option on, else the native focus scrolls the MindBox into view (2026-09-28)
+  await loadAdmin(page)
+  const scrollTop = () => page.evaluate(() => document.body.scrollTop)
+  await page.evaluate(() => document.body.scrollTo(0, 600))
+  await expect.poll(scrollTop, { message: 'the body scrolled down (the page is long enough)' }).toBeGreaterThan(300)
+  const before = await scrollTop()
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
+  await expect(page.locator('#textarea-mindbox')).toBeFocused()
+  expect(await scrollTop(), 'no scroll with preventScroll').toBe(before)
+})
