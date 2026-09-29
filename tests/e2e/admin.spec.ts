@@ -2,6 +2,7 @@ import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
 import { resolve } from 'path'
 import { firestore, install, loadAdmin, loadAnonymous, laneProjectId } from './helpers.js'
+import { savedId } from './editor_helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the baseline project
@@ -732,4 +733,225 @@ test('the autodep tag applies to descendants only, order-independently, before a
   const middleAfter = await idOf('#e2e_ad/b')
   expect(await depsOf('#e2e_ad/b/c'), 'the initialization pass agrees').toContain(middleAfter)
   expect(await depsOf('#e2e_ad/b'), 'the middle still adopts the root').toContain(await idOf('#e2e_ad'))
+})
+
+test('a hidden parent tag places a renamed chat under its tag parent: context, arrow keys, adoption, reload', async ({ page }) => {
+  // parent tags (2026-09-28; the vault's notes/design/mind_page_parent_tag.md): `#p/plan-b #_p/0/0`
+  // behaves as the nested child #p/0/0/plan-b would, its label kept short: the tag names the
+  // parent, the tree's ancestry follows it (the context and the ranks), the arrow keys walk it, a
+  // tag-free child under the renamed node adopts it (#_autodep along the same ancestry), the
+  // shortening cuts at a segment; every derived fact survives a reload, after each mutation
+  await loadAdmin(page)
+  const T = '#e2e_pt'
+  const create = (text: string) => page.evaluate(text => void window._create(text), text)
+  const write = (name: string, text: string) => page.evaluate(([name, text]) => (window._item(name, true) as any).write(text, ''), [name, text] as const)
+  // the tree's facts of an item, its closure as labels (the ids of items created in this tab change on reload)
+  const view = (name: string) =>
+    page.evaluate(name => {
+      const i = window._item(name, true) as any
+      if (!i) return null
+      const label = (id: string) => (window._item(id, true) as any).label
+      return { ancestors: i.ancestors, tag_parent: i.tag_parent, deps: i.dependencies.map(label), dependents: i.dependents.map(label).sort() }
+    }, name)
+  const settled = () =>
+    expect
+      .poll(
+        () => page.evaluate(() => (window as any)._items().filter((i: any) => String(i.label).startsWith('#e2e_')).map((i: any) => [i.label, !!i.saving, !!i.saved_id]).filter((i: any) => i[1] || !i[2])),
+        { message: 'every fixture item saved before the reload', timeout: 30_000 }
+      )
+      .toEqual([])
+  for (const text of [
+    `${T} the todo`,
+    `${T}/0 #_chat/vault #_autodep\n<<user>> first`,
+    `${T}/0/0\n<<user>> second`,
+    `${T}/0/0/0\n<<user>> third`,
+    `${T}/plan-b #_${T.slice(1)}/0/0\n<<user>> plan b`,
+    `${T}/plan-b/0\n<<user>> under plan b`,
+    `${T}/a #_chat/vault #_autodep\n<<user>> a`,
+    `${T}/ab #_${T.slice(1)}/a\n<<user>> ab`,
+    `${T}/deep/x #_${T.slice(1)}/0/0\n<<user>> renamed from two levels down`,
+    `<< '${T}/0/0/m' >> #_${T.slice(1)}/0/0\n<<user>> a macro-labeled continuation of #e2e_pt/0/0`, // a chat like its siblings (the error state ranks before the nesting)
+    `${T}/0/0/ref\n<<user>> see ${T}/plan-b/0`, // a chat below the carrier: its reference in a turn
+    `${T}/r/s\nsee ${T}/plan-b/0`,
+  ])
+    await create(text)
+  await expect.poll(() => savedId(page, `${T}/deep/x`), { timeout: 30_000 }).toBeTruthy()
+  // the facts: the renamed node under its tag parent, a chat item continuing it; its tag-free
+  // child adopting it (the renamed node's closure first, the chat prefix kept)
+  const chatPrefix = await page.evaluate(() => {
+    const c = window._item('#chat', true) as any
+    return [...c.dependencies.map((id: string) => (window._item(id, true) as any).label), '#chat']
+  })
+  const planB = (await view(`${T}/plan-b`))!
+  expect(planB.tag_parent).toBe(`${T}/0/0`)
+  expect(planB.ancestors).toEqual([`${T}/0/0`, `${T}/0`, T])
+  expect(planB.deps.slice(0, chatPrefix.length), 'a chat item').toEqual(chatPrefix)
+  expect(planB.deps.slice(-2)).toEqual([`${T}/0`, `${T}/0/0`])
+  const child = (await view(`${T}/plan-b/0`))!
+  expect(child).toMatchObject({ tag_parent: null, ancestors: [`${T}/plan-b`, `${T}/0/0`, `${T}/0`, T] })
+  expect(child.deps.slice(-3), 'adopts the renamed node').toEqual([`${T}/0`, `${T}/0/0`, `${T}/plan-b`])
+  expect(child.deps.slice(0, chatPrefix.length)).toEqual(chatPrefix)
+  // ('' is the macro-labeled continuation: its raw label is empty)
+  expect((await view(`${T}/0/0`))!.dependents, 'the dependents index at the tag parent').toEqual(['', `${T}/0/0/0`, `${T}/0/0/ref`, `${T}/deep/x`, `${T}/plan-b`, `${T}/plan-b/0`])
+  expect(planB.dependents, 'and at the renamed node').toEqual([`${T}/plan-b/0`])
+  // the listing: the ancestry above the target in chain order, the shortening at the textual ancestor
+  const shown = () => page.evaluate(() => [...document.querySelectorAll('.container mark.label')].map((m: any) => [m.title, m.textContent] as [string, string]))
+  const navigate = async (name: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await expect.poll(async () => (await shown()).some(([title]) => title == name), { timeout: 15_000 }).toBe(true)
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+    return shown()
+  }
+  const listed = await navigate(`${T}/plan-b/0`)
+  expect(listed.slice(0, 5).map(([title]) => title), 'the chain above the target, in order').toEqual([T, `${T}/0`, `${T}/0/0`, `${T}/plan-b`, `${T}/plan-b/0`])
+  expect(Object.fromEntries(listed)[`${T}/plan-b`], 'shortened against the textual ancestor').toBe('…/plan-b')
+  expect(Object.fromEntries(await navigate(`${T}/ab`))[`${T}/ab`], 'a segment boundary: #e2e_pt/a is no ancestor of #e2e_pt/ab').toBe('…/ab')
+  // the ranks by the tree's depths (a witness the textual arithmetic fails): under the query
+  // #e2e_pt/0/0 the renamed nodes (/plan-b, and /deep/x two textual levels down) and the
+  // macro-labeled child (/0/0/m, an expanded label) rank with /0/0/0 at depth 1, then the
+  // tag-free /plan-b/0 at depth 2 (LISTED by the tree, as a nested label would be by its text);
+  // under the query /plan-b/0 two items referring to it rank by their depth under its levels:
+  // /0/0/ref (depth 1 under /0/0, a level of the query; textually depth 3 under the todo) before
+  // /r/s (depth 2 under the todo either way)
+  // the listed items by item id (a macro-labeled item has no label mark: its label is a plain tag
+  // mark of the expansion, the raw label being empty), and their RANK positions (the item view's
+  // `position`: the listing lays the ranked items out in columns, so the DOM order is not the rank)
+  const listedIds = () => page.evaluate(() => [...document.querySelectorAll('.container[data-item-id]')].map(c => c.getAttribute('data-item-id')))
+  const positions = (ids: Record<string, string>) =>
+    page.evaluate(ids => Object.fromEntries(Object.entries(ids).map(([name, id]) => [name, (window._item(id, true) as any).position as number])), ids)
+  // the rank of items in the listing of a query, polled until every one is rendered (the show
+  // toggle clicked until it is) and `ordered` holds (the listing reranks about a second after a
+  // macro expansion, so an order is a condition to wait for)
+  const ranked = async (query: string, ids: Record<string, string>, ordered: (order: Record<string, number>) => boolean) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), query)
+    await expect
+      .poll(
+        async () => {
+          const shownIds = await listedIds()
+          const missing = Object.keys(ids).filter(name => !shownIds.includes(ids[name]))
+          if (missing.length) {
+            await page.evaluate(() => document.querySelector('.toggle.show')?.dispatchEvent(new Event('click')))
+            return `missing ${missing.join(', ')}`
+          }
+          const order = await positions(ids)
+          return ordered(order) ? 'ordered' : `unordered ${JSON.stringify(order)}`
+        },
+        { message: `the listing under ${query}`, timeout: 15_000 }
+      )
+      .toBe('ordered')
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  }
+  const idsOf = async (names: string[]) => Object.fromEntries(await Promise.all(names.map(async name => [name, await page.evaluate(n => (window._item(n, true) as any).id, name)])))
+  // the macro-labeled child is expanded (its label read from the macro) once it renders: shown by
+  // its id first, as any macro item is at init or when first listed; its expanded label is the
+  // first tag mark of its rendering; a chat item like the items it is ranked against (a chat's
+  // rendering logs, and the error state is a rank key ahead of the nesting)
+  const macroId = await page.evaluate(prefix => (window as any)._items().find((i: any) => i.text.startsWith(prefix))?.id ?? null, `<< '${T}/0/0/m' >>`)
+  expect(macroId).toBeTruthy()
+  await page.evaluate(id => (window as any).MindBox.set('id:' + id, { scroll: true }), macroId)
+  await expect
+    .poll(() => page.evaluate(id => (document.querySelector(`.container[data-item-id="${id}"] mark`) as HTMLElement)?.title ?? null, macroId), { message: 'the macro item rendered with its expanded label', timeout: 15_000 })
+    .toBe(`${T}/0/0/m`)
+  const depth1 = [`${T}/0/0/0`, `${T}/plan-b`, `${T}/deep/x`, `${T}/0/0/m`]
+  await ranked(
+    `${T}/0/0`,
+    { ...(await idsOf([`${T}/0/0/0`, `${T}/plan-b`, `${T}/deep/x`, `${T}/plan-b/0`])), [`${T}/0/0/m`]: macroId },
+    order => depth1.every(name => order[name] < order[`${T}/plan-b/0`]) // depth 1 before depth 2
+  )
+  // the tag-free child MATCHES the query by its levels (its index button says so), as a nested label would by its text
+  expect(await page.evaluate(id => !!document.querySelector(`.container[data-item-id="${id}"] .button.index.matching`), (await idsOf([`${T}/plan-b/0`]))[`${T}/plan-b/0`]), '/plan-b/0 matches #e2e_pt/0/0').toBe(true)
+  await ranked(`${T}/plan-b/0`, await idsOf([`${T}/0/0/ref`, `${T}/r/s`]), order => order[`${T}/0/0/ref`] < order[`${T}/r/s`]) // depth 1 under a level of the query before depth 2
+  // the arrow keys: Up to the tag parent, Down to the shortest nested child, Right along the
+  // nested children to the tag child after them and Left back through the tag parent's ring,
+  // Down into the tag-free child; the todo's ring has the nested children only
+  const box = () => page.evaluate(() => (window as any).MindBox.get())
+  const press = async (key: string, expected: string) => {
+    await page.keyboard.press(key)
+    await expect.poll(box, { message: `${key} to ${expected}`, timeout: 10_000 }).toBe(expected)
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  }
+  await navigate(`${T}/plan-b`)
+  await press('ArrowUp', `${T}/0/0 `)
+  await press('ArrowDown', `${T}/0/0/0 `)
+  await press('ArrowRight', `${T}/0/0/ref `) // the ring: the nested children (/0/0/0, /0/0/ref), then the tag children by label
+  await press('ArrowRight', `${T}/deep/x `)
+  await press('ArrowRight', `${T}/plan-b `)
+  await press('ArrowLeft', `${T}/deep/x `) // back through the tag parent's ring
+  await press('ArrowLeft', `${T}/0/0/ref `)
+  await press('ArrowLeft', `${T}/0/0/0 `)
+  await navigate(`${T}/plan-b`)
+  await press('ArrowDown', `${T}/plan-b/0 `)
+  await navigate(`${T}/0`)
+  await press('ArrowRight', `${T}/a `)
+  await press('ArrowRight', `${T}/0 `)
+  // mutations, each compared with a reload: the facts of the tree and the listing's order
+  const G = '#e2e_gap'
+  const facts = async () => {
+    const out: Record<string, unknown> = {}
+    for (const name of [`${T}/0`, `${T}/0/0`, `${T}/0/0/0`, `${T}/plan-b`, `${T}/plan-b/0`, `${T}/ab`, `${T}/plan-c`, `${T}/late`, `${G}/b/c`, `${G}/b/c/d`]) out[name] = await view(name)
+    // the listing's head: the target's tree path (the rest renders in chunks, and ranks by time)
+    const target = `${T}/plan-b/0`
+    const depth = (await view(target))!.ancestors.length + 1
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), target)
+    await expect
+      .poll(async () => (await shown()).slice(0, depth).map(([title]) => title), { timeout: 15_000 })
+      .toEqual(expect.arrayContaining([T, target]))
+    out.listing = (await shown()).slice(0, depth).map(([title]) => title)
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+    return out
+  }
+  const reloaded = async (): Promise<Record<string, unknown>> => {
+    await settled()
+    const before = await facts()
+    await loadAdmin(page) // signs in and navigates: the reload
+    expect(await facts(), 'the same facts after a reload').toEqual(before)
+    return before
+  }
+  // the carrier tag removed: the target is no chat item, the override lapses, the child adopts nothing
+  await write(`${T}/0`, `${T}/0 #_chat/vault\n<<user>> first`)
+  let seen = await reloaded()
+  expect(seen[`${T}/plan-b`]).toMatchObject({ tag_parent: null, ancestors: [T] })
+  expect(seen[`${T}/plan-b/0`]).toMatchObject({ ancestors: [`${T}/plan-b`, T], deps: [], dependents: [] })
+  expect(seen[`${T}/0`], 'the carrier lost every dependent').toMatchObject({ dependents: [] })
+  expect(seen[`${T}/0/0`]).toMatchObject({ dependents: ['', `${T}/deep/x`, `${T}/plan-b`] }) // the tags stay dependencies
+  await write(`${T}/0`, `${T}/0 #_chat/vault #_autodep\n<<user>> first`)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-b/0`]).toMatchObject({ ancestors: [`${T}/plan-b`, `${T}/0/0`, `${T}/0`, T] })
+  // the parent tag changed, and changed back
+  const ms = await page.evaluate(([name, text]) => {
+    const started = performance.now()
+    ;(window._item(name, true) as any).write(text, '')
+    return performance.now() - started
+  }, [`${T}/plan-b`, `${T}/plan-b #_${T.slice(1)}/0\n<<user>> plan b`] as const)
+  console.log(`parent tags: a parent tag change over ${await page.evaluate(() => (window as any)._items().length)} items took ${ms.toFixed(1)} ms (the write's synchronous part: the derivation, the closures, the indexes)`)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-b`]).toMatchObject({ tag_parent: `${T}/0`, ancestors: [`${T}/0`, T] })
+  expect(seen[`${T}/0/0`], 'the old parent lost the renamed node and its child').toMatchObject({ dependents: ['', `${T}/0/0/0`, `${T}/0/0/ref`, `${T}/deep/x`] })
+  expect((seen[`${T}/0`] as any).dependents, 'the new parent gained them').toEqual(expect.arrayContaining([`${T}/plan-b`, `${T}/plan-b/0`]))
+  expect(seen.listing, 'the chain reordered through the new parent').toEqual([T, `${T}/0`, `${T}/plan-b`, `${T}/plan-b/0`])
+  await write(`${T}/plan-b`, `${T}/plan-b #_${T.slice(1)}/0/0\n<<user>> plan b`)
+  // the target created after its child, made ambiguous, then unique again
+  await create(`${T}/plan-c #_${T.slice(1)}/late\n<<user>> plan c`)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-c`]).toMatchObject({ tag_parent: null, ancestors: [T], deps: [] })
+  await create(`${T}/late #_chat/vault #_autodep\n<<user>> late`)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-c`]).toMatchObject({ tag_parent: `${T}/late`, ancestors: [`${T}/late`, T] })
+  await create(`${T}/late\nduplicate`)
+  await expect.poll(() => page.evaluate(name => (window as any)._items(name).length, `${T}/late`)).toBe(2)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-c`]).toMatchObject({ tag_parent: null, ancestors: [T], deps: [] })
+  const dupId = await page.evaluate(name => (window as any)._items(name).find((i: any) => i.text.includes('duplicate')).saved_id, `${T}/late`)
+  await page.evaluate(name => (window as any)._items(name).find((i: any) => i.text.includes('duplicate')).delete(false), `${T}/late`)
+  await expect.poll(async () => (await firestore().collection('items').doc(dupId).get()).exists, { timeout: 30_000 }).toBe(false)
+  seen = await reloaded()
+  expect(seen[`${T}/plan-c`]).toMatchObject({ tag_parent: `${T}/late`, ancestors: [`${T}/late`, T] })
+  // #_autodep added above a missing level: the change reaches the grandchild across it
+  for (const text of [`${G} a root`, `${G}/b/c\nc`, `${G}/b/c/d\nd`]) await create(text)
+  seen = await reloaded()
+  expect(seen[`${G}/b/c/d`]).toMatchObject({ ancestors: [`${G}/b/c`, `${G}/b`, G], deps: [] })
+  await write(G, `${G} a root #_autodep`)
+  seen = await reloaded()
+  expect(seen[`${G}/b/c/d`]).toMatchObject({ deps: [`${G}/b/c`] })
+  expect(seen[`${G}/b/c`]).toMatchObject({ deps: [] })
 })

@@ -710,6 +710,16 @@
     get dependencies(): Array<string> {
       return item(this.id).deps
     }
+    // the tree's levels above the item, nearest first (labels; a level need not be an item): the
+    // textual prefixes with the tag parents of uniquely labeled levels spliced in
+    get ancestors(): Array<string> {
+      return item(this.id).ancestors ?? []
+    }
+    // the label of the chat item a hidden tag names as the item's parent in the tree, or null
+    get tag_parent(): string | null {
+      const parent = item(this.id).tagParent
+      return parent ? item(parent).label : null
+    }
     get dependents(): Array<string> {
       return item(this.id).dependents
     }
@@ -1494,8 +1504,7 @@
       // throw error if there are missing dependencies
       // _direct_ missing dependencies should be already indicated visibly
       // macros should be re-run as soon as missing dependencies are installed/restored
-      const missing_deps = []
-      itemDeps(this.index, [], missing_deps)
+      const missing_deps = missingDeps(items[this.index])
       if (missing_deps.length > 0)
         throw new Error('eval missing dependencies: ' + missing_deps.map(t => t.slice(1)).join(', '))
 
@@ -2779,7 +2788,7 @@
     if (terms[0] != '#log' && idsFromLabel.get(terms[0])?.length == 1) {
       listingItemIndex = indexFromId.get(idsFromLabel.get(terms[0])[0])
       let item = items[listingItemIndex]
-      context = [item.label].concat(item.labelPrefixes) // lower index means lower in ranking
+      context = [item.label].concat(item.ancestors) // lower index means lower in ranking; the tree's levels
       listing = item.tagsVisible
         .filter(t => t != item.label)
         .slice()
@@ -2787,9 +2796,10 @@
         .concat(item.label)
       // console.debug(listing);
     } else if (context.length == 0 && terms[0] != '#log' && idsFromLabel.get(terms[0])?.length > 1) {
-      // for non-unique first-tag-matching items, still use label + prefixes as context
-      let item = items[indexFromId.get(idsFromLabel.get(terms[0])[0])]
-      context = [item.label].concat(item.labelPrefixes) // lower index means lower in ranking
+      // for non-unique first-tag-matching items, still use label + the label's levels as context
+      // (the levels of the LABEL: nothing item-specific at level zero, so the context does not
+      // depend on which duplicate comes first)
+      context = [terms[0]].concat(lineage?.ancestorsOfLabel(terms[0]) ?? []) // lower index means lower in ranking
     }
 
     // expand context to include "context" items that visibly tag other items in context
@@ -2806,8 +2816,7 @@
         ) {
           context.push(ctxitem.label)
           // NOTE: "context of context" should be at the end (top), so we do difference + concat
-          if (ctxitem.labelPrefixes.length > 0)
-            context = _.difference(context, ctxitem.labelPrefixes).concat(ctxitem.labelPrefixes)
+          if (ctxitem.ancestors.length > 0) context = _.difference(context, ctxitem.ancestors).concat(ctxitem.ancestors)
         }
       })
       if (context.length == lastContextLength) break
@@ -2867,12 +2876,24 @@
       item.uniqueLabel = labelUnique ? label : ''
       // item.uniqueLabelPrefixes = labelUnique ? labelPrefixes : [];
 
-      // compute contextLabel as closest ancestor label from context
-      item.contextLabel = !label ? '' : context.find(cl => cl.length < label.length && label.startsWith(cl)) || ''
+      // compute contextLabel as closest ancestor label from context (a SEGMENT boundary: #p/a is no
+      // ancestor of #p/ab)
+      item.contextLabel = !label ? '' : context.find(cl => label.startsWith(cl + '/')) || ''
+
+      // the item's levels in the tree (the tree's ancestry: the textual levels with the tag parents
+      // spliced in, so a renamed node's subtree sits under the tag parent; a level need not be an
+      // item), of every labeled item (a duplicated label takes no override of its own but has the
+      // ancestry its unique levels give it); a macro expansion that changes the label takes that
+      // LABEL's levels, derived now (the raw graph and the cached expansion stay as they are, the
+      // levels follow the current tree). The ranks below use them for unique labels only, as today
+      const matchLevels = !label ? [] : label != item.label ? (lineage?.ancestorsOfLabel(label) ?? []) : (item.ancestors ?? [])
+      const levels = item.uniqueLabel ? matchLevels : []
 
       if (!fixed) {
-        // match tags against item tagsAlt (expanded using altTags), allowing prefix matches
-        item.matchingTerms = terms.filter(t => t[0] == '#' && tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0)
+        // match tags against item tagsAlt (expanded using altTags), allowing prefix matches; a tag
+        // term also matches an item one of whose levels starts with it (a nested label matches its
+        // ancestors' queries by its text; a renamed node's tag-free child matches them by the tree)
+        item.matchingTerms = terms.filter(t => t[0] == '#' && (tagsAlt.findIndex(tag => tag.startsWith(t)) >= 0 || levelsMatch(matchLevels, t)))
 
         // match all terms (tag or non-tag) anywhere in text
         item.matchingTerms.push(...terms.filter(t => searchText.includes(t)))
@@ -2926,24 +2947,23 @@
         item.target_context = false
       }
 
-      // compute nesting level (-depth) of item name under target name
+      // compute nesting level (-depth) of item name under target name: the query label among the
+      // item's levels (above), so a renamed node ranks under its tag parent
       item.target_nesting = item.target ? 0 : -Infinity
-      if (!item.target && item.uniqueLabel.startsWith(terms[0] + '/')) {
-        item.target_nesting = -1
-        for (let i = terms[0].length + 1; i < item.uniqueLabel.length; ++i)
-          if (item.uniqueLabel[i] == '/') item.target_nesting--
+      if (!item.target && item.uniqueLabel) {
+        const depth = levels.indexOf(terms[0])
+        if (depth >= 0) item.target_nesting = -(depth + 1)
       }
 
-      // compute minimum nesting level (max -depth) of item name under _prefixes_ of target name
+      // compute minimum nesting level (max -depth) of item name under the _levels_ of target name
       item.target_prefix_nesting = -Infinity
-      if (!item.target && listingItemIndex >= 0) {
+      if (!item.target && item.uniqueLabel && listingItemIndex >= 0) {
         const target_item = items[listingItemIndex]
-        const { labelPrefixes } = target_item.expanded?.item ?? target_item
-        for (const prefix of labelPrefixes) {
-          if (!item.uniqueLabel.startsWith(prefix + '/')) continue
-          let nesting = -1
-          for (let i = prefix.length + 1; i < item.uniqueLabel.length; ++i) if (item.uniqueLabel[i] == '/') nesting--
-          item.target_prefix_nesting = Math.max(nesting, item.target_prefix_nesting)
+        const target_label = (target_item.expanded?.item ?? target_item).label
+        const ancestors = target_label != target_item.label ? (lineage?.ancestorsOfLabel(target_label) ?? []) : (target_item.ancestors ?? [])
+        for (const level of ancestors) {
+          const depth = levels.indexOf(level)
+          if (depth >= 0) item.target_prefix_nesting = Math.max(-(depth + 1), item.target_prefix_nesting)
         }
       }
 
@@ -3900,60 +3920,94 @@
       generation
     )
 
-  // whether an item adopts its immediate label-prefix parent as its first dependency: some
-  // uniquely labeled STRICT ancestor carries #_autodep (the raw tags, never a cached flag)
-  function adoptsParent(item) {
-    return item.labelPrefixes.some(pfx => {
-      const ids = idsFromLabel.get(pfx)
-      return ids?.length == 1 && __item(ids[0]).tagsRaw.includes('#_autodep')
+  // chat.js's is_chat_item: the item's ordered closure begins with the unique #chat item's closure
+  // and #chat itself (the install seam classifies a local tag parent candidate by it)
+  function isChatItem(item) {
+    const ids = idsFromLabel.get('#chat')
+    if (ids?.length != 1) return false
+    const chat = __item(ids[0])
+    const prefix = [...chat.deps, chat.id]
+    return item.deps.length >= prefix.length && prefix.every((id, i) => item.deps[i] == id)
+  }
+
+  // the label tree's facts of every item (src/lineage.ts, the design in the vault's
+  // notes/design/mind_page_parent_tag.md): the tag parent (a hidden tag naming a chat item under
+  // the item's own root: the item's place in the tree without the nested label), the ancestry
+  // (the textual levels with such overrides spliced in), the adoption (#_autodep carried by a
+  // unique item among the ancestors), the first dependency and the ordered closure, derived from
+  // ALL items' facts at once (about 45 ms for two thousand items) at init and whenever an item's
+  // label, hidden tags or carrier tag change, an item appears or one is deleted (its facts are
+  // cleared first); each item keeps the key of the facts it was derived from, so a change that
+  // leaves them alone (a text edit) derives nothing
+  let lineage: Lineage = null
+  function lineageKey(item) {
+    return [item.label ?? '', (item.tagsHiddenAlt ?? []).join(' '), (item.tagsHidden ?? []).join(' '), !!item.tagsRaw?.includes('#_autodep')].join('\n')
+  }
+  function deriveLineage() {
+    lineage = new Lineage(
+      items.map(item => ({
+        id: item.id,
+        label: item.label ?? '',
+        tagsHidden: item.tagsHidden ?? [],
+        tagsHiddenAlt: item.tagsHiddenAlt ?? [],
+        carrier: !!item.tagsRaw?.includes('#_autodep'),
+      }))
+    )
+    items.forEach(item => {
+      const derived = lineage.get(item.id)
+      item.lineageKey = lineageKey(item)
+      item.tagParent = derived.tagParent // an item id, or null
+      item.ancestors = derived.ancestors // labels, nearest first
+      item.autodep = derived.adopts
+      item.parentId = derived.parent
+      item.derivedDeps = derived.deps
     })
   }
 
-  function itemDeps(index, deps = [], missing_deps = undefined) {
-    let item = items[index]
-    if (deps.includes(item.id)) return deps
+  // the tree's levels above a label (lowercase): the unique item's ancestry, else the label's
+  // own levels (a missing or duplicated label splices nothing of its own); the navigation's
+  // descendant test, where a textual prefix test stood
+  function labelLevels(label: string): string[] {
+    if (!label) return []
+    const ids = idsFromLabel.get(label)
+    if (ids?.length == 1) return __item(ids[0]).ancestors ?? []
+    return lineage?.ancestorsOfLabel(label) ?? []
+  }
+  // the tree's parent label of a label (lowercase): the unique item's tag parent when it has one,
+  // else the textual parent (the label itself for a root)
+  function parentLabelOf(label: string): string {
+    const ids = idsFromLabel.get(label)
+    const tagParent = ids?.length == 1 ? __item(ids[0]).tagParent : null
+    return tagParent ? __item(tagParent).label : label.replace(/\/[^\/]*$/, '')
+  }
+  // the labels of the items whose tag parent the label's unique item is, in label order: the tree's
+  // children beyond the nested ones
+  function tagChildLabels(label: string): string[] {
+    const ids = idsFromLabel.get(label)
+    if (ids?.length != 1) return []
+    return items
+      .filter(other => other.tagParent == ids[0])
+      .map(other => other.label)
+      .sort()
+  }
 
-    // append item.id temporarily to avoid cycles (moved to back below for non-root item)
-    // NOTE: dependency order matters for hashing and potentially for code import
-    const orig_deps_length = deps.length // used below for moving item.id to back
-    deps.push(item.id)
-
-    // for autodep item, append parent item (if unique) as dependency
-    // note autodep flag is inherited (see itemTextChanged)
-    if (item.autodep) {
-      if (item.labelPrefixes.length) {
-        const tag = item.labelPrefixes[0]
+  // the exact hidden tags of an item's closure (the item first) that resolve to no unique item
+  // and are not special tags, in the closure walk's order: what an eval refuses to run with
+  function missingDeps(item) {
+    const missing = []
+    const visited = new Set<string>()
+    const walk = walked => {
+      if (visited.has(walked.id)) return
+      visited.add(walked.id)
+      if (walked.parentId) walk(__item(walked.parentId))
+      walked.tagsHiddenAlt.forEach(tag => {
         const ids = idsFromLabel.get(tag)
-        if (ids?.length == 1) {
-          const id = ids[0]
-          const dep_index = indexFromId.get(id)
-          if (dep_index === undefined) throw new Error(`idsFromLabel.get(${tag}) returned deleted id ${id}`)
-          deps = itemDeps(dep_index, deps, missing_deps)
-        }
-      }
-    }
-
-    // append hidden tags (that correspond to unique labels) as dependencies
-    item.tagsHiddenAlt.forEach(tag => {
-      // NOTE: we allow special tags as dependents if corresponding uniquely named items exist
-      // if (isSpecialTag(tag)) return
-      const ids = idsFromLabel.get(tag)
-      if (!ids || ids.length == 0 || ids.length > 1) {
-        // record tag as missing if not special or an "alt" of a special tag
-        if (!isSpecialTag(tag) && item.tagsHidden.includes(tag)) missing_deps?.push(tag)
-        return
-      }
-      ids.forEach(id => {
-        // NOTE: idsFromLabel should never return deleted items!
-        const dep_index = indexFromId.get(id)
-        if (dep_index === undefined) throw new Error(`idsFromLabel.get(${tag}) returned deleted id ${id}`)
-        deps = itemDeps(dep_index, deps, missing_deps)
+        if (ids?.length == 1) walk(__item(ids[0]))
+        else if (!isSpecialTag(tag) && walked.tagsHidden.includes(tag)) missing.push(tag)
       })
-    })
-
-    deps.splice(orig_deps_length, 1) // remove item.id added temporarily above
-    if (orig_deps_length > 0) deps.push(item.id) // append item.id to back if non-root
-    return deps
+    }
+    walk(item)
+    return missing
   }
 
   function itemDepsString(item) {
@@ -4019,7 +4073,8 @@
           const ids = idsFromLabel.get(tag)
           if (!ids?.length) return null
           if (ids.length > 1) return 'ambiguous'
-          return { autodep: !!(__item(ids[0]).autodepRoot || __item(ids[0]).autodep) } // carries or adopts
+          const local = __item(ids[0])
+          return { autodep: !!(local.autodepRoot || local.autodep), chat: isChatItem(local) } // carries or adopts; a chat item
         },
         fetchRawTags: async tag => {
           let data
@@ -4287,38 +4342,19 @@
     // as with header (see above), we allow some html tag lines and/or hash tag lines before title line
     item.title = item.vaultScan.grammarText.match(/^(?:\s*(?:<|#[^#\s])[^\n]*\n)*?(?:\s{0,3}#{1,6}\s+)([^\n]*)/)?.pop()
 
-    // compute autodep flag, inheriting from (uniquely named) ancestors based on label prefixes
-    // autodep affects itemDeps (used below) to treat parent as first dependency
-    // note the flag itself does NOT depend on dependencies/dependents
-    // it should be computed outside update_deps (e.g. for init before separate pass for deps)
-    // the #_autodep tag applies to the carrier's DESCENDANTS (2026-09-27, as documented: the
-    // item and its descendants become the first dependency of their children): an item's own
-    // tag never makes it adopt its label-prefix parent; `autodep` (adopts the parent) is true
-    // when a uniquely labeled STRICT ancestor carries the tag, computed from the ancestors' raw
-    // tags alone (order-independent: a descendant scan that visits a nested carrier before its
-    // parent must not read a stale inherited flag, autodep review 0), and `autodepRoot`
-    // (carries the tag) is what the change guards below key on for the descendants
-    const prev_autodep = item.autodep // for change propagation to descendants
-    const prev_autodep_root = item.autodepRoot
+    // the carrier flag (the tag applies to the carrier's DESCENDANTS, 2026-09-27): what the tree
+    // derivation below reads through the raw tags; `autodep` (adopts a parent) and the rest of the
+    // tree's facts come from that derivation, for every item at once, under update_deps
     item.autodepRoot = item.tagsRaw.includes('#_autodep')
-    item.autodep = adoptsParent(item)
-    // propagate changes in autodep (adopted or carried) OR label to descendants: those of the
-    // current label, and of the previous one on a label change (their carrying ancestor left
-    // them; each recomputed from its own ancestors' raw tags, autodep review 1)
-    if (item.autodep != prev_autodep || item.autodepRoot != prev_autodep_root || item.label != prevLabel) {
-      const prefixes = [item.label + '/']
-      if (prevLabel && prevLabel != item.label) prefixes.push(prevLabel + '/')
-      for (let descendant of items) {
-        if (!descendant.label || !prefixes.some(prefix => descendant.label.length > prefix.length && descendant.label.startsWith(prefix)))
-          continue // skip non-descendant
-        descendant.autodep = adoptsParent(descendant)
-      }
-    }
 
     if (update_deps) {
       const prevDeps = item.deps || []
       const prevDependents = item.dependents || []
-      item.deps = itemDeps(index)
+      // the tree derived again for every item when this item's facts changed or it is new (a
+      // deletion clears its facts first, so it derives as absent); a text edit derives nothing
+      const rederived = !item.dependents || lineageKey(item) != item.lineageKey
+      if (rederived) deriveLineage()
+      item.deps = rederived ? item.derivedDeps : prevDeps
       // console.debug('updated dependencies:', item.label, prevLabel, item.deps, prevDeps)
 
       const prevDeepHash = item.deephash
@@ -4375,29 +4411,24 @@
       }
       if (item.deephash != prevDeepHash) invoke_listeners_for_changed_item(item.id, item.label, prevLabel ?? '')
 
-      // update deps and deephash as needed for all dependent items
-      // NOTE: we reconstruct dependents from scratch as needed for new items; we could scan only the dependents array once it exists and label has not changed, but we keep it simple and always do a full scan for now
-      if (
-        !item.dependents ||
-        item.label != prevLabel ||
-        item.autodep != prev_autodep ||
-        item.autodepRoot != prev_autodep_root ||
-        item.deephash != prevDeepHash
-      ) {
-        item.dependents = []
+      // update deps and deephash as needed for all dependent items: after a derivation every
+      // item whose closure changed (this item's dependents, and any item whose ancestry or parent
+      // the change moved) takes the derived closure, the dependents index is rebuilt for all
+      // items from the closures (both endpoints of every added or removed edge); after a text
+      // edit only the dependents' deep hashes move, as before
+      if (!item.dependents || rederived || item.deephash != prevDeepHash) {
         items.forEach((depitem, depindex) => {
           if (depindex == index) return // skip self
           const was_dependent = depitem.deps.includes(item.id) // was dependent w/ prevLabel?
-          let is_dependent = was_dependent
-          if (item.label != prevLabel || item.autodep != prev_autodep || item.autodepRoot != prev_autodep_root) {
-            // label or autodep (adopted or carried) changed, need to update dependencies
-            depitem.deps = itemDeps(depindex)
-            is_dependent = depitem.deps.includes(item.id)
+          let changed = false
+          if (rederived && !_.isEqual(depitem.deps, depitem.derivedDeps)) {
+            depitem.deps = depitem.derivedDeps
+            changed = true
           }
+          const is_dependent = depitem.deps.includes(item.id)
           // dependency is considered modified when dependency is added/removed
-          if ((is_dependent && item.deephash != prevDeepHash) || is_dependent != was_dependent) {
-            // update deps & deephash (triggers re-rendering and cache invalidation)
-            depitem.deps = itemDeps(depindex)
+          if (changed || (is_dependent && item.deephash != prevDeepHash) || is_dependent != was_dependent) {
+            // update deephash (triggers re-rendering and cache invalidation)
             const depitem_prevDeepHash = depitem.deephash
             depitem.deephash = hash(
               depitem.deps
@@ -4416,9 +4447,17 @@
                   onItemRun(depitem.index, null, false /* touch_first */)
               })
           }
-          if (depitem.deps.includes(item.id)) item.dependents.push(depitem.id)
         })
-        // console.debug('updated dependents:', item.label, prevLabel, item.dependents, prevDependents)
+        if (rederived) {
+          items.forEach(other => (other.dependents = []))
+          items.forEach(other => other.deps.forEach(id => __item(id).dependents.push(other.id)))
+          items.forEach(other => {
+            other.depsString = itemDepsString(other)
+            other.styleDepsString = itemStyleDepsString(other)
+            other.dependentsString = itemDependentsString(other)
+          })
+        } else item.dependents = items.filter(other => other.id != item.id && other.deps.includes(item.id)).map(other => other.id)
+        // console.debug('updated dependents:', item.label, prevLabel, item.dependents)
       }
 
       // update deps/dependents strings
@@ -7623,6 +7662,7 @@
   } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { autodepParent } from '../install_deps'
+  import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert } from '../inert'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
@@ -8348,20 +8388,21 @@
     })
     finalizeStateOnEditorChange = true // make initial empty state final
     onEditorChange('') // initial sorting
+    // the label tree of every item (the tag parents, ancestries, adoptions and closures at once)
+    // changes are handled in itemTextChanged (w/ update_deps==true)
+    deriveLineage()
     items.forEach((item, index) => {
       // initialize missingTags based on labels & tags (initialized above)
       // changes are handled in itemTextChanged (w/ update_deps==true)
       item.missingTags = item.tagsVisible
         .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
         .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
-      // initialize autodep based on labels & tags (initialized above): the tag applies to
-      // the carrier's descendants (an own tag adopts no parent, see itemTextChanged)
-      // changes are handled in itemTextChanged (w/ update_deps==true)
+      // the carrier flag (the tag applies to the carrier's descendants; the derivation above
+      // read it through the raw tags)
       item.autodepRoot = item.tagsRaw.includes('#_autodep')
-      item.autodep = adoptsParent(item)
       // initialize deps, deephash, missing tags/labels
       // changes are handled in itemTextChanged (w/ update_deps==true)
-      item.deps = itemDeps(index)
+      item.deps = item.derivedDeps
       item.deephash = hash(
         item.deps
           .map(id => items[indexFromId.get(id)].hash)
@@ -10017,7 +10058,7 @@
       // note this allows keyboard navigation to children w/ non-unique labels
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim().toLowerCase()
-        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        const parentLabel = parentLabelOf(targetLabel) // the tag parent of a renamed node, else the textual parent
         if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */))
           lastContext = _item(parentLabel).elem?.querySelector('.container')
       }
@@ -10045,18 +10086,23 @@
         // if context is based on nesting (vs _context tag), then we only navigate among other nested descendants, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
         if (contextBasedOnNesting) {
-          // restrict visible tags to nested descendants
-          visibleTags = visibleTags.filter(t => t['title']?.startsWith(contextLabel + '/')) // descendants
-          // expand w/ non-visible children, if any, and determine selection based on target (i.e. query)
+          // restrict visible tags to the tree's descendants (a tag child of the context qualifies)
+          visibleTags = visibleTags.filter(t => labelLevels(t['title']?.toLowerCase() ?? '').includes(contextLabel))
+          // expand w/ non-visible children, if any (the nested ones whose tree parent the context
+          // still is, then its tag children), and determine selection based on target (i.e. query)
           let labels = visibleTags.map(e => e['title'].toLowerCase())
           const targetLabel = editorText.trim().toLowerCase()
-          if (targetLabel.startsWith(contextLabel + '/')) {
+          if (labelLevels(targetLabel).includes(contextLabel)) {
             labels = _.uniq(
               labels.concat(
                 _labels(
                   label =>
-                    label.length > prefix.length && label.startsWith(prefix) && label.indexOf('/', prefix.length) < 0
-                )
+                    label.length > prefix.length &&
+                    label.startsWith(prefix) &&
+                    label.indexOf('/', prefix.length) < 0 &&
+                    labelLevels(label)[0] == contextLabel
+                ),
+                tagChildLabels(contextLabel)
               )
             )
           }
@@ -10112,15 +10158,13 @@
             '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
           )
         } else {
-          // filter to children w/ nested labels
-          const prefix = targetLabel + '/'
+          // filter to children w/ nested labels: the tree's descendants (a tag naming a renamed
+          // child qualifies, a nested label renamed away does not)
           const childTags = Array.from(
             document.querySelectorAll(
               '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
             )
-          ).filter(
-            t => t['title']?.toLowerCase().startsWith(prefix) /* && t['title'].indexOf('/', prefix.length) == -1*/
-          )
+          ).filter(t => labelLevels(t['title']?.toLowerCase() ?? '').includes(targetLabel))
           child = childTags[0]
         }
 
@@ -10128,10 +10172,13 @@
           child.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
           return
         } else {
-          // if no child found on target, search for items w/ nested names and take the one with the shortest name
-          const childLabel = _labels((label, ids) => ids.length == 1 && label.startsWith(targetLabel + '/')).sort(
-            (a, b) => a.length - b.length
-          )[0]
+          // if no child found on target, search for items w/ nested names that still descend from
+          // the target in the tree and take the one with the shortest name; else the first of the
+          // target's tag children (renamed nodes, by label)
+          const childLabel =
+            _labels((label, ids) => ids.length == 1 && label.startsWith(targetLabel + '/') && __item(ids[0]).ancestors?.includes(targetLabel)).sort(
+              (a, b) => a.length - b.length
+            )[0] ?? tagChildLabels(targetLabel)[0]
           if (childLabel) {
             lastEditorChangeTime = 0 // force immediate update
             forceNewStateOnEditorChange = true // add to history like click-based nav
@@ -10186,7 +10233,7 @@
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim().toLowerCase()
-        const parentLabel = targetLabel.replace(/\/[^\/]*$/, '')
+        const parentLabel = parentLabelOf(targetLabel) // the tag parent of a renamed node, else the textual parent
         const contextLabel = item(_item(targetLabel).id).contextLabel // closest ancestor label from context
         if (parentLabel != targetLabel && _exists(parentLabel, false /* allow_multiple */)) {
           lastContext = _item(parentLabel).elem?.querySelector('.container')

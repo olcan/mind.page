@@ -850,6 +850,19 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.keyboard.press('Control+Enter')
   await expect.poll(() => savedId(page, `${CHATTY}/0/0`), { timeout: 30_000 }).toBeTruthy()
   await expect.poll(box, { message: 'the box navigates to the continuation' }).toBe(`${CHATTY}/0/0 `)
+  // a renamed node (parent tags, 2026-09-28: `#p/plan-b #_p/0/0` sits under #p/0/0 in the tree)
+  // continues with the turn alone too: the hook's ancestor walk reaches the carrier through the
+  // tag parent, and the app makes the child adopt the renamed node
+  await page.evaluate(text => void window._create(text), `${CHATTY}/plan-b #_${CHATTY.slice(1)}/0/0\n<<user>> plan b`)
+  await expect.poll(() => savedId(page, `${CHATTY}/plan-b`), { timeout: 30_000 }).toBeTruthy()
+  const renamed = await createChild(`${CHATTY}/plan-b`)
+  const RENAMED = `${CHATTY}/plan-b/0\n<<user>> `
+  expect(renamed).toEqual({ value: RENAMED, start: RENAMED.length, end: RENAMED.length })
+  await page.keyboard.type('under the rename')
+  await page.keyboard.press('Control+Enter')
+  await expect.poll(() => savedId(page, `${CHATTY}/plan-b/0`), { timeout: 30_000 }).toBeTruthy()
+  const renamedDeps = await page.evaluate(name => (window._item(name, true) as any)?.dependencies ?? null, `${CHATTY}/plan-b/0`)
+  expect(renamedDeps.slice(-3), 'the chain through the renamed node').toEqual([await idOf(`${CHATTY}/0`), await idOf(`${CHATTY}/0/0`), await idOf(`${CHATTY}/plan-b`)])
   const PLAIN = '#e2e_plain'
   await page.evaluate(text => void window._create(text), `${PLAIN}\nnot a todo, not a chat`)
   await expect.poll(() => savedId(page, PLAIN), { timeout: 30_000 }).toBeTruthy()
