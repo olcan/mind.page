@@ -57,6 +57,11 @@ declare global {
     _user: { uid: string; full_name?: string }
     _init_time: number // 0-ish (undefined) until initialization begins
     _restored_reload_at?: number // the stamp of the page-cache restore that reloaded this page (see src/page_lifecycle.ts)
+    _probe_reload_at?: number // the stamp of the timed-out resume probe that reloaded this page (see src/page_lifecycle.ts)
+    _probe_timeout_ms?: number // the resume probe's deadline, shortened by a row
+    _probe_liveness: (hiddenMs: number) => Promise<'ok' | 'timeout' | 'error' | 'stale'> // the resume probe, for a hide of that length
+    _instance: { hidden_time: number; visible_time: number; sync_time: number; probe: unknown; reloaded: unknown } // this page's instance record, as published
+    _instance_id: string | undefined // this page's instance record id (instances/<id>), set after sign-in
     _server_confirmed: boolean // a current server revision applied (index.svelte markServerConfirmed; a secondary tab confirms on its own, see editor2.spec.ts)
     _server_current: boolean // the latest items snapshot came from the server, not the cache (updated at every snapshot; see lifecycle.spec.ts)
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item

@@ -320,6 +320,7 @@
     Object.defineProperty(window, '_focused', { get: () => focused })
     Object.defineProperty(window, '_focus_time', { get: () => focus_time })
     Object.defineProperty(window, '_instance', { get: () => instance })
+    Object.defineProperty(window, '_instance_id', { get: () => instanceId })
     Object.defineProperty(window, '_instances', { get: () => instances })
     Object.defineProperty(window, '_primary', { get: () => primary })
     Object.defineProperty(window, '_history', { get: () => sessionStateHistory })
@@ -3726,33 +3727,132 @@
     })
     if (action == 'none') return
     console.warn('restored from the page cache: the local data store shut down at pagehide (reload to resume sync)')
+    recover(
+      action,
+      () => sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())), // noted in the reloaded page's init log
+      `MindPage was restored from the browser's page cache, which shut down its local data store: ` +
+        `changes made elsewhere no longer arrive, and edits can no longer be saved from this page. ` +
+        `Copy any unsaved edits, then reload.`
+    )
+  }
+  // the RECOVERY of a dead client (the page-cache restore above, the resume probe below): a
+  // reload at once, or after asking when an edit is unsaved; `stamp` notes the reason for the
+  // reloaded page (sessionStorage, guarded: storage access can throw under Safari's "Block All
+  // Cookies", and the diagnostic never gates the recovery)
+  function recover(action: 'reload' | 'prompt', stamp: () => void, message: string) {
     const reload = () => {
       try {
-        sessionStorage.setItem(RESTORED_RELOAD_KEY, String(Date.now())) // noted in the reloaded page's init log
-      } catch {} // storage access can throw (Safari's "Block All Cookies"); the diagnostic never gates the recovery
+        stamp()
+      } catch {}
       reloading_after_restore = true // the reload's beforeunload must not prompt again (see onBeforeUnload)
       location.reload()
     }
     if (action == 'reload') return reload()
-    _modal(
-      `MindPage was restored from the browser's page cache, which shut down its local data store: ` +
-        `changes made elsewhere no longer arrive, and edits can no longer be saved from this page. ` +
-        `Copy any unsaved edits, then reload.`,
-      { confirm: 'Reload', cancel: 'Later', onConfirm: reload }
+    _modal(message, { confirm: 'Reload', cancel: 'Later', onConfirm: reload })
+  }
+
+  // THE RESUME PROBE (see src/page_lifecycle.ts, table-tested): the hypothesis that a page
+  // suspended without a page-cache park (a home-screen web app on iOS) fires no persisted
+  // pageshow when it returns and turns visible again with the client it was hidden with, whose
+  // stream the suspension may have killed without a word. after a long enough hide the page
+  // reads its own instance record from the server with a deadline: an answer means the
+  // listener's transport is live (the same Listen stream), an error a client that could answer
+  // at all, left to the SDK's own reconnection, no answer the recovery heuristic (a reload, or
+  // the prompt over an unsaved edit). a resume while offline defers the check to the `online`
+  // event (review 0 R1), and an attempt is invalidated when the page hides or goes offline
+  // before its deadline (review 0 R2): its late result recovers nothing, while the check itself
+  // stays pending until an attempt of it is accepted, so a brief interruption loses nothing
+  // (review 1 R4: `ResumeSchedule`). the hide's length is measured from the visibility events;
+  // the facts ride the instance record (see updateInstance) for the #status item
+  const resumeSchedule = new ResumeSchedule() // what is due (src/page_lifecycle.ts, review 1 R4)
+  function onVisibilityChange() {
+    if (!instance) return
+    if (document.visibilityState == 'hidden') {
+      instance.hidden_time = Date.now()
+      resumeSchedule.invalidate() // a pending attempt's result is stale now; the check stays
+      return
+    }
+    instance.visible_time = Date.now()
+    const hiddenMs = instance.hidden_time ? instance.visible_time - instance.hidden_time : 0
+    const due = resumeSchedule.shown({ hiddenMs, online: navigator.onLine, anonymous })
+    if (due) void probeLiveness(due)
+  }
+  function onOnline() {
+    // after the grace the SDK needs to restart its streams (a read issued at once fails fast);
+    // the check runs only while the page is still visible and online then
+    setTimeout(() => {
+      if (!navigator.onLine) return
+      const due = resumeSchedule.online({ visible: document.visibilityState == 'visible', anonymous })
+      if (due) void probeLiveness(due)
+    }, RESUME_ONLINE_GRACE_MS)
+  }
+  function onOffline() {
+    resumeSchedule.invalidate() // a pending attempt's read can only fail or time out now; the check stays
+  }
+  // exposed for a tethered console: the probe for a hide of the given length, whatever the
+  // visibility events said; window._probe_timeout_ms shortens the deadline (the lifecycle rows)
+  if (isClient) window['_probe_liveness'] = (hiddenMs: number) => probeLiveness(hiddenMs)
+  async function probeLiveness(hiddenMs: number): Promise<ProbeOutcome | 'stale'> {
+    if (!instanceId) return 'error' // before sign-in there is no record to read (and no stream to lose)
+    const attempt = resumeSchedule.begin() // a fresh attempt with a fresh deadline (never joining an older one)
+    const started = Date.now()
+    const deadline = Number(window['_probe_timeout_ms']) || RESUME_PROBE_TIMEOUT_MS
+    let timer
+    const outcome: ProbeOutcome = await Promise.race([
+      getDocFromServer(doc(getFirestore(firebase), 'instances', instanceId)).then(
+        () => 'ok' as const,
+        () => 'error' as const
+      ),
+      new Promise<ProbeOutcome>(resolve => (timer = setTimeout(() => resolve('timeout'), deadline))),
+    ])
+    clearTimeout(timer)
+    const ms = Date.now() - started
+    if (!resumeSchedule.settled(attempt)) return 'stale' // the page hid or went offline meanwhile: nothing follows
+    instance.probe = { time: started, hidden_ms: hiddenMs, ms, outcome }
+    const action = resumeAction({ outcome, unsaved: items.some(unsaved) })
+    if (action == 'none') {
+      if (outcome != 'ok') console.warn(`resume probe: ${outcome} after ${ms} ms (hidden ${hiddenMs} ms); left to the client's own reconnection`)
+      updateInstance() // the probe's facts published now, not at the heartbeat's next minute
+      return outcome
+    }
+    console.warn(`resume probe: no answer in ${ms} ms (hidden ${hiddenMs} ms): reloading to resume sync`)
+    recover(
+      action,
+      () => sessionStorage.setItem(PROBE_RELOAD_KEY, JSON.stringify({ time: Date.now(), hidden_ms: hiddenMs, ms })),
+      `MindPage could not reach the server after returning to the foreground, so changes made ` +
+        `elsewhere may no longer arrive and edits may no longer be saved from this page. ` +
+        `Copy any unsaved edits, then reload.`
     )
+    return outcome
   }
   // the reload a restore made says so in this load's init log (console.debug: on a phone, readable
   // only through a tethered Web Inspector) and leaves its stamp on window._restored_reload_at
   // (readable from any console, or an item), since the restore itself leaves no trace
+  let reloaded = null // the recovery reload that produced this page, for its instance record (see updateInstance)
   if (isClient) {
     let restored: string | null = null
+    let probed: string | null = null
     try {
       restored = sessionStorage.getItem(RESTORED_RELOAD_KEY)
       if (restored) sessionStorage.removeItem(RESTORED_RELOAD_KEY)
+      probed = sessionStorage.getItem(PROBE_RELOAD_KEY)
+      if (probed) sessionStorage.removeItem(PROBE_RELOAD_KEY)
     } catch {} // storage access can throw (Safari's "Block All Cookies"); the diagnostic never gates the load
     if (restored) {
       window['_restored_reload_at'] = Number(restored)
+      reloaded = { reason: 'restore', time: Number(restored) }
       init_log('reloaded after a page-cache restore (the restored page had lost its local data store at pagehide)')
+    }
+    if (probed) {
+      let facts: any = {}
+      try {
+        facts = JSON.parse(probed)
+      } catch {}
+      window['_probe_reload_at'] = Number(facts.time) || Date.now()
+      reloaded = { reason: 'probe', time: Number(facts.time) || Date.now(), hidden_ms: facts.hidden_ms ?? null, ms: facts.ms ?? null }
+      init_log(
+        `reloaded after a resume probe got no answer (the page had been hidden ${Math.round((facts.hidden_ms ?? 0) / 1000)} s; nothing in ${facts.ms ?? '?'} ms)`
+      )
     }
   }
 
@@ -7677,7 +7777,16 @@
   import { pushableAfterRemoteModify, serverConfirmed, snapshotDecision } from '../snapshot'
   import { attrSaveStep, settleCorpus, WELCOME_CONFIRMATION_TIMEOUT_MS } from '../welcome'
   import { raisesLiveSignal, receiveSnapshot, type Receipt } from '../live_signal'
-  import { restoreAction, RESTORED_RELOAD_KEY } from '../page_lifecycle'
+  import {
+    restoreAction,
+    RESTORED_RELOAD_KEY,
+    ResumeSchedule,
+    resumeAction,
+    RESUME_PROBE_TIMEOUT_MS,
+    RESUME_ONLINE_GRACE_MS,
+    PROBE_RELOAD_KEY,
+    type ProbeOutcome,
+  } from '../page_lifecycle'
   import { removeZWSP } from '../zwsp'
   import {
     buildHiddenIndex,
@@ -7786,6 +7895,14 @@
         init_time: 0, // set after init (together w/ initTime)
         update_time: 0, // set at each update
         focus_time: 0, // set whenever focus_time is set
+        // the SYNC FACTS for the #status item (2026-09-30, see onVisibilityChange): the last items
+        // snapshot satisfying the current-view predicate, the last visibility changes, the last
+        // resume probe and the recovery reload that produced this page, if any
+        sync_time: 0, // set at every items snapshot satisfying the current-view predicate (see the listener: no clock of server replies)
+        hidden_time: 0, // set when the page turns hidden
+        visible_time: 0, // set when the page turns visible again
+        probe: null, // the last resume probe: {time, hidden_ms, ms, outcome}
+        reloaded: null, // the recovery reload that produced this page: {reason: 'restore' | 'probe', time, ...}
         user_agent: navigator.userAgent,
         // the device's name for the instances listing (#status), set with /device per browser
         // profile (localStorage is per origin and profile, so every tab of the app shares it)
@@ -8532,6 +8649,7 @@
       // the device name is the profile's shared preference (/device in any tab of this origin):
       // re-read at every publication, so a sibling tab's change reaches this record too
       instance.device_name = localStorage.getItem('mindpage_device_name') || null
+      instance.reloaded = reloaded // the recovery reload that produced this page, if any (see the stamps at load)
       instance.update_time = Date.now()
       // console.debug('updated instance')
       setDoc(doc(getFirestore(firebase), 'instances', instanceId), instance)
@@ -9355,6 +9473,13 @@
             // the receipt this lease will report its application for is captured below
             latestReceipt = receiveSnapshot(latestReceipt, facts.fromCache)
             window['_server_current'] = false
+            // the sync facts (see onVisibilityChange): the time of the last snapshot that satisfied
+            // the app's current-view predicate (`serverConfirmed`: not from the cache, no pending
+            // write overlaid; review 0 R3: a local add's or edit's overlay arrives with fromCache
+            // false and is excluded), NOT a clock of server replies: a local deletion alone
+            // satisfies the predicate too (review 1), the time is the receipt's, not the
+            // application's, and nothing here says the stream stays live afterwards
+            if (serverConfirmed(facts) && instance) instance.sync_time = Date.now()
             const decision = snapshotDecision(facts)
             const action = decision.action
             // a current server revision: once applied (in lease order, see reserveHiddenAuthority)
@@ -11206,7 +11331,11 @@
   on:popstate={onPopState}
   on:beforeunload={onBeforeUnload}
   on:pageshow={onPageShow}
+  on:online={onOnline}
+  on:offline={onOffline}
 />
+
+<svelte:document on:visibilitychange={onVisibilityChange} />
 
 <!-- increase list item padding on android, otherwise too small -->
 <!-- also hack for custom font wrapping issue (if needed) -->

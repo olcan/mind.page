@@ -51,3 +51,97 @@ export function restoreAction(facts: {
 // since the restore itself leaves no trace. the stamp is diagnostic only: storage access can throw
 // (Safari's "Block All Cookies"), so both ends guard it and never gate the recovery on it
 export const RESTORED_RELOAD_KEY = 'mindpage_restored_reload'
+
+// THE RESUME PROBE (2026-09-30). the owner's iPhone home-screen app showed stale items until a
+// full restart. the HYPOTHESIS this guards against (the tethered session confirms or corrects it):
+// a page the OS suspends without parking it in the page cache (a home-screen web app above all)
+// comes back with no persisted pageshow, so the restore above never runs for it, and it turns
+// visible again holding the client it was hidden with, whose Firestore stream the suspension may
+// have killed on the wire (a dead socket raises no error until a write fails, and the Listen
+// stream only reads), or, when the SDK's pagehide handler did run at the suspension, the
+// restricted queue described above where nothing settles (the suite's dead-client witness proves
+// that branch, not what the phone emits). either way the page shows the item set it was hidden
+// with, and nothing says so. so a page that becomes visible after a long enough hide asks the
+// server one small question with a deadline: a read of its own instance record from the server
+// (getDocFromServer rides the same Listen stream as the items listener, so an answer means the
+// listener's transport is live too). an answer in time is `ok`; an error is a client that could
+// answer at all (offline, denied, a missing record) and is left alone, its transport left to the
+// SDK's own reconnection; no answer by the deadline is the RECOVERY HEURISTIC: the client cannot
+// be relied on, and the page recovers as the restore does (a reload at once, or after asking when
+// an edit is unsaved: the reload discards it, which a client that answers nothing is unlikely to
+// have saved either). the deadline proves nothing about the cause (the SDK itself allows ten
+// seconds before it calls a stalled connection offline); it is the price of a reload against the
+// price of a silently stale page, tuned on real-device evidence. the check runs after a hide long
+// enough for a suspension to matter (a tab switch and back leaves the stream alone) and on a
+// signed-in client (an anonymous page has no instance record to read); a resume while the browser
+// reports itself OFFLINE defers it (a probe under it could only fail fast or time out; the online
+// status establishes no reachability either, but a probe under it is at least not doomed) and
+// the `online` event runs it while the page is still visible (review 0 R1: a restricted queue
+// survives the network's return, so the deferred check is the page's one chance short of a
+// restart). an attempt is INVALIDATED when the page hides or goes offline before its deadline
+// (review 0 R2): its late result recovers nothing, while the check itself stays pending until an
+// attempt of it is accepted (review 1 R4: `ResumeSchedule` below)
+export const RESUME_PROBE_AFTER_MS = 15_000 // a hide shorter than this raises no check of its own
+export const RESUME_PROBE_TIMEOUT_MS = 8_000 // the server's deadline
+// the deferred check waits this long after the `online` event: the SDK restarts its streams on
+// the same event, and a read issued at once fails fast as `unavailable` (an error, which recovers
+// nothing) instead of asking the server
+export const RESUME_ONLINE_GRACE_MS = 2_000
+export type ProbeOutcome = 'ok' | 'timeout' | 'error'
+
+// THE RESUME SCHEDULE (review 1 R4): a qualifying hide raises a CHECK that stays pending until
+// an attempt of it reaches an accepted outcome, through every interruption: a hide or an offline
+// event before the deadline invalidates the pending attempt (its late result is stale: nothing
+// recorded, nothing recovered), never the check, so the next time the page is visible and
+// online a fresh attempt runs with a fresh deadline, its hide short or not (a one-second app
+// switch during a probe, a connection dropping and returning under a visible page, a deferred
+// check interrupted before it starts). the caller owns the clock, the events and the probe
+// itself; this object owns what is due
+export class ResumeSchedule {
+  pending = 0 // the hide length of the unfinished check (0: none)
+  attempt = 0 // the current attempt's number: a hide or an offline event moves it on
+
+  // the page turned hidden, or the browser went offline: the pending attempt is stale, the check stays
+  invalidate(): void {
+    this.attempt++
+  }
+
+  // the page turned visible after `hiddenMs`: the hide length to probe for now, or 0 (a hide
+  // too short with no check pending, an anonymous page, or offline: the check waits for the
+  // `online` event)
+  shown(facts: { hiddenMs: number; online: boolean; anonymous: boolean }): number {
+    if (facts.anonymous) return 0
+    if (facts.hiddenMs >= RESUME_PROBE_AFTER_MS) this.pending = facts.hiddenMs
+    return facts.online ? this.pending : 0
+  }
+
+  // the browser came back online (after the grace) with the page visible: the pending check, or 0
+  online(facts: { visible: boolean; anonymous: boolean }): number {
+    return facts.visible && !facts.anonymous ? this.pending : 0
+  }
+
+  // a fresh attempt: its number, compared at its end
+  begin(): number {
+    return ++this.attempt
+  }
+
+  // an attempt ended: accepted when it is still the current one (the check is done), stale otherwise
+  settled(attempt: number): boolean {
+    if (attempt != this.attempt) return false
+    this.pending = 0
+    return true
+  }
+}
+
+// what an accepted outcome calls for: a timeout recovers, an answer or an error changes nothing
+export function resumeAction(facts: { outcome: ProbeOutcome; unsaved: boolean }): RestoreAction {
+  if (facts.outcome != 'timeout') return 'none'
+  return facts.unsaved ? 'prompt' : 'reload'
+}
+
+// sessionStorage key: the reload a timed-out probe makes stamps itself for the next load (a JSON
+// record: the reload's time, the hide's length and the probe's duration in ms), whose init log
+// says why it reloaded and whose window._probe_reload_at holds the time; the reloaded page's
+// instance record carries both stamps as `reloaded` (see updateInstance in index.svelte), so the
+// #status item shows a recovery from any device. diagnostic only, guarded like RESTORED_RELOAD_KEY
+export const PROBE_RELOAD_KEY = 'mindpage_probe_reload'

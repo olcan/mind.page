@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { focusMindbox, mindbox } from './editor_helpers.js'
-import { firestore, loadAdmin, loadAnonymous, waitForApp } from './helpers.js'
+import { ALICE, firestore, loadAdmin, loadAnonymous, loadUser, secretFor, waitForApp } from './helpers.js'
 import { savedId } from './editor_helpers.js'
 
 // the PAGE-CACHE RESTORE (see src/page_lifecycle.ts and onPageShow in index.svelte): the browser
@@ -230,6 +230,171 @@ test.describe('under an iPhone UA', () => {
       savedText: AFTER,
     })
     for (const name of ['#e2e_dead_client/control', '#e2e_dead_client/after']) await deleteSettled(page, name)
+  })
+})
+
+// THE RESUME PROBE (2026-09-30, see src/page_lifecycle.ts and onVisibilityChange in index.svelte):
+// the hypothesis that a page suspended without a page-cache park (a home-screen web app on iOS)
+// fires no persisted pageshow when it returns, so after a long enough hide the page reads its own
+// instance record from the server with a deadline. the three probe rows drive the page's own
+// visibility events (document.visibilityState overridden, the hide's length set on the record:
+// playwright's chromium never hides the page); the pending-write row is telemetry alone. all on a
+// returning personal account (the anonymous account of the admin load
+// publishes no instance record, and the probe reads the page's own; a first sign-in's secret
+// prompt and the upgrade prompt would sit over the page, see tests/e2e/personal.spec.ts)
+async function loadReturning(page: Page) {
+  await page.goto('/')
+  await page.evaluate(secret => {
+    localStorage.setItem('mindpage_secret', secret)
+    localStorage.setItem('mindpage_kdf', 'off') // no encryption-upgrade prompt either (the legacy override, as the personal lane's v0 rows)
+  }, secretFor(ALICE, 'correct horse battery staple'))
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+}
+
+// the heartbeat's first write (the record the probe reads; a read of a missing record is denied
+// by the rules, which the probe reports as an error, never a timeout)
+async function instanceRecorded(page: Page): Promise<string> {
+  const instanceId = await page.evaluate(() => window._instance_id)
+  expect(instanceId, 'signed in').toBeTruthy()
+  await expect.poll(async () => (await firestore().doc(`instances/${instanceId}`).get()).exists, { timeout: 30_000 }).toBe(true)
+  return instanceId!
+}
+
+const instanceRecord = async (instanceId: string) => (await firestore().doc(`instances/${instanceId}`).get()).data() ?? {}
+
+// the page's visibility as the app reads it, then the event; a hide's length is set on the record
+// (hidden_time moved back), since nothing here waits real seconds
+const setVisibility = (page: Page, state: 'hidden' | 'visible', hiddenForMs = 0) =>
+  page.evaluate(
+    ({ state, hiddenForMs }) => {
+      Object.defineProperty(document, 'visibilityState', { get: () => state, configurable: true })
+      if (state == 'visible' && hiddenForMs) window._instance.hidden_time = Date.now() - hiddenForMs
+      document.dispatchEvent(new Event('visibilitychange'))
+    },
+    { state, hiddenForMs },
+  )
+
+test('a live page turning visible after a long hide probes, publishes the facts and reloads nothing; a short hide probes nothing', async ({
+  page,
+}) => {
+  await loadReturning(page)
+  const before = await page.evaluate(() => window._init_time)
+  const instanceId = await instanceRecorded(page)
+  const logs: string[] = []
+  page.on('console', msg => logs.push(msg.text()))
+  await setVisibility(page, 'hidden')
+  await setVisibility(page, 'visible', 5_000) // a short hide: nothing
+  await page.waitForTimeout(500)
+  expect(await page.evaluate(() => window._instance.probe), 'no probe after a short hide').toBeNull()
+  await setVisibility(page, 'hidden')
+  await setVisibility(page, 'visible', 60_000)
+  // the facts ride the instance record, published at once (the heartbeat restarted by the probe)
+  await expect.poll(async () => (await instanceRecord(instanceId)).probe?.outcome, { timeout: 30_000 }).toBe('ok')
+  const record = await instanceRecord(instanceId)
+  expect(record.probe.hidden_ms).toBeGreaterThanOrEqual(60_000)
+  expect(record.probe.hidden_ms).toBeLessThan(61_000)
+  expect(record.probe.ms).toBeGreaterThanOrEqual(0)
+  expect(record.sync_time, 'a current server revision received').toBeGreaterThan(0)
+  expect(record.hidden_time).toBeGreaterThan(0)
+  expect(record.visible_time).toBeGreaterThan(record.hidden_time)
+  expect(record.reloaded, 'no recovery reload produced this page').toBeNull()
+  expect(await page.evaluate(() => window._init_time), 'no reload').toBe(before)
+  await expect(page.locator('.background.visible'), 'no modal').toBeHidden()
+  expect(logs.join('\n')).not.toMatch(/resume probe/)
+})
+
+test('a resume while offline defers the check, and the online event runs it while the page is visible', async ({
+  page,
+  context,
+}) => {
+  await loadReturning(page)
+  const instanceId = await instanceRecorded(page)
+  await setVisibility(page, 'hidden')
+  await context.setOffline(true) // navigator.onLine false, the offline event
+  await setVisibility(page, 'visible', 90_000)
+  await page.waitForTimeout(500)
+  expect(await page.evaluate(() => window._instance.probe), 'deferred: no probe offline').toBeNull()
+  await context.setOffline(false) // the online event: the deferred check runs now
+  await expect.poll(() => page.evaluate(() => (window._instance.probe as any)?.outcome), { timeout: 30_000 }).toBe('ok')
+  expect(await page.evaluate(() => (window._instance.probe as any).hidden_ms)).toBeGreaterThanOrEqual(90_000)
+  await expect.poll(async () => (await instanceRecord(instanceId)).probe?.outcome, { timeout: 30_000 }).toBe('ok')
+})
+
+test('a local write pending is no server-sync observation: the sync time waits for the acknowledged revision', async ({
+  page,
+}) => {
+  await loadReturning(page)
+  await instanceRecorded(page)
+  const t0 = await page.evaluate(() => window._instance.sync_time)
+  expect(t0).toBeGreaterThan(0)
+  // the write's acknowledgement held back 1.5 s at the network (the Write channel's requests
+  // alone: the Listen stream is untouched), while the SDK's local overlay of the pending write
+  // arrives at once with fromCache false and hasPendingWrites true (review 0 R3)
+  await page.route(/Firestore\/Write\/channel/, async route => {
+    if (route.request().method() == 'POST') await new Promise(r => setTimeout(r, 1_500))
+    await route.continue()
+  })
+  const TEXT = '#e2e_sync_time a local write, pending'
+  await page.evaluate(text => void window._create(text), TEXT)
+  await page.waitForTimeout(400) // the overlay has arrived, the acknowledgement has not
+  expect(await page.evaluate(() => window._instance.sync_time), 'unchanged by the overlay').toBe(t0)
+  await expect.poll(() => saveState(page, '#e2e_sync_time'), { timeout: 30_000 }).toEqual({ saving: false, savedText: TEXT })
+  await expect.poll(() => page.evaluate(() => window._instance.sync_time), 'the acknowledged revision').toBeGreaterThan(t0)
+  await page.unroute(/Firestore\/Write\/channel/)
+  await deleteSettled(page, '#e2e_sync_time')
+})
+
+test.describe('under an iPhone UA', () => {
+  test.use({
+    userAgent:
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
+  })
+
+  test('a dead client: an attempt the page hid before its deadline recovers nothing; the next show, its hide short, runs the pending check afresh, which gets no answer and reloads, noting the probe', async ({
+    page,
+  }) => {
+    await loadReturning(page)
+    const before = await page.evaluate(() => window._init_time)
+    await instanceRecorded(page)
+    const logs: string[] = []
+    page.on('console', msg => logs.push(msg.text()))
+    // the SDK's own pagehide handler: the zombie mark, then (this UA) the restricted queue where
+    // every later operation hangs (see the dead-client row above); a short deadline, since the
+    // probe hangs for good on this client
+    await page.evaluate(() => {
+      window._probe_timeout_ms = 2_000
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }))
+    })
+    // an attempt invalidated by a hide before its deadline (review 0 R2): no reload, no prompt
+    await setVisibility(page, 'hidden')
+    await setVisibility(page, 'visible', 30_000)
+    await page.waitForTimeout(300) // the attempt is pending
+    await setVisibility(page, 'hidden')
+    await page.waitForTimeout(3_000) // past the deadline
+    expect(await page.evaluate(() => window._init_time), 'no reload from a stale attempt').toBe(before)
+    await expect(page.locator('.background.visible'), 'no modal from a stale attempt').toBeHidden()
+    expect(await page.evaluate(() => window._instance.probe), 'a stale attempt records nothing').toBeNull()
+    // the next show after a SHORT hide (a one-second app switch): the check of the 30 s hide is
+    // still pending (review 1 R4), so a fresh attempt with a fresh deadline runs for it, gets no
+    // answer, and the page reloads (nothing is unsaved on this returning account; the dead-client
+    // row above covers the prompt over a hung write); the reload destroys the evaluation context
+    // mid-call, which is expected
+    const load = page.waitForEvent('load', { timeout: 20_000 })
+    await setVisibility(page, 'visible', 1_000).catch(() => {})
+    await load
+    await waitForApp(page) // signed in, the reload asks no anonymous choice
+    expect(await page.evaluate(() => window._init_time), 'a new initialization').toBeGreaterThan(before)
+    expect(logs.join('\n')).toMatch(/resume probe: no answer in \d+ ms \(hidden 30\d{3} ms\): reloading to resume sync/)
+    expect(logs.join('\n')).toMatch(/reloaded after a resume probe got no answer \(the page had been hidden 30 s/)
+    expect(await page.evaluate(() => window._probe_reload_at), 'the probe stamp').toBeGreaterThan(0)
+    // the reloaded page's instance record (a new one: a new initialization) says why it reloaded
+    const instanceId = await instanceRecorded(page)
+    await expect.poll(async () => (await instanceRecord(instanceId)).reloaded?.reason, { timeout: 30_000 }).toBe('probe')
+    const record = await instanceRecord(instanceId)
+    expect(record.reloaded.hidden_ms).toBeGreaterThanOrEqual(30_000)
+    expect(record.reloaded.hidden_ms).toBeLessThan(31_000)
+    expect(record.reloaded.ms).toBeGreaterThanOrEqual(2_000)
   })
 })
 
