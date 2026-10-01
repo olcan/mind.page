@@ -719,8 +719,9 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // sits in the MAIN list while agent-held (its work continues); the owner answers through the
   // main widget's delegate (a command document, the overlay to the delegated list) and takes it
   // back with /takeback (the overlay to the main list); a bound CHILD (its projection carries
-  // `parent`) stays in the delegated list when owner-held, marked ↳ with its parent in the
-  // tooltip, and the owner accepts its proposal by an unchanged re-delegation (the command
+  // `parent`) sits in the delegated list when owner-held under the project's standing /land
+  // (2.9: without it a proposal is the owner's and sits in the main list), marked ↳ with its
+  // parent in the tooltip, and the owner accepts its proposal by an unchanged re-delegation (the command
   // document carries the capture as the server holds it); a take-back on the child overlays it
   // into the main list at once
   await page.evaluate(name => void (location.hash = ''), '')
@@ -738,6 +739,12 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const CHILD_ROW = `↳ ${OTHER} #todo [delegated] write the release note` // the prefix, then the label
   const has = (rows: Row[], text: string, pending: string | null) => rows.filter(r => r[0].endsWith(text) && r[1] == pending).length == 1 // exactly one row
   await expect.poll(async () => has((await lists(page)).main, PROJECT_ROW, null), { timeout: 30_000 }).toBe(true)
+  // the vault's project design 2.9 (the owner, 2026-09-30): a child's PROPOSAL on a project
+  // without a standing /land is the owner's to accept, so it sits in the MAIN list beside its
+  // parent; under the project's standing /land (`standing_land` on the parent's projection)
+  // the parent lands it, and the child stays in the delegated list
+  await expect.poll(async () => has((await lists(page)).main, CHILD_ROW, null), { timeout: 30_000 }).toBe(true)
+  await writeStore(STORE, `global_store_${taskId}`, { ...taskStore, _agent: { state: { ...asking, rev: 10, standing_land: true } } })
   await expect.poll(async () => has((await lists(page)).delegated, CHILD_ROW, null), { timeout: 30_000 }).toBe(true)
   const placed = await lists(page) // the other todos of the lane sit where they sat
   expect(placed.main.some(r => r[0].endsWith(CHILD_ROW))).toBe(false)

@@ -81,12 +81,18 @@ export const RESTORED_RELOAD_KEY = 'mindpage_restored_reload'
 // restart). an attempt is INVALIDATED when the page hides or goes offline before its deadline
 // (review 0 R2): its late result recovers nothing, while the check itself stays pending until an
 // attempt of it is accepted (review 1 R4: `ResumeSchedule` below)
-export const RESUME_PROBE_AFTER_MS = 15_000 // a hide shorter than this raises no check of its own
-export const RESUME_PROBE_TIMEOUT_MS = 8_000 // the server's deadline
+// the thresholds, retuned the same day (the owner's gen14 tabs all reloaded after a 9.5-minute
+// laptop suspend under 15 s / 8 s / 2 s: the probe ran the moment Wi-Fi came back, while DNS and
+// the IPv6 route were still settling, and a desktop tab after a sleep is slow, not dead; the stale
+// state this guards against follows HOURS in the background, so the thresholds err toward never
+// probing a short absence): a hide shorter than 30 minutes raises no check of its own, the
+// server gets 20 seconds, and a deferred check waits 5 seconds after the `online` event
+export const RESUME_PROBE_AFTER_MS = 30 * 60_000
+export const RESUME_PROBE_TIMEOUT_MS = 20_000 // the server's deadline
 // the deferred check waits this long after the `online` event: the SDK restarts its streams on
 // the same event, and a read issued at once fails fast as `unavailable` (an error, which recovers
-// nothing) instead of asking the server
-export const RESUME_ONLINE_GRACE_MS = 2_000
+// nothing) instead of asking the server; a resumed laptop's network needs a few seconds more
+export const RESUME_ONLINE_GRACE_MS = 5_000
 export type ProbeOutcome = 'ok' | 'timeout' | 'error'
 
 // THE RESUME SCHEDULE (review 1 R4): a qualifying hide raises a CHECK that stays pending until

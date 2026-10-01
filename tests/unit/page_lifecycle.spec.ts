@@ -31,7 +31,7 @@ test('a restore of the memory-cache client (the shared origin) does nothing: no 
 // timeout recovers (reload, or ask when an edit is unsaved), an answer or an error leaves the
 // page alone
 
-const LONG = RESUME_PROBE_AFTER_MS
+const LONG = RESUME_PROBE_AFTER_MS // 30 minutes: the rows' hides are relative to it
 const signedIn = { anonymous: false }
 
 test('a long hide raises a check probed at once online; a short hide, an anonymous page or nothing pending raises none', () => {
@@ -59,42 +59,42 @@ test('a resume offline defers the check to the online event, run only with the p
 
 test('an attempt invalidated by a hide is stale, and the check runs afresh at the next show, its hide short or not', () => {
   const s = new ResumeSchedule()
-  expect(s.shown({ hiddenMs: 30_000, online: true, ...signedIn })).toBe(30_000)
+  expect(s.shown({ hiddenMs: LONG + 30_000, online: true, ...signedIn })).toBe(LONG + 30_000)
   const first = s.begin()
   s.invalidate() // a one-second app switch during the probe
-  expect(s.shown({ hiddenMs: 1_000, online: true, ...signedIn }), 'the pending check, not the short hide').toBe(30_000)
+  expect(s.shown({ hiddenMs: 1_000, online: true, ...signedIn }), 'the pending check, not the short hide').toBe(LONG + 30_000)
   const second = s.begin()
   expect(s.settled(first), 'the old attempt is stale').toBe(false)
-  expect(s.pending, 'and left the check pending').toBe(30_000)
+  expect(s.pending, 'and left the check pending').toBe(LONG + 30_000)
   expect(s.settled(second)).toBe(true)
   expect(s.pending).toBe(0)
 })
 
 test('an attempt invalidated by a connection drop is stale, and the online event runs the check afresh', () => {
   const s = new ResumeSchedule()
-  expect(s.shown({ hiddenMs: 60_000, online: true, ...signedIn })).toBe(60_000)
+  expect(s.shown({ hiddenMs: LONG + 60_000, online: true, ...signedIn })).toBe(LONG + 60_000)
   const first = s.begin()
   s.invalidate() // offline before the answer
   expect(s.settled(first)).toBe(false)
-  expect(s.online({ visible: true, ...signedIn }), 'the pending check').toBe(60_000)
+  expect(s.online({ visible: true, ...signedIn }), 'the pending check').toBe(LONG + 60_000)
   expect(s.settled(s.begin())).toBe(true)
 })
 
 test('a deferred check interrupted before it starts survives the interruption', () => {
   const s = new ResumeSchedule()
-  expect(s.shown({ hiddenMs: 45_000, online: false, ...signedIn }), 'deferred').toBe(0)
+  expect(s.shown({ hiddenMs: LONG + 45_000, online: false, ...signedIn }), 'deferred').toBe(0)
   s.invalidate() // hidden again before the network returned
-  expect(s.shown({ hiddenMs: 2_000, online: true, ...signedIn }), 'the pending check at the next show').toBe(45_000)
+  expect(s.shown({ hiddenMs: 2_000, online: true, ...signedIn }), 'the pending check at the next show').toBe(LONG + 45_000)
   expect(s.settled(s.begin())).toBe(true)
 })
 
 test('a later long hide replaces the pending check\'s length; a later short one keeps it', () => {
   const s = new ResumeSchedule()
-  s.shown({ hiddenMs: 20_000, online: false, ...signedIn })
-  expect(s.shown({ hiddenMs: 90_000, online: false, ...signedIn })).toBe(0)
-  expect(s.pending).toBe(90_000)
+  s.shown({ hiddenMs: LONG + 20_000, online: false, ...signedIn })
+  expect(s.shown({ hiddenMs: LONG + 90_000, online: false, ...signedIn })).toBe(0)
+  expect(s.pending).toBe(LONG + 90_000)
   s.shown({ hiddenMs: 500, online: false, ...signedIn })
-  expect(s.pending).toBe(90_000)
+  expect(s.pending).toBe(LONG + 90_000)
 })
 
 test('a timed-out probe reloads, or asks first when an edit is unsaved; an answer or an error changes nothing', () => {

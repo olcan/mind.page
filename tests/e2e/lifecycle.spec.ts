@@ -284,16 +284,16 @@ test('a live page turning visible after a long hide probes, publishes the facts 
   const logs: string[] = []
   page.on('console', msg => logs.push(msg.text()))
   await setVisibility(page, 'hidden')
-  await setVisibility(page, 'visible', 5_000) // a short hide: nothing
+  await setVisibility(page, 'visible', 600_000) // a short hide (ten minutes: a laptop's nap): nothing
   await page.waitForTimeout(500)
   expect(await page.evaluate(() => window._instance.probe), 'no probe after a short hide').toBeNull()
   await setVisibility(page, 'hidden')
-  await setVisibility(page, 'visible', 60_000)
+  await setVisibility(page, 'visible', 1_860_000) // 31 minutes: a long hide
   // the facts ride the instance record, published at once (the heartbeat restarted by the probe)
   await expect.poll(async () => (await instanceRecord(instanceId)).probe?.outcome, { timeout: 30_000 }).toBe('ok')
   const record = await instanceRecord(instanceId)
-  expect(record.probe.hidden_ms).toBeGreaterThanOrEqual(60_000)
-  expect(record.probe.hidden_ms).toBeLessThan(61_000)
+  expect(record.probe.hidden_ms).toBeGreaterThanOrEqual(1_860_000)
+  expect(record.probe.hidden_ms).toBeLessThan(1_861_000)
   expect(record.probe.ms).toBeGreaterThanOrEqual(0)
   expect(record.sync_time, 'a current server revision received').toBeGreaterThan(0)
   expect(record.hidden_time).toBeGreaterThan(0)
@@ -312,12 +312,12 @@ test('a resume while offline defers the check, and the online event runs it whil
   const instanceId = await instanceRecorded(page)
   await setVisibility(page, 'hidden')
   await context.setOffline(true) // navigator.onLine false, the offline event
-  await setVisibility(page, 'visible', 90_000)
+  await setVisibility(page, 'visible', 1_890_000)
   await page.waitForTimeout(500)
   expect(await page.evaluate(() => window._instance.probe), 'deferred: no probe offline').toBeNull()
-  await context.setOffline(false) // the online event: the deferred check runs now
+  await context.setOffline(false) // the online event: the deferred check runs now (after the grace)
   await expect.poll(() => page.evaluate(() => (window._instance.probe as any)?.outcome), { timeout: 30_000 }).toBe('ok')
-  expect(await page.evaluate(() => (window._instance.probe as any).hidden_ms)).toBeGreaterThanOrEqual(90_000)
+  expect(await page.evaluate(() => (window._instance.probe as any).hidden_ms)).toBeGreaterThanOrEqual(1_890_000)
   await expect.poll(async () => (await instanceRecord(instanceId)).probe?.outcome, { timeout: 30_000 }).toBe('ok')
 })
 
@@ -368,14 +368,14 @@ test.describe('under an iPhone UA', () => {
     })
     // an attempt invalidated by a hide before its deadline (review 0 R2): no reload, no prompt
     await setVisibility(page, 'hidden')
-    await setVisibility(page, 'visible', 30_000)
+    await setVisibility(page, 'visible', 1_830_000)
     await page.waitForTimeout(300) // the attempt is pending
     await setVisibility(page, 'hidden')
     await page.waitForTimeout(3_000) // past the deadline
     expect(await page.evaluate(() => window._init_time), 'no reload from a stale attempt').toBe(before)
     await expect(page.locator('.background.visible'), 'no modal from a stale attempt').toBeHidden()
     expect(await page.evaluate(() => window._instance.probe), 'a stale attempt records nothing').toBeNull()
-    // the next show after a SHORT hide (a one-second app switch): the check of the 30 s hide is
+    // the next show after a SHORT hide (a one-second app switch): the check of the 1830 s hide is
     // still pending (review 1 R4), so a fresh attempt with a fresh deadline runs for it, gets no
     // answer, and the page reloads (nothing is unsaved on this returning account; the dead-client
     // row above covers the prompt over a hung write); the reload destroys the evaluation context
@@ -385,15 +385,15 @@ test.describe('under an iPhone UA', () => {
     await load
     await waitForApp(page) // signed in, the reload asks no anonymous choice
     expect(await page.evaluate(() => window._init_time), 'a new initialization').toBeGreaterThan(before)
-    expect(logs.join('\n')).toMatch(/resume probe: no answer in \d+ ms \(hidden 30\d{3} ms\): reloading to resume sync/)
-    expect(logs.join('\n')).toMatch(/reloaded after a resume probe got no answer \(the page had been hidden 30 s/)
+    expect(logs.join('\n')).toMatch(/resume probe: no answer in \d+ ms \(hidden 183\d{4} ms\): reloading to resume sync/)
+    expect(logs.join('\n')).toMatch(/reloaded after a resume probe got no answer \(the page had been hidden 1830 s/)
     expect(await page.evaluate(() => window._probe_reload_at), 'the probe stamp').toBeGreaterThan(0)
     // the reloaded page's instance record (a new one: a new initialization) says why it reloaded
     const instanceId = await instanceRecorded(page)
     await expect.poll(async () => (await instanceRecord(instanceId)).reloaded?.reason, { timeout: 30_000 }).toBe('probe')
     const record = await instanceRecord(instanceId)
-    expect(record.reloaded.hidden_ms).toBeGreaterThanOrEqual(30_000)
-    expect(record.reloaded.hidden_ms).toBeLessThan(31_000)
+    expect(record.reloaded.hidden_ms).toBeGreaterThanOrEqual(1_830_000)
+    expect(record.reloaded.hidden_ms).toBeLessThan(1_831_000)
     expect(record.reloaded.ms).toBeGreaterThanOrEqual(2_000)
   })
 })
