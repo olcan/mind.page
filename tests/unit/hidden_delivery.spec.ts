@@ -274,6 +274,43 @@ test('BOUNDARY: the producer changes the held side; the waiting delivery reads e
   expect(h.hiddenById.get('b'), 'and b installed from its post-boundary evidence').toBe('global_store_b')
 })
 
+test('STARTUP: a visible modification of a cached hidden document, received while initialization holds the boundary, is admitted with evidence and repairs both sides after the rebuild', async () => {
+  // review 4 R5 (2026-09-30): the items listener publishes the first snapshot's raw hidden ids as
+  // pending membership with the initialization attempt as the boundary (index.svelte, the
+  // initialize branch). a same-id live change received before the index exists is then admitted
+  // at receipt — the boundary is its admission arm AND an uncertainty source — waits for the
+  // rebuild, and its evidence read installs the CURRENT side over the cached one. with the startup
+  // maps merely present and empty (not tracked, not visible) and no membership, the change was
+  // admitted BLIND: the visible reducer missed the index and the visible side was lost while
+  // the cached hidden wrapper stayed and the lease sealed. a full-account owner page, as the phone
+  const h = harness({ fixed: false, readonly: false, anonymous: false })
+  h.server.set('h', { item: { hidden: false, text: 'unhidden now' } }) // server truth: VISIBLE now
+  const published = deferred()
+  const rebuild = deferred()
+  const initialization = h.corpus.run(async run => {
+    run.publishMembership(['h']) // the cached first snapshot's hidden ids, before any await
+    published.resolve()
+    await rebuild.promise // the decrypt and the index build
+    h.hiddenById.set('h', 'global_store_h') // the rebuild installs the CACHED hidden wrapper
+  })
+  await published.promise
+  const { deliveries } = h.receive([changeOf('h', 'modified', { hidden: false })]) // nothing tracked or visible yet
+  const [delivery] = deliveries
+  expect(delivery.record.kind, 'admitted by the boundary alone').toBe('admitted')
+  expect(delivery.needsEvidence, 'and uncertain: evidence').toBe(true)
+  expect(!!delivery.boundary, 'the initialization boundary captured at receipt').toBe(true)
+  h.schedule(delivery, { hidden: false, text: 'unhidden now' })
+  await new Promise(res => setImmediate(res))
+  expect(h.membershipReadCount(), 'no read while initialization holds the boundary').toBe(0)
+  expect(h.effects, 'and no reducer').toEqual([])
+  rebuild.resolve()
+  await initialization
+  expect(await outcomeOf(delivery)).toBe('applied')
+  expect(h.membershipReadCount(), 'the evidence read taken AFTER the rebuild').toBe(1)
+  expect(h.hiddenById.has('h'), 'the cached hidden wrapper removed').toBe(false)
+  expect(h.visible.has('h'), 'the visible item installed').toBe(true)
+})
+
 test('STOP between reservation and the body: the delivery blocks with zero mutation', async () => {
   // production applyRemote reaches the body on a later microtask behind predecessors; a stop can
   // land in that gap, and the body-level check is what refuses — deleting it survived round 77

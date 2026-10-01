@@ -2105,7 +2105,7 @@
     return document.documentElement.clientWidth / (parseFloat(zoom) || 1)
   }
 
-  let indexFromId
+  let indexFromId = new Map<string, number>() // present and empty before the first indexing: the receipt path's `visibleNow` reads it during initialization (see hiddenItems)
   let itemsdiv
   let headerdiv
   let consolediv
@@ -7933,7 +7933,17 @@
   let maxRenderedAtInit = 100
   let specialTagFunctions = []
   let adminItems = new Set(['QbtH06q6y6GY4ONPzq8N' /* welcome item */])
-  let hiddenItems
+  // the hidden index EXISTS from the start, empty until the first initialization builds it (and
+  // rebuilds replace the maps): a server change arriving between the first snapshot and the build
+  // (another client's hidden-store write, the bridge's status heartbeat above all) runs the
+  // receipt path, whose admission reads the index (`tracksDocument`); on an undefined map it threw
+  // inside the firestore callback, its reserved lease never settled, and the page never confirmed
+  // its corpus for its lifetime (the owner's iPhone, 2026-09-30: the pusher, the updater, the
+  // sharer and the todoer's writers waited forever, the stale app until a relaunch that saw no
+  // early change). An empty map says "not tracked", which alone would lose a cached hidden
+  // document's visible modification; initialization therefore also publishes its raw hidden ids
+  // as pending corpus membership (see the initialize branch of the items listener)
+  let hiddenItems = new Map()
   // the two maps as one index for the extracted transitions (see src/hidden.ts)
   // NOTE: this rebuilds the adapter object on every call, so the index must own NO state of its
   // own — anything attached lazily to the returned object is discarded immediately. session
@@ -8341,7 +8351,7 @@
       )
   }
 
-  let hiddenItemsByName
+  let hiddenItemsByName = new Map() // see hiddenItems: present and empty before the first build
   let hiddenItemsInvalid
   let resolve_init // set below
   function init_log(...args) {
@@ -8434,6 +8444,10 @@
     // whole firebase facade — and it does not need to be one: that origin holds no session, no
     // secret and no session cookie
 
+    // a test seam: the startup-race row stalls the build here so a server change can arrive
+    // between the first snapshot and the index (tests/e2e/lifecycle.spec.ts)
+    const stall = Number(window['_initialize_stall_ms']) || 0
+    if (stall) await new Promise(resolve => setTimeout(resolve, stall))
     // decrypt any encrypted items
     items = (await Promise.all(items.map(decryptItem)).catch(encryptionError)) || []
     if (signingOut) return false // encryption error
@@ -9574,6 +9588,24 @@
                   const lease = reserveHiddenAuthority({ policy: decision.policy, confirmsServer })
                   initializeAttempt = attemptInitialize()
                   void initializeAttempt.then(ok => lease.settle({ failed: !ok }))
+                  // THE FIRST SNAPSHOT IS A CORPUS PRODUCER (the coordinator design's startup
+                  // group): its raw hidden ids are published as pending membership with the
+                  // initialization attempt as the boundary, so a same-id live change received
+                  // before the index exists is ADMITTED at receipt (the boundary is its admission
+                  // arm and an uncertainty source: evidence), waits for the rebuild, and its
+                  // membership read then installs the current side over the cached one. Without
+                  // it a visible modification of a cached hidden document arriving during
+                  // initialization was admitted blind and lost (2026-09-30, review 4 R5); the
+                  // startup maps alone (present and empty) only kept the receipt from throwing.
+                  // The attempt always settles, so the boundary always releases; a stop rejects
+                  // the run with CorpusStopped, which the attempt's own lease and stop already own
+                  const attempt = initializeAttempt
+                  void hiddenCorpus
+                    .run(async run => {
+                      run.publishMembership(items.filter(item => item.hidden).map(item => item.id))
+                      await attempt
+                    })
+                    .catch(() => {})
                 }
               }
               // set up callback to complete init (or "sync")
@@ -9659,7 +9691,9 @@
             // per change, every record allocated in the same order, and each change BOUND to its
             // own record, captured boundary and needsEvidence bit — the helper owns the
             // correlation, so no caller re-zips parallel arrays by index
-            const { batch, deliveries } = receiveChanges(changes, {
+            const received = ((): ReturnType<typeof receiveChanges> | null => {
+              try {
+                return receiveChanges(changes, {
               mode: { fixed, readonly, anonymous },
               pendingBoundary: id => hiddenCorpus.pendingBoundary(id),
               tracksDocument: id => !!hiddenPersistence.nameForDocument(id),
@@ -9672,7 +9706,24 @@
               // a fresh one would stale a NEWER callback's candidate that should be able to heal
               // this failure
               revoke: revokeThisRevision,
-            })
+                })
+              } catch (e) {
+                // A RECEIPT STEP THAT THROWS (an observation read before its state existed, as
+                // `tracksDocument` and `visibleNow` did during initialization until 2026-09-30)
+                // leaves this revision's changes unapplied, and firestore will not replay them.
+                // Its lease, reserved above, must still settle: an unsettled slot holds every later
+                // lease's `done` behind it, so no later revision confirms the corpus or advances the
+                // basis, for the page's lifetime (the owner's iPhone: a page that continued applying
+                // later changes yet never confirmed; the pusher, the updater, the sharer and the todoer's
+                // writers waited forever). Fail the slot and take the sticky stop, which says so.
+                console.error('remote change receipt failed:', e)
+                settleApplied({ failed: true })
+                stopIngress('remote change receipt failed')
+                return null
+              }
+            })()
+            if (received === null) return
+            const { batch, deliveries } = received
             // this callback is ACTIVE until every one of its records terminalizes. AGGREGATE
             // FINALIZATION is the sole remover: a stop aborts the records but must not delete a
             // context whose work is still live

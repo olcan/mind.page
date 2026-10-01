@@ -242,12 +242,23 @@ test.describe('under an iPhone UA', () => {
 // returning personal account (the anonymous account of the admin load
 // publishes no instance record, and the probe reads the page's own; a first sign-in's secret
 // prompt and the upgrade prompt would sit over the page, see tests/e2e/personal.spec.ts)
+const PHRASE = 'correct horse battery staple'
+
+// a hidden document written by ANOTHER client (the bridge's store writes: the app's hidden document
+// shape, v0), as tests/e2e/tasks.spec.ts writes them
+async function writeHiddenStore(id: string, name: string, item: unknown) {
+  const { encryptWithSecret } = await import('../../src/crypto.js')
+  const time = Date.now()
+  const cipher = await encryptWithSecret(JSON.stringify({ hidden: true, time, attr: null, text: JSON.stringify({ name, item }) }), secretFor(ALICE, PHRASE))
+  await firestore().collection('items').doc(id).set({ user: ALICE.uid, time, hidden: true, text: null, attr: null, cipher })
+}
+
 async function loadReturning(page: Page) {
   await page.goto('/')
   await page.evaluate(secret => {
     localStorage.setItem('mindpage_secret', secret)
     localStorage.setItem('mindpage_kdf', 'off') // no encryption-upgrade prompt either (the legacy override, as the personal lane's v0 rows)
-  }, secretFor(ALICE, 'correct horse battery staple'))
+  }, secretFor(ALICE, PHRASE))
   await loadUser(page, ALICE)
   await waitForApp(page)
 }
@@ -472,4 +483,64 @@ test('a child created by Ctrl+Enter and deleted at once by Ctrl+Backspace leaves
   expect(await page.evaluate(() => (window as any).MindBox.get().trim()), 'the parent targeted again').toBe(PARENT)
   expect(seen, 'no dialog').toEqual([])
   await deleteSettled(page, PARENT)
+})
+
+// THE STARTUP RACE (2026-09-30, the owner's iPhone, read over the tethered inspector): a hidden
+// document changed by another client within the first seconds of a launch (the bridge's status
+// heartbeat and the task projections rewrite an item's store every few seconds) arrived between
+// the first snapshot and the index build; the receipt path's admission read the hidden and the
+// visible index before initialization had built them and threw inside the firestore callback,
+// and the thrown receipt's authority lease never settled, so no later revision confirmed the
+// corpus for that page's lifetime (the pusher, the updater, the sharer and the todoer's writers
+// waited for the server-confirmed corpus; a relaunch that saw no early change confirmed). the row
+// owns a real item with two hidden stores, stalls the build through the seam on a cached launch
+// (the first snapshot from the persistent cache, the confirmation needing a later current receipt)
+// and, meanwhile, rewrites one store as the bridge does and turns the other VISIBLE (review 4 R5:
+// a cached hidden document's visible modification received during initialization was admitted
+// blind and lost until initialization published its raw hidden membership)
+test('a server change arriving during initialization neither throws nor blocks the server confirmation', async ({ page }) => {
+  await loadReturning(page)
+  const NAME = '#e2e_startup_race'
+  await page.evaluate(text => void window._create(text), `${NAME} the store owner`)
+  await expect.poll(() => savedId(page, NAME), { timeout: 30_000 }).toBeTruthy()
+  const ownerId = (await savedId(page, NAME))!
+  const STORE_A = 'e2e-startup-race-store-a' // rewritten during the stall, stays hidden
+  const STORE_H = 'e2e-startup-race-store-h' // turned visible during the stall
+  const UNHIDDEN = '#e2e_startup_race_h'
+  await writeHiddenStore(STORE_A, `global_store_${ownerId}`, { beat: 0 })
+  await writeHiddenStore(STORE_H, `global_store_e2e_startup_race_h`, { shadow: true })
+  await page.waitForTimeout(1_500) // both delivered before the relaunch (the cache holds them)
+  const errors: string[] = []
+  page.on('pageerror', e => errors.push(String(e)))
+  await page.addInitScript(() => void (window._initialize_stall_ms = 2_500))
+  try {
+    await page.reload() // the first snapshot comes from the persistent cache now
+    for (let beat = 1; beat <= 4; beat++) {
+      await writeHiddenStore(STORE_A, `global_store_${ownerId}`, { beat }) // lands while the build stalls
+      await page.waitForTimeout(200)
+    }
+    const { encryptWithSecret } = await import('../../src/crypto.js')
+    await firestore()
+      .collection('items')
+      .doc(STORE_H)
+      .set({
+        user: ALICE.uid,
+        time: Date.now(),
+        hidden: false,
+        text: null,
+        attr: null,
+        cipher: await encryptWithSecret(JSON.stringify({ text: `${UNHIDDEN} unhidden during initialization`, attr: null }), secretFor(ALICE, PHRASE)),
+      })
+    await waitForApp(page)
+    await expect.poll(() => page.evaluate(() => window._server_confirmed), { timeout: 30_000 }).toBe(true)
+    expect(errors, 'no uncaught error in the listener').toEqual([])
+    // the same-side rewrites applied: the store holds the last beat
+    await expect.poll(() => page.evaluate(name => (window._item(name, true) as any)?.global_store?.beat, NAME), { timeout: 30_000 }).toBe(4)
+    // the transition applied on both sides: the visible item exists, the cached wrapper is gone
+    await expect.poll(() => page.evaluate(name => window._item(name, true)?.text ?? null, UNHIDDEN), { timeout: 30_000 }).toContain('unhidden during initialization')
+    expect(await page.evaluate(() => window._items().filter(item => item.global_store?.shadow).length), 'no item carries the shadow store').toBe(0)
+  } finally {
+    await firestore().collection('items').doc(STORE_A).delete()
+    await firestore().collection('items').doc(STORE_H).delete()
+  }
 })

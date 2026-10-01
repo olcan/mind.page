@@ -59,6 +59,7 @@ declare global {
     _restored_reload_at?: number // the stamp of the page-cache restore that reloaded this page (see src/page_lifecycle.ts)
     _probe_reload_at?: number // the stamp of the timed-out resume probe that reloaded this page (see src/page_lifecycle.ts)
     _probe_timeout_ms?: number // the resume probe's deadline, shortened by a row
+    _initialize_stall_ms?: number // the startup-race row stalls the first index build this long (initialize in index.svelte)
     _probe_liveness: (hiddenMs: number) => Promise<'ok' | 'timeout' | 'error' | 'stale'> // the resume probe, for a hide of that length
     _instance: { hidden_time: number; visible_time: number; sync_time: number; probe: unknown; reloaded: unknown } // this page's instance record, as published
     _instance_id: string | undefined // this page's instance record id (instances/<id>), set after sign-in
