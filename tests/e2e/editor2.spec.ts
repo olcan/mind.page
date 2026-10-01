@@ -283,6 +283,79 @@ const becamePrimary = (page: Page) =>
     return { tried: sdk.some(m => /updateClientMetadataAndTryBecomePrimary/.test(m)), became: sdk.some(m => /Client is eligible for a primary lease/.test(m)) }
   })
 
+test('an external image that fails once is retried once with a cache-busting query; one that fails twice is marked failed', async ({
+  page,
+}) => {
+  // the owner's iPhone (2026-10-01): six Dropbox-hosted icons failed with "The network connection
+  // was lost" in the first seconds of every launch and loaded fine a moment later. an external
+  // image's first failure now schedules one retry (2 s, a `_retry` query inserted before any
+  // fragment); a second failure takes the ordinary failed path. the routes stand in for the
+  // flaky host: `flaky.png` (with a query and a fragment, review 0 R1) fails its first request and
+  // serves a 1x1 png to the second, which is HELD until the row has seen the page released;
+  // `dead.png` fails every request
+  const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII', 'base64')
+  const requests: string[] = []
+  let releaseRetry!: () => void
+  const retryHeld = new Promise<void>(resolve => (releaseRetry = resolve))
+  await page.route(/https:\/\/icons\.e2e\.invalid\//, async route => {
+    const url = route.request().url()
+    requests.push(url)
+    const flaky = url.includes('flaky.png')
+    if (!flaky || requests.filter(u => u.includes('flaky.png')).length == 1) return route.abort('connectionfailed')
+    await retryHeld // the retry's response waits for the release below
+    await route.fulfill({ status: 200, contentType: 'image/png', body: PNG })
+  })
+  const logs: string[] = []
+  page.on('console', msg => logs.push(`${msg.type()}: ${msg.text()}`))
+  await loadAdmin(page)
+  try {
+    await page.evaluate(() => {
+      void window._create(
+        '#e2e_extimg external icons\n<img src="https://icons.e2e.invalid/flaky.png?size=16#view" style="zoom:0.5"> <img src="https://icons.e2e.invalid/dead.png" style="zoom:0.5">'
+      )
+    })
+    await page.evaluate(() => void (location.hash = '#e2e_extimg'))
+    const state = () =>
+      page.evaluate(() => {
+        const imgs = [...(window._item('#e2e_extimg', true)?.elem?.querySelectorAll('.content img') ?? [])] as HTMLImageElement[]
+        return imgs.map(img => ({
+          src: img.getAttribute('src')!.replace(/_retry=\d+/, '_retry=T'),
+          retried: img.hasAttribute('_retried'),
+          failed: img.hasAttribute('_failed'),
+          rendered: img.hasAttribute('_rendered'),
+          width: img.naturalWidth,
+        }))
+      })
+    const rendered = () => page.evaluate(() => (window.__items.find(item => item.labelText == '#e2e_extimg') as any)?.rendered ?? false)
+    // the first failures: both retried, the item rendered (the page released) while the flaky
+    // image's retry is still held and nothing has loaded
+    await expect.poll(async () => requests.filter(u => u.includes('flaky.png')).length, { timeout: 20_000 }).toBe(2)
+    await expect.poll(rendered, { timeout: 20_000 }).toBe(true)
+    expect((await state()).map(s => s.width), 'nothing loaded yet').toEqual([0, 0])
+    // the retry's request carries the parameter IN THE QUERY, after the existing one; the fragment
+    // never reaches the server and stays on the element
+    expect(requests.filter(u => u.includes('flaky.png'))[1]).toMatch(/^https:\/\/icons\.e2e\.invalid\/flaky\.png\?size=16&_retry=\d+$/)
+    releaseRetry()
+    // the flaky one: loaded by its retry, the fragment kept; the dead one: retried once, then failed
+    await expect.poll(state, { timeout: 20_000 }).toEqual([
+      { src: 'https://icons.e2e.invalid/flaky.png?size=16&_retry=T#view', retried: true, failed: false, rendered: true, width: 1 },
+      { src: 'https://icons.e2e.invalid/dead.png?_retry=T', retried: true, failed: true, rendered: true, width: 0 },
+    ])
+    expect(requests.filter(u => u.includes('flaky.png')).length, 'exactly two requests for the flaky image: the failure and the retry that loaded').toBe(2)
+    // the dead one: its retry was requested; an item's settling re-renders create fresh elements,
+    // each failing from the memory cache without a request and scheduling a retry that finds its
+    // element replaced, so the log lines are not a count of attempts: the requests and the final
+    // state are (and `_failed` on the flaky image would be the error's mark: it has none)
+    expect(requests.filter(u => u.includes('dead.png')).length, 'the dead one was retried').toBeGreaterThanOrEqual(2)
+    expect(logs.some(l => l.startsWith('debug: image load failed, retrying once in 2000ms: https://icons.e2e.invalid/flaky.png?size=16#view')), 'the retry is logged at debug').toBe(true)
+    expect(logs.some(l => l.startsWith('error: image load failed')), 'the second failure is the error').toBe(true)
+  } finally {
+    releaseRetry() // harmless twice: a route handler must not stay awaiting it after a failed assertion
+    const id = await savedId(page, '#e2e_extimg').catch(() => null)
+    if (id) await firestore().collection('items').doc(id).delete()
+  }
+})
+
 test('a second tab sharing the persistent cache, a secondary, confirms on its own', async ({ page }) => {
   await sdkLogs(page)
   await loadAdmin(page)

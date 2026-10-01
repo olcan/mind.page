@@ -173,6 +173,13 @@ test.describe('under an iPhone UA', () => {
     const CONTROL = '#e2e_dead_client/control a write that settles on the live client'
     const DEAD = '#e2e_dead_client/dead a write the dead client never sends'
     const AFTER = '#e2e_dead_client/after a write that settles on the reloaded client'
+      // the account's external images cannot resolve in this sandbox; served as a 1x1 png so neither
+      // their failure nor their one retry (Item.svelte) lands in this row's error list
+    await page.route(/^https?:\/\/(?!(?:[\w-]+\.)*localhost|127\.0\.0\.1)/, route =>
+      route.request().resourceType() == 'image'
+        ? route.fulfill({ status: 200, contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII', 'base64') })
+        : route.continue(),
+    )
     await loadAdmin(page)
     const before = await page.evaluate(() => window._init_time)
     // the app's own UA switch stays off: the steps run the desktop code paths (isIOS's inputs as the

@@ -1209,6 +1209,39 @@
       .catch(console.error)
   }
 
+  // AN EXTERNAL IMAGE'S FIRST FAILURE IS RETRIED ONCE (2026-10-01): on the owner's iPhone six
+  // Dropbox-hosted icons failed with "The network connection was lost" within the first seconds
+  // of every launch and loaded fine a moment later (the host was up, the links alive, no service
+  // worker in the way: a connection-level failure of the launch's first burst to that host). The
+  // retry waits out the burst and adds a cache-busting query, so a cached failed entry cannot be
+  // served again; a second failure takes the ordinary path (the error logged, `_failed`). Only an
+  // http(s) image that is not the app's own pending download qualifies (the account's images
+  // have their own bounded retries in onImageFailed, see index.svelte), and only once per element
+  // (`_retried`); a re-render starts afresh. The page is released at the first failure as before:
+  // the retry runs underneath, and its success repaints the img through the ordinary onload
+  const EXTERNAL_IMAGE_RETRY_MS = 2_000
+  function retryExternalImage(img: HTMLImageElement): boolean {
+    const src = img.getAttribute('src') ?? ''
+    if (img.hasAttribute('_pending') || img.hasAttribute('_retried') || !/^https?:\/\//.test(src)) return false
+    img.setAttribute('_retried', Date.now().toString())
+    console.debug(`image load failed, retrying once in ${EXTERNAL_IMAGE_RETRY_MS}ms: ${src}`)
+    img.onload?.(new Event('load')) // the page is released now, as a failure releases it; the retry repaints
+    setTimeout(() => {
+      if (!img.isConnected) return // re-rendered or removed meanwhile
+      img.src = withRetryQuery(src, Date.now())
+    }, EXTERNAL_IMAGE_RETRY_MS)
+    return true
+  }
+  // the cache-busting query goes INTO the query, before any fragment (a `#view` of an svg must
+  // stay a fragment; appended to the whole string it would have joined the fragment and left
+  // the request unchanged, review 0 R1); the existing query and fragment are preserved as written
+  function withRetryQuery(src: string, stamp: number): string {
+    const hash = src.indexOf('#')
+    const base = hash < 0 ? src : src.slice(0, hash)
+    const fragment = hash < 0 ? '' : src.slice(hash)
+    return base + (base.includes('?') ? '&' : '?') + '_retry=' + stamp + fragment
+  }
+
   function renderImages(id, elems) {
     cacheElems() // cache/restore any new cached elements
     // set up img elements to trigger downloading (if _pending) and invoke onResized upon loading
@@ -1243,6 +1276,7 @@
         // note PDFs currently fail in chrome (and presumably some other browsers) so we emit a warning in that case
         if (img.getAttribute('_type') == 'application/pdf')
           console.warn('pdf image load failed (as expected in some browsers like chrome)', img, e)
+        else if (retryExternalImage(img)) return // the first failure of an external image: one retry
         else console.error('image load failed', img, e)
         img.setAttribute('_failed', Date.now().toString())
         img.onload()

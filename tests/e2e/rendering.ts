@@ -18,8 +18,12 @@ export async function renderedHtml(page: Page, id: string, timeout = 15_000): Pr
         await sleep(200)
         const current = content.innerHTML
         // graphviz (dot) renders after a lazy wasm fetch, so a dot container without its svg is
-        // still pending even if the html has not changed between polls
-        const pending = /class="dot"/.test(current) && !/<svg/.test(current)
+        // still pending even if the html has not changed between polls; so is an external image
+        // whose one retry (Item.svelte, 2 s after its first failure) has neither loaded nor failed
+        const retrying = [...content.querySelectorAll('img[_retried]:not([_failed])')].some(
+          img => !(img as HTMLImageElement).naturalWidth
+        )
+        const pending = (/class="dot"/.test(current) && !/<svg/.test(current)) || retrying
         if (current == html && !pending) break // settled
         html = current
       }
@@ -55,6 +59,7 @@ export function normalize(html: string): string {
     .replace(/ _(?:cached|rendered)="\d+"/g, '') // element cache timestamps (see Item.svelte)
     .replace(/ _cache_key="[^"]*"/g, '') // includes a per-render counter (see Item.svelte)
     .replace(/ _failed="\d+"/g, ' _failed') // failed image marker carries a timestamp
+    .replace(/<img\b[^>]*\b_retried="\d+"[^>]*>/g, stripRetry) // an external image's one retry (Item.svelte)
     .replace(/ ctxtmenu_counter="\d+"/g, '') // mathjax context menu counter (render order)
     .replace(/ ?position: relative;?/g, '') // set by c3 (chart containers) and mathjax at variable times
     // inline style declaration order varies with render timing (e.g. the img macro applies
@@ -72,4 +77,14 @@ export function normalize(html: string): string {
     .replace(/ aria-(?:owns|labelledby)="[^"]*"/g, '') // mathjax aria refs to dropped ids
     .replace(/>\s*</g, '>\n<') // one tag per line
     .trim()
+}
+
+// a retried external image's generated markers, and nothing else: the `_retried` stamp and the
+// `_retry` parameter the retry appended LAST to the query (serialized `&amp;` after an existing
+// query, `?` without one), the fragment kept. scoped to the img tag that carries the stamp: a
+// document-wide replacement also erased authored text and links containing `?_retry=` (review 0 R2)
+export function stripRetry(imgTag: string): string {
+  return imgTag
+    .replace(/ _retried="\d+"/, '')
+    .replace(/(src="[^"]*?)(?:\?|&amp;|&)_retry=\d+(?=["#])/, '$1')
 }
