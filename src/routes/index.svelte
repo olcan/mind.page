@@ -6866,6 +6866,11 @@
     // this item's global_store_<id> (if any) is now an ORPHAN, and the listener echo of our own
     // removal is classified as ours and skipped, so nothing else requests the reclassification
     requestHiddenCleanup()
+    // a deleted item has no expansion: itemTextChanged merges item.expanded.item's tags into the
+    // tag counts (tagsExpandedWithMacros), so a stale expansion kept the deleted label counted
+    // and no tagger turned `missing` (the owner's report, 2026-10-01: the bridge's children carry
+    // an `<<agent(...)>>` macro); the listener's removal below resets it the same way
+    item.expanded = null
     itemTextChanged(index, '') // clears label, deps, etc
     items.splice(index, 1)
     if (index < hideIndex) hideIndex-- // back up hide index
@@ -9370,6 +9375,7 @@
                     if (index === undefined) return // nothing to remove
                     let item = items[index]
                     // console.debug('removing item', item.name)
+                    item.expanded = null // no expansion for a deleted item (see deleteItem)
                     itemTextChanged(
                       index,
                       '',

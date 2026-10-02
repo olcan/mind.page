@@ -247,6 +247,48 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   }
 })
 
+test('a deleted child that held macro expansions turns its tags missing: the marks in the frame and plain tags alike', async ({ page }) => {
+  // the owner's report (2026-10-01): the bridge's children carry an `<<agent(...)>>` macro, so a
+  // child once rendered or pre-expanded holds expansion state (expanded.item); deleting it cleared
+  // its text with that stale expansion still merged into its tag counts (tagsExpandedWithMacros),
+  // so its label stayed counted twice and no tagger turned `missing`: the chat's marks in the
+  // inert frame, but equally a plain tag in another item. Both deletion paths (the app's own and
+  // the listener's removal) drop the expansion state before the clearing text change. Each child
+  // here has ONE tagger (a tag carried by two items is never missing)
+  await loadAdmin(page)
+  const CHAT = '#e2e_cc_gone'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  // a macro the lane can evaluate stands in for the bridge's `<<agent(...)>>` line
+  const child = (name: string) => `${CHAT}/${name}\n<<'created in run ab12cd34'>>\n${name} body`
+  await page.evaluate(text => void window._create(text), `${CHAT} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/alpha and #/beta')}`)
+  await page.evaluate(text => void window._create(text), `${CHAT}/plain a plain tag ${CHAT}/gamma`)
+  for (const name of ['alpha', 'beta', 'gamma']) await page.evaluate(text => void window._create(text), child(name))
+  await page.evaluate(() => (window as any).MindBox.set('e2e_cc_gone', { scroll: true })) // a text query: every item renders
+  // the state the marks report, [text, missing]: the chat's frame marks and the plain item's tag mark
+  const state = () =>
+    page.evaluate(label => {
+      const marks = (n: string, sel: string) =>
+        [...(window._item(n, true)?.elem?.querySelectorAll(sel) ?? [])]
+          .filter(m => /alpha|beta|gamma/.test(m.textContent ?? ''))
+          .map(m => [m.textContent, m.classList.contains('missing')])
+      return { chat: marks(label, '.vault-result mark[data-tag]'), plain: marks(`${label}/plain`, 'mark') }
+    }, CHAT)
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false], ['beta', false]], plain: [['gamma', false]] })
+  // each child holds expansion state: the macro-evaluating read records it (expandMacros' path)
+  for (const name of ['alpha', 'beta', 'gamma'])
+    expect(await page.evaluate(n => window._item(n)!.read('', { eval_macros: true }), `${CHAT}/${name}`)).toContain('created in run ab12cd34')
+  // the app's own deletion (no confirmation): the plain tag and the frame's mark turn missing alike
+  expect(await page.evaluate(n => window._item(n)!.delete(false), `${CHAT}/gamma`)).toBe(true)
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false], ['beta', false]], plain: [['gamma', true]] })
+  expect(await page.evaluate(n => window._item(n)!.delete(false), `${CHAT}/alpha`)).toBe(true)
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', true], ['beta', false]], plain: [['gamma', true]] })
+  // the listener's removal (the server's delete)
+  const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
+  await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy()
+  await firestore().collection('items').doc((await betaDoc())!).delete()
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', true], ['beta', true]], plain: [['gamma', true]] })
+})
+
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {
   // the combined hostile-result witness (bridge design §2.2, reviews 141-146) in TWO
   // phases: (a) a VALID envelope whose DECODED text carries every active item grammar,
