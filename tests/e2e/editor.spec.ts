@@ -454,6 +454,110 @@ test('/_undelete restores the last deleted item', async ({ page }) => {
   expect(await itemText(page, '#e2e_source')).toBe(SOURCE_TEXT)
 })
 
+test('Shift with the delete shortcut deletes the target item and its subtree after one confirmation', async ({ page }) => {
+  // the owner's ask (2026-10-02): a chat subtree in one go. The Window shortcut with Shift
+  // deletes the item named by the MindBox and every item under it in the TREE (the derived
+  // ancestry the arrow keys walk: a renamed node moved under the target by its hidden parent tag
+  // belongs with its tag-free children, a nested item moved out by its own does not; a hidden
+  // dependency from another root is no tree edge; a look-alike sibling is no descendant) after ONE
+  // confirm naming the count and the items deepest first; a dismissed confirm deletes nothing;
+  // the deletions are ordinary ones, the target's last, so the MindBox backs up to its context
+  // and /_undelete restores the target first (the vault's subtree_delete reviews 0-1)
+  await loadAdmin(page)
+  // the chat root the parent-tag rule needs (a tag parent must be a chat item: src/lineage.ts), the
+  // unit corpus's stubs; removed at the end
+  for (const text of ['#chat #_autodep', '#chat/vault']) await page.evaluate(t => void window._create(t), text)
+  const T = '#e2e_tree'
+  const texts: Record<string, string> = {
+    [T]: `${T} root`,
+    [`${T}/a`]: `${T}/a #_chat/vault #_autodep\n<<user>> a`, // the target: a chat branch
+    [`${T}/a/x`]: `${T}/a/x\n<<user>> x`,
+    [`${T}/b`]: `${T}/b #_chat/vault #_autodep\n<<user>> b`,
+    [`${T}/in`]: `${T}/in #_${T.slice(1)}/a\n<<user>> moved in`, // under /a by its tag parent
+    [`${T}/in/leaf`]: `${T}/in/leaf\n<<user>> under the moved node`,
+    [`${T}/a/out`]: `${T}/a/out #_${T.slice(1)}/b\n<<user>> moved out`, // under /b by its tag parent
+    [`${T}/a/out/leaf`]: `${T}/a/out/leaf\n<<user>> under the moved-out node`,
+    [`${T}/ab`]: `${T}/ab a look-alike sibling`,
+    ['#e2e_dep']: `#e2e_dep #_${T.slice(1)}/a\na dependency from another root`,
+  }
+  for (const text of Object.values(texts)) await page.evaluate(t => void window._create(t), text)
+  const labels = Object.keys(texts)
+  const state = () =>
+    page.evaluate(
+      labels => labels.map(l => [l, window._exists(l) ? (window._item(l, true) as any).text : null] as [string, string | null]),
+      labels
+    )
+  const view = (name: string) =>
+    page.evaluate(name => {
+      const i = window._item(name, true) as any
+      return { ancestors: i.ancestors, tag_parent: i.tag_parent, deps: i.dependencies.map((id: string) => (window._item(id, true) as any).label) }
+    }, name)
+  await expect.poll(() => state().then(s => s.every(([, text]) => text !== null))).toBe(true)
+  // the fixture's shape, proved before any deletion
+  expect(await view(`${T}/in`)).toMatchObject({ tag_parent: `${T}/a`, ancestors: [`${T}/a`, T] })
+  expect((await view(`${T}/in/leaf`)).ancestors).toEqual([`${T}/in`, `${T}/a`, T])
+  expect(await view(`${T}/a/out`)).toMatchObject({ tag_parent: `${T}/b`, ancestors: [`${T}/b`, T] })
+  expect((await view(`${T}/a/out/leaf`)).ancestors).toEqual([`${T}/a/out`, `${T}/b`, T])
+  const dep = await view('#e2e_dep')
+  expect(dep.tag_parent).toBeNull()
+  expect(dep.ancestors).toEqual([])
+  expect(dep.deps).toContain(`${T}/a`) // a dependency, not a tree edge
+  const target = async (name: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  }
+  const dialogs: string[] = []
+  // dismissed: the whole fixture as it was
+  const before = await state()
+  await target(`${T}/a`)
+  page.once('dialog', dialog => {
+    dialogs.push(dialog.message())
+    void dialog.dismiss()
+  })
+  await page.keyboard.press('Control+Shift+Backspace')
+  await expect.poll(() => dialogs.length).toBe(1)
+  expect(dialogs[0]).toBe(`Delete ${T}/a and 3 items under it?\n\n${T}/in/leaf\n${T}/a/x\n${T}/in`)
+  expect(await state()).toEqual(before)
+  // accepted: the target, its nested child and the moved-in node with its child are gone; the
+  // moved-out node and its child, the sibling, the look-alike and the dependent stay; the MindBox
+  // backs up to the target's context
+  await target(`${T}/a`)
+  page.once('dialog', dialog => void dialog.accept())
+  await page.keyboard.press('Control+Shift+Backspace')
+  const gone = [`${T}/a`, `${T}/a/x`, `${T}/in`, `${T}/in/leaf`]
+  await expect.poll(() => state().then(s => s.filter(([, text]) => text === null).map(([l]) => l))).toEqual(gone)
+  expect(await mindbox(page).inputValue()).toBe(T)
+  // a lone target under Shift still confirms
+  await target(`${T}/ab`)
+  page.once('dialog', dialog => {
+    dialogs.push(dialog.message())
+    void dialog.dismiss()
+  })
+  await page.keyboard.press('Control+Shift+Backspace')
+  await expect.poll(() => dialogs.length).toBe(2)
+  expect(dialogs[1]).toBe(`Delete ${T}/ab?`)
+  // /_undelete restores the target (deleted last) first, then the moved-in node (the MindBox,
+  // focused by the shortcut's key and still naming the lone target, is cleared first)
+  const undelete = async () => {
+    await page.evaluate(() => (window as any).MindBox.set('/_undelete', {}))
+    await mindbox(page).focus()
+    await expect(mindbox(page)).toHaveValue('/_undelete')
+    await page.keyboard.press('Shift+Enter')
+  }
+  await undelete()
+  await expect.poll(() => page.evaluate(l => window._exists(l), `${T}/a`)).toBe(true)
+  expect(await itemText(page, `${T}/a`)).toBe(texts[`${T}/a`])
+  await undelete()
+  await expect.poll(() => page.evaluate(l => window._exists(l), `${T}/in`)).toBe(true)
+  // the API without a confirmation: the other branch with its moved-in node and that node's child
+  expect(await page.evaluate(l => window._item(l)!.delete_subtree(false), `${T}/b`)).toBe(true)
+  await expect.poll(() => state().then(s => s.filter(([, text]) => text === null).map(([l]) => l))).toEqual([`${T}/a/x`, `${T}/b`, `${T}/in/leaf`, `${T}/a/out`, `${T}/a/out/leaf`])
+  expect(await page.evaluate(l => window._exists(l), T)).toBe(true)
+  // the stubs and the rest of the fixture removed through the API (a root's subtree)
+  for (const root of ['#chat', T, '#e2e_dep']) expect(await page.evaluate(l => window._item(l)!.delete_subtree(false), root)).toBe(true)
+  await expect.poll(() => page.evaluate(() => ['#chat', '#chat/vault', '#e2e_tree', '#e2e_tree/ab', '#e2e_dep'].some(l => window._exists(l)))).toBe(false)
+})
+
 test('attr changes reach the changed item and #_listen listeners, never bystanders', async ({ page }) => {
   // regression for itemAttrChanged (index.svelte): its guard compared item.id to itself, so every
   // item defining _on_attr_change ran on any attr change, and each received its OWN id instead of

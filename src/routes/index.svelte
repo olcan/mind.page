@@ -1406,6 +1406,14 @@
       return deleteItem(this.index, confirm)
     }
 
+    // deletes item and every item under it in the tree (the items whose ancestry names this item's
+    // label: the derived lineage, with the tag parents spliced in), confirmed as ONE batch unless
+    // confirm=false
+    // returns true if deleted, false if declined/cancelled
+    delete_subtree(confirm = true) {
+      return deleteSubtree(this.index, confirm)
+    }
+
     write_log(options) {
       options = _.merge(
         {
@@ -6896,6 +6904,40 @@
     return true
   }
 
+  // delete an item and every item under it in the tree: the items whose ANCESTRY names its label
+  // (the derived lineage, the textual levels with the tag parents spliced in, the relation the
+  // arrow keys walk: a renamed node moved under this item by its hidden parent tag belongs, a
+  // nested item moved elsewhere by its own does not; the vault's subtree_delete review 0),
+  // confirmed as ONE batch (the count and the first names), the descendants first (deepest first)
+  // and the item last, so the mindbox backs up to the item's context as a single deletion does;
+  // the selection and its order are fixed before the first deletion (each deletion re-derives the
+  // lineage), each index looked up by id just before deleteItem, so the undelete list holds every
+  // one, the item first (the owner's shortcut for chat subtrees, 2026-10-02)
+  function deleteSubtree(index: number, confirm_delete = true): boolean {
+    if (fixed) {
+      _modal('can not delete items when viewing shared items')
+      return false
+    }
+    const item = items[index]
+    const descendants = item.label ? items.filter(other => (other.ancestors ?? []).includes(item.label)) : []
+    descendants.sort(
+      (a, b) => (b.ancestors?.length ?? 0) - (a.ancestors?.length ?? 0) || a.label.localeCompare(b.label)
+    )
+    if (confirm_delete) {
+      const names = descendants.map(other => other.name)
+      const listed = names.slice(0, 10).join('\n') + (names.length > 10 ? `\n… and ${names.length - 10} more` : '')
+      const count = `${descendants.length} item${descendants.length == 1 ? '' : 's'}`
+      const msg = descendants.length ? `Delete ${item.name} and ${count} under it?\n\n${listed}` : `Delete ${item.name}?`
+      if (!confirm(msg)) return false
+    }
+    for (const other of descendants) {
+      const i = indexFromId.get(other.id)
+      if (i !== undefined) deleteItem(i, false /* confirmed as the batch */)
+    }
+    const i = indexFromId.get(item.id)
+    return i === undefined || deleteItem(i, false /* confirmed as the batch */)
+  }
+
   function onItemEditing(
     index: number,
     editing: boolean,
@@ -10476,12 +10518,14 @@
       }
     }
 
-    // delete target item with Cmd/Ctrl+Backspace/Delete
+    // delete target item with Cmd/Ctrl+Backspace/Delete; with Shift, the item AND every item under
+    // it in the tree (deleteSubtree), confirmed as one batch (the owner's chat subtrees, 2026-10-02)
     // if trimmed editor text matches a unique item, then delete that item
     if ((key == 'Backspace' || key == 'Delete') && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
       if (_exists(editorText.trim(), false /* allow_multiple */)) {
-        _item(editorText.trim()).delete(false /* skip confirmation */)
+        if (e.shiftKey) _item(editorText.trim()).delete_subtree(true /* confirm the batch */)
+        else _item(editorText.trim()).delete(false /* skip confirmation */)
         return
       }
     }
