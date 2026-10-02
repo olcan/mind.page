@@ -125,6 +125,24 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   expect(chat.tags, "the child tags are the item's; nothing from code, a link target or an unbounded token").toEqual(['#e2e_cc', '#e2e_cc/alpha', '#e2e_cc/beta'])
   expect(chat.deps, 'a visible tag is no dependency edge').not.toContain(alpha.id)
   expect(alpha.tags, "the child's own #/deeper is the CHILD's child tag").toEqual(['#e2e_cc/alpha', '#e2e_cc/alpha/deeper'])
+  // a child's own `#//name` is a SIBLING tag and `#///name` the parent's sibling (the owner's ask,
+  // 2026-10-02: a child's text naming another child): the item carries the resolved tags and its
+  // frame's marks carry them with the relative form, as the index resolves the item's own tags
+  await page.evaluate(text => void window._create(text), `${CHAT}/gamma\n<<agent('vault/default · created in run ab12cd34')>>\n${inert('see the sibling #//alpha and #///zeta')}`)
+  await expect.poll(() => facts(`${CHAT}/gamma`).then(f => f?.tags ?? null), { timeout: 15_000 }).toEqual(['#e2e_cc/alpha', '#e2e_cc/gamma', '#zeta'])
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/gamma`)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => [m.getAttribute('data-tag'), m.getAttribute('data-reltag'), m.classList.contains('missing')]), `${CHAT}/gamma`),
+      { timeout: 15_000 }
+    )
+    .toEqual([
+      ['#e2e_cc/alpha', '#//alpha', false],
+      ['#zeta', '#///zeta', true],
+    ])
+  await page.evaluate(() => void (location.hash = '#e2e_cc'))
+  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(3)
   const elemId = await page.evaluate(label => window._item(label, true)!.elem!.id, CHAT)
   const query = () => mindbox(page).inputValue()
   const editing = () => page.evaluate(id => !!document.querySelector(`[id="${id}"] textarea, .container.editing`), elemId)
@@ -287,6 +305,39 @@ test('a deleted child that held macro expansions turns its tags missing: the mar
   await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy()
   await firestore().collection('items').doc((await betaDoc())!).delete()
   await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', true], ['beta', true]], plain: [['gamma', true]] })
+})
+
+test('an inert body supplies visible tags only: a sibling form resolving to a control tag is refused', async ({ page }) => {
+  // review 15 B1: a reply's `#//_autodep` under a root chat resolves to `#_autodep`, which the
+  // lineage reads from tagsRaw as the carrier flag; the index refuses a resolved hidden tag from
+  // an inert body and the frame shows the token as text, so the chat is no carrier and its
+  // tag-free child adopts nothing; the owner's own `#_autodep` in ordinary text still works
+  await loadAdmin(page)
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const reply = (body: string) => `<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`
+  for (const text of [
+    `#e2e_ctl chat\n${reply('see #//_autodep and #///_autodep and #/safe')}`, // the control forms: text
+    '#e2e_ctl/kid\n<<user>> tag-free child',
+    `#e2e_ctl_real #_autodep\n${reply('see #/safe')}`, // the owner's own carrier tag: as before
+    '#e2e_ctl_real/kid\n<<user>> tag-free child',
+  ])
+    await page.evaluate(t => void window._create(t), text)
+  const facts = (name: string) =>
+    page.evaluate(n => {
+      const i = window._item(n, true) as any
+      return i ? { tags: [...i.tags].sort(), deps: [...(i.dependencies ?? [])].map((id: string) => (window._item(id, true) as any).label) } : null
+    }, name)
+  // (the dependency lists are compared by membership: the seeded account's own items can join a
+  // closure through the carrier tag's reference, as the parent-tag fixture of admin.spec.ts notes)
+  await expect.poll(() => facts('#e2e_ctl_real/kid').then(f => f?.deps ?? null), { timeout: 15_000 }).toContain('#e2e_ctl_real')
+  expect((await facts('#e2e_ctl'))!.tags).toEqual(['#e2e_ctl', '#e2e_ctl/safe']) // no #_autodep
+  expect((await facts('#e2e_ctl/kid'))!.deps).not.toContain('#e2e_ctl') // adopts nothing
+  expect((await facts('#e2e_ctl_real'))!.tags).toEqual(['#autodep', '#e2e_ctl_real', '#e2e_ctl_real/safe']) // the item API lists a hidden tag without its underscore
+  await page.evaluate(() => void (location.hash = '#e2e_ctl'))
+  await expect
+    .poll(() => page.evaluate(() => [...(window._item('#e2e_ctl', true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => m.getAttribute('data-reltag'))), { timeout: 15_000 })
+    .toEqual(['#/safe'])
+  expect(await page.evaluate(() => window._item('#e2e_ctl', true)?.elem?.querySelector('.vault-result')?.textContent ?? '')).toContain('#//_autodep and #///_autodep')
 })
 
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {

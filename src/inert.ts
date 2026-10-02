@@ -471,3 +471,21 @@ export function isVaultRouted(rawText: string): boolean {
   const tags: string[] = (parseTags(scanInert(rawText).grammarText.toLowerCase()) as { raw: string[] }).raw
   return tags.some(tag => VAULT_ROOTS.some(root => tag === root || tag.startsWith(root + '/')))
 }
+
+// a relative tag resolved against a label: `#/x` a child of the label, `#//x` a sibling (the
+// parent's child; a root label's `#//x` is the root-level `#x`), `#///x` the parent's sibling (a
+// root's child for a label of two levels; nothing for a root). The index's `resolveTag` (the tags
+// an item carries, its inert bodies' child tags included) and the inert renderer's marks share it,
+// so a mark's absolute tag is the tag the item carries. Undefined when the label has no such
+// ancestor; the label's case is kept (a label text gives the mark's title in the author's case).
+export function resolveRelativeTag(label: string, tag: string): string | undefined {
+  let resolved = tag
+  if (tag == label) resolved = tag
+  else if (tag.startsWith('#///') && label.match(/\/[^\/]*?\/[^\/]*$/)) resolved = label.replace(/\/[^\/]*?\/[^\/]*$/, '') + tag.substring(3)
+  else if (tag.startsWith('#///') && label.match(/^#[^\/]*?\/[^\/]*$/)) resolved = '#' + tag.substring(4)
+  else if (tag.startsWith('#//') && label.match(/\/[^\/]*$/)) resolved = label.replace(/\/[^\/]*$/, '') + tag.substring(2)
+  else if (tag.startsWith('#//') && label.match(/^#[^\/]*$/)) resolved = '#' + tag.substring(3)
+  else if (tag.startsWith('#/')) resolved = label + tag.substring(1)
+  if (resolved.startsWith('#/')) return undefined // no such ancestor
+  return resolved
+}

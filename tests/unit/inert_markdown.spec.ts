@@ -139,7 +139,7 @@ test('fenced code: plain without a highlighter, filtered spans with one', () => 
   expect(highlightCode('x', 'js', { highlight: () => { throw new Error('boom') } })).toBeNull()
 })
 
-test('child tags: the one shorthand a reply may use as a tag, recognized and rendered by one Marked', () => {
+test('child tags: the relative shorthands a reply may use as tags, recognized and rendered by one Marked', () => {
   // vault design mind_chat_children 2.2: `#/<segment>` at a boundary of its inline run, ending
   // where the app's tag ends, renders as the app's mark (title and data attributes in the label's
   // case, no inline handler, `renderTag`'s display) with `missing` from the item's computed state;
@@ -161,9 +161,31 @@ test('child tags: the one shorthand a reply may use as a tag, recognized and ren
     expect(reltags(render(`#/${name} end`)), name).toEqual([`#/${name}`.toLowerCase()])
   expect(render('#/Alpha')).toContain('title="&#35;Chat&#47;Alpha"')
   expect(render('#/a*b*c')).not.toContain('<em>') // one tag, not emphasis
-  // boundaries: a longer tag is never a prefix match; siblings and other tags stay text
-  for (const body of ['#/a/b', '#/ab/c', '#//x', '#///x', '#x', '#_x', 'x#/x', 'a#/x b'])
+  // boundaries: a longer tag is never a prefix match; four slashes and other tags stay text
+  for (const body of ['#/a/b', '#/ab/c', '#////x', '#//a/b', '#x', '#_x', 'x#/x', 'a#/x b', 'x#//x'])
     expect(render(body), body).not.toContain('<mark')
+  // the sibling and parent's-sibling forms (the owner's ask, 2026-10-02) resolve as the index
+  // resolves the item's own relative tags (resolveRelativeTag, shared): a root's `#//x` is the
+  // root-level `#x`, its `#///y` nothing (text, while the token is claimed: the index drops the
+  // unresolved tag the same way); under a nested label both resolve, the display drops the slashes
+  expect(marks(render('#//x and #///y'))).toEqual([' title="&#35;x" data-tag="&#35;x" data-reltag="&#35;&#47;&#47;x"|x'])
+  expect(render('#///y')).toBe('<div class="inert-markdown"><p>&#35;&#47;&#47;&#47;y</p></div>')
+  expect(inertChildTags('#///y')).toEqual(['#///y'])
+  const nested = { ...ctx, label: '#chat/4/0', labelText: '#Chat/4/0' }
+  expect(marks(render('#//x #///y #/z', nested))).toEqual([
+    ' title="&#35;Chat&#47;4&#47;x" data-tag="&#35;Chat&#47;4&#47;x" data-reltag="&#35;&#47;&#47;x"|x',
+    ' title="&#35;Chat&#47;y" data-tag="&#35;Chat&#47;y" data-reltag="&#35;&#47;&#47;&#47;y"|y',
+    ' title="&#35;Chat&#47;4&#47;0&#47;z" data-tag="&#35;Chat&#47;4&#47;0&#47;z" data-reltag="&#35;&#47;z"|z',
+  ])
+  expect(inertChildTags('#//x #///y #/z #////w')).toEqual(['#//x', '#///y', '#/z'])
+  expect(reltags(render('#//x #///y #/z', nested))).toEqual(inertChildTags('#//x #///y #/z'))
+  // a form resolving to a HIDDEN tag is text (review 15 B1: a root's `#//_autodep` or a two-level
+  // label's `#///_autodep` would be the control tag itself; the index refuses it the same way),
+  // while a nested underscore name stays an ordinary child tag; the tokens are claimed either way
+  expect(render('#//_autodep')).not.toContain('<mark')
+  expect(render('#///_autodep', { ...ctx, label: '#chat/4', labelText: '#Chat/4' })).not.toContain('<mark')
+  expect(marks(render('#/_detail'))).toEqual([' title="&#35;Chat&#47;&#95;detail" data-tag="&#35;Chat&#47;&#95;detail" data-reltag="&#35;&#47;&#95;detail"|&#95;detail'])
+  expect(inertChildTags('#//_autodep #///_autodep')).toEqual(['#//_autodep', '#///_autodep'])
   for (const body of ['#/x', '(#/x)', 'see #/x.', 'a\n#/x', '**#/x**', '> #/x', '>#/x', '- #/x', '| #/x |\n|---|']) agree(body), expect(reltags(render(body)), body).toEqual(['#/x'])
   // the deliberate rule: a nested inline run starts its own boundary
   expect(reltags(render('**#/x**'))).toEqual(['#/x'])

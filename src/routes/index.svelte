@@ -4148,18 +4148,9 @@
   }
 
   function resolveTag(label, tag) {
-    let resolved = tag
-    if (tag == label) resolved = tag
-    else if (tag.startsWith('#///') && label.match(/\/[^\/]*?\/[^\/]*$/))
-      resolved = label.replace(/\/[^\/]*?\/[^\/]*$/, '') + tag.substring(3)
-    else if (tag.startsWith('#///') && label.match(/^#[^\/]*?\/[^\/]*$/)) resolved = '#' + tag.substring(4)
-    else if (tag.startsWith('#//') && label.match(/\/[^\/]*$/))
-      resolved = label.replace(/\/[^\/]*$/, '') + tag.substring(2)
-    else if (tag.startsWith('#//') && label.match(/^#[^\/]*$/)) resolved = '#' + tag.substring(3)
-    else if (tag.startsWith('#/')) resolved = label + tag.substring(1)
-
-    if (resolved.startsWith('#/')) return // return undefined on failure to resolve tag relative to label
-    return resolved
+    // shared with the inert renderer's marks (src/inert.ts), so a body's `#/x`, `#//x` and `#///x`
+    // resolve to the tags the item carries
+    return resolveRelativeTag(label, tag)
   }
 
   function resolveTags(label, tags) {
@@ -4376,11 +4367,17 @@
       for (const marker of (item.childTagMarkers as Set<string> | undefined) ?? [])
         if (bodies.has(marker))
           for (const tag of inertChildTags(bodies.get(marker)!)) if (!childTags.includes(tag)) childTags.push(tag)
-      if (childTags.length) {
-        item.tags = _.uniq(item.tags.concat(childTags))
-        item.tagsVisible = _.uniq(item.tagsVisible.concat(childTags))
-        item.tagsRaw = _.uniq(item.tagsRaw.concat(childTags))
-        item.tagsAlt = _.uniq(item.tagsAlt.concat(childTags))
+      // resolved here (a sibling `#//x` or a parent's sibling `#///x` resolves outside the label,
+      // src/inert.ts resolveRelativeTag) and a resolved CONTROL tag refused: an inert body supplies
+      // visible tags, never `#_autodep` or another hidden tag (review 15 B1: a root chat's
+      // `#//_autodep` would have made it a carrier through tagsRaw); the renderer shows such a
+      // token as text (inert_markdown.ts), so a mark is always a tag the item carries
+      const resolvedChildTags = resolveTags(item.label, childTags).filter(tag => !tag.startsWith('#_'))
+      if (resolvedChildTags.length) {
+        item.tags = _.uniq(item.tags.concat(resolvedChildTags))
+        item.tagsVisible = _.uniq(item.tagsVisible.concat(resolvedChildTags))
+        item.tagsRaw = _.uniq(item.tagsRaw.concat(resolvedChildTags))
+        item.tagsAlt = _.uniq(item.tagsAlt.concat(resolvedChildTags))
       }
     }
     if (item.label) {
@@ -7840,7 +7837,7 @@
   import { autodepParent } from '../install_deps'
   import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
-  import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions } from '../inert'
+  import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
