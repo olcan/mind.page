@@ -4218,7 +4218,12 @@
     const rawInertValues: [string, string][] = item.vaultScan.candidates
       .filter(c => typeof c.value == 'string')
       .map(c => [c.marker, c.value as string])
-    itemTextChanged(item.index, item.expanded.text, false /* update_deps */)
+    item.inertBodies = new Map(rawInertValues) // the child tags of the expanded pass (see itemTextChanged)
+    try {
+      itemTextChanged(item.index, item.expanded.text, false /* update_deps */)
+    } finally {
+      delete item.inertBodies
+    }
     item.expanded.item = _.pick(item, [
       // these names should match destructured item state in onEditorChange
       'tagsVisibleExpanded',
@@ -4346,6 +4351,30 @@
       .every(t => t == item.label || (t.startsWith('#_') && tagRegex.test(t)))
     item.labelUnique ??= false
     item.labelPrefixes ??= []
+    // CHILD TAGS (vault design mind_chat_children 2.2): the `#/name` tokens of the canonical
+    // inert bodies in a CHILD-TAG REGION (childTagRegions: the one placement rule the renderer
+    // applies to the same text before it marks a frame) are VISIBLE body tags of a labeled item,
+    // resolved against the label below like any `#/x` of the owner's text; the expanded pass
+    // reads the raw scan's bodies and regions through item.inertBodies and item.childTagMarkers
+    // (its text carries the raw markers), as the search text does (review 188 §2.1)
+    const expandedPass = item.inertBodies !== undefined
+    if (!expandedPass) item.childTagMarkers = childTagRegions(item.vaultScan)
+    if (item.label) {
+      const bodies = new Map<string, string>([
+        ...((item.inertBodies as Map<string, string> | undefined) ?? []),
+        ...item.vaultScan.candidates.filter(c => typeof c.value == 'string').map(c => [c.marker, c.value as string] as [string, string]),
+      ])
+      const childTags: string[] = []
+      for (const marker of (item.childTagMarkers as Set<string> | undefined) ?? [])
+        if (bodies.has(marker))
+          for (const tag of inertChildTags(bodies.get(marker)!)) if (!childTags.includes(tag)) childTags.push(tag)
+      if (childTags.length) {
+        item.tags = _.uniq(item.tags.concat(childTags))
+        item.tagsVisible = _.uniq(item.tagsVisible.concat(childTags))
+        item.tagsRaw = _.uniq(item.tagsRaw.concat(childTags))
+        item.tagsAlt = _.uniq(item.tagsAlt.concat(childTags))
+      }
+    }
     if (item.label) {
       // resolve tags relative to label
       item.tags = resolveTags(item.label, item.tags)
@@ -7764,7 +7793,8 @@
   import { autodepParent } from '../install_deps'
   import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
-  import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert } from '../inert'
+  import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions } from '../inert'
+  import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)
@@ -8583,6 +8613,12 @@
   let rendered = false
   let renderStart = 0
   let renderEnd = 0
+  // the items the measuring column mounts, BY IDENTITY: a chunk is sliced by position, but a
+  // re-ranking during the pass (the restored state's query, an expansion) moves items, and a
+  // window by index then never mounts an awaited item that moved past it (nor does the page,
+  // when it also moved beyond hideIndex): the pass waited forever and `rendered` never came
+  // (2026-10-01, a reload with eleven items ranked ahead of the chunk; the chain log named it)
+  let renderIds = new Set<string>()
   let keepOnPageDuringDelay = false
 
   // TIME-BUDGETED initial rendering (init_perf, 2026-09-07): the hidden-column measuring pass
@@ -8596,8 +8632,10 @@
     const started = performance.now()
     renderStart = start
     renderEnd = Math.min(cutoff, end)
+    const chunkItems = items.slice(renderStart, renderEnd)
+    renderIds = new Set(chunkItems.map(item => item.id))
     return Promise.all(
-      items.slice(renderStart, renderEnd).map(
+      chunkItems.map(
         item =>
           new Promise(resolve => {
             if (item.height > 0) resolve(item.height)
@@ -8605,7 +8643,10 @@
           })
       )
     ).then(() => {
-      if (!keepOnPageDuringDelay) renderStart = renderEnd
+      if (!keepOnPageDuringDelay) {
+        renderStart = renderEnd
+        renderIds = new Set()
+      }
       if (renderEnd < cutoff) {
         // init_log(`rendered items ${renderStart}-${renderEnd}`)
         if (start == 0 || Math.floor(start / 100) < Math.floor(renderEnd / 100))
@@ -8633,6 +8674,7 @@
     if (!rendered) throw new Error('can not render specific item before initial rendering is complete')
     renderStart = item.index
     renderEnd = item.index + 1
+    renderIds = new Set([item.id])
     return tick().then(
       () =>
         new Promise(resolve => {
@@ -11269,7 +11311,7 @@
                 {/each}
               {/if}
             {/if}
-            {#if item.index < hideIndex || (column == columnCount && item.index >= renderStart && item.index < renderEnd)}
+            {#if item.index < hideIndex || (column == columnCount && renderIds.has(item.id))}
               <Item
                 onEditing={onItemEditing}
                 onFocused={onItemFocused}

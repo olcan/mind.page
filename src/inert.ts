@@ -19,7 +19,8 @@
 // the app's global tag parser (untyped util.js; the app tsconfig is non-strict and the
 // tests tsconfig needs the suppression, as in src/vault_result.ts)
 // @ts-ignore
-import { parseTags } from './util.js'
+import { parseTags, prepareBlocks, removeSections, removeRemovedBlocks } from './util.js'
+import { Marked, type Token, type Tokens } from 'marked'
 
 // markers keep the existing ephemeral v1-named prefix (178 §2.2): the token is never
 // persisted, and retaining it keeps the already-loaded stored-consumer marker refusals
@@ -167,6 +168,207 @@ export function scanInert(text: string): InertScan {
 // prediction. The pattern is anchored for a tokenizer's `^` match; callers needing a
 // global scan build their own /g copy.
 export const INERT_MARKER_SOURCE = `⟦${MARKER_FENCE}:\\d+:\\d+⟧`
+
+// CHILD-TAG REGIONS (vault design mind_chat_children 2.2, revision 7): the canonical regions
+// whose `#/name` tokens count as the item's child tags AND render as marks, decided by ONE rule
+// over the grammar text that the index (itemTextChanged) and the renderer (toHTML) both apply,
+// and ENFORCED by the renderer where the rule admits a region. The rule admits exactly the
+// publisher's shape: a canonical region whose marker line DIRECTLY follows a CHAT BOUNDARY, an
+// `<<agent(...)>>` delimiter line alone (a reply's opener, a child's stored shape) outside a
+// fenced code block. The renderer prefixes the expansion of a delimiter the rule admits a region
+// after (the chat template's `_html` block) with the RESET line below and a blank line, on lines
+// of their own (chatResetOffsets; the rule itself reads every boundary as reset): the reset, ONE
+// comment, ends a comment the owner left open before the reply (its `-->`), a declaration (its
+// `>`) and the app's removed section (the removed pass that runs after expansion ends a section at
+// this line); the blank line ends an html block of kinds 6-7, a paragraph or a list. Unmatched,
+// the comment is invisible; inside an open comment or declaration, its text is theirs. The rule
+// then reads the text AS THE RENDERER'S BLOCK PASSES LEAVE IT (src/util.js prepareBlocks and
+// removeSections, the renderer's own functions, applied to the text with the resets in place)
+// WITH THE INSTALLED MARKED: a region counts when its boundary line opens a paragraph of that
+// text (not code, not an html block: the fence grammar and the html block kinds exactly as the
+// renderer's own lexer reads them; a processing instruction or a CDATA section left open is such
+// a block to its end, so a reply inside one is DECLINED, never healed: the reset's text would show
+// after the browser's own end of the bogus comment) and no raw-text element of the browser is open
+// before it (the html tokens so far read tag by tag, the app's static `_html` blocks among them,
+// which the renderer emits raw, by the first word of their info string as marked-highlight reads
+// it: a `<textarea>` or an `<xmp>` would show any reset as its text, so
+// an open raw-text element is DECLINED too, the reply staying swallowed and untagged, as the
+// publisher never writes one there). So a removed section that ate a fence's or a comment's
+// closing line (the removed pass reads no fence of tildes and no comment), an `_md` block whose
+// unwrapped content opens a fence, a closing fence with a trailing tab (no closer to Marked)
+// leave the reply unframed AND untagged. Every other placement (after a blank line, after prose,
+// after `<<user>>`, inside a fence, an `_md` fence the renderer unwraps, an html block, a link
+// label) carries no child tags and renders no marks, framed or not. The owner's text is never
+// scanned for tag-shaped content (review 4 R3): inline code or an escape in a question cannot
+// disable the feature. Outside the rule's reading, by design: a macro's expansion (the publisher
+// writes none before a reply; the delimiters' own expansion is the block the reset precedes).
+export const AGENT_LINE = /^<<agent\b[^\n]*>>\s*$/
+export const CHAT_BOUNDARY_RESET = '<!--/removed-->'
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/
+// the html blocks of kinds 1-5: a start at a line start, the end condition met on the start
+// line or any later one
+const HTML_BLOCKS: [RegExp, RegExp][] = [
+  [/^ {0,3}<(?:script|pre|style|textarea)(?=[\s>]|$)/i, /<\/(?:script|pre|style|textarea)>/i],
+  [/^ {0,3}<!--/, /-->/],
+  [/^ {0,3}<\?/, /\?>/],
+  [/^ {0,3}<![A-Za-z]/, />/],
+  [/^ {0,3}<!\[CDATA\[/, /\]\]>/],
+]
+// the line indices of a grammar text's chat boundaries: the `<<agent(...)>>` lines alone
+// outside a fence, read as the installed Marked reads a fence (an opener of three or more
+// backticks without a backtick in its info string, or tildes; the closer the same string, more
+// fence characters allowed, then SPACES alone: a trailing tab keeps the fence open) with the html
+// blocks of kinds 1-5 read at a line start, so a fence-looking line inside one is text; a
+// boundary inside such a block counts (the renderer's reset ends a comment-like block there, and
+// the second reading in childTagRegions decides what Marked makes of it)
+export function chatBoundaries(text: string): Set<number> {
+  const boundaries = new Set<number>()
+  let fence: RegExp | null = null // the open fence's closer
+  let blockEnd: RegExp | null = null
+  text.split('\n').forEach((line, index) => {
+    if (fence) {
+      if (fence.test(line)) fence = null
+      return
+    }
+    if (blockEnd) {
+      if (blockEnd.test(line)) blockEnd = null
+    } else {
+      const open = FENCE_OPEN.exec(line)
+      if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+        fence = new RegExp('^ {0,3}' + open[1] + '[~`]* *$') // Marked's closer: \\1[~`]* *(?=\\n|$)
+        return
+      }
+      for (const [start, end] of HTML_BLOCKS) {
+        const at = start.exec(line)
+        if (!at) continue
+        if (!end.test(line.slice(at[0].length))) blockEnd = end
+        break
+      }
+    }
+    if (AGENT_LINE.test(line)) boundaries.add(index)
+  })
+  return boundaries
+}
+// the boundaries the renderer resets, as the character offsets of their line starts (its macro
+// pass sees offsets into the grammar text): those directly followed by an ADMITTED region (the
+// markers childTagRegions returns), so the reset precedes exactly the replies that carry marks;
+// a boundary the renderer's own passes move into code (an unwrapped `_md` block opening a tilde
+// fence) gets none and shows no reset text beside the reply's own source
+export function chatResetOffsets(grammarText: string, admitted: Set<string>): Set<number> {
+  const offsets = new Set<number>()
+  if (!admitted.size) return offsets
+  const boundaries = chatBoundaries(grammarText)
+  const lines = grammarText.split('\n')
+  let offset = 0
+  lines.forEach((line, index) => {
+    if (boundaries.has(index) && index + 1 < lines.length && admitted.has(lines[index + 1])) offsets.add(offset)
+    offset += line.length + 1
+  })
+  return offsets
+}
+// an html token's raw text read TAG BY TAG for the raw-text element it leaves open (`names`):
+// inside an open element only its own end tag counts (its content is text, comments included);
+// outside, a comment is skipped whole and a complete tag (quoted attribute values honored: an
+// end tag spelled inside an attribute is no end tag) opens an element of the set; a lone `<` is
+// text. An unclosed comment makes the rest of the token comment text.
+const HTML_TAG = /<(\/?)([A-Za-z][\w:-]*)(?:\s+[^\s"'=<>`\/]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*\s*\/?>/y // sticky: a tag AT the `<`, no search ahead (review 6: a forward search re-read the token's remainder at every `<` of comparison text)
+export function rawElementState(raw: string, open: string | null, names: RegExp): string | null {
+  let i = 0
+  while (i < raw.length) {
+    if (open) {
+      const close = new RegExp('</' + open + '(?=[\\s>/]|$)', 'ig')
+      close.lastIndex = i
+      const m = close.exec(raw)
+      if (!m) return open
+      open = null
+      i = m.index + m[0].length
+      continue
+    }
+    const lt = raw.indexOf('<', i)
+    if (lt < 0) return null
+    if (raw.startsWith('<!--', lt)) {
+      const end = raw.indexOf('-->', lt + 4)
+      if (end < 0) return null
+      i = end + 3
+      continue
+    }
+    HTML_TAG.lastIndex = lt
+    const m = HTML_TAG.exec(raw)
+    if (m) {
+      if (!m[1] && names.test(m[2])) open = m[2].toLowerCase()
+      i = lt + m[0].length
+      continue
+    }
+    i = lt + 1
+  }
+  return open
+}
+// the raw-text elements of a browser: their content is text until their own end tag
+const BROWSER_RAW = /^(?:script|style|textarea|title|xmp|iframe|noembed|noframes|noscript)$/i
+// the raw-text state after a token tree, in document order (an image's label is discarded by the
+// renderers and skipped)
+function rawStateAfter(tokens: Token[], open: string | null, names: RegExp): string | null {
+  for (const token of tokens) {
+    const t = token as Tokens.Generic
+    if (t.type === 'image') continue
+    if (t.type === 'html') {
+      open = rawElementState(String(t.raw), open, names)
+      continue
+    }
+    // the app's static `_html(_*)` blocks are raw html to the item renderer (emitted unescaped,
+    // their code wrapper unwrapped), by the language marked-highlight hands it: the info string's
+    // first word (reviews 6-7; a backtick `*_removed` block is gone from the prepared text already,
+    // a tilde one is live, as the renderer has it)
+    if (t.type === 'code') {
+      const lang = String(t.lang ?? '').match(/\S*/)![0]
+      if (/^_html(?:_|$)/.test(lang)) open = rawElementState(String(t.text), open, names)
+      continue
+    }
+    if (Array.isArray(t.tokens)) open = rawStateAfter(t.tokens, open, names)
+    if (Array.isArray(t.items)) open = rawStateAfter(t.items, open, names)
+    if (Array.isArray(t.header)) open = rawStateAfter(t.header, open, names)
+    if (Array.isArray(t.rows)) for (const row of t.rows) open = rawStateAfter(row, open, names)
+  }
+  return open
+}
+let plain: Marked | null = null
+export function childTagRegions(scan: InertScan): Set<string> {
+  const eligible = new Set<string>()
+  const canonical = new Set(scan.candidates.filter(c => c.canonical).map(c => c.marker))
+  if (!canonical.size) return eligible
+  const boundaries = chatBoundaries(scan.grammarText)
+  if (!boundaries.size) return eligible
+  // the text as the renderer's block passes leave it: the reset and the blank line before each
+  // boundary (the macro pass's prefix; the delimiter line stands for the block it expands to),
+  // then the renderer's own passes
+  const withResets = scan.grammarText
+    .split('\n')
+    .map((line, index) => (boundaries.has(index) ? CHAT_BOUNDARY_RESET + '\n\t\n' + line : line))
+    .join('\n')
+  const prepared: string = removeRemovedBlocks(removeSections(prepareBlocks(withResets)))
+  // the second reading, by the installed Marked: a boundary line (an agent line behind its blank
+  // line, which a removed section leaves in place) admits the region after it when it opens a
+  // paragraph and no raw-text element is open before it; the line a token starts on is the count
+  // of newlines in the raw text before it (the source for the constructs here; a lone CR, or a
+  // duplicate reference definition with a multiline url or title, can shift the count and leave
+  // an ordinary framed reply untagged: a recorded limitation, as the inert renderer's)
+  const lines = prepared.split('\n')
+  const admitted = new Set<number>()
+  plain ??= new Marked({ gfm: true, breaks: true })
+  let line = 0
+  let open: string | null = null
+  for (const token of plain.lexer(prepared)) {
+    const t = token as Tokens.Generic
+    const raw = String(t.raw)
+    if (t.type === 'paragraph' && !open && AGENT_LINE.test(lines[line] ?? '') && lines[line - 1] === '\t') admitted.add(line)
+    open = rawStateAfter([token], open, BROWSER_RAW)
+    line += raw.split('\n').length - 1
+  }
+  lines.forEach((text, index) => {
+    if (admitted.has(index - 1) && canonical.has(text)) eligible.add(text)
+  })
+  return eligible
+}
 
 // fixed placeholder for a claimed candidate WITHOUT a value (unclosed, unframed, or
 // noncanonical) -- assigned only via textContent, exactly like the v1 placeholder

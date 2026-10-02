@@ -43,6 +43,56 @@ export function blockRegExp(type_regex) {
   return new RegExp('((?:^|\\n) *)```(' + type_regex + ')\\n( *|.*?\\n *)```', 'ugsi')
 }
 
+// THE RENDERER'S BLOCK PASSES before Markdown (Item.svelte toHTML), shared with the index's
+// child-tag rule (src/inert.ts childTagRegions), which reads an item's block structure as these
+// passes leave it. prepareBlocks, in order: a colon-separated block type keeps its last part
+// without a period; a block ending followed by text breaks the line; a non-empty `_markdown` or
+// `_md` block that is not removed or hidden is unwrapped. removeSections, later in the renderer
+// (after the dependency lists are appended): a removed section (`<!--removed-->` to the first
+// `<!--/removed-->` ending its line) is dropped unless it starts inside a backtick block or a
+// 4-space indented block (blockExclusions, which the hidden-section pass shares).
+export const blockExclusions = [
+  '(?:^|\\n) *```.*?\\n *```', // multi-line block
+  '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
+]
+export function prepareBlocks(text) {
+  // pre-process block types to allow colon-separated parts, taking only last part without a period
+  text = text.replace(blockRegExp('\\S+?'), (m, pfx, type, body) => {
+    if (type.includes(':')) type = type.split(':').reverse().find(s => !s.includes('.')) ?? ''
+    return pfx + '```' + type + '\n' + body + '```'
+  })
+  // force line break after block endings (most useful for macro-generated blocks that may be followed by text)
+  const block_regex = blockRegExp(/\S*?/)
+  const regex = new RegExp(block_regex.source + ' *([^\\n]?)', block_regex.flags)
+  text = text.replace(regex, (m, pfx, type, body, sfx) => {
+    return pfx + '```' + type + '\n' + body + '```' + (sfx ? '\n' + sfx : '')
+  })
+  // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
+  text = text.replace(blockRegExp('(?:_markdown|_md)(?:_\\S*)? *'), (m, pfx, type, body) => {
+    if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
+    // remove trailing newline in body (as in extractBlock) to avoid extra lines between blocks
+    // for tables/blockquotes, we instead append an escape to force breaking across blocks w/o forcing spacing
+    // note the second \n comes from the closing block delimiter ```\n since blockRegExp excludes the final \n
+    if (!body.match(/(?:^|\n)\s*[|>][^\n]*\n$/)) body = body.replace(/\n$/, '')
+    else body = body.replace(/\n$/, '\n\\')
+    body = body.replace(/((?:^|\n) *)\\```/g, '$1```') // unescape nested blocks
+    return pfx + body
+  })
+  return text
+}
+// the renderer's `*_removed` BLOCK pass (after its line pass): a backtick block whose type ends in
+// `_removed` is dropped (blockRegExp reads backtick fences alone: a tilde `_removed` block stays,
+// and renders as its type does)
+export function removeRemovedBlocks(text) {
+  return text.replace(blockRegExp(/\S*_removed/), '')
+}
+export function removeSections(text) {
+  return text.replace(
+    exclusionRegExp(blockExclusions, /<\!-- *removed *-->.*?<\!-- *\/removed *--> *?(\n|$)/gs),
+    skipExclusions(() => '')
+  )
+}
+
 export function extractBlock(text, type, remove_empty_lines = false) {
   // sanity check against patterns that can match across multiple blocks
   if (type.match(/\.[+*]/)) throw new Error(`invalid block type '${type}' can match across blocks`)

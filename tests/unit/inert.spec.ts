@@ -12,6 +12,10 @@ import {
   INERT_OPEN,
   containsOpaqueMarker,
   decodeInertSource,
+  childTagRegions,
+  chatBoundaries,
+  chatResetOffsets,
+  rawElementState,
   inertCandidateSpan,
   inertSearchText,
   editInertText,
@@ -293,4 +297,116 @@ test('inertSearchText: collision-safe, simultaneous, position-preserving (189 §
   expect(inertSearchText(`a\n${markerA}\nmid\n${markerB}\nz`, twoValues)).toBe(
     `a\nsneaky ${markerB} payload\nmid\nreal_b\nz`
   )
+})
+
+test('child-tag regions: the one placement rule the index and the renderer apply to the same scan', () => {
+  // vault design mind_chat_children 2.2 (revision 6): a canonical region counts (its `#/name`
+  // tokens are tags, its frame marks them) exactly when its marker line directly follows a CHAT
+  // BOUNDARY, an `<<agent(...)>>` delimiter line alone outside a fenced code block, the position
+  // the renderer resets, read after the renderer's block passes by the installed Marked (review 4
+  // R3: the owner's text is never scanned for tag-shaped content; a comment or a removed section
+  // left open before a reply is healed, an open raw-text element declines the reply; review 5 R3:
+  // the fence grammar is Marked's own)
+  const region = encodeInert('see #/x')
+  const agent = "<<agent('vault/default · run ab12cd34 · 1s')>>"
+  const regions = (text: string) => {
+    const scan = scanInert(text)
+    return [...childTagRegions(scan)].map(marker => scan.candidates.findIndex(c => c.marker === marker))
+  }
+  expect(regions(`#label\n${agent}\n${region}`)).toEqual([0]) // the publisher's shape
+  expect(regions(`#label\n<<agent>>\n${region}`)).toEqual([0]) // a bare delimiter
+  expect(regions(`#label\n<<agent('x')>>  \n${region}`)).toEqual([0]) // trailing spaces
+  expect(regions(`${agent}\n${region}`)).toEqual([0]) // the first line
+  expect(regions(`#label\n${agent}\n${region}\n${agent}\n${region}`)).toEqual([0, 1]) // two replies
+  expect(regions(`#label\n<<user>>\n${region}`)).toEqual([]) // the owner's delimiter opens no reply
+  expect(regions(`#label\n\n${region}`)).toEqual([]) // a blank line
+  expect(regions(region)).toEqual([]) // the text's start
+  expect(regions(`#label\nprose\n${region}`)).toEqual([]) // prose
+  expect(regions(`#label\n<<(1 + 2)>>\n${region}`)).toEqual([]) // another macro line
+  expect(regions(`#label\n${agent} trailing\n${region}`)).toEqual([]) // content after the delimiter
+  expect(regions(`#label\n ${agent}\n${region}`)).toEqual([]) // an indented delimiter
+  expect(regions(`#label\n${agent}\n\n${region}`)).toEqual([]) // a blank line between
+  expect(regions(`#label\n${agent}\n${region}\n${region}`)).toEqual([0]) // a second region continues the paragraph
+  // fences: nothing ends them from within, so a boundary inside one is none
+  expect(regions(`#label\n\`\`\`\n${agent}\n${region}\n\`\`\``)).toEqual([])
+  expect(regions(`#label\n~~~\n${agent}\n${region}\n~~~`)).toEqual([])
+  expect(regions(`#label\n\`\`\`_md\n${agent}\n${region}\n\`\`\``)).toEqual([]) // an _md fence the renderer unwraps
+  expect(regions(`#label\n\`\`\`\ncode\n\`\`\`\n${agent}\n${region}`)).toEqual([0]) // after a closed fence
+  expect(regions(`#label\n\`\`\`\`\n\`\`\`\n${agent}\n${region}\n\`\`\`\``)).toEqual([]) // a longer fence over a shorter one
+  expect(regions(`#label\n\`\`\`a\`b\n${agent}\n${region}`)).toEqual([0]) // a backtick in the info string: no fence
+  expect(regions(`#label\n    \`\`\`\n${agent}\n${region}`)).toEqual([0]) // an indented fence line is code
+  // Marked's closer: the opener's string, more fence characters allowed, then spaces alone
+  expect(regions(`#label\n~~~\ncode\n~~~ \n${agent}\n${region}`)).toEqual([0]) // trailing spaces close
+  expect(regions(`#label\n~~~\ncode\n~~~\t\n${agent}\n${region}`)).toEqual([]) // a trailing tab keeps the fence open (review 5 R3)
+  expect(regions(`#label\n~~~\ncode\n~~~\u00a0\n${agent}\n${region}`)).toEqual([]) // a trailing NBSP too
+  expect(regions(`#label\n\`\`\`\ncode\n\`\`\`~\n${agent}\n${region}`)).toEqual([0]) // more fence characters still close
+  // the html blocks that span blank lines (CommonMark kinds 1-5) hold fence-looking lines as text,
+  // and a boundary inside one is healed by the reset like any other
+  expect(regions(`#label\n<!--\n\`\`\`\n-->\n${agent}\n${region}`)).toEqual([0]) // a fence line inside a comment block
+  expect(regions(`#label\n<!--\n\`\`\`\n-->\n\`\`\`\n${agent}\n${region}\n\`\`\``)).toEqual([]) // then a real fence
+  expect(regions(`#label\n<!-- c -->\n\`\`\`\n${agent}\n${region}\n\`\`\``)).toEqual([]) // a comment closed on its line, then a fence
+  expect(regions(`#label\n<style>\n\`\`\`\n</style>\n${agent}\n${region}`)).toEqual([0]) // a fence line inside a closed raw block
+  // (a processing instruction, a declaration or CDATA opens a block after a blank line only: to
+  // the installed Marked none of them interrupts a paragraph, where the fence line is a fence)
+  expect(regions(`#label\n\n<?php\n\`\`\`\n?>\n${agent}\n${region}`)).toEqual([0]) // inside a processing instruction block
+  expect(regions(`#label\n\n<![CDATA[\n\`\`\`\n]]>\n${agent}\n${region}`)).toEqual([0]) // inside a CDATA block
+  expect(regions(`#label\n<?php\n\`\`\`\n?>\n${agent}\n${region}`)).toEqual([]) // after a paragraph line: the fence is a fence
+  expect(regions(`#label\n\n<!DOCTYPE html>\n\`\`\`\n${agent}\n${region}\n\`\`\``)).toEqual([]) // a declaration closed on its line, then a fence
+  expect(regions(`#label\n<!-- c\n${agent}\n${region}\n-->`)).toEqual([0]) // a boundary inside a comment block: healed
+  expect(regions(`#label\n<!--removed-->\n${agent}\n${region}\n<!--/removed-->`)).toEqual([0]) // inside a removed section: healed
+  expect(regions(`#label\n\n<!OWNER\n${agent}\n${region}`)).toEqual([0]) // inside a declaration block: healed (the reset's `>` ends it)
+  expect(regions(`#label\n<?php\n${agent}\n${region}\n?>`)).toEqual([0]) // after a paragraph line a processing instruction is text
+  // a processing instruction or a CDATA section open as a block swallows the reply to its end:
+  // declined (the browser would end its bogus comment at the reset's first `>` and show the rest)
+  expect(regions(`#label\n\n<?php\n${agent}\n${region}\n?>`)).toEqual([])
+  expect(regions(`#label\n\n<![CDATA[\n${agent}\n${region}\n]]>`)).toEqual([])
+  expect(regions(`#label\n<<user>> Explain \`<style>\` and <!--\n${agent}\n${region}`)).toEqual([0]) // tag-shaped text in a question
+  // an open raw-text element of the browser before the boundary declines the reply (its text
+  // would show the reset, and the reply is swallowed either way), read tag by tag
+  expect(regions(`#label\n<style>\n${agent}\n${region}\n</style>`)).toEqual([]) // a raw block
+  expect(regions(`#label\ntext <textarea>\n${agent}\n${region}`)).toEqual([]) // one opened inside a line
+  expect(regions(`#label\n<xmp>\n\n${agent}\n${region}`)).toEqual([])
+  expect(regions(`#label\n<style data-x="</style>">\n${agent}\n${region}`)).toEqual([]) // an end tag inside an attribute closes nothing
+  expect(regions(`#label\n<style></style>\n${agent}\n${region}`)).toEqual([0]) // closed on its line
+  expect(regions(`#label\n<!-- <style> -->\n${agent}\n${region}`)).toEqual([0]) // an opener inside a comment opens nothing
+  expect(regions(`#label\n<span data-x="<style>">\n${agent}\n${region}`)).toEqual([0]) // nor inside an attribute
+  expect(regions(`#label\n\`<style>\`\n${agent}\n${region}`)).toEqual([0]) // nor in inline code
+  // the app's static `_html` blocks are raw html to the item renderer (review 6)
+  expect(regions(`#label\n\`\`\`_html\n<textarea>\n\`\`\`\n${agent}\n${region}`)).toEqual([]) // an open textarea in one
+  expect(regions(`#label\n\`\`\`_html\n<textarea></textarea>\n\`\`\`\n${agent}\n${region}`)).toEqual([0]) // closed there
+  expect(regions(`#label\n\`\`\`_html_removed\n<textarea>\n\`\`\`\n${agent}\n${region}`)).toEqual([0]) // a backtick removed block is dropped by the renderer
+  expect(regions(`#label\n~~~_html_removed\n<textarea>\n~~~\n${agent}\n${region}`)).toEqual([]) // a tilde one stays, and is raw html (review 7)
+  expect(regions(`#label\n\`\`\`_html extra\n<textarea>\n\`\`\`\n${agent}\n${region}`)).toEqual([]) // the info string's first word is the language (review 7)
+  expect(regions(`#label\n~~~_html\n<textarea></textarea>\n~~~\n${agent}\n${region}`)).toEqual([0]) // closed, in a tilde block
+  expect(regions(`#label\n\`\`\`html\n<textarea>\n\`\`\`\n${agent}\n${region}`)).toEqual([0]) // ordinary code is code
+  // the text is read as the renderer's block passes leave it, with the resets in place: a removed
+  // section that starts in a tilde fence or a comment (which the removed pass does not read) eats
+  // their closing lines and the reset, so the boundary ends up inside the fence or the comment
+  expect(regions(`#label\n~~~\n<!--removed-->\n~~~\n\n${agent}\n${region}\n<!--/removed-->`)).toEqual([])
+  expect(regions(`#label\n<!--\n<!--removed-->\n-->\n${agent}\n${region}\n<!--/removed-->`)).toEqual([])
+  expect(regions(`#label\n\`\`\`\n<!--removed-->\n\`\`\`\n${agent}\n${region}\n<!--/removed-->`)).toEqual([0]) // a backtick block excludes the start
+  expect(regions(`#label\n<!--removed-->\nx\n<!--/removed-->\n${agent}\n${region}`)).toEqual([0]) // a closed section before
+  // an unwrapped `_md` block's content is live: a comment opener it holds is healed by the reset,
+  // a tilde fence it opens is not
+  expect(regions(`#label\n\`\`\`_md\n<!--\n\`\`\`\n${agent}\n${region}`)).toEqual([0])
+  expect(regions(`#label\n\`\`\`_md\n~~~\n\`\`\`\n${agent}\n${region}`)).toEqual([])
+  // an unclosed or noncanonical region is no region at all
+  expect(regions(`#label\n${agent}\n${INERT_OPEN}\nopen`)).toEqual([])
+  expect(regions(`#label\n${agent}\n${INERT_OPEN}\n${INERT_CLOSE}`)).toEqual([])
+  // the tag-by-tag reading itself
+  const RAW = /^(?:style|textarea)$/i
+  expect(rawElementState('<style>', null, RAW)).toBe('style')
+  expect(rawElementState('<style data-x="</style>"> x', null, RAW)).toBe('style')
+  expect(rawElementState('<!-- <style> --> <span data-x="<style>">', null, RAW)).toBeNull()
+  expect(rawElementState('<!-- <style>', null, RAW)).toBeNull() // an unclosed comment: comment text
+  expect(rawElementState(' <!-- x --> </style> y', 'style', RAW)).toBeNull() // inside: only its own end tag
+  expect(rawElementState('</STYLE >', 'style', RAW)).toBeNull()
+  expect(rawElementState('</styles>', 'style', RAW)).toBe('style')
+  expect(rawElementState('<textarea/>', null, RAW)).toBe('textarea')
+  expect(rawElementState('<div>1 < 2, 3 < 4</div><style>', null, RAW)).toBe('style') // comparison text is text, the opener after it counts
+  // the boundaries themselves, by line and by offset (the renderer's macro pass)
+  expect([...chatBoundaries(`#label\n${agent}\n${region}\n\`\`\`\n${agent}\n\`\`\``)]).toEqual([1])
+  const twice = scanInert(`#label\n${agent}\n${region}\n${agent}\ny`) // the renderer resets before admitted regions alone
+  expect([...chatResetOffsets(twice.grammarText, new Set([twice.candidates[0].marker]))]).toEqual(['#label\n'.length])
+  expect([...chatResetOffsets(twice.grammarText, new Set())]).toEqual([])
 })

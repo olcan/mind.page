@@ -9,7 +9,7 @@
 // _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
 import { firestore, install, loadAdmin, waitForApp } from './helpers.js'
-import { focusMindbox, mindbox } from './editor_helpers.js'
+import { focusMindbox, mindbox, visible } from './editor_helpers.js'
 
 test('a canonical reply renders as inert markdown: structure, admitted links, literal grammar', async ({ page }) => {
   // design §2.2a amended 2026-09-05 (owner): the dead frame shows the decoded body as Markdown
@@ -76,6 +76,175 @@ test('a canonical reply renders as inert markdown: structure, admitted links, li
   expect(shape.marks).toBe(0)
   expect(shape.pwned).toBeNull()
   expect(shape.tags, 'a #tag inside the reply is not an item tag').not.toContain('#not_a_tag')
+})
+
+test("a reply's child tags are the item's tags: marks in the frame, navigation, search, the frame otherwise dead", async ({ page, context }) => {
+  // vault design mind_chat_children 2.2: the `#/name` tokens of a canonical reply are visible
+  // tags of the labeled item (resolved against its label), rendered in the dead frame as the
+  // app's marks (title and data attributes, `renderTag`'s display, `missing` from the item's
+  // state) and routed to the app's tag handler by the frame's capture listeners (a real click;
+  // the keyboard navigation's synthetic non-bubbling mousedown); a mark inside a link's label
+  // navigates without firing the anchor; everything else in the frame stays dead; the parent's
+  // dependencies gain nothing (a visible tag is no edge); a child appearing or vanishing updates
+  // the mark's class in place with the selection class surviving
+  await loadAdmin(page)
+  const CHAT = '#e2e_cc'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const child = (name: string) =>
+    `${CHAT}/${name}\n<<agent('vault/default · created in run ab12cd34')>>\n${inert(`${name} body <<not_a_macro>> #/deeper`)}`
+  const body = ['## Findings', '', 'see #/alpha and #/beta, code `#/no`, [docs #/alpha](https://example.com/d), x#/none', '', '```', '#/fenced', '```'].join('\n')
+  await page.evaluate(text => void window._create(text), `${CHAT} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`)
+  await page.evaluate(text => void window._create(text), child('alpha'))
+  await page.evaluate(() => void (location.hash = '#e2e_cc'))
+  const marks = () =>
+    page.evaluate(
+      label =>
+        [...window._item(label, true)!.elem!.querySelectorAll('.vault-result mark[data-tag]')].map(m => ({
+          tag: m.getAttribute('data-tag'),
+          rel: m.getAttribute('data-reltag'),
+          text: m.textContent,
+          missing: m.classList.contains('missing'),
+          selected: m.classList.contains('selected'),
+          inAnchor: !!m.closest('a'),
+        })),
+      CHAT
+    )
+  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(3)
+  const facts = (name: string) =>
+    page.evaluate(n => {
+      const i = window._item(n, true) as any
+      return i ? { id: i.id as string, tags: [...i.tags].sort() as string[], deps: [...(i.dependencies ?? [])] as string[] } : null
+    }, name)
+  expect(await marks()).toEqual([
+    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, selected: false, inAnchor: false },
+    { tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: true, selected: false, inAnchor: false },
+    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, selected: false, inAnchor: true },
+  ])
+  const chat = (await facts(CHAT))!
+  const alpha = (await facts(`${CHAT}/alpha`))!
+  expect(chat.tags, "the child tags are the item's; nothing from code, a link target or an unbounded token").toEqual(['#e2e_cc', '#e2e_cc/alpha', '#e2e_cc/beta'])
+  expect(chat.deps, 'a visible tag is no dependency edge').not.toContain(alpha.id)
+  expect(alpha.tags, "the child's own #/deeper is the CHILD's child tag").toEqual(['#e2e_cc/alpha', '#e2e_cc/alpha/deeper'])
+  const elemId = await page.evaluate(label => window._item(label, true)!.elem!.id, CHAT)
+  const query = () => mindbox(page).inputValue()
+  const editing = () => page.evaluate(id => !!document.querySelector(`[id="${id}"] textarea, .container.editing`), elemId)
+  // a real click on a mark navigates to the child (the box holds its label); no editor opens
+  await page.locator(`[id="${elemId}"] .vault-result mark[data-tag="#e2e_cc/alpha"]`).first().click()
+  await expect.poll(query).toBe('#e2e_cc/alpha ')
+  expect(await editing(), 'no editor after the mark click').toBe(false)
+  // the mark inside the link's label navigates and the anchor does not fire (no new page)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  await expect.poll(query).toMatch(/^#e2e_cc ?$/)
+  await page.locator(`[id="${elemId}"] .vault-result a mark[data-tag]`).click()
+  await expect.poll(query).toBe('#e2e_cc/alpha ')
+  await page.waitForTimeout(300)
+  expect(context.pages().length, 'the anchor did not open').toBe(1)
+  // the keyboard navigation's synthetic non-bubbling mousedown on a mark reaches the handler
+  await page.evaluate(
+    id => (document.querySelector(`[id="${id}"] .vault-result mark[data-tag="#e2e_cc/beta"]`) as HTMLElement).dispatchEvent(new MouseEvent('mousedown', { altKey: true })),
+    elemId
+  )
+  await expect.poll(query).toBe('#e2e_cc/beta ')
+  // the second child appears: its mark loses `missing` in place while the selection class (the
+  // box holds its tag) survives; vanishes: `missing` again, still selected; appears again
+  await page.evaluate(text => void window._create(text), child('beta'))
+  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: false, selected: true, inAnchor: false })
+  const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
+  await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy() // saved: deletable on the server
+  await firestore().collection('items').doc((await betaDoc())!).delete()
+  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: true, selected: true, inAnchor: false })
+  await page.evaluate(text => void window._create(text), child('beta'))
+  await expect.poll(() => marks().then(m => m[1].missing), { timeout: 15_000 }).toBe(false)
+  // Down enters the first child from the chat, Right moves to the next sibling, Up returns
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  await expect.poll(query).toMatch(/^#e2e_cc ?$/)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_cc/alpha ')
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(query).toBe('#e2e_cc/beta ')
+  await page.keyboard.press('ArrowUp')
+  await expect.poll(query).toMatch(/^#e2e_cc ?$/)
+  // a tag search for a child lists the chat (the tag is its) with the mark selected
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/alpha`)
+  await expect.poll(() => marks().then(m => m[0].selected)).toBe(true)
+  expect(await visible(page), "the chat is listed under its child's tag").toContain(CHAT)
+  // the frame stays dead for everything else: a text click opens no editor
+  await page.locator(`[id="${elemId}"] .vault-result h2`).click()
+  await page.waitForTimeout(300)
+  expect(await editing()).toBe(false)
+  // PARITY (reviews 2-4, R3): one placement rule for the index and the renderer (src/inert.ts
+  // childTagRegions): a region directly after a CHAT BOUNDARY, an `<<agent(...)>>` line alone
+  // outside a fence, carries child tags and marks, and the renderer's boundary reset makes it
+  // framed whatever comment or declaration the owner's text left open before it (a comment, a
+  // declaration, a removed section, tag-shaped text in a question); the rule reads the text as the
+  // renderer's block passes leave it with the installed Marked, so a removed section that ate a
+  // fence's or a comment's closing line, a fence Marked keeps open, a processing-instruction block
+  // or an open raw-text element (in the owner's html or a static _html block; its text would show
+  // the reset) leaves the reply unframed AND untagged; every other placement carries neither,
+  // framed or not (the image label of the unit table is left out here: its <img> fetches a url, a
+  // network round trip this row does not need). The reset leaves no visible text, in a textarea's
+  // value included.
+  const agent = "<<agent('vault/default · run ab12cd34 · 1s')>>"
+  const shapes: [string, string, boolean, boolean][] = [
+    // name, the text after the label line, a frame rendered, child tags indexed and marked
+    ['opener', `${agent}\n` + inert('#/x'), true, true],
+    ['blank', '\n' + inert('#/x'), true, false],
+    ['prose', 'prose\n' + inert('#/x'), true, false],
+    ['user', '<<user>>\n' + inert('#/x'), true, false],
+    ['trailing', `${agent} x\n` + inert('#/x'), true, false],
+    ['fence', '\n```\n' + inert('#/x') + '\n```', false, false],
+    ['fencedreply', '```\n' + `${agent}\n` + inert('#/x') + '\n```', false, false],
+    ['md', '\n```_md\n' + inert('#/x') + '\n```', true, false],
+    ['div', '<div>\n' + inert('#/x') + '\n</div>', true, false],
+    ['link', '[\n' + inert('#/x') + '\n](https://example.com/)', true, false],
+    ['comment', '<!-- c\n\n' + inert('#/x') + '\n-->', false, false],
+    ['removed', '<!--removed-->\n\n' + inert('#/x') + '\n<!--/removed-->', false, false],
+    ['rawblock', '<style>\n\n' + inert('#/x') + '\n</style>', false, false],
+    ['healcomment', `<!-- c\n${agent}\n` + inert('#/x') + '\n-->', true, true],
+    ['healremoved', `<!--removed-->\n${agent}\n` + inert('#/x') + '\n<!--/removed-->', true, true],
+    ['rawopen', `<style>\n${agent}\n` + inert('#/x') + '\n</style>', false, false], // an open raw-text element declines the reply
+    ['textarea', `<textarea>\nowner\n${agent}\n` + inert('#/x') + '\n</textarea>', false, false], // its value shows no reset (asserted below)
+    ['tabfence', `~~~\ncode\n~~~\t\n${agent}\n` + inert('#/x'), false, false], // a trailing tab keeps Marked's fence open
+    ['declaration', `\n<!OWNER\n${agent}\n` + inert('#/x'), true, true], // the reset's `>` ends a declaration block: healed, nothing shown
+    ['pi', `\n<?owner\n${agent}\n` + inert('#/x'), false, false], // a processing instruction block swallows the reply: declined, no reset
+    ['htmltextarea', '```_html\n<textarea>\n```\n' + `${agent}\n` + inert('#/x'), false, false], // an open textarea in a static _html block
+    ['htmlclosed', '```_html\n<textarea></textarea>\n```\n' + `${agent}\n` + inert('#/x'), true, true],
+    ['htmltilde', '~~~_html_removed\n<textarea>\n~~~\n' + `${agent}\n` + inert('#/x'), false, false], // a tilde removed block is not removed: raw html, an open textarea
+    // a removed marker from a macro: the rule reads the literal marker inside the macro's quotes and
+    // removes from there (the renderer expands it first), the boundary's blank line merges into the
+    // leftover `<<'` and the reply is declined; the renderer, told so, resets nothing and the
+    // expanded marker's section swallows the reply: neither, consistently (a macro's expansion is
+    // outside the rule's reading by design)
+    ['macroremoved', `<<'<!--removed-->'>>\n${agent}\n` + inert('#/x') + '\n<!--/removed-->', false, false],
+    // the removed pass reads no tilde fence and no comment: a section starting in one eats its
+    // closing line, so the reply ends up in code or in the comment, and the rule reads the same
+    ['tilderemoved', `~~~\n<!--removed-->\n~~~\n\n${agent}\n` + inert('#/x') + '\n<!--/removed-->', false, false],
+    ['commentremoved', `<!--\n<!--removed-->\n-->\n${agent}\n` + inert('#/x') + '\n<!--/removed-->', false, false],
+    ['mdtilde', '```_md\n~~~\n```\n' + `${agent}\n` + inert('#/x'), false, false],
+    ['mdcomment', '```_md\n<!--\n```\n' + `${agent}\n` + inert('#/x'), true, true],
+    ['codequestion', `<<user>> Explain \`<style>\` and <!--\n${agent}\n` + inert('#/x'), true, true],
+  ]
+  for (const [name, rest, framed, tagged] of shapes) await page.evaluate(text => void window._create(text), `#e2e_sh_${name}\n${rest}`)
+  for (const [name, , framed, tagged] of shapes) {
+    const label = `#e2e_sh_${name}`
+    await page.evaluate(label => void (location.hash = label), label)
+    await expect.poll(() => page.evaluate(label => !!window._item(label, true)?.elem?.querySelector('.content'), label), { timeout: 15_000 }).toBe(true)
+    const shape = await page.evaluate(label => {
+      const item = window._item(label, true) as any
+      return {
+        frames: item.elem.querySelectorAll('.vault-result').length,
+        marks: item.elem.querySelectorAll('.vault-result mark[data-tag]').length,
+        tagged: (item.tags as string[]).includes(`${label}/x`),
+        text: (item.elem.querySelector('.content') as HTMLElement | null)?.innerText ?? '', // rendered text: a style element's text is not shown
+        values: [...item.elem.querySelectorAll('textarea')].map((t: HTMLTextAreaElement) => t.value).join('\n'), // a textarea shows its value
+      }
+    }, label)
+    expect(shape.frames > 0, `${name}: a frame`).toBe(framed)
+    expect(shape.tagged, `${name}: the child tag indexed`).toBe(tagged)
+    expect(shape.marks > 0, `${name}: marks exactly where the tag is indexed`).toBe(tagged)
+    expect(shape.text + '\n' + shape.values, `${name}: the reset shows nothing`).not.toMatch(/\/removed--|\]\]>/) // the reset's own text (a shape's text may show the owner's markers as code) and the fragment of review 6
+  }
 })
 
 test('inert regions render dead: valid decoded text and malformed candidates', async ({ page }) => {

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { decodeEntities, grammarRefs, highlightCode, renderInertMarkdown } from '../../src/inert_markdown.js'
+import { decodeEntities, grammarRefs, highlightCode, inertChildTags, renderInertMarkdown } from '../../src/inert_markdown.js'
 
 // the inert Markdown policy for bridge replies (src/inert_markdown.ts): the vault renderer's
 // policy ported for the dead frame. these rows check the produced html string with the REAL
@@ -137,4 +137,93 @@ test('fenced code: plain without a highlighter, filtered spans with one', () => 
   )
   expect(highlightCode('x', 'js', null)).toBeNull()
   expect(highlightCode('x', 'js', { highlight: () => { throw new Error('boom') } })).toBeNull()
+})
+
+test('child tags: the one shorthand a reply may use as a tag, recognized and rendered by one Marked', () => {
+  // vault design mind_chat_children 2.2: `#/<segment>` at a boundary of its inline run, ending
+  // where the app's tag ends, renders as the app's mark (title and data attributes in the label's
+  // case, no inline handler, `renderTag`'s display) with `missing` from the item's computed state;
+  // everything else stays text, and `inertChildTags` names exactly the tokens the marks render
+  const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', missingTags: new Set(['#chat/gone']) }
+  const render = (body: string, c = ctx) => renderInertMarkdown(body, c)
+  const marks = (h: string) => [...h.matchAll(/<mark([^>]*)>([^<]*)<\/mark>/g)].map(m => m[1] + '|' + m[2])
+  const reltags = (h: string) => [...h.matchAll(/data-reltag="([^"]*)"/g)].map(m => m[1].replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).toLowerCase())
+  const agree = (body: string) => expect(reltags(render(body)), body).toEqual(inertChildTags(body))
+  // the mark: the absolute tag in the label's case, the relative token, the display without `#/`
+  expect(marks(render('see #/alpha and #/gone'))).toEqual([
+    ' title="&#35;Chat&#47;alpha" data-tag="&#35;Chat&#47;alpha" data-reltag="&#35;&#47;alpha"|alpha',
+    ' class="missing" title="&#35;Chat&#47;gone" data-tag="&#35;Chat&#47;gone" data-reltag="&#35;&#47;gone"|gone',
+  ])
+  expect(inertChildTags('see #/alpha and #/gone')).toEqual(['#/alpha', '#/gone'])
+  // legal names of the app's grammar: unicode, markdown punctuation, a literal backslash; case kept
+  // in the mark and lowered in the extraction
+  for (const name of ['θ_1', 'a*b*c', 'foo\\x41', 'Alpha', '9x', 'snake_case-ok'])
+    expect(reltags(render(`#/${name} end`)), name).toEqual([`#/${name}`.toLowerCase()])
+  expect(render('#/Alpha')).toContain('title="&#35;Chat&#47;Alpha"')
+  expect(render('#/a*b*c')).not.toContain('<em>') // one tag, not emphasis
+  // boundaries: a longer tag is never a prefix match; siblings and other tags stay text
+  for (const body of ['#/a/b', '#/ab/c', '#//x', '#///x', '#x', '#_x', 'x#/x', 'a#/x b'])
+    expect(render(body), body).not.toContain('<mark')
+  for (const body of ['#/x', '(#/x)', 'see #/x.', 'a\n#/x', '**#/x**', '> #/x', '>#/x', '- #/x', '| #/x |\n|---|']) agree(body), expect(reltags(render(body)), body).toEqual(['#/x'])
+  // the deliberate rule: a nested inline run starts its own boundary
+  expect(reltags(render('**#/x**'))).toEqual(['#/x'])
+  // entities, escapes and protected positions are text
+  for (const body of ['&#35;/x', '\\#/x', '`#/x`', '```\n#/x\n```', '~~~\n#/x\n~~~', '    #/x', '<b>#/x</b>', '[t](#/x)', '![i](#/x)'])
+    expect(render(body), body).not.toContain('<mark'), agree(body)
+  // inline raw html is text too (review 2 R1: the extension yields inside Marked's raw block and
+  // inside the raw-text elements the token walk tracks in document order, so a nested run of
+  // emphasis or a link label inside one is text as well: reviews 3-4 R1), and an image's label is not
+  // rendered, so it carries no tag (R2); a link's label is rendered and does
+  for (const body of [
+    'example <script> #/x </script>',
+    'a <style> #/x </style> b',
+    '<pre> #/x </pre>',
+    'a <style> **#/x** </style>',
+    'a <textarea> **#/x** </textarea>',
+    'a <title> [#/x](https://e.org) </title>',
+    'a <xmp> *#/x* </xmp>',
+    '<pre> *#/x* </pre>',
+    '![#/hidden](https://e.org/i.png)',
+    '![**#/hidden**](https://e.org/i.png)',
+  ])
+    expect(render(body), body).not.toContain('<mark'), expect(inertChildTags(body), body).toEqual([])
+  // the suppression ends with the element, also when its close sits inside a nested run
+  // (an element opened at a line start is one of Marked's html BLOCKS to the end of its closing
+  // line, `#/y` on that line included: text, as the app shows it); an element that opens and
+  // closes through BLOCK tokens (`<title>` or `<xmp>` alone on a line: review 4 R1) suppresses
+  // the paragraphs between them and nothing after; an image's label is discarded by the renderer,
+  // so a tag it opens there holds nothing open
+  for (const body of [
+    'a <style> #/x </style> #/y',
+    'a <style> **x </style>** #/y',
+    '<textarea>#/x</textarea>\n\n#/y',
+    '<title>\n\n#/x\n\n</title>\n\n#/y',
+    '<xmp>\n\n**#/x**\n\n</xmp>\n\n#/y',
+    '![<style>](https://e.org/i.png) then #/y',
+    // tag by tag (review 5 R1): an end tag spelled inside a quoted attribute closes nothing, a
+    // raw-element opener inside a comment or an attribute opens nothing
+    'a <style data-example="</style>"> #/x </style> #/y',
+    'a <textarea title=\'</textarea>\'> **#/x** </textarea> #/y',
+    'a <!-- <style> --> #/y',
+    'a <span data-example="<style>"> #/y </span>',
+  ])
+    agree(body), expect(inertChildTags(body), body).toEqual(['#/y'])
+  expect(inertChildTags('<style> #/x </style> #/y')).toEqual([])
+  expect(inertChildTags('[#/x](https://e.org)')).toEqual(['#/x'])
+  // a mark inside a link's label is a permitted shape (the frame's click listener cancels the anchor)
+  expect(render('[see #/x](https://e.org)')).toMatch(/<a href="https&#58;&#47;&#47;e&#46;org" target="_blank" rel="noopener">see <mark /)
+  agree('[see #/x](https://e.org)')
+  // the `start` hook names the next candidate wherever it is (a bounded cut split emails and urls
+  // before Marked saw them: review 7); a tag far down a body and the links around it stay whole
+  expect(inertChildTags('word '.repeat(2000) + '#/far end')).toEqual(['#/far'])
+  expect(renderInertMarkdown('x'.repeat(253) + ' name@example.org')).toContain('href="mailto&#58;name&#64;example&#46;org"') // no context: the plain renderer
+  expect(renderInertMarkdown('x'.repeat(253) + ' https://example.org/path')).toContain('href="https&#58;&#47;&#47;example&#46;org&#47;path"')
+  // no label, no context: text; the context is not retained across renders
+  expect(render('#/x', { ...ctx, label: '', labelText: '' })).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
+  expect(renderInertMarkdown('#/x')).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
+  expect(render('#/gone', { ...ctx, missingTags: new Set() })).not.toContain('missing')
+  expect(render('#/gone')).toContain('class="missing"')
+  expect(renderInertMarkdown('#/gone')).not.toContain('<mark')
+  // the extraction walks every structure
+  expect(inertChildTags('- #/a\n- b #/b\n\n> #/c\n\n| h |\n|---|\n| #/d |\n\n[#/e](https://e.org) `#/no`')).toEqual(['#/a', '#/b', '#/c', '#/d', '#/e'])
 })

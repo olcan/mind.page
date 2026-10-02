@@ -899,4 +899,65 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const LEGACY_CHILD = `${LEGACY}/0/0 #_${LEGACY.slice(1)}/0\n<<user>> `
   expect(legacyChild, 'no autodep ancestor: the parent named').toEqual({ value: LEGACY_CHILD, start: LEGACY_CHILD.length, end: LEGACY_CHILD.length })
   await page.keyboard.press('Escape')
+
+  // CHAT CHILDREN (vault design mind_chat_children): under the INSTALLED chat template a chat's
+  // reply tags its children with `#/name` and the children bind to the chat by autodep; the
+  // stub #chat root above is replaced by the real template first (one #chat label)
+  await firestore().collection('items').doc((await savedId(page, '#chat'))!).delete()
+  await expect.poll(() => savedId(page, '#chat'), { timeout: 30_000 }).toBeNull()
+  expect(await install(page, 'chat'), '/_install chat').toBeNull()
+  await expect.poll(() => savedId(page, '#chat'), { timeout: 60_000 }).toBeTruthy()
+  const CC = '#e2e_cc'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), `${CC}\n#todo structure me`)
+  // the chat depends on the template root directly (#_chat): the lane's #chat/vault stub carries
+  // #_agent/vault, which the lane has not, and a macro-evaluating read refuses an item with a
+  // missing dependency, transitive ones included
+  await page.evaluate(text => void window._create(text), `${CC}/0 #_chat #_autodep\n<<user>> what now?\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('Two parts: #/alpha and #/beta.')}`)
+  await page.evaluate(text => void window._create(text), `${CC}/0/alpha\n<<agent('vault/default · created in run ab12cd34')>>\n${inert('Alpha body')}`)
+  for (const name of [CC, `${CC}/0`, `${CC}/0/alpha`]) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+  const ccMarks = () =>
+    page.evaluate(
+      n => [...window._item(n, true)!.elem!.querySelectorAll('.vault-result mark[data-tag]')].map(m => ({ tag: m.getAttribute('data-tag'), missing: m.classList.contains('missing') })),
+      `${CC}/0`
+    )
+  await expect.poll(ccMarks, { timeout: 15_000 }).toEqual([
+    { tag: '#e2e_cc/0/alpha', missing: false },
+    { tag: '#e2e_cc/0/beta', missing: true },
+  ])
+  // the delimiters expanded under the template (the message headers, not error spans), with the
+  // boundary reset before the reply's header leaving no text behind
+  const headers = await page.evaluate(n => {
+    const e = window._item(n, true)!.elem!
+    return { user: !!e.querySelector('.message.user'), agent: !!e.querySelector('.message.agent'), errors: e.querySelectorAll('.macro-error').length, text: (e.querySelector('.content') as HTMLElement | null)?.innerText ?? '' }
+  }, `${CC}/0`)
+  expect(headers).toMatchObject({ user: true, agent: true, errors: 0 })
+  expect(headers.text).not.toMatch(/\?> \]\]>|<\/noscript>/)
+  // the EXPANDED state carries the child tags (review 2): the chat's delimiters evaluate under the
+  // installed template, a macro-evaluating read builds `item.expanded` from the expanded text (the
+  // raw bodies and boundaries travel into that pass: item.inertBodies, item.childTagMarkers), and
+  // its visible tags, the ones search prefers, hold them; the state lives on the app's own item
+  // record (window.__items), not the handle
+  const expanded = await page.evaluate(n => {
+    const item = window._item(n, true) as any
+    const record = () => (window as any).__items.find((i: any) => i.label == n)
+    return Promise.resolve(item.read('', { eval_macros: true })).then(() => [...(record()?.expanded?.item?.tagsVisible ?? [])].sort())
+  }, `${CC}/0`)
+  expect(expanded, 'the expanded pass indexed the child tags').toEqual(['#e2e_cc/0', '#e2e_cc/0/alpha', '#e2e_cc/0/beta'])
+  // the child depends on the chat (adopted through the chat's #_autodep), the chat not on the child
+  const depsOf = (name: string) => page.evaluate(n => (window._item(n, true) as any)?.dependencies ?? null, name)
+  expect(await depsOf(`${CC}/0/alpha`), 'the child adopts the chat').toContain(await idOf(`${CC}/0`))
+  expect(await depsOf(`${CC}/0`), 'the chat gains no edge from its reply').not.toContain(await idOf(`${CC}/0/alpha`))
+  // the child renders its agent message under the template: the body in its frame, the
+  // attribution shown (no publisher footer: a run id and duration it does not have)
+  const alphaShape = await page.evaluate(n => {
+    const e = window._item(n, true)!.elem!
+    return { body: e.querySelector('.vault-result')?.textContent ?? '', attribution: e.textContent?.includes('created in run ab12cd34') ?? false }
+  }, `${CC}/0/alpha`)
+  expect(alphaShape.body).toContain('Alpha body')
+  expect(alphaShape.attribution, 'the attribution is displayed').toBe(true)
+  // a mark click in the chat navigates to the child
+  const ccElem = await page.evaluate(n => window._item(n, true)!.elem!.id, `${CC}/0`)
+  await page.locator(`[id="${ccElem}"] .vault-result mark[data-tag="#e2e_cc/0/alpha"]`).click()
+  await expect.poll(box).toBe(`${CC}/0/alpha `)
 })

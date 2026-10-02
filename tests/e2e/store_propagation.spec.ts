@@ -246,6 +246,10 @@ test('a store change re-renders the owner and the items that template it', async
   await page.evaluate(text => void window._create(text), inPlaceOwnerText(G))
   await expect.poll(() => savedId(page, G), { timeout: 30_000 }).toBeTruthy()
   const gId = (await savedId(page, G))!
+  // its own render first (every item of this page is hidden behind the toggle and rendered on
+  // request; before the measuring window mounted by identity, the previous request's window
+  // `[0, 1)` happened to mount a new item at index 0, and this row read the element it never asked for)
+  await expect.poll(() => rendered(page, G), { timeout: 30_000 }).toContain('v=null')
   // a new item's renders settle first (the id change after its first save is one more render)
   let gVersion: string | null = null
   await expect

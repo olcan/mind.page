@@ -50,8 +50,7 @@
     skipExclusions,
     isSafeNavigationUrl,
     destroyElem,
-    hash as _hash,
-  } from '../util.js'
+    hash as _hash, prepareBlocks, removeSections, removeRemovedBlocks, blockExclusions } from '../util.js'
   import { wikiLinkExtension, wikiLinkRegExp } from '../wiki_links'
 
   import { Circle, Circle2 } from 'svelte-loading-spinners'
@@ -61,6 +60,7 @@
     INERT_FENCED_PLACEHOLDER,
     INERT_MARKER_SOURCE,
     INVALID_INERT_REGION,
+    childTagRegions, chatResetOffsets, CHAT_BOUNDARY_RESET,
   } from '../inert'
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
@@ -361,8 +361,19 @@
       // candidate keeps an UNDEFINED value so the frame population can tell validity apart
       // from a canonical body that merely equals the placeholder string
       vaultValues = new Map(vaultScan.candidates.map(candidate => [candidate.marker, candidate.value ?? undefined]))
+      // the regions whose frames render child-tag marks: the index's own rule over the same
+      // scan (src/inert.ts childTagRegions), so a mark exists exactly where a tag is indexed
+      childTagMarkers = childTagRegions(vaultScan)
       text = vaultScan.grammarText
-    } else if (vaultValues.size) vaultValues = new Map()
+    } else if (vaultValues.size) {
+      vaultValues = new Map()
+      childTagMarkers = new Set()
+    }
+    // the CHAT BOUNDARIES the rule admits a region after (src/inert.ts: an `<<agent(...)>>` line
+    // alone outside a fence, directly before a canonical region, by its offset into the grammar
+    // text the macro pass below replaces in): its expansion is prefixed with the boundary reset,
+    // so the region is framed whatever the owner's text left open before it
+    const chatBoundaries = vaultValues.size ? chatResetOffsets(text, childTagMarkers) : null
 
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
@@ -389,18 +400,25 @@
     } else {
       // console.debug('expanding macros while rendering', name)
       expanded = {} // reset macro expansion state
-      const replaceMacro = (m, js) => {
+      const replaceMacro = (m, js, offset, string) => {
         if (!isBalanced(js)) return m // skip unbalanced macros that are probably not macros, e.g. ((x << 2) >> 2)
+        // a chat boundary's expansion starts clean: the reset line and a blank line before the
+        // template's block (see chatBoundaries above), in the error path too (the span of a failing
+        // delimiter still heads the reply)
+        const reset = chatBoundaries?.has(string.lastIndexOf('\n', offset - 1) + 1) ? CHAT_BOUNDARY_RESET + '\n\t\n' : ''
         try {
-          return window['_item'](id).eval(js, {
-            trigger: 'macro_' + cacheIndex++,
-            cid: `${id}-${deephash}-${cacheIndex}`, // enable replacement of $cid
-          })
+          return (
+            reset +
+            window['_item'](id).eval(js, {
+              trigger: 'macro_' + cacheIndex++,
+              cid: `${id}-${deephash}-${cacheIndex}`, // enable replacement of $cid
+            })
+          )
         } catch (e) {
           expanded.error ??= e // record first error & continue replacing
           // no need to log missing dependency errors
           if (!e.message.startsWith('eval missing dependencies')) console.error(`macro error in item ${name}: ${e}`)
-          return `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
+          return reset + `<span class="macro-error" title="${_.escape(e.message)}">${js}</span>`
           // return `<span class="macro-error">MACRO ERROR: ${e.message}</span>`
         }
       }
@@ -417,30 +435,8 @@
       }
     }
 
-    // pre-process block types to allow colon-separated parts, taking only last part without a period
-    text = text.replace(blockRegExp('\\S+?'), (m, pfx, type, body) => {
-      if (type.includes(':')) type = _.findLast(type.split(':'), s => !s.includes('.')) ?? ''
-      return pfx + '```' + type + '\n' + body + '```'
-    })
-
-    // force line break after block endings (most useful for macro-generated blocks that may be followed by text)
-    const block_regex = blockRegExp(/\S*?/)
-    const regex = new RegExp(block_regex.source + ' *([^\\n]?)', block_regex.flags)
-    text = text.replace(regex, (m, pfx, type, body, sfx) => {
-      return pfx + '```' + type + '\n' + body + '```' + (sfx ? '\n' + sfx : '')
-    })
-
-    // unwrap _markdown(_*) and _md(_*) blocks that are non-empty and NOT removed/hidden
-    text = text.replace(blockRegExp('(?:_markdown|_md)(?:_\\S*)? *'), (m, pfx, type, body) => {
-      if (type.match(/(?:_removed|_hidden) *$/) || !body) return m
-      // remove trailing newline in body (as in extractBlock) to avoid extra lines between blocks
-      // for tables/blockquotes, we instead append an escape to force breaking across blocks w/o forcing spacing
-      // note the second \n comes from the closing block delimiter ```\n since blockRegExp excludes the final \n
-      if (!body.match(/(?:^|\n)\s*[|>][^\n]*\n$/)) body = body.replace(/\n$/, '')
-      else body = body.replace(/\n$/, '\n\\')
-      body = body.replace(/((?:^|\n) *)\\```/g, '$1```') // unescape nested blocks
-      return pfx + body
-    })
+    // the block passes shared with the index's child-tag rule (src/util.js prepareBlocks)
+    text = prepareBlocks(text)
 
     const firstTerm = matchingTerms ? matchingTerms.match(/^\S+/)[0] : ''
     matchingTerms = new Set<string>(matchingTerms.split(' ').filter(t => t))
@@ -506,15 +502,8 @@
       text += '</div>'
     }
 
-    // remove removed sections, except inside blocks
-    const blockExclusions = [
-      '(?:^|\\n) *```.*?\\n *```', // multi-line block
-      '(?:^|\\n)     *[^-*+ ][^\\n]*(?:$|\\n)', // 4-space indented block
-    ]
-    text = text.replace(
-      exclusionRegExp(blockExclusions, /<\!-- *removed *-->.*?<\!-- *\/removed *--> *?(\n|$)/gs),
-      skipExclusions(m => ``)
-    )
+    // remove removed sections, except inside blocks (src/util.js removeSections, shared with the index's child-tag rule)
+    text = removeSections(text)
 
     // extract _log blocks (processed for summary at bottom)
     const log = extractBlock(scanInert(text).grammarText, '_log')
@@ -784,8 +773,8 @@
     // restore the masked wiki links for the extension
     if (wikiMasked.length) text = text.replace(/\u0000wiki(\d+)\u0000/g, (m, n) => wikiMasked[+n])
 
-    // remove *_removed blocks
-    text = text.replace(blockRegExp(/\S*_removed/), '')
+    // remove *_removed blocks (src/util.js removeRemovedBlocks, shared with the index's child-tag rule)
+    text = removeRemovedBlocks(text)
 
     // hide *_hidden blocks
     text = text.replace(blockRegExp(/\S*_hidden/), (m, pfx) => `${pfx}<!--hidden-->\n ${m} \n<!--/hidden-->\n`)
@@ -1146,6 +1135,7 @@
   // body is rendered into its dead frame as inert markdown, a malformed one shows the fixed
   // placeholder as a text node (bridge design §2.2a, amended 2026-09-05)
   let vaultValues = new Map<string, string | undefined>() // marker -> decoded value / undefined
+  let childTagMarkers = new Set<string>() // the frames that render child-tag marks (src/inert.ts)
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1298,15 +1288,67 @@
     // trusted html is assigned by innerHTML and never sees the app's own Markdown, macro,
     // tag or url passes; the fixed invalid placeholder stays a text node. Repopulation
     // survives the app's forced rerenders (the rendered marker is remembered per frame).
+    // CHILD TAGS (vault design mind_chat_children 2.2): a body's `#/name` tokens render as the
+    // app's marks (the item's context: label, case, missing state) in the frames of the
+    // child-tag regions alone (childTagMarkers, the index's rule); the frame's render key is
+    // the marker plus the missing state of its marks, so a frame element Svelte keeps across a
+    // state change updates its marks' classes in place (the selection and search classes
+    // assigned below survive), while replaced content renders afresh; the frame's capture
+    // listeners route a mark's mousedown (the keyboard navigation dispatches a non-bubbling
+    // one on the mark) to the app's tag handler and cancel the mark's click (a mark inside a
+    // link's label must not fire the anchor); everything else in the frame stays dead. (the
+    // missingTags PROP is the space-separated string the caller wires; toHTML converts its own
+    // parameter, never the prop)
+    const missing = new Set<string>(String(missingTags ?? '').split(' ').filter(t => t))
+    const childTagContext = { id, label, labelText, missingTags: missing }
+    const missingKey = (elem: Element) =>
+      [...elem.querySelectorAll('mark[data-tag]')]
+        .map(mark => mark.getAttribute('data-tag')!.toLowerCase())
+        .filter(tag => missing.has(tag))
+        .sort()
+        .join(' ')
     itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
       const marker = elem.getAttribute('data-vault-marker')!
       const value = vaultValues.get(marker)
       if (value === undefined) {
         if (elem.textContent !== INVALID_INERT_REGION) elem.textContent = INVALID_INERT_REGION
         elem.removeAttribute('data-inert-rendered')
-      } else if (elem.getAttribute('data-inert-rendered') !== marker) {
-        elem.innerHTML = renderInertMarkdown(value)
-        elem.setAttribute('data-inert-rendered', marker)
+        return
+      }
+      const rendered = elem.getAttribute('data-inert-rendered') ?? ''
+      if (!rendered.startsWith(marker + '|')) {
+        elem.innerHTML = renderInertMarkdown(value, childTagMarkers.has(marker) ? childTagContext : null)
+        elem.setAttribute('data-inert-rendered', marker + '|' + missingKey(elem))
+        if (!elem.hasAttribute('data-child-tags-wired')) {
+          elem.setAttribute('data-child-tags-wired', '')
+          const childMark = (e: Event) => {
+            const mark = (e.target as Element | null)?.closest?.('mark[data-tag]')
+            return mark && elem.contains(mark) ? mark : null
+          }
+          elem.addEventListener(
+            'mousedown',
+            (e: MouseEvent) => {
+              const mark = childMark(e)
+              if (mark) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
+            },
+            true
+          )
+          elem.addEventListener(
+            'click',
+            (e: MouseEvent) => {
+              if (childMark(e)) {
+                e.preventDefault()
+                e.stopPropagation()
+              }
+            },
+            true
+          )
+        }
+      } else if (rendered !== marker + '|' + missingKey(elem)) {
+        elem.querySelectorAll('mark[data-tag]').forEach(mark => {
+          mark.classList.toggle('missing', missing.has(mark.getAttribute('data-tag')!.toLowerCase()))
+        })
+        elem.setAttribute('data-inert-rendered', marker + '|' + missingKey(elem))
       }
     })
     // always report container height for potential changes
