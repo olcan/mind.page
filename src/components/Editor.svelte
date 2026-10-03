@@ -456,6 +456,16 @@
   let createClosure
   let createClosureModifierKeys
 
+  // the caret moved to the text's start or end sits at the textarea's top or bottom edge (the textarea is
+  // as tall as its text): that edge is brought into view when it lies outside the viewport, above OR below
+  // it (an editor left entirely past either boundary, e.g. after a scroll to the top), as the browser does
+  // for a native caret move; a plain scroll, no history entry (arrow_edges reviews 0-1, 2026-10-03)
+  function revealEdge(top: boolean) {
+    const rect = textarea.getBoundingClientRect()
+    const edge = top ? rect.top : rect.bottom
+    if (edge < 0 || edge > innerHeight) textarea.scrollIntoView({ block: top ? 'start' : 'end' })
+  }
+
   function onKeyDown(e: any) {
     onEditorKeyDown(e)
     let key = eventKey(e) // physical code, except a character on a remapped keycode
@@ -487,6 +497,15 @@
       if (lastKeyDown == 'Meta') Object.defineProperty(e, 'metaKey', { value: true })
       lastKeyDown = key
       lastKeyDownTime = Date.now()
+    }
+
+    // Up/Down with two or more of Ctrl, Alt and Cmd is the page's global scroll to the top, from every
+    // editor (the owner, 2026-10-03): it propagates to the window handler untouched, and like any other
+    // key it cancels a create/run deferred to the modifiers' release (review 0: with Ctrl held through
+    // Enter and the arrow, the release would have run the item)
+    if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {
+      createClosure = createClosureModifierKeys = null
+      return
     }
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
@@ -733,16 +752,36 @@
     }
 
     // jump to the previous/next item from the edges of the text: Cmd on a Mac, and Ctrl too, since
-    // Super+arrows belong to the window manager on Linux (and Ctrl+arrows have no caret meaning here)
-    if (key == 'ArrowUp' && (e.metaKey || e.ctrlKey) && textarea.selectionEnd == 0) {
-      e.preventDefault()
-      onPrev()
-      return
+    // Super+arrows belong to the window manager on Linux. Away from the edge the caret goes there first:
+    // Cmd+arrows do that natively on a Mac (left to the browser); Ctrl maps explicitly to the item's edges
+    // for the owner's Linux workflow (in this Chromium on a Mac it has no native caret move either), so
+    // Ctrl moves the caret here and brings the edge into view (the owner, 2026-10-03). Shift is left to
+    // the selection
+    if (key == 'ArrowUp' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      if (textarea.selectionEnd == 0) {
+        e.preventDefault()
+        onPrev()
+        return
+      }
+      if (e.ctrlKey) {
+        e.preventDefault()
+        textarea.setSelectionRange(0, 0)
+        revealEdge(true)
+        return
+      }
     }
-    if (key == 'ArrowDown' && (e.metaKey || e.ctrlKey) && textarea.selectionStart == textarea.value.length) {
-      e.preventDefault()
-      onNext()
-      return
+    if (key == 'ArrowDown' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      if (textarea.selectionStart == textarea.value.length) {
+        e.preventDefault()
+        onNext()
+        return
+      }
+      if (e.ctrlKey) {
+        e.preventDefault()
+        textarea.setSelectionRange(textarea.value.length, textarea.value.length)
+        revealEdge(false)
+        return
+      }
     }
 
     // remove spaced tabs (and optional bullet) with backspace

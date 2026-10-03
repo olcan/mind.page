@@ -829,10 +829,14 @@ test('a chain of continuations shortens to its last segment; a branch keeps its 
   expect((await listed('#e2e_deep/98', '#e2e_deep/98/9/9'))['#e2e_deep/98/9/9']).toBe('…/98/9/9')
 })
 
-test('ctrl+arrows at the edges of an item editor jump to the neighboring items, like cmd+arrows', async ({ page }) => {
+test('ctrl+arrows at the edges of an item editor jump to the neighboring items, like cmd+arrows; away from the edge they move the caret there', async ({
+  page,
+}) => {
   // Cmd+↑ at the start and Cmd+↓ at the end of an item's text open the previous/next item's
   // editor; Ctrl does the same since 2026-09-28 (Super+arrows belong to the window manager on
-  // Linux, where the browser reports Super as Meta)
+  // Linux, where the browser reports Super as Meta). Away from the edge, Ctrl+↑/↓ move the caret
+  // to the start/end first (2026-10-03: Ctrl maps explicitly to the item's edges for the owner's Linux
+  // workflow; Cmd+arrows do this natively on a Mac and are left to the browser)
   await loadAdmin(page)
   for (const label of ['#e2e_jump/a', '#e2e_jump/b']) await page.evaluate(label => void window._create(label + ' item'), label)
   await expect.poll(() => savedId(page, '#e2e_jump/b'), { timeout: 30_000 }).toBeTruthy()
@@ -849,16 +853,28 @@ test('ctrl+arrows at the edges of an item editor jump to the neighboring items, 
   const box = (await paragraph.boundingBox())!
   await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
   await expect(page.locator(`#textarea-${first}`)).toBeFocused()
-  const caret = (id: string, at: 'start' | 'end') =>
+  const caret = (id: string, at: 'start' | 'end' | number) =>
     page.evaluate(([id, at]) => {
       const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
-      const pos = at == 'end' ? t.value.length : 0
+      const pos = at == 'end' ? t.value.length : at == 'start' ? 0 : at
       t.setSelectionRange(pos, pos)
     }, [id, at] as const)
-  await caret(first, 'end')
+  const selection = (id: string) =>
+    page.evaluate(id => {
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      return [t.selectionStart, t.selectionEnd, t.value.length]
+    }, id)
+  await caret(first, 3)
+  await page.keyboard.press('Control+ArrowDown')
+  await expect(page.locator(`#textarea-${first}`), 'away from the edge: the same editor keeps the focus').toBeFocused()
+  const [s1, e1, l1] = await selection(first)
+  expect([s1, e1], 'the caret moved to the end').toEqual([l1, l1])
   await page.keyboard.press('Control+ArrowDown')
   await expect(page.locator(`#textarea-${second}`), 'the next item opened for editing and focused').toBeFocused()
-  await caret(second, 'start')
+  await caret(second, 3)
+  await page.keyboard.press('Control+ArrowUp')
+  await expect(page.locator(`#textarea-${second}`), 'away from the edge: the same editor keeps the focus').toBeFocused()
+  expect((await selection(second)).slice(0, 2), 'the caret moved to the start').toEqual([0, 0])
   await page.keyboard.press('Control+ArrowUp')
   await expect(page.locator(`#textarea-${first}`), 'and back to the previous one').toBeFocused()
   await page.keyboard.press('Escape') // nothing edited: the editors close
@@ -1144,9 +1160,13 @@ test("cmd/ctrl+arrows in the MindBox on a query: the text and caret stay, typing
   await page.waitForTimeout(700) // time for the layout's queued scroll, not a sync point: the assertion below is the check
   await nearTop(page, 'still at the top once the layout settled: the explicit scroll won over the target scroll')
   expect(await page.evaluate(() => history.state.scrollPosition)).toBe(await headerTop(page))
-  // at the top, Ctrl+↓ at the end of the text keeps its edge jump (the query's item opens for editing)
-  // and pushes no entry
-  await focusMindboxInPlace(page, 13)
+  // at the top, Ctrl+↓ away from the end moves the caret there (no jump, no entry), and at the end keeps
+  // its edge jump (the query's item opens for editing) with no entry
+  await focusMindboxInPlace(page, 4)
+  await page.keyboard.press('Control+ArrowDown')
+  await expect(mindbox(page)).toBeFocused()
+  expect(await selection(), 'the caret moved to the end').toEqual(['#e2e_scroll/a', 13, 13])
+  expect(await entries(page), 'no entry for the caret move').toEqual([length + 4, index + 4])
   await page.keyboard.press('Control+ArrowDown')
   await expect(page.locator(`#textarea-${ids[0]}`), "the query's item opened for editing and focused").toBeFocused()
   expect(await entries(page), 'no entry at the top').toEqual([length + 4, index + 4])
@@ -1241,6 +1261,183 @@ test('cmd/ctrl+arrows from the window scroll a scrolled page to the top with a h
   await nearTop(page, 'a second plain arrow scrolls to the top')
   await expect(mindbox(page)).toBeFocused()
   expect(await entries(page), 'still without an entry').toEqual([length + 1, index + 1])
+})
+
+test('up/down with two modifiers scroll to the top from every context, with a history entry and nothing else', async ({ page }) => {
+  // the owner's global shortcut (2026-10-03): Up or Down with two or more of Ctrl, Alt and Cmd scrolls a
+  // scrolled page to the top with the history entry, from the window, the MindBox and an item editor
+  // alike, and changes nothing else: no focus change, no reset of the expanded items, no edge jump
+  await loadAdmin(page)
+  const expanded = await expand(page)
+  const [length, index] = await entries(page)
+  // from the window: nothing focused before, nothing focused after
+  await scrollDown(page)
+  await blur(page)
+  await page.keyboard.press('Control+Meta+ArrowDown')
+  await nearTop(page, 'scrolled to the top from the window')
+  await expect(mindbox(page), 'the MindBox not focused').not.toBeFocused()
+  expect(await visible(page)).toEqual(expanded)
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  // from the MindBox, the caret at the start (the single-modifier edge jump's position): no history walk
+  await scrollDown(page)
+  await focusMindboxInPlace(page, 0)
+  await page.keyboard.press('Control+Alt+ArrowUp')
+  await nearTop(page, 'scrolled to the top from the MindBox')
+  await expect(mindbox(page)).toBeFocused()
+  await expect(mindbox(page)).toHaveValue('')
+  expect(await entries(page)).toEqual([length + 2, index + 2])
+  // from an item editor: a tall item of this row's own (newest, so first after the pinned items), its
+  // editor opened by a click, closed with Escape and reopened with the Resume shortcut (⇧⌘S), which calls
+  // the caret restore synchronously (restoreItemEditor: a focus and a measurement after two frames, then
+  // the scroll after two more). The frames are HELD and released one at a time: the first phase runs, then
+  // the explicit scroll and the press come in between, then the second phase runs and must yield (its
+  // scroll undid the explicit one otherwise, pulling the page back to the editor). The editor keeps the
+  // focus, no jump
+  const globalText = '#e2e_global ' + Array.from({ length: 40 }, (_, i) => `global ${i + 1}`).join('\n\n')
+  await page.evaluate(text => void window._create(text), globalText)
+  await expect.poll(() => savedId(page, '#e2e_global'), { timeout: 30_000 }).toBeTruthy()
+  const id = await page.evaluate(() => window._item('#e2e_global', true)!.id)
+  await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000 }).toBe(true)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  await paragraph.scrollIntoViewIfNeeded()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  await page.keyboard.press('Escape') // nothing edited: the editor closes, the item is the last edited one
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  await page.evaluate(() => {
+    const held: FrameRequestCallback[] = ((window as any).__held = [])
+    ;(window as any).__raf = window.requestAnimationFrame
+    window.requestAnimationFrame = cb => held.push(cb)
+  })
+  // one frame: the callbacks held so far run, what they request waits for the next
+  const frame = () =>
+    page.evaluate(() => {
+      const held: FrameRequestCallback[] = (window as any).__held
+      const now = performance.now()
+      for (const cb of held.splice(0)) cb(now)
+    })
+  await blur(page) // the Resume shortcut is the window's: nothing focused
+  await page.keyboard.press('Shift+Meta+KeyS') // Resume: the editor reopens and the caret restore is dispatched
+  await frame()
+  await frame() // the first phase ran (the editor focused, the caret measured); the second awaits two more frames
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  const [length3, index3] = await entries(page) // the item's creation and the resume pushed entries of their own
+  await page.evaluate(
+    ([id, top]) => {
+      document.body.scrollTo(0, top + 600)
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      t.setSelectionRange(1, 1)
+      t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+    },
+    [id, await headerTop(page)] as const
+  )
+  await nearTop(page, 'scrolled to the top from the item editor')
+  await frame()
+  await frame() // the second phase ran: its caret scroll must have yielded to the explicit scroll
+  await page.evaluate(() => {
+    window.requestAnimationFrame = (window as any).__raf
+    const t = performance.now()
+    for (const cb of ((window as any).__held as FrameRequestCallback[]).splice(0)) cb(t)
+  })
+  await page.waitForTimeout(300) // whatever the released frames scheduled; the assertions below are the check
+  await nearTop(page, 'still at the top once the resume ran its deferred caret scroll')
+  await expect(page.locator(`#textarea-${id}`), 'the editor keeps the focus').toBeFocused()
+  expect(await entries(page)).toEqual([length3 + 1, index3 + 1])
+  const after = await entries(page)
+  // at the top a repeat (three modifiers) changes nothing: no entry, the focus kept
+  await page.keyboard.press('Control+Alt+Meta+ArrowUp')
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  expect(await entries(page)).toEqual(after)
+  // a create/run deferred to the modifiers' release (Ctrl held through Enter) does not survive the
+  // global arrow, like any other key (review 0 B2): Ctrl down, Enter, Alt down, Down, Alt up, Ctrl up
+  // leaves the editor open with nothing saved or run
+  const internal = (id: string) => page.evaluate(id => window.__items.find(item => item.id == id)!, id)
+  expect((await internal(id)).savedText, 'the fixture saved as created').toBe(globalText)
+  await page.keyboard.down('Control')
+  await page.keyboard.press('Enter')
+  await page.keyboard.down('Alt')
+  await page.keyboard.press('ArrowDown')
+  await page.keyboard.up('Alt')
+  await page.keyboard.up('Control')
+  await expect(page.locator(`#textarea-${id}`), 'the editor still open and focused: nothing submitted').toBeFocused()
+  expect([(await internal(id)).savedText, !!(await internal(id)).saving], 'nothing saved or running').toEqual([globalText, false])
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+})
+
+test("ctrl+arrows in a tall item bring the caret's edge into view", async ({ page }) => {
+  // the textarea is as tall as its text, so the caret moved to the start or end sits at its top or
+  // bottom edge, possibly far outside the viewport: the Ctrl move brings that edge into view (review 0
+  // B1 of arrow_edges: a plain scroll, no history entry; the next press is still the edge jump)
+  await loadAdmin(page)
+  const body = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`).join('\n\n')
+  await page.evaluate(body => void window._create(`#e2e_tall/pad ${body}`), body) // a child of the item, for the page to continue below the editor
+  await expect.poll(() => savedId(page, '#e2e_tall/pad'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(body => void window._create(`#e2e_tall ${body}`), body)
+  await expect.poll(() => savedId(page, '#e2e_tall'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => (window as any).MindBox.set('#e2e_tall', { scroll: true }))
+  const id = await page.evaluate(() => window._item('#e2e_tall', true)!.id)
+  await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000 }).toBe(true)
+  const paragraph = page.locator(`#item-${id} p`).nth(30)
+  await paragraph.scrollIntoViewIfNeeded()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  const textarea = page.locator(`#textarea-${id}`)
+  await expect(textarea).toBeFocused()
+  // the caret in the middle of the text, the textarea's edges both outside the viewport
+  const rect = () => page.evaluate(id => {
+    const r = document.getElementById(`textarea-${id}`)!.getBoundingClientRect()
+    return { top: r.top, bottom: r.bottom, height: innerHeight }
+  }, id)
+  await page.evaluate(id => {
+    const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+    t.setSelectionRange(Math.floor(t.value.length / 2), Math.floor(t.value.length / 2))
+    const r = t.getBoundingClientRect()
+    document.body.scrollBy(0, r.top + r.height / 2 - innerHeight / 2) // the middle of the textarea mid-viewport
+  }, id)
+  const before = await rect()
+  expect(before.top < 0 && before.bottom > before.height, 'both edges outside the viewport').toBe(true)
+  const [length] = await entries(page)
+  await page.keyboard.press('Control+ArrowUp')
+  await expect(textarea).toBeFocused()
+  // within a pixel: scrollIntoView lands on a fractional scroll position (-0.44 px seen)
+  await expect.poll(async () => (await rect()).top, { message: 'the top edge in view' }).toBeGreaterThanOrEqual(-1)
+  expect((await rect()).top).toBeLessThan(before.height)
+  expect(await page.evaluate(id => (document.getElementById(`textarea-${id}`) as HTMLTextAreaElement).selectionEnd, id)).toBe(0)
+  await page.keyboard.press('Control+ArrowDown')
+  await expect(textarea).toBeFocused()
+  await expect.poll(async () => (await rect()).bottom, { message: 'the bottom edge in view' }).toBeLessThanOrEqual(before.height + 1)
+  expect((await rect()).bottom).toBeGreaterThan(0)
+  expect(await page.evaluate(id => {
+    const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+    return t.selectionStart == t.value.length
+  }, id)).toBe(true)
+  expect((await entries(page))[0], 'plain scrolls: no history entry').toBe(length)
+  // the editor left ENTIRELY past a boundary (review 1): below the viewport after a scroll to the top,
+  // ⌃↑ brings its top edge back; above the viewport after a scroll to the bottom, ⌃↓ brings its bottom
+  // edge back. The child is hidden past hideIndex while editing, so it is shown through the toggle first
+  // (the click leaves the editor open; it is refocused in place), which keeps the page scrollable past the editor
+  await page.evaluate(top => document.body.scrollTo(0, top), await headerTop(page))
+  expect((await rect()).top, 'the editor entirely below the viewport').toBeGreaterThan(before.height)
+  await expect(textarea).toBeFocused()
+  await page.keyboard.press('Control+ArrowUp')
+  await expect.poll(async () => (await rect()).top, { message: 'the top edge back in view' }).toBeLessThan(before.height)
+  expect((await rect()).top).toBeGreaterThanOrEqual(-1)
+  await page.locator('.toggle.show').first().click()
+  await expect
+    .poll(() => page.evaluate(() => !!document.querySelector(`#super-container-${window._item('#e2e_tall/pad', true)!.id}`)), { timeout: 15_000 })
+    .toBe(true)
+  await page.evaluate(id => (document.getElementById(`textarea-${id}`) as HTMLTextAreaElement).focus({ preventScroll: true }), id)
+  await expect(textarea).toBeFocused()
+  await page.evaluate(() => document.body.scrollTo(0, document.body.scrollHeight))
+  expect((await rect()).bottom, 'the editor entirely above the viewport').toBeLessThan(0)
+  await page.keyboard.press('Control+ArrowDown')
+  await expect.poll(async () => (await rect()).bottom, { message: 'the bottom edge back in view' }).toBeGreaterThan(0)
+  expect((await rect()).bottom).toBeLessThanOrEqual(before.height + 1)
+  expect((await entries(page))[0], 'still no history entry').toBe(length)
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(textarea).toBeHidden()
 })
 
 test('no link on the page shows a focus ring', async ({ page }) => {

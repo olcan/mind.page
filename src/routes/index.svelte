@@ -7375,7 +7375,13 @@
   }
 
   function restoreItemEditor(id) {
+    const dispatchTime = Date.now()
     update_dom().then(() => {
+      // cancel on scroll since dispatch, as the layout's caller does for the call itself, here and again
+      // before the scroll below (two waits of two frames each): the caret scroll otherwise landed after an
+      // explicit scroll made in those frames and pulled the page back to the editor (the global scroll to
+      // the top right after an editor opened; arrow_edges reviews 0-1, 2026-10-03)
+      if (lastScrollTime > dispatchTime) return
       const textarea = textArea(indexFromId.get(id))
       if (!textarea) return
       textarea.focus()
@@ -7403,6 +7409,7 @@
       // allow going above header for more reliable scrolling on mobile (esp. on ios)
       // waiting for dom update significantly improves consistency on ios, likely due to toggling of items below, e.g. due to editing mode change (which can also be revisited if there are other similar issues)
       update_dom().then(() => {
+        if (lastScrollTime > dispatchTime) return // the same cancel for this second wait (review 1 of arrow_edges)
         if (caretTop < document.body.scrollTop || caretTop > document.body.scrollTop + visualViewport.height - 200)
           scrollTo(Math.max(0, caretTop - visualViewport.height / 4))
       })
@@ -10283,6 +10290,15 @@
     // ignore keys (except forward to _on_key) in fixed mode
     if (fixed) {
       if (window['_on_key']) window['_on_key'](key, e)
+      return
+    }
+
+    // the global scroll to the top: Up or Down with two or more of Ctrl, Alt and Cmd, from every context
+    // (the window, the MindBox, an item editor, which let the key through): the scroll with its history
+    // entry (see scrollToTopWithHistory) and nothing else, not even a focus change (the owner, 2026-10-03)
+    if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {
+      e.preventDefault()
+      scrollToTopWithHistory()
       return
     }
 
