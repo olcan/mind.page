@@ -24,6 +24,9 @@
   export let onSave = () => {}
   export let onPrev = () => {}
   export let onNext = () => {}
+  // Cmd/Ctrl+arrows ask the page to scroll to the top first when it is scrolled down (the MindBox);
+  // true means it did and the key is done. Item editors keep their edge jumps wherever the page is
+  export let onScrollTop = () => false
 
   const _ = globalThis['_'] // imported in client.ts
 
@@ -721,6 +724,14 @@
       return
     }
 
+    // with the page scrolled down, Cmd/Ctrl+arrows only bring the top back into view (the history
+    // and edge jumps below make sense with the MindBox in sight; the owner, 2026-10-03): the page
+    // scrolls with a history entry, so Back returns to the position; nothing else changes
+    if ((key == 'ArrowUp' || key == 'ArrowDown') && (e.metaKey || e.ctrlKey) && !e.shiftKey && onScrollTop()) {
+      e.preventDefault()
+      return
+    }
+
     // jump to the previous/next item from the edges of the text: Cmd on a Mac, and Ctrl too, since
     // Super+arrows belong to the window manager on Linux (and Ctrl+arrows have no caret meaning here)
     if (key == 'ArrowUp' && (e.metaKey || e.ctrlKey) && textarea.selectionEnd == 0) {
@@ -757,7 +768,9 @@
     if (key == 'Escape') {
       e.preventDefault()
       if (!onEscape(e)) return // escape was handled, should be ignored
-      onDone(editorText, e, true /* cancelled */)
+      // the textarea's text, not the typed copy: a tag click or MindBox.set changes the text without
+      // an input event, and a cancel with the stale copy restored the last TYPED query (2026-10-03)
+      onDone((editorText = textarea.value), e, true /* cancelled */)
       return
     }
 
@@ -777,7 +790,7 @@
     // NOTE: Cmd-Backspace may be assigned already to "delete line" and overload requires disabling on key down
     if ((key == 'Backspace' || key == 'Delete') && (e.metaKey || e.ctrlKey)) {
       if (!cancelOnDelete) e._delete = true // use this flag instead of clearing text, which is hard to cancel
-      onDone(editorText, e, cancelOnDelete) // if cancelled, item will not be deleted
+      onDone((editorText = textarea.value), e, cancelOnDelete) // if cancelled, item will not be deleted
       e.preventDefault()
       return
     }

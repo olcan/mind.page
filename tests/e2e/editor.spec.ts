@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { mindbox, focusMindbox, savedId, itemText, visible } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
@@ -493,6 +493,11 @@ test('Shift with the delete shortcut deletes the target item and its subtree aft
       return { ancestors: i.ancestors, tag_parent: i.tag_parent, deps: i.dependencies.map((id: string) => (window._item(id, true) as any).label) }
     }, name)
   await expect.poll(() => state().then(s => s.every(([, text]) => text !== null))).toBe(true)
+  // the fixture's saved ids, for the persisted cleanup at the end of the row
+  const fixture = [...labels, '#chat', '#chat/vault']
+  const savedIds = () => page.evaluate(ls => ls.map(l => window._item(l, true)?.saved_id).filter(Boolean) as string[], fixture)
+  await expect.poll(async () => (await savedIds()).length, { timeout: 30_000 }).toBe(fixture.length)
+  const ids = new Set(await savedIds())
   // the fixture's shape, proved before any deletion
   expect(await view(`${T}/in`)).toMatchObject({ tag_parent: `${T}/a`, ancestors: [`${T}/a`, T] })
   expect((await view(`${T}/in/leaf`)).ancestors).toEqual([`${T}/in`, `${T}/a`, T])
@@ -554,8 +559,21 @@ test('Shift with the delete shortcut deletes the target item and its subtree aft
   await expect.poll(() => state().then(s => s.filter(([, text]) => text === null).map(([l]) => l))).toEqual([`${T}/a/x`, `${T}/b`, `${T}/in/leaf`, `${T}/a/out`, `${T}/a/out/leaf`])
   expect(await page.evaluate(l => window._exists(l), T)).toBe(true)
   // the stubs and the rest of the fixture removed through the API (a root's subtree)
+  // the undeleted items carry new ids and may still be saving: every existing fixture item has its saved
+  // id first, else a save completing after the local delete queues a delete this row's wait would miss
+  await expect
+    .poll(() => page.evaluate(ls => ls.filter(l => window._exists(l)).every(l => !!window._item(l, true)?.saved_id), fixture), {
+      timeout: 30_000,
+    })
+    .toBe(true)
+  for (const id of await savedIds()) ids.add(id) // the undeleted items, whatever ids they carry now
   for (const root of ['#chat', T, '#e2e_dep']) expect(await page.evaluate(l => window._item(l)!.delete_subtree(false), root)).toBe(true)
   await expect.poll(() => page.evaluate(() => ['#chat', '#chat/vault', '#e2e_tree', '#e2e_tree/ab', '#e2e_dep'].some(l => window._exists(l)))).toBe(false)
+  // the deletions PERSISTED before the row ends: deleteDoc is fire-and-forget, and a page closed on
+  // pending deletes revived the fixture in the rows after (the ctrl+arrows row's jump landed on
+  // `#e2e_tree/a/out/leaf`, erroring on its `<<user>>` macro, 2026-10-03)
+  for (const id of ids)
+    await expect.poll(async () => (await firestore().collection('items').doc(id).get()).exists, { timeout: 30_000 }).toBe(false)
 })
 
 test('attr changes reach the changed item and #_listen listeners, never bystanders', async ({ page }) => {
@@ -891,6 +909,338 @@ test("the MindBox's focus wrapper forwards preventScroll: a restore keeps the pa
   await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
   await expect(page.locator('#textarea-mindbox')).toBeFocused()
   expect(await scrollTop(), 'no scroll with preventScroll').toBe(before)
+})
+
+test('escape in the MindBox keeps a query set by a tag click: the editor passed its last TYPED text', async ({ page }) => {
+  // a tag click (or MindBox.set) changes the MindBox's text without an input event, so the Editor's
+  // typed copy went stale, and Escape (like Cmd+Backspace) handed that copy to the done handler,
+  // which takes it as the text: with `#e2e_esc` typed and its `#e2e_esc/sub` tag clicked, Escape
+  // turned the query back into `#e2e_esc` (the owner's report, 2026-10-03)
+  await loadAdmin(page)
+  await page.evaluate(() => {
+    void window._create('#e2e_esc the parent, see #e2e_esc/sub')
+    void window._create('#e2e_esc/sub the sub')
+  })
+  await expect.poll(() => savedId(page, '#e2e_esc/sub'), { timeout: 30_000 }).toBeTruthy()
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_esc')
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_esc')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_esc')!.elem)).toBe(true)
+  const id = await page.evaluate(() => window._item('#e2e_esc')!.id)
+  await page.locator(`#item-${id} mark[title="#e2e_esc/sub"]`).click()
+  await expect(mindbox(page)).toHaveValue('#e2e_esc/sub ') // tag searches get a trailing space
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#e2e_esc/sub')
+  // the owner's position: the MindBox focused on the clicked query (focused here whatever the click left)
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus())
+  await expect(mindbox(page)).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(mindbox(page), 'plain text: Escape only blurs').not.toBeFocused()
+  await expect(mindbox(page)).toHaveValue('#e2e_esc/sub ')
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#e2e_esc/sub')
+})
+
+// the scroll-to-top rows (2026-10-03): the page's TOP is the header's offset (an area sits above the
+// header, 600 px or so, and the page loads scrolled to the header; scrollTo lands within 2 px of it)
+const scrollTop = (page: Page) => page.evaluate(() => document.body.scrollTop)
+const headerTop = (page: Page) => page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+// the page's history entries: the session state history's length and the current index
+const entries = (page: Page) => page.evaluate(() => [(window as any)._history.length, (window as any)._history_index] as const)
+// scrolls 600 px below the header and returns the position
+const scrollDown = async (page: Page) => {
+  const top = await headerTop(page)
+  await page.evaluate(y => document.body.scrollTo(0, y), top + 600)
+  await expect.poll(() => scrollTop(page), { message: 'the body scrolled below the header (the page is long enough)' }).toBeGreaterThan(top + 300)
+  return scrollTop(page)
+}
+const nearTop = async (page: Page, message: string) =>
+  expect.poll(async () => Math.abs((await scrollTop(page)) - (await headerTop(page))) <= 2, { message }).toBe(true)
+// shows more items (the set a visibility reset would collapse) and returns the shown names
+const expand = async (page: Page) => {
+  const shown = await visible(page)
+  await page.locator('.toggle.show').first().click()
+  await expect.poll(() => visible(page).then(v => v.length)).toBeGreaterThan(shown.length)
+  return visible(page)
+}
+const focusMindboxInPlace = (page: Page, caret?: number) =>
+  page.evaluate(caret => {
+    const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    t.focus({ preventScroll: true }) // see the focus wrapper row above
+    if (caret !== undefined) t.setSelectionRange(caret, caret)
+  }, caret)
+const blur = (page: Page) => page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+// the scroll listener's 250 ms write idle, so the next turn's scroll event arms it (a row that needs
+// the write pending across its own steps waits for this first)
+const noWritePending = (page: Page) =>
+  expect.poll(() => page.evaluate(() => (window as any)._history_update_pending), { message: 'no scroll write pending' }).toBe(false)
+// a modified arrow dispatched to the MindBox from inside the page, for the steps whose precondition
+// must hold in the same browser turn as the key (a real press is a separate round trip)
+const dispatchArrow = (key: 'ArrowUp' | 'ArrowDown') =>
+  document
+    .getElementById('textarea-mindbox')!
+    .dispatchEvent(new KeyboardEvent('keydown', { key, code: key, metaKey: true, bubbles: true, cancelable: true }))
+
+test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a history entry; the shown items and the focus stay', async ({
+  page,
+}) => {
+  // the owner's ask (2026-10-03): with the page scrolled down, ⌘↑/⌃↑/⌘↓/⌃↓ in the MindBox only bring
+  // the top back into view (the query history and the edge jumps make sense with the MindBox in sight),
+  // with a history entry so Back (button, shortcut or gesture) returns to the position
+  await loadAdmin(page)
+  // the listener's write survives a replace of the SAME entry (review 2 B2): a scroll and Show more
+  // (toggleItems replaces the entry's hideIndex, keeping its stored position) in one turn, inside the
+  // listener's 250 ms; the entry's stored position must end at the live one (an identity check on
+  // history.state dropped the write, and nothing wrote it later)
+  const shown = await visible(page)
+  const stored0 = await page.evaluate(() => history.state.scrollPosition as number)
+  await noWritePending(page)
+  await page.evaluate(top => {
+    document.body.dispatchEvent(new Event('scroll')) // the write armed now, for this entry (a scrollTo's own event comes a frame later)
+    document.body.scrollTo(0, top + 600)
+    ;(document.querySelector('.toggle.show') as HTMLElement).click()
+  }, await headerTop(page))
+  await expect.poll(() => visible(page).then(v => v.length)).toBeGreaterThan(shown.length)
+  await expect
+    .poll(() => page.evaluate(() => history.state.scrollPosition === document.body.scrollTop && document.body.scrollTop > 0), {
+      message: 'the stored position caught up with the live one',
+    })
+    .toBe(true)
+  expect(await page.evaluate(() => [history.state.scrollPosition, (window as any)._history[(window as any)._history_index].scrollPosition])).not.toContain(stored0)
+  const expanded = await visible(page)
+  const before = await scrollDown(page)
+  await focusMindboxInPlace(page)
+  await expect(mindbox(page)).toBeFocused()
+  expect(await scrollTop(page)).toBe(before)
+  const [length, index] = await entries(page)
+  // a stale stored position planted and the key dispatched in the same turn (no listener write between):
+  // the entry left must record the LIVE position; the caret at the end of the empty text is the edge
+  // jump's position
+  await page.evaluate(dispatchArrow => {
+    history.replaceState({ ...history.state, scrollPosition: 1 }, '')
+    eval(dispatchArrow)('ArrowDown')
+  }, dispatchArrow.toString())
+  await nearTop(page, 'scrolled to the top')
+  await expect(mindbox(page), 'the MindBox keeps the focus: no item editor opened').toBeFocused()
+  expect(await visible(page), 'the expanded items stay').toEqual(expanded)
+  expect(await entries(page), 'one history entry pushed').toEqual([length + 1, index + 1])
+  expect(await page.evaluate(() => [history.state.scrollPosition, history.state.hideIndex])).toEqual([await headerTop(page), expanded.length])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index), 'the live position on the entry left').toBe(before)
+  // Back under a controlled overlap (review 1 B2): a scroll event schedules the listener's 250 ms write
+  // and Back follows in the same turn while the animation frames the restore awaits are HELD for 400 ms,
+  // so the write fires with the destination entry current and the body still at the header. The
+  // destination keeps its position and the restore lands there (the write used to take the departed
+  // view's position, and Back stayed at the header)
+  await page.evaluate(() => {
+    const raf = window.requestAnimationFrame
+    const held: FrameRequestCallback[] = []
+    window.requestAnimationFrame = cb => held.push(cb)
+    document.body.dispatchEvent(new Event('scroll'))
+    history.back()
+    setTimeout(() => {
+      window.requestAnimationFrame = raf
+      held.forEach(cb => cb(performance.now()))
+    }, 400)
+  })
+  await expect.poll(async () => Math.abs((await scrollTop(page)) - before) <= 2, { message: 'Back returns to the position' }).toBe(true)
+  expect(await entries(page)).toEqual([length + 1, index])
+  expect(await page.evaluate(i => (window as any)._history.slice(i).map((s: any) => s.scrollPosition), index), 'both positions intact').toEqual([
+    before,
+    await headerTop(page),
+  ])
+  expect(await visible(page)).toEqual(expanded)
+  await page.goForward()
+  await nearTop(page, 'Forward returns to the top')
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  expect(await visible(page)).toEqual(expanded)
+  // a fresh scroll on the destination while the departed view's write is pending (review 2 B2): one turn
+  // arms a write for the top entry (a scroll event), goes Back, and scrolls the destination further
+  // 120 ms later, while that write is still pending (it fires at 250 ms); the restore, two frames,
+  // is normally long done by then. The destination must record the fresh position (the identity
+  // check dropped the write, and the fresh scroll could not re-arm while one was pending)
+  await noWritePending(page)
+  await page.evaluate(y => {
+    document.body.dispatchEvent(new Event('scroll'))
+    history.back()
+    setTimeout(() => document.body.scrollTo(0, y), 120)
+  }, before + 100)
+  await expect
+    .poll(() => page.evaluate(i => (window as any)._history[i].scrollPosition, index), { message: 'the destination recorded the fresh position' })
+    .toBe(before + 100)
+  expect(await page.evaluate(() => [history.state.scrollPosition, document.body.scrollTop])).toEqual([before + 100, before + 100])
+  expect(await entries(page)).toEqual([length + 1, index])
+})
+
+test("cmd/ctrl+arrows in the MindBox on a query: the text and caret stay, typing afterwards pushes, a new scroll truncates Forward, a pending query settles first, and at the top the edge jump remains", async ({
+  page,
+}) => {
+  await loadAdmin(page)
+  // three tall items, so the query's page scrolls well below the header, and a tall item under another
+  // tag for the unrevealed-target step
+  const body = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n\n')
+  for (const n of ['a', 'b', 'c']) await page.evaluate(([n, body]) => void window._create(`#e2e_scroll/${n} ${body}`), [n, body] as const)
+  await page.evaluate(body => void window._create(`#e2e_ctx ${body}`), body) // a tall context item ...
+  await page.evaluate(() => void window._create('#e2e_ctx/leaf the nested target')) // ... above its nested child
+  await expect.poll(() => savedId(page, '#e2e_ctx/leaf'), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => savedId(page, '#e2e_scroll/c'), { timeout: 30_000 }).toBeTruthy()
+  const leafId = await page.evaluate(() => window._item('#e2e_ctx/leaf', true)!.id)
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_scroll') // a parent tag no item carries: no hash, the three children match
+  await expect.poll(() => page.evaluate(() => window.__items.filter(item => item.matching).length), { timeout: 10_000 }).toBe(3)
+  const ids = await Promise.all(['a', 'b', 'c'].map(n => page.evaluate(n => window._item(`#e2e_scroll/${n}`, true)!.id, n)))
+  await expect.poll(() => page.evaluate(ids => ids.every(id => !!document.querySelector(`#item-${id}`)), ids), { timeout: 15_000 }).toBe(true)
+  const selection = () =>
+    page.evaluate(() => {
+      const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      return [t.value, t.selectionStart, t.selectionEnd]
+    })
+  const texts = (from: number) => page.evaluate(from => (window as any)._history.slice(from).map((s: any) => s.editorText), from)
+  const before = await scrollDown(page)
+  await focusMindboxInPlace(page, 4) // the caret inside the text: neither edge
+  const [length, index] = await entries(page)
+  await page.keyboard.press('Meta+ArrowUp')
+  await nearTop(page, 'scrolled to the top')
+  await expect(mindbox(page)).toBeFocused()
+  expect(await selection(), 'the text and caret stay').toEqual(['#e2e_scroll', 4, 4])
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index)).toBe(before)
+  // typing after the scroll's entry pushes (the entry is final, like a tag click's), so Back reaches the top
+  // entry; a term all three items carry, since a unique tag would also scroll the page to its item
+  await focusMindboxInPlace(page, 11)
+  await page.keyboard.type(' line')
+  await expect.poll(() => entries(page), { timeout: 10_000 }).toEqual([length + 2, index + 2])
+  expect(await page.evaluate(() => history.state.editorText)).toBe('#e2e_scroll line')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_scroll')
+  await nearTop(page, 'Back: the top entry')
+  // a new scroll from the top entry truncates the forward entry, as a tag click would
+  await scrollDown(page)
+  await focusMindboxInPlace(page, 4)
+  await page.keyboard.press('Control+ArrowUp')
+  await nearTop(page, 'scrolled to the top again')
+  expect(await entries(page), 'the forward entry replaced').toEqual([length + 2, index + 2])
+  expect(await texts(index)).toEqual(['#e2e_scroll', '#e2e_scroll', '#e2e_scroll'])
+  // a query still debouncing when the key arrives is settled before the scroll's entry: two entries for
+  // the new query, at the position and at the top, never the old query at the top in between. The typed
+  // text and the key go in one browser turn with the pending debounce asserted between them, so this is
+  // the pending branch. The query names a UNIQUE item that MOVES (review 1 B3; the oldest of the three
+  // ranks last under the parent query and first under its own, and only a moved target is scrolled to):
+  // the layout the flush runs would scroll to that item a few frames later, and the explicit scroll to
+  // the top must win, so the position is checked again once the layout has had its time
+  await scrollDown(page)
+  const pending = await page.evaluate(dispatchArrow => {
+    const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    t.focus({ preventScroll: true })
+    t.setRangeText('/a', t.value.length, t.value.length, 'end')
+    t.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '/a' }))
+    const pending = (window as any)._mindboxDebounced === true
+    eval(dispatchArrow)('ArrowUp')
+    return pending
+  }, dispatchArrow.toString())
+  expect(pending, 'the query was still debouncing when the key arrived').toBe(true)
+  await nearTop(page, 'scrolled to the top with the new query')
+  expect(await entries(page)).toEqual([length + 4, index + 4])
+  expect(await texts(index + 2)).toEqual(['#e2e_scroll', '#e2e_scroll/a', '#e2e_scroll/a'])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition > (document.querySelector('.header') as HTMLElement).offsetTop + 2, index + 3), 'the new query at the position').toBe(true)
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index + 4)).toBe(await headerTop(page))
+  await page.waitForTimeout(700) // time for the layout's queued scroll, not a sync point: the assertion below is the check
+  await nearTop(page, 'still at the top once the layout settled: the explicit scroll won over the target scroll')
+  expect(await page.evaluate(() => history.state.scrollPosition)).toBe(await headerTop(page))
+  // at the top, Ctrl+↓ at the end of the text keeps its edge jump (the query's item opens for editing)
+  // and pushes no entry
+  await focusMindboxInPlace(page, 13)
+  await page.keyboard.press('Control+ArrowDown')
+  await expect(page.locator(`#textarea-${ids[0]}`), "the query's item opened for editing and focused").toBeFocused()
+  expect(await entries(page), 'no entry at the top').toEqual([length + 4, index + 4])
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(page.locator(`#textarea-${ids[0]}`)).toBeHidden()
+  // the pending query names a nested item NOT RENDERED under the current view (review 2 B3: beyond the
+  // old hideIndex), listed below its tall context item once revealed, so it lands past the first viewport:
+  // the flush's own layout sees no mover for it, the reveal renders it, and that layout would queue the
+  // target scroll. The precedence holds for the settled query's layouts: the body's scrollTo is called
+  // once (the explicit scroll) and the page is still at the top once the reveal has rendered
+  await scrollDown(page)
+  const far = await page.evaluate(
+    ([dispatchArrow, leafId]) => {
+      const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      t.focus({ preventScroll: true })
+      t.setRangeText('ctx/leaf', 5, t.value.length, 'end') // '#e2e_scroll/a' -> '#e2e_ctx/leaf'
+      t.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'ctx/leaf' }))
+      const pending = (window as any)._mindboxDebounced === true
+      const rendered = !!document.querySelector(`#item-${leafId}`)
+      const scrolls: number[] = ((window as any).__scrolls = [])
+      const scrollTo = document.body.scrollTo.bind(document.body)
+      document.body.scrollTo = ((x: number, y: number) => {
+        scrolls.push(y)
+        scrollTo(x, y)
+      }) as typeof document.body.scrollTo
+      eval(dispatchArrow)('ArrowUp')
+      return { pending, rendered, value: t.value }
+    },
+    [dispatchArrow.toString(), leafId] as const
+  )
+  expect(far, 'the query was pending and its item not yet rendered when the key arrived').toEqual({ pending: true, rendered: false, value: '#e2e_ctx/leaf' })
+  await nearTop(page, 'scrolled to the top with the nested query')
+  expect(await entries(page)).toEqual([length + 6, index + 6])
+  expect(await texts(index + 4)).toEqual(['#e2e_scroll/a', '#e2e_ctx/leaf', '#e2e_ctx/leaf'])
+  await expect(page.locator(`#item-${leafId}`), 'the item revealed and rendered').toBeAttached()
+  expect(
+    await page.evaluate(([id, top]) => (document.getElementById(`super-container-${id}`) as HTMLElement).offsetTop > top + 700, [leafId, await headerTop(page)] as const),
+    'the target sits past the first viewport, below its context item'
+  ).toBe(true)
+  await page.waitForTimeout(700) // time for the reveal's layout and its queued scroll; the assertions below are the check
+  expect(await page.evaluate(() => (window as any).__scrolls.length), 'one body scroll: the explicit one').toBe(1)
+  await nearTop(page, 'still at the top once the revealed item rendered')
+  expect(await page.evaluate(() => history.state.scrollPosition)).toBe(await headerTop(page))
+  await page.evaluate(() => delete (document.body as any).scrollTo) // the spy off: the prototype's method again
+  // the next ORDINARY search is not suppressed: from the bottom of the far page, a typed unique query
+  // whose item ranks first ends with the viewport moved up (the layout's target scroll; typing into the
+  // offscreen MindBox and the page's new height can move it too, so this is a smoke check, not a
+  // proof of the target scroll alone)
+  await page.evaluate(() => document.body.scrollTo(0, document.body.scrollHeight))
+  const bottom = await scrollTop(page)
+  expect(bottom).toBeGreaterThan((await headerTop(page)) + 300)
+  await focusMindboxInPlace(page)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type('#e2e_scroll/c')
+  await expect.poll(() => page.evaluate(() => history.state.editorText), { timeout: 10_000 }).toBe('#e2e_scroll/c')
+  await expect.poll(() => scrollTop(page), { message: "the ordinary search's target scroll", timeout: 10_000 }).toBeLessThan(bottom - 100)
+})
+
+test('cmd/ctrl+arrows from the window scroll a scrolled page to the top with a history entry and focus the MindBox; the shown items stay', async ({
+  page,
+}) => {
+  // the window's ⌘↑/⌃↑/⌘↓/⌃↓ (nothing focused) focused the MindBox and scrolled to the top with no
+  // history entry, collapsing the expanded items on the way; scrolled down they now only scroll, with
+  // the entry (review 0: the collapse contradicted "just scroll+focus"). At the top the reset stays,
+  // and a plain ↑ keeps its own steps
+  await loadAdmin(page)
+  const expanded = await expand(page)
+  const before = await scrollDown(page)
+  const [length, index] = await entries(page)
+  await blur(page)
+  await page.keyboard.press('Control+ArrowUp')
+  await nearTop(page, 'scrolled to the top')
+  await expect(mindbox(page)).toBeFocused()
+  expect(await visible(page), 'the expanded items stay').toEqual(expanded)
+  expect(await entries(page), 'one history entry pushed').toEqual([length + 1, index + 1])
+  await page.goBack()
+  await expect.poll(async () => Math.abs((await scrollTop(page)) - before) <= 2, { message: 'Back returns to the position' }).toBe(true)
+  expect(await visible(page)).toEqual(expanded)
+  await page.goForward()
+  await nearTop(page, 'Forward returns to the top')
+  expect(await visible(page)).toEqual(expanded)
+  // a plain ↑ from the window keeps its documented steps and pushes no entry: on an expanded page it
+  // hides the expanded items (no scroll), and with nothing left to hide it scrolls to the top and
+  // focuses the MindBox, as before
+  await scrollDown(page)
+  await blur(page)
+  await page.keyboard.press('ArrowUp')
+  await expect.poll(() => visible(page).then(v => v.length), { message: 'the expanded items hidden' }).toBeLessThan(expanded.length)
+  expect(await entries(page), 'without an entry').toEqual([length + 1, index + 1])
+  await blur(page)
+  await page.keyboard.press('ArrowUp')
+  await nearTop(page, 'a second plain arrow scrolls to the top')
+  await expect(mindbox(page)).toBeFocused()
+  expect(await entries(page), 'still without an entry').toEqual([length + 1, index + 1])
 })
 
 test('no link on the page shows a focus ring', async ({ page }) => {

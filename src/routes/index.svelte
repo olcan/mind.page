@@ -325,6 +325,7 @@
     Object.defineProperty(window, '_primary', { get: () => primary })
     Object.defineProperty(window, '_history', { get: () => sessionStateHistory })
     Object.defineProperty(window, '_history_index', { get: () => sessionStateHistoryIndex })
+    Object.defineProperty(window, '_history_update_pending', { get: () => historyUpdatePending }) // the scroll listener's write (tests)
     Object.defineProperty(window, '_mindbox_history', { get: () => sessionHistory })
     Object.defineProperty(window, '_mindbox_history_index', { get: () => sessionHistoryIndex })
     window['_item'] = _item
@@ -2072,6 +2073,47 @@
   }
   const memoryItemStore = new Map()
 
+  // the query scrollToTopWithHistory settled on its way to the top: the layouts of THAT query (the one run
+  // synchronously in onEditorChange, and the ones that follow as its newly revealed items render) must
+  // not queue their scroll to the query's target or movers, since the explicit scroll to the top would be
+  // undone a few frames later; the next query clears it, and its layouts scroll as usual (scroll_top
+  // reviews 1-2, 2026-10-03)
+  let explicitScrollQuery: string | null = null
+
+  // whether the page shows its top (the header; 2 px: scrollTo lands a fractional scrollTop)
+  function scrolledToTop() {
+    return !headerdiv || document.body.scrollTop <= headerdiv.offsetTop + 2
+  }
+
+  // scroll to the top with a HISTORY ENTRY, so Back returns to the position (the owner, 2026-10-03):
+  // the current state keeps the live position (the scroll listener's copy can be 250 ms stale), a
+  // copy of it at the top is pushed as a final state like a tag click's, then the page scrolls;
+  // nothing when the top is already in view. Returns whether it scrolled
+  function scrollToTopWithHistory() {
+    if (scrolledToTop()) return false
+    // a query still debouncing (typed within 500 ms with the MindBox focused) is settled first, so
+    // the entry left describes the query as shown and the pending update pushes no third entry
+    if (editorChangePending) {
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      explicitScrollQuery = editorText // this query's layouts yield to the scroll below
+      onEditorChange(editorText)
+    }
+    const current = Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, {
+      index: sessionStateHistoryIndex,
+      scrollPosition: document.body.scrollTop,
+    })
+    replaceState(current)
+    const top = Object.assign(_.cloneDeep(current), {
+      index: ++sessionStateHistoryIndex,
+      scrollPosition: headerdiv.offsetTop,
+      final: true,
+    })
+    sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
+    pushState(top)
+    scrollTo(headerdiv.offsetTop)
+    return true
+  }
+
   function scrollTo(y) {
     // NOTE: we have to add (innerHeight * visualViewport.scale - document.body.offsetHeight) on ios
     //       likely related to inconsistency of innerHeight vs visualViewport.height on ios
@@ -2276,16 +2318,19 @@
       if (target?.mover && (target.id != lastScrolledTarget || renderingVisibleItems)) {
         // console.debug('target moved')
         const dispatchTime = Date.now()
+        const explicit = explicitScrollQuery === editorText // an explicit scroll to the top won for this query
         update_dom().then(() => {
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
           // console.debug('scrolling to target')
-          scrollToTarget()
+          if (!explicit) scrollToTarget()
           lastScrolledTarget = target.id
         })
       } else if (!target && !narrating && _.min(topMovers) < items.length) {
         // console.debug('detected movers', !!target)
         const dispatchTime = Date.now()
+        const explicit = explicitScrollQuery === editorText // an explicit scroll to the top won for this query
         update_dom().then(() => {
+          if (explicit) return
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
           const itemTop = _.min(
             topMovers.map(index => {
@@ -2756,6 +2801,7 @@
     editorChangePending = false
     lastEditorChangeTime = Infinity // force minimum wait for next change
     window['_mindboxDebounced'] = false
+    if (explicitScrollQuery !== null && explicitScrollQuery !== editorText) explicitScrollQuery = null // a new query: its layouts scroll as usual
     const start = Date.now()
 
     const tags = parseTags(text)
@@ -3676,14 +3722,17 @@
     if (typeof state.hideIndex == 'number') hideIndex = Math.max(hideIndex, state.hideIndex)
 
     if (!skipScrollForPopState) {
-      // scroll to state.scrollPosition (unless scrollToTopOnPopState is set)
+      // scroll to state.scrollPosition (unless scrollToTopOnPopState is set); the position is read NOW,
+      // since the state object is shared with history.state and a writer could reach it before the frames
+      // below (see onScroll)
+      const scrollPosition = state.scrollPosition || 0
       update_dom().then(() => {
         if (scrollToTopOnPopState) {
           scrollTo(headerdiv.offsetTop)
           scrollToTopOnPopState = false
         } else {
           // scroll to last recorded scroll position at this state
-          scrollTo(state.scrollPosition || 0)
+          scrollTo(scrollPosition)
         }
       })
     }
@@ -7438,6 +7487,8 @@
 
   let lastScrollTime = 0
   let historyUpdatePending = false
+  let historyUpdateIndex = -1 // the session history index the pending write belongs to
+  let historyUpdateTimer = null
   function onScroll() {
     if (!headerdiv) return
     // adjust header button text based on scroll position if visible
@@ -7457,12 +7508,21 @@
     // does not appear to be possible to shift-focus-on-scroll on macos
     if (rendered && Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
     lastScrollTime = Date.now()
-    if (!historyUpdatePending) {
+    // the position is written into the history ENTRY the scroll happened in (its session index), 250 ms
+    // after the first scroll of a burst: a traversal (Back, Forward) or a push in the meantime moves the
+    // index, and the write is dropped (a Back within the 250 ms had its destination overwritten with the
+    // departed view's position while its restore awaited layout, and stayed there; scroll_top reviews 1-2,
+    // 2026-10-03), while a replace of the same entry (Show more) keeps the index and the write; a scroll
+    // on another entry while a write is pending re-arms the timer for that entry, so its position is kept
+    if (!historyUpdatePending || historyUpdateIndex != sessionStateHistoryIndex) {
+      clearTimeout(historyUpdateTimer)
       historyUpdatePending = true
-      setTimeout(() => {
+      historyUpdateIndex = sessionStateHistoryIndex
+      historyUpdateTimer = setTimeout(() => {
+        historyUpdatePending = false
+        if (sessionStateHistoryIndex != historyUpdateIndex) return // the view changed under the timer
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
         replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { scrollPosition: document.body.scrollTop }))
-        historyUpdatePending = false
       }, 250)
     }
   }
@@ -10561,6 +10621,15 @@
 
     // disable various "unfocused" item editor shortcuts, focus on editor instead
     if (focusedItem >= 0) return // already focused on an item
+
+    // Cmd/Ctrl+arrows with the page scrolled down: only the scroll (with its history entry, so Back
+    // returns to the position) and the MindBox focus; the expanded items are kept, unlike the reset
+    // below (the owner's "just scroll+focus if not on top", 2026-10-03). At the top, as before
+    if ((key == 'ArrowUp' || key == 'ArrowDown') && (e.metaKey || e.ctrlKey) && scrollToTopWithHistory()) {
+      e.preventDefault()
+      tick().then(() => textArea(-1).focus())
+      return
+    }
     if (
       (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
       (key == 'KeyS' && (e.metaKey || e.ctrlKey)) ||
@@ -11253,6 +11322,7 @@
                   onDone={onEditorDone}
                   onPrev={onPrevItem}
                   onNext={onNextItem}
+                  onScrollTop={scrollToTopWithHistory}
                 />
               </div>
               <div class="spacer"></div>
