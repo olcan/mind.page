@@ -499,8 +499,8 @@
       lastKeyDownTime = Date.now()
     }
 
-    // Up/Down with two or more of Ctrl, Alt and Cmd is the page's global scroll to the top, from every
-    // editor (the owner, 2026-10-03): it propagates to the window handler untouched, and like any other
+    // Up/Down with two or more of Ctrl, Alt and Cmd is the page's global scroll to the top (Up) or back to the
+    // position it left (Down), from every editor (the owner, 2026-10-03): it propagates to the window handler untouched, and like any other
     // key it cancels a create/run deferred to the modifiers' release (review 0: with Ctrl held through
     // Enter and the arrow, the release would have run the item)
     if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {

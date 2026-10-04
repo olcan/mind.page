@@ -326,6 +326,7 @@
     Object.defineProperty(window, '_history', { get: () => sessionStateHistory })
     Object.defineProperty(window, '_history_index', { get: () => sessionStateHistoryIndex })
     Object.defineProperty(window, '_history_update_pending', { get: () => historyUpdatePending }) // the scroll listener's write (tests)
+    Object.defineProperty(window, '_editor_change_pending', { get: () => editorChangePending }) // the query's debounce (tests)
     Object.defineProperty(window, '_mindbox_history', { get: () => sessionHistory })
     Object.defineProperty(window, '_mindbox_history_index', { get: () => sessionHistoryIndex })
     window['_item'] = _item
@@ -2114,6 +2115,31 @@
     return true
   }
 
+  // the inverse (the owner, 2026-10-03): Back when Back would scroll DOWN within the same query, which is
+  // the state scrollToTopWithHistory leaves (the previous entry shows this query at a position below the
+  // current one): the cursor returns to that entry and Down adds no entry (the top entry stays reachable by
+  // Forward). Nothing otherwise: an arrow never changes the query (a tag
+  // click's entry is another text; a query typed and still debouncing has a live text the entry lacks:
+  // review 0 B1, Back would have discarded it), and never scrolls up (the page scrolled past the position
+  // since). history.back() is asynchronous, so a second press before its popstate lands is ignored (the
+  // flag is cleared by onPopState, and after a second if no popstate comes). Returns whether it navigated
+  // or is navigating
+  let scrollBackPending = false
+  let scrollBackTimer: ReturnType<typeof setTimeout> | undefined
+  function scrollBackWithHistory() {
+    if (scrollBackPending) return true
+    const entry = (i: number) => sessionStateHistory[i] as { editorText?: string; scrollPosition?: number } | undefined
+    const current = entry(sessionStateHistoryIndex)
+    const previous = entry(sessionStateHistoryIndex - 1)
+    if (!current || !previous || (previous.editorText || '') != (current.editorText || '')) return false
+    if ((editorText || '') != (current.editorText || '')) return false // a query typed, not yet in the entry
+    if (!((previous.scrollPosition ?? -Infinity) > document.body.scrollTop + 2)) return false
+    scrollBackPending = true
+    scrollBackTimer = setTimeout(() => (scrollBackPending = false), 1000)
+    history.back()
+    return true
+  }
+
   function scrollTo(y) {
     // NOTE: we have to add (innerHeight * visualViewport.scale - document.body.offsetHeight) on ios
     //       likely related to inconsistency of innerHeight vs visualViewport.height on ios
@@ -3644,6 +3670,8 @@
   let scrollToTopOnPopState = false
   let skipScrollForPopState = false
   function onPopState(e) {
+    scrollBackPending = false // a navigation landed (see scrollBackWithHistory)
+    clearTimeout(scrollBackTimer)
     readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
     if (!e?.state) {
       // empty state indicates a change in url fragment, which we use to navigate if it matches an item; this seems to be due to hash change triggering a change in state (to null), see step 12 in https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event#when_popstate_is_sent
@@ -10293,12 +10321,15 @@
       return
     }
 
-    // the global scroll to the top: Up or Down with two or more of Ctrl, Alt and Cmd, from every context
-    // (the window, the MindBox, an item editor, which let the key through): the scroll with its history
-    // entry (see scrollToTopWithHistory) and nothing else, not even a focus change (the owner, 2026-10-03)
+    // the global scroll to the top and back: Up or Down with two or more of Ctrl, Alt and Cmd, from every
+    // context (the window, the MindBox, an item editor, which let the key through). Up scrolls a scrolled
+    // page to the top with its history entry (scrollToTopWithHistory); Down goes Back when that would
+    // scroll down within the same query, the inverse of Up (scrollBackWithHistory), and otherwise does
+    // nothing; neither changes anything else, not even the focus (the owner, 2026-10-03)
     if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {
       e.preventDefault()
-      scrollToTopWithHistory()
+      if (key == 'ArrowUp') scrollToTopWithHistory()
+      else scrollBackWithHistory()
       return
     }
 

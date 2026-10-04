@@ -1266,17 +1266,18 @@ test('cmd/ctrl+arrows from the window scroll a scrolled page to the top with a h
   expect(await entries(page), 'still without an entry').toEqual([length + 1, index + 1])
 })
 
-test('up/down with two modifiers scroll to the top from every context, with a history entry and nothing else', async ({ page }) => {
-  // the owner's global shortcut (2026-10-03): Up or Down with two or more of Ctrl, Alt and Cmd scrolls a
-  // scrolled page to the top with the history entry, from the window, the MindBox and an item editor
-  // alike, and changes nothing else: no focus change, no reset of the expanded items, no edge jump
+test('up with two modifiers scrolls to the top from every context, with a history entry and nothing else', async ({ page }) => {
+  // the owner's global shortcut (2026-10-03): Up with two or more of Ctrl, Alt and Cmd scrolls a scrolled
+  // page to the top with the history entry, from the window, the MindBox and an item editor alike, and
+  // changes nothing else: no focus change, no reset of the expanded items, no edge jump (Down with two
+  // modifiers is its inverse, the row below)
   await loadAdmin(page)
   const expanded = await expand(page)
   const [length, index] = await entries(page)
   // from the window: nothing focused before, nothing focused after
   await scrollDown(page)
   await blur(page)
-  await page.keyboard.press('Control+Meta+ArrowDown')
+  await page.keyboard.press('Control+Meta+ArrowUp')
   await nearTop(page, 'scrolled to the top from the window')
   await expect(mindbox(page), 'the MindBox not focused').not.toBeFocused()
   expect(asSet(await visible(page))).toEqual(asSet(expanded))
@@ -1331,7 +1332,7 @@ test('up/down with two modifiers scroll to the top from every context, with a hi
       document.body.scrollTo(0, top + 600)
       const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
       t.setSelectionRange(1, 1)
-      t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+      t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
     },
     [id, await headerTop(page)] as const
   )
@@ -1357,20 +1358,183 @@ test('up/down with two modifiers scroll to the top from every context, with a hi
   await expect(page.locator(`#textarea-${id}`)).toBeFocused()
   expect(await entries(page)).toEqual(after)
   // a create/run deferred to the modifiers' release (Ctrl held through Enter) does not survive the
-  // global arrow, like any other key (review 0 B2): Ctrl down, Enter, Alt down, Down, Alt up, Ctrl up
+  // global arrow, like any other key (review 0 B2): Ctrl down, Enter, Alt down, Up, Alt up, Ctrl up
   // leaves the editor open with nothing saved or run
   const internal = (id: string) => page.evaluate(id => window.__items.find(item => item.id == id)!, id)
   expect((await internal(id)).savedText, 'the fixture saved as created').toBe(globalText)
   await page.keyboard.down('Control')
   await page.keyboard.press('Enter')
   await page.keyboard.down('Alt')
-  await page.keyboard.press('ArrowDown')
+  await page.keyboard.press('ArrowUp')
   await page.keyboard.up('Alt')
   await page.keyboard.up('Control')
   await expect(page.locator(`#textarea-${id}`), 'the editor still open and focused: nothing submitted').toBeFocused()
   expect([(await internal(id)).savedText, !!(await internal(id)).saving], 'nothing saved or running').toEqual([globalText, false])
   await page.keyboard.press('Escape') // nothing edited: the editor closes
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+})
+
+test('down with two modifiers undoes a scroll to the top: Back to the position when the previous entry shows the same query below, nothing otherwise', async ({ page }) => {
+  // the owner's inverse (2026-10-03): Up with two modifiers pushes the top entry (the row above); Down goes
+  // Back when Back would scroll DOWN within the same query: the cursor returns to the previous entry without
+  // adding one (the top entry stays reachable by Forward). Nothing when no entry sits below the position,
+  // when the page scrolled past the position since the Up, or when the previous entry shows another query
+  // (an arrow never changes the query, a typed query still debouncing included: review 0 B1); a second
+  // press before the popstate lands is ignored; Up and Down in one turn work
+  await loadAdmin(page)
+  const expanded = await expand(page)
+  const [length, index] = await entries(page)
+  const up = () => page.keyboard.press('Control+Meta+ArrowUp')
+  const down = () => page.keyboard.press('Control+Meta+ArrowDown')
+  const atPosition = (y: number, message: string) =>
+    expect.poll(async () => Math.abs((await scrollTop(page)) - y) <= 2, { message }).toBe(true)
+  // from the window: Up then Down lands back at the position without a new entry (the length kept, Forward
+  // still holding the top entry; the index back), nothing focused, the expanded items kept
+  const pos = await scrollDown(page)
+  await blur(page)
+  await up()
+  await nearTop(page, 'scrolled to the top')
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  await down()
+  await atPosition(pos, 'back at the position')
+  expect(await entries(page)).toEqual([length + 1, index])
+  await expect(mindbox(page), 'the MindBox not focused').not.toBeFocused()
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
+  // no entry below the position: another Down changes nothing
+  await down()
+  await page.waitForTimeout(300)
+  expect(await entries(page)).toEqual([length + 1, index])
+  await atPosition(pos, 'still at the position')
+  // the page scrolled past the position since the Up: Back would scroll up, so nothing
+  await up()
+  await nearTop(page, 'at the top again')
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  await page.evaluate(y => document.body.scrollTo(0, y), pos + 100)
+  await expect.poll(() => scrollTop(page), { message: 'scrolled past the position' }).toBeGreaterThan(pos + 50)
+  const past = await scrollTop(page)
+  await down()
+  await page.waitForTimeout(300)
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  await atPosition(past, 'still past the position')
+  // another query since: the previous entry (the top entry, its position written below the new query's)
+  // shows a different text, so nothing: the query and the entries stay
+  await noWritePending(page)
+  expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index].scrollPosition), 'the top entry holds the position scrolled to').toBeGreaterThan(pos + 50)
+  await focusMindboxInPlace(page)
+  await page.keyboard.type('#e2e')
+  await expect.poll(() => entries(page), { message: 'the typed query pushed its entry' }).toEqual([length + 2, index + 2])
+  // at the top of the new query, so only the text check stands between Down and a Back that would
+  // scroll down to the previous entry's position (and change the query)
+  await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
+  await nearTop(page, 'at the top of the typed query')
+  await down()
+  await page.waitForTimeout(300)
+  await expect(mindbox(page)).toHaveValue('#e2e')
+  expect(await entries(page)).toEqual([length + 2, index + 2])
+  // in the MindBox, on that query: Up then Down, the focus and the text kept
+  const pos2 = await scrollDown(page)
+  await focusMindboxInPlace(page, 4)
+  await up()
+  await nearTop(page, 'scrolled to the top from the MindBox')
+  expect(await entries(page)).toEqual([length + 3, index + 3])
+  await down()
+  await atPosition(pos2, 'back at the position from the MindBox')
+  expect(await entries(page)).toEqual([length + 3, index + 2])
+  await expect(mindbox(page)).toBeFocused()
+  await expect(mindbox(page)).toHaveValue('#e2e')
+  // two Downs in one browser turn go back ONCE: the second lands before the popstate of the first and is
+  // ignored (the pending guard), so the history walks one entry, not two
+  await blur(page)
+  await up()
+  await nearTop(page, 'at the top before the double press')
+  const before = await entries(page)
+  await page.evaluate(() => {
+    const press = () => new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true })
+    document.body.dispatchEvent(press())
+    document.body.dispatchEvent(press())
+  })
+  await atPosition(pos2, 'back at the position once')
+  await page.waitForTimeout(300)
+  expect(await entries(page)).toEqual([before[0], before[1] - 1])
+  await expect(mindbox(page)).toHaveValue('#e2e')
+  // from an item editor: the editor keeps the focus through Up and Down, the page back at the position.
+  // (The query is cleared at the top with the MindBox focused first: Playwright will not fill the
+  // unfocused MindBox, whose textarea it reports as not visible)
+  await up()
+  await nearTop(page, 'at the top to clear the query')
+  await focusMindboxInPlace(page)
+  await mindbox(page).fill('')
+  await expect.poll(() => mindbox(page).inputValue()).toBe('')
+  // the Backs restored the entries' smaller show-more cut (onPopState keeps the larger of the query's default
+  // and the entry's hideIndex): expand again so the newest item renders below the pinned ones
+  await expand(page)
+  const backText = '#e2e_back ' + Array.from({ length: 40 }, (_, i) => `back ${i + 1}`).join('\n\n')
+  await page.evaluate(text => void window._create(text), backText)
+  await expect.poll(() => savedId(page, '#e2e_back'), { timeout: 30_000 }).toBeTruthy()
+  const id = await page.evaluate(() => window._item('#e2e_back', true)!.id)
+  await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000, message: 'the fixture renders among the expanded items' }).toBe(true)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  await paragraph.scrollIntoViewIfNeeded()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  await page.evaluate(y => document.body.scrollTo(0, y), (await headerTop(page)) + 600)
+  await expect.poll(() => scrollTop(page), { message: 'scrolled with the editor open' }).toBeGreaterThan((await headerTop(page)) + 300)
+  const pos3 = await scrollTop(page)
+  const [length4, index4] = await entries(page)
+  await page.keyboard.press('Control+Alt+ArrowUp')
+  await nearTop(page, 'scrolled to the top from the editor')
+  expect(await entries(page)).toEqual([length4 + 1, index4 + 1])
+  await expect(page.locator(`#textarea-${id}`)).toBeFocused()
+  await page.keyboard.press('Control+Alt+ArrowDown')
+  await atPosition(pos3, 'back at the position from the editor')
+  await page.waitForTimeout(300) // whatever the restore scheduled; the assertions below are the check
+  await atPosition(pos3, 'still at the position once the restore settled')
+  expect(await entries(page)).toEqual([length4 + 1, index4])
+  await expect(page.locator(`#textarea-${id}`), 'the editor keeps the focus').toBeFocused()
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  // the quick combo: Up and Down dispatched in ONE browser turn (the owner: "a quick up-down combo should
+  // work"): Up writes its predecessor and pushes the top entry synchronously, so the Down right after it
+  // finds the pair; the page ends back at the position with the index where it started
+  const pos4 = await scrollDown(page)
+  await blur(page)
+  const [, index5] = await entries(page)
+  await page.evaluate(() => {
+    const press = (key: string) => new KeyboardEvent('keydown', { key, code: key, metaKey: true, altKey: true, bubbles: true, cancelable: true })
+    document.body.dispatchEvent(press('ArrowUp'))
+    document.body.dispatchEvent(press('ArrowDown'))
+  })
+  await atPosition(pos4, 'back at the position after Up and Down in one turn')
+  await page.waitForTimeout(300)
+  // the Up truncated the Forward entry the editor part's Back had left, then pushed: the length is the
+  // index plus two whatever it was before
+  expect(await entries(page)).toEqual([index5 + 2, index5])
+  // a query typed and still debouncing (review 0 B1): its live text is not in the entry yet, so a Down in the
+  // same turn, with the entries still a qualifying pair (the top entry over the same query below), must NOT
+  // go Back (Back would have restored the old query and discarded the typing); the typed text survives and
+  // the debounce then records it in an entry of its own
+  await up()
+  await nearTop(page, 'at the top before typing')
+  await focusMindboxInPlace(page)
+  const [, index6] = await entries(page)
+  const typed = await page.evaluate(() => {
+    const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    t.value = '#e2e pending'
+    t.dispatchEvent(new Event('input', { bubbles: true }))
+    const w = window as any
+    const before = { pending: w._editor_change_pending as boolean, recorded: w._history[w._history_index].editorText as string, index: w._history_index as number }
+    t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+    return before
+  })
+  expect(typed, 'the precondition held in the turn: the query debouncing, the entry still the old text').toEqual({ pending: true, recorded: '', index: index6 })
+  await page.waitForTimeout(300)
+  // no Back: the index never drops below the top entry's (the debounce, 500 ms with the MindBox focused,
+  // may already have pushed the typed query's own entry above it)
+  expect((await entries(page))[1], 'no Back').toBeGreaterThanOrEqual(index6)
+  await expect(mindbox(page), 'the typed text survives').toHaveValue('#e2e pending')
+  await expect.poll(() => page.evaluate(() => (window as any)._history[(window as any)._history_index].editorText), { message: 'the debounce recorded the typed query' }).toBe('#e2e pending')
+  await expect(mindbox(page)).toHaveValue('#e2e pending')
 })
 
 test("ctrl+arrows in a tall item bring the caret's edge into view", async ({ page }) => {
