@@ -2140,6 +2140,40 @@
     return true
   }
 
+  // the FALLBACK of Down (the owner, 2026-10-04): when Back does not apply, Down scrolls to the item the
+  // query NAMES (the target: the listing item whose label is the query, or an id: match; the item a tag
+  // click lands on), exactly as a tag click's last step does (targetScrollPosition: the item brought to the
+  // upper middle of the view when it sits above or below the view, nothing when it is in view), with a
+  // history entry when it moves, as Up records one (the current entry keeps the position left, a copy at
+  // the new position is pushed as a final state), so Back returns to the position. The query, the focus
+  // and the item's time stay as they are (a tag click would touch the time and push the query's state).
+  // Nothing when the query names no item, or while a typed query is not yet applied (its live text differs
+  // from the current entry's, the test scrollBackWithHistory makes: its own layout scrolls to its target
+  // when it settles; a re-rank's pending debounce is no typed query). Returns whether it scrolled
+  function scrollToTargetWithHistory() {
+    const entry = sessionStateHistory[sessionStateHistoryIndex] as { editorText?: string } | undefined
+    if ((editorText || '') != (entry?.editorText || '')) return false
+    const y = targetScrollPosition()
+    // a destination that is the position (a short view: the in-view rule's lower band and the destination's
+    // quarter disagree there, so the item can count as below the view at the very position it was brought
+    // to) moves nothing and gets no entry (review 0 B1: a push per press otherwise)
+    if (y == null || Math.abs(y - document.body.scrollTop) <= 2) return false
+    const current = Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, {
+      index: sessionStateHistoryIndex,
+      scrollPosition: document.body.scrollTop,
+    })
+    replaceState(current)
+    const moved = Object.assign(_.cloneDeep(current), {
+      index: ++sessionStateHistoryIndex,
+      scrollPosition: y,
+      final: true,
+    })
+    sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
+    pushState(moved)
+    scrollTo(y)
+    return true
+  }
+
   function scrollTo(y) {
     // NOTE: we have to add (innerHeight * visualViewport.scale - document.body.offsetHeight) on ios
     //       likely related to inconsistency of innerHeight vs visualViewport.height on ios
@@ -3518,15 +3552,22 @@
     replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { hideIndex }))
   }
 
-  function scrollToTarget() {
+  // the position that brings the target item (the item the query names) into view, or null when there is
+  // no target (can happen even under unique match, e.g. for #log items) or it is already in view: if the
+  // target is too far up or down, it goes to ~upper-middle, snapping up to the header
+  function targetScrollPosition(): number | null {
     const target = document.querySelector(`.super-container.target`) as HTMLElement
-    if (!target) return // target missing, can happen even under unique match (e.g. for #log items)
-    // if target is too far up or down, bring it to ~upper-middle, snapping up to header
+    if (!target) return null
     if (
       target.offsetTop < document.body.scrollTop ||
       target.offsetTop > document.body.scrollTop + visualViewport.height - 200
     )
-      scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4))
+      return Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4)
+    return null
+  }
+  function scrollToTarget() {
+    const y = targetScrollPosition()
+    if (y != null) scrollTo(y)
   }
 
   function onTagClick(id: string, tag: string, reltag: string, e: MouseEvent) {
@@ -10348,12 +10389,13 @@
     // the global scroll to the top and back: Up or Down with two or more of Ctrl, Alt and Cmd, from every
     // context (the window, the MindBox, an item editor, which let the key through). Up scrolls a scrolled
     // page to the top with its history entry (scrollToTopWithHistory); Down goes Back when that would
-    // scroll down within the same query, the inverse of Up (scrollBackWithHistory), and otherwise does
-    // nothing; neither changes anything else, not even the focus (the owner, 2026-10-03)
+    // scroll down within the same query, the inverse of Up (scrollBackWithHistory), otherwise scrolls to
+    // the item the query names, as a tag click does (scrollToTargetWithHistory; the owner, 2026-10-04),
+    // and otherwise does nothing; neither changes anything else, not even the focus (the owner, 2026-10-03)
     if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {
       e.preventDefault()
       if (key == 'ArrowUp') scrollToTopWithHistory()
-      else scrollBackWithHistory()
+      else if (!scrollBackWithHistory()) scrollToTargetWithHistory()
       return
     }
 

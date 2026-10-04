@@ -1537,6 +1537,225 @@ test('down with two modifiers undoes a scroll to the top: Back to the position w
   await expect(mindbox(page)).toHaveValue('#e2e pending')
 })
 
+test('down with two modifiers, when Back does not apply, scrolls to the item the query names as a tag click does, with a history entry; nothing otherwise', async ({ page }) => {
+  // the owner's fallback (2026-10-04): the query names an item (the listing item, the one a tag click
+  // lands on) out of view, below or above: Down brings it to the upper middle of the view, as the tag
+  // click's last step does, with an entry so Back returns to the position; the query, the caret, the
+  // focus and the entries' texts stay. In view: nothing. Back comes first (the Back row): after an upward
+  // jump the next Down returns to the position left (the alternation); after a downward jump it does not.
+  // A short view, where the destination can equal the position: no entry (review 0 B1). A typed query not
+  // yet applied: nothing (review 0 B2). A query naming no item: nothing. Each fallback press asserts its
+  // premise, that Back does not apply (the previous entry another text, or a position not below)
+  await loadAdmin(page)
+  const body = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n\n')
+  // the named item, tall, with two tall children under its tag, so the query's page scrolls well past it
+  await page.evaluate(body => void window._create(`#e2e_named ${body}`), body)
+  for (const n of ['p', 'q']) await page.evaluate(([n, body]) => void window._create(`#e2e_named/${n} ${body}`), [n, body] as const)
+  await expect.poll(() => savedId(page, '#e2e_named/q'), { timeout: 30_000 }).toBeTruthy()
+  const id = await page.evaluate(() => window._item('#e2e_named', true)!.id)
+  const targeted = () =>
+    expect.poll(() => page.evaluate(id => !!document.querySelector(`.super-container.target #item-${id}`), id), { timeout: 15_000 }).toBe(true)
+  const down = () => page.keyboard.press('Control+Meta+ArrowDown')
+  const up = () => page.keyboard.press('Control+Meta+ArrowUp')
+  const atPosition = (y: number, message: string) =>
+    expect.poll(async () => Math.abs((await scrollTop(page)) - y) <= 2, { message }).toBe(true)
+  // the tag click's destination: the item's top less a quarter of the view, no higher than the header
+  const destination = () =>
+    page.evaluate(() => {
+      const target = document.querySelector('.super-container.target') as HTMLElement
+      return Math.max((document.querySelector('.header') as HTMLElement).offsetTop, target.offsetTop - visualViewport!.height / 4)
+    })
+  const targetTop = () => page.evaluate(() => (document.querySelector('.super-container.target') as HTMLElement).offsetTop)
+  // the item below the view's lower band (the tag click's rule)
+  const below = () => page.evaluate(() => (document.querySelector('.super-container.target') as HTMLElement).offsetTop > document.body.scrollTop + visualViewport!.height - 200)
+  // the premise of a fallback press: Back does not apply (scrollBackWithHistory's test)
+  const noBack = () =>
+    page.evaluate(() => {
+      const w = window as any
+      const current = w._history[w._history_index]
+      const previous = w._history[w._history_index - 1]
+      return !previous || (previous.editorText || '') !== (current.editorText || '') || !((previous.scrollPosition ?? -Infinity) > document.body.scrollTop + 2)
+    })
+  const selection = () =>
+    page.evaluate(() => {
+      const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      return [t.value, t.selectionStart, t.selectionEnd]
+    })
+  // the query from a fresh history: another query, Up (a final entry), then the query, pushed after it, so
+  // the previous entry is another text and Back cannot apply whatever the positions
+  // the app's bottom padding (0.85 of the view's height) follows a view change only while nothing is focused
+  // (updateVerticalPadding under the resize handler, two unfocused passes), and shifts the position when it
+  // does: settle it after a view change, before any position is measured
+  const settleView = async (height: number) => {
+    await blur(page)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            window.dispatchEvent(new Event('resize'))
+            return parseFloat((document.querySelector('.items') as HTMLElement).style.paddingBottom || '0')
+          }),
+        { message: 'the padding follows the view', timeout: 10_000 }
+      )
+      .toBeCloseTo(0.85 * height, 0)
+    await noWritePending(page)
+  }
+  const freshQuery = async () => {
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('#e2e_named/q')
+    await expect.poll(() => page.evaluate(() => (window as any)._history[(window as any)._history_index].editorText), { timeout: 10_000 }).toBe('#e2e_named/q')
+    await scrollDown(page)
+    await up()
+    await nearTop(page, 'a final entry at the top of the other query')
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('#e2e_named')
+    await targeted()
+    await expect.poll(() => page.evaluate(() => (window as any)._history[(window as any)._history_index].editorText), { timeout: 10_000 }).toBe('#e2e_named')
+    expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index - 1].editorText), 'the previous entry is the other query').toBe('#e2e_named/q')
+  }
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_named')
+  await targeted()
+  await noWritePending(page)
+  const [length, index] = await entries(page)
+  // in view (the query's own layout scrolled to its item; the item sits below the pinned items), the previous
+  // entry another query: Down changes nothing
+  const settled = await scrollTop(page)
+  await focusMindboxInPlace(page, 4)
+  expect(await noBack()).toBe(true)
+  await down()
+  await page.waitForTimeout(300)
+  expect(await entries(page)).toEqual([length, index])
+  await atPosition(settled, 'still where the query settled')
+  // the item BELOW the view: from the top of the query's page, Down brings it to the upper middle with one
+  // entry whose predecessor holds the top; the previous entry sits above, so the next Down is no Back
+  // (the alternation holds after an upward jump alone) and, the item in view, nothing
+  await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
+  await nearTop(page, 'at the top of the query')
+  await noWritePending(page)
+  expect([await below(), await noBack()], 'the item below the view, no Back').toEqual([true, true])
+  const dest = await destination()
+  await down()
+  await atPosition(dest, 'at the item, from above')
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index), 'the top, kept in the previous entry').toBe(await headerTop(page))
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index + 1), 'the destination in the new entry').toBe(dest)
+  expect(await page.evaluate(i => (window as any)._history[i].editorText, index + 1)).toBe('#e2e_named')
+  expect(await selection(), 'the text and caret stay').toEqual(['#e2e_named', 4, 4])
+  await expect(mindbox(page)).toBeFocused()
+  expect(await noBack(), 'no Back after a downward jump').toBe(true)
+  await down()
+  await page.waitForTimeout(300)
+  await atPosition(dest, 'still at the item: the item in view')
+  expect(await entries(page)).toEqual([length + 1, index + 1])
+  // scrolled PAST the item: Down brings it back up with an entry; the entry makes the next Down a Back that
+  // scrolls down within the same query, back to the position left, and the Down after that lands at the
+  // item again (Down alternates between the item and the position)
+  const top = await targetTop()
+  await page.evaluate(y => document.body.scrollTo(0, y), top + 400)
+  await expect.poll(() => scrollTop(page), { message: 'scrolled past the item' }).toBeGreaterThan(top + 300)
+  await noWritePending(page)
+  const pos = await scrollTop(page)
+  expect(await noBack(), 'no Back from past the item').toBe(true)
+  await down()
+  await atPosition(dest, 'at the item, as a tag click lands')
+  expect(await entries(page)).toEqual([length + 2, index + 2])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index + 1), 'the position left, kept in the previous entry').toBe(pos)
+  await down()
+  await atPosition(pos, 'Back to the position left')
+  expect(await entries(page)).toEqual([length + 2, index + 1])
+  await down()
+  await atPosition(dest, 'at the item again')
+  expect(await entries(page)).toEqual([length + 2, index + 2])
+  // Back comes first: after Up, Down returns to the position Up left, not to the item
+  await noWritePending(page)
+  const pos2 = await scrollDown(page)
+  expect(Math.abs(pos2 - dest), 'the position differs from the destination').toBeGreaterThan(50)
+  await up()
+  await nearTop(page, 'scrolled to the top')
+  expect(await entries(page)).toEqual([length + 3, index + 3])
+  await down()
+  await atPosition(pos2, 'Back to the position, not to the item')
+  expect(await entries(page)).toEqual([length + 3, index + 2])
+  // a query naming no item (a term the tall items carry): a long page, no target, so Down changes nothing
+  await focusMindboxInPlace(page)
+  await mindbox(page).fill('line')
+  await expect.poll(() => page.evaluate(() => window.__items.filter(item => item.matching).length), { timeout: 10_000 }).toBeGreaterThan(2)
+  await expect.poll(() => page.evaluate(() => !!document.querySelector('.super-container.target')), { message: 'no target under the term', timeout: 10_000 }).toBe(false)
+  await noWritePending(page)
+  const pos3 = await scrollDown(page)
+  const before = await entries(page)
+  await down()
+  await page.waitForTimeout(300)
+  await atPosition(pos3, 'still at the position')
+  expect(await entries(page)).toEqual(before)
+  await expect(mindbox(page)).toHaveValue('line')
+  // a SHORT view (review 0 B1): the in-view rule's lower band and the destination's quarter disagree there,
+  // so at the destination the item still counts as below the view and the destination is the position: Down
+  // moves nothing and pushes nothing (the precondition asserted, so an ordinary in-view no-op cannot stand in)
+  await freshQuery()
+  const size = page.viewportSize()!
+  await page.setViewportSize({ width: size.width, height: 240 })
+  await settleView(240)
+  await focusMindboxInPlace(page)
+  const top2 = await targetTop()
+  await page.evaluate(y => document.body.scrollTo(0, y), top2 - 300)
+  await expect.poll(() => scrollTop(page), { message: 'above the item in the short view' }).toBeLessThan(top2 - 200)
+  await noWritePending(page)
+  expect([await below(), await noBack()], 'the item below the short view, no Back').toEqual([true, true])
+  const [length3, index3] = await entries(page)
+  const dest3 = await destination()
+  await down()
+  await atPosition(dest3, 'at the item in the short view')
+  expect(await entries(page)).toEqual([length3 + 1, index3 + 1])
+  expect(await below(), 'the item still counts as below the short view at the destination').toBe(true)
+  expect(Math.abs((await destination()) - (await scrollTop(page))), 'the destination is the position').toBeLessThanOrEqual(2)
+  expect(await noBack(), 'no Back (the position left lies above)').toBe(true)
+  await down()
+  await page.waitForTimeout(300)
+  await atPosition(dest3, 'unmoved')
+  expect(await entries(page), 'no entry for a destination that is the position').toEqual([length3 + 1, index3 + 1])
+  await page.setViewportSize(size)
+  await settleView(size.height)
+  // a typed query not yet applied (review 0 B2), the old target off screen: the input and Down in one browser
+  // turn; the shortcut neither scrolls nor touches the history (the text guard), and the typed query then
+  // settles with its own entry. The target is measured AFTER the view's restore (the padding's 408 px moved
+  // it: review 1 B2, the row's third cut scrolled past a stale top and left the item in view), and the
+  // premises are read in the same turn as the key: the target still the old item, above the position, its
+  // destination well away from it, so the guard alone keeps the page
+  const top3 = await targetTop()
+  await page.evaluate(y => document.body.scrollTo(0, y), top3 + 400)
+  await expect.poll(() => scrollTop(page), { message: 'past the item' }).toBeGreaterThan(top3 + 300)
+  await noWritePending(page)
+  const posP = await scrollTop(page)
+  const [lengthP, indexP] = await entries(page)
+  const typed = await page.evaluate(id => {
+    const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    t.focus({ preventScroll: true })
+    t.setRangeText('/p', t.value.length, t.value.length, 'end')
+    t.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '/p' }))
+    const w = window as any
+    const pending = w._mindboxDebounced === true
+    const recorded = w._history[w._history_index].editorText
+    const target = document.querySelector('.super-container.target') as HTMLElement
+    const scrollTop = document.body.scrollTop
+    const destination = Math.max((document.querySelector('.header') as HTMLElement).offsetTop, target.offsetTop - visualViewport!.height / 4)
+    const premises = {
+      oldTarget: !!target.querySelector(`#item-${id}`),
+      above: target.offsetTop < scrollTop,
+      destinationAway: Math.abs(destination - scrollTop) > 50,
+    }
+    t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+    return { pending, recorded, premises, live: t.value, scrollTop: document.body.scrollTop, length: w._history.length, index: w._history_index }
+  }, id)
+  expect(typed.premises, 'the old target, above the position, its destination away from it').toEqual({ oldTarget: true, above: true, destinationAway: true })
+  expect(typed.pending, 'the query was still debouncing when the key arrived').toBe(true)
+  expect([typed.recorded, typed.live], 'the entry holds the old text, the MindBox the new').toEqual(['#e2e_named', '#e2e_named/p'])
+  expect([typed.scrollTop, typed.length, typed.index], 'the shortcut scrolled nothing and touched no entry').toEqual([posP, lengthP, indexP])
+  await expect.poll(() => page.evaluate(() => (window as any)._history[(window as any)._history_index].editorText), { message: 'the typed query settled', timeout: 10_000 }).toBe('#e2e_named/p')
+  await expect(mindbox(page)).toHaveValue('#e2e_named/p')
+})
+
 test('a dangling relative tag neither ranks an item up nor counts as missing; an absolute missing tag still does both', async ({ page }) => {
   // the owner's report (2026-10-04): a chat child carrying `#//why_each_row`, a sibling no item has, kept
   // surfacing at the top of the list, as if its time were updated: the dangling tag sat in missingTags,
