@@ -1028,4 +1028,10 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget; this device: granted')
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('proposal', 5, 6))
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context', '[proposal] answer the agent some context'])
+  // a project's repeated check-in (2026-10-03, round 3): the bridge counts the resurfacings it
+  // publishes (`surfaced`), so a second question under the same epoch and reason notifies again
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 5, 7, { held: 'agent', project: true, surfaced: 1 }))
+  await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(5)
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 5, 8, { held: 'agent', project: true, surfaced: 2 }))
+  await expect.poll(async () => (await notified()).map(n => n.title).slice(-2), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[question] answer the agent some context'])
 })
