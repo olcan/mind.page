@@ -960,4 +960,72 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const ccElem = await page.evaluate(n => window._item(n, true)!.elem!.id, `${CC}/0`)
   await page.locator(`[id="${ccElem}"] .vault-result mark[data-tag="#e2e_cc/0/alpha"]`).click()
   await expect.poll(box).toBe(`${CC}/0/alpha `)
+
+  // DESKTOP NOTIFICATIONS (vault design mind_task_agents 2.7, 2026-10-03): a projection change
+  // into a state waiting on the owner, in the main list, shows one notification from the device's
+  // elected window (this one: the election claimed in localStorage); its click targets the item as
+  // the row's click does. The browser's Notification is replaced by a recorder (headless Chromium
+  // shows nothing; the permission and the ask are the recorder's), installed before /notify on
+  const NOTIFY = '#e2e_notify'
+  await page.evaluate(text => void window._create(text), `${NOTIFY}\n#todo answer the agent\nsome context`)
+  await expect.poll(() => savedId(page, NOTIFY), { timeout: 30_000 }).toBeTruthy()
+  const notifyId = (await savedId(page, NOTIFY))!
+  await page.evaluate(() => {
+    const shown: any[] = ((window as any).__notified = [])
+    class Recorder {
+      static permission = 'default'
+      static async requestPermission() {
+        Recorder.permission = 'granted'
+        return 'granted'
+      }
+      closed = false
+      onclick: (() => void) | null = null
+      constructor(public title: string, public options: any) {
+        shown.push(this)
+      }
+      close() {
+        this.closed = true
+      }
+    }
+    ;(window as any).Notification = Recorder
+  })
+  expect(await command(page, '/notify on')).toBeNull()
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget; this device: granted')
+  const NOTIFY_STORE = 'e2e-notify-store'
+  const notifyState = (reason: string, epoch: number, rev: number, more: Record<string, unknown> = {}) => ({ _agent: { state: { held: 'owner', reason, epoch, rev, updated: Date.now(), worktree: null, phase: 'idle', acked: {}, ...more } } })
+  const notified = () => page.evaluate(() => ((window as any).__notified as any[]).map(n => ({ title: n.title, tag: n.options.tag, body: n.options.body, requireInteraction: n.options.requireInteraction, closed: n.closed })))
+  // the hand-back of a question (the bridge's projection write behind the app)
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 1, 1))
+  await expect.poll(notified, { timeout: 30_000 }).toEqual([{ title: '[question] answer the agent some context', tag: `todoer:${notifyId}`, body: NOTIFY, requireInteraction: true, closed: false }])
+  expect(await page.evaluate(() => [JSON.parse(localStorage.getItem('mindpage_todoer_notifier')!).id, (window._item('#todoer') as any).store.notifier_id]), 'this window holds the election').toEqual([await page.evaluate(() => (window._item('#todoer') as any).store.notifier_id), expect.any(String)])
+  // a stats refresh of the same state and a reason not enabled notify nothing; a blocked hand-back
+  // under a new epoch does: each write awaited on the item's store before the next
+  const applied = (rev: number) => expect.poll(() => page.evaluate(id => (window._item('id:' + id, true) as any)?._global_store?._agent?.state?.rev, notifyId), { timeout: 30_000 }).toBe(rev)
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 1, 2, { stats: { workers: 1, cost: 0.5 } }))
+  await applied(2)
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('done', 2, 3))
+  await applied(3)
+  expect((await notified()).map(n => n.title), 'a stats refresh and a done hand-back notify nothing').toEqual(['[question] answer the agent some context'])
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('blocked', 3, 4))
+  await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context'])
+  // the minute scan (review 0, B1): a delivery the app announces to no hook (this tab owed a save
+  // for that store) leaves the record the tab last saw behind the applied state; the scan,
+  // run here directly (the task's minute is not waited for), notices it over the real items
+  await page.evaluate(id => void ((window._item('#todoer') as any).store.notify_seen[window._item('id:' + id, true)!.id] = 'owner:done:2|main'), notifyId)
+  expect(await page.evaluate(() => (window._item('#todoer') as any).eval('_scan_notify()'))).toBeGreaterThanOrEqual(1)
+  await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 10_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context'])
+  // the click: the notification closed, the item targeted by its name (its todo line selected)
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
+  await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${NOTIFY} ?$`))
+  expect((await notified()).at(-1)!.closed, 'the clicked notification is closed').toBe(true)
+  // off: a hand-back notifies nothing; on again: the next one does (the one skipped stays skipped)
+  expect(await command(page, '/notify off')).toBeNull()
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: off')
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 4, 5))
+  await applied(5)
+  expect(await command(page, '/notify on')).toBeNull()
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget; this device: granted')
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('proposal', 5, 6))
+  await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context', '[proposal] answer the agent some context'])
 })
