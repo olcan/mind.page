@@ -75,7 +75,7 @@ test('markdown structure renders with every text character referenced', () => {
   expect(bareText(out)).toMatch(/^[A-Za-z0-9 \n.]*$/)
 })
 
-test('app grammar, macros, tags, math, wiki and jinja are ordinary text', () => {
+test('app grammar, macros, tags, plain-dollar math, wiki and jinja are ordinary text', () => {
   const body = '<<window._pwned = 1>> #_autorun [[agents/worker]] {{ run.id }} $x$ @{eval}@ https://a.b/c'
   const out = html(body)
   expect(out).not.toContain('<mark')
@@ -85,6 +85,42 @@ test('app grammar, macros, tags, math, wiki and jinja are ordinary text', () => 
   expect(bareText(out)).toMatch(/^[A-Za-z0-9 \n]*$/)
   // and the browser decodes the references back to the literal spelling
   expect(textOf(out).replace(/&#(\d+);/g, (_, c) => String.fromCodePoint(Number(c)))).toContain(body)
+})
+
+test("math: the app's code-span forms become its math spans, exactly the single-backtick span", () => {
+  // the owner (2026-10-04): a reply's TeX renders as the owner's does. the app's forms alone
+  // (Item.svelte's line pass): a single-backtick code span between dollar signs on one line, `$`…`$`
+  // inline and `$$`…`$$` display, wrapped as the app's span.math / span.math-display over the
+  // delimited TeX; what the TeX may do is decided where a frame's spans are typeset (the app's inert
+  // MathJax document, src/inert_math.ts), not here; a plain `$x$` stays text as it is in the owner's text
+  expect(html('a $`x^2`$ b')).toBe('<div class="inert-markdown"><p>a <span class="math">&#36;x&#94;2&#36;</span> b</p></div>')
+  expect(html('$$`\\sum_i x_i`$$')).toBe(
+    '<div class="inert-markdown"><p><span class="math-display">&#36;&#36;&#92;sum&#95;i x&#95;i&#36;&#36;</span></p></div>'
+  )
+  expect(html('$`\\href{javascript:x}{y}`$')).toBe(
+    '<div class="inert-markdown"><p><span class="math">' + grammarRefs('$\\href{javascript:x}{y}$') + '</span></p></div>'
+  )
+  // the app's own alternation: an unbalanced form is a dollar sign of text and the inline form
+  expect(html('$$`x`$')).toBe('<div class="inert-markdown"><p>&#36;<span class="math">&#36;x&#36;</span></p></div>')
+  expect(html('$`x`$$')).toBe('<div class="inert-markdown"><p><span class="math">&#36;x&#36;</span>&#36;</p></div>')
+  // EXACTLY the single-backtick span (review 0 B3): a backtick inside is no form (Marked's code spans
+  // and the text between them render as before, a child tag there included), a longer run is Marked's
+  // own code span; the bridge's reader (lib/mindpage_child_tags.py, the parity table) agrees
+  expect(html('$`a` #/x `b`$')).toBe('<div class="inert-markdown"><p>&#36;<code>a</code> &#35;&#47;x <code>b</code>&#36;</p></div>')
+  expect(html('$``a`$ #/x``$')).toBe('<div class="inert-markdown"><p>&#36;<code>a&#96;&#36; &#35;&#47;x</code>&#36;</p></div>')
+  expect(inertChildTags('$`a` #/x `b`$')).toEqual(['#/x'])
+  expect(inertChildTags('$``a`$ #/x``$')).toEqual([])
+  expect(inertChildTags('$$`a` #/x `b`$$')).toEqual(['#/x'])
+  expect(inertChildTags('$$``a`$$ #/x``$$')).toEqual([])
+  // a child tag inside the TeX is TeX (the math token has no children), and the form is no boundary
+  // for one after it, as a code span is none
+  expect(inertChildTags('$`#/x`$ and #/a')).toEqual(['#/a'])
+  expect(inertChildTags('$`x`$#/a')).toEqual([])
+  // plain dollars and a form across lines are text; so is a form inside Marked's raw block (`<code>`)
+  // or inside a raw-text element of this policy (`<textarea>`), as a child tag there is
+  expect(html('$x$ costs $5 and $`a\nb`$')).not.toContain('<span class="math')
+  expect(html('<code>$`x`$</code>')).not.toContain('<span class="math')
+  expect(html('x <textarea>$`x`$</textarea>')).not.toContain('<span class="math') // inline: the demotion, not a protected block
 })
 
 test('raw html is visible text: comments in gray code typography, other html code-styled', () => {

@@ -66,6 +66,7 @@
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
   import { renderInertMarkdown } from '../inert_markdown'
+  import { typesetInertMath } from '../inert_math'
   export let editable = true
   export let pushable = false
   export let previewable = false
@@ -1203,8 +1204,39 @@
     // still measuring its glyph <use> refs, which then measure as zero bbox (e.g. NaN/Infinity
     // transforms in _dot_rendered); the shared queue serializes typesetting across items and runs
     // each done() before the next typeset can start
+    // an INERT frame's math (a bridge reply's, src/inert_markdown.ts) is typeset by a MathJax
+    // document of the frame's own (src/inert_math.ts; inert_math reviews 0-2): a plain document
+    // with a fresh parser per frame over a bounded package set and this app's filter of the
+    // frame's MathML, so a reply's TeX can neither define macros for the owner's math or the next
+    // reply's nor carry a url, a class, an id, a style or a resource-bearing color into the
+    // output, and no menu of a frame can touch the page's document. The owner's math goes
+    // through the page's document as before; all run on the shared queue after MathJax's startup
+    // (the page's automatic scan is off, src/app.html: this pass and the graph-text one below are
+    // the only typesetters, so a frame's math never meets the page's parser), the owner's first. A frame whose typeset
+    // fails keeps its TeX as text and is marked as done() marks the others (an unmarked span
+    // keeps the item unrendered, and the loading overlay on the page); the other frames and the
+    // item's completion go on
+    const owner = elems.filter(elem => !elem.closest('.vault-result'))
+    const frames = new Map<Element, Element[]>()
+    for (const elem of elems) {
+      const frame = elem.closest('.vault-result')
+      if (!frame) continue
+      if (!frames.has(frame)) frames.set(frame, [])
+      frames.get(frame)!.push(elem)
+    }
     window['_typeset_queue'] = (window['_typeset_queue'] ?? Promise.resolve())
-      .then(() => window['MathJax'].typesetPromise(elems))
+      .then(() => window['MathJax'].startup.promise)
+      .then(() => (owner.length ? window['MathJax'].typesetPromise(owner) : null))
+      .then(async () => {
+        for (const spans of frames.values()) {
+          try {
+            await typesetInertMath(spans)
+          } catch (e) {
+            console.error(e)
+            spans.forEach(span => span.setAttribute('_rendered', 'failed'))
+          }
+        }
+      })
       .then(() => {
         const itemdiv = elems[0].closest('.item')
         if (!itemdiv) return
@@ -1215,7 +1247,16 @@
         if (done) done()
         onResized(id, container, 'math rendered')
       })
-      .catch(console.error)
+      .catch(e => {
+        // a typeset that fails (an extension the loader cannot fetch, offline, or an unknown
+        // `\require{…}` in the owner's TeX) leaves its TeX as text, and the item still counts as
+        // rendered (its spans marked as done() marks them): an unrendered visible item keeps the
+        // loading overlay on the page, which intercepts every click (inert_math review 0's lane run:
+        // a missing extension wedged every later row)
+        console.error(e)
+        elems.forEach(elem => elem.setAttribute('_rendered', 'failed'))
+        if (elems[0].closest('.item')) onResized(id, container, 'math failed')
+      })
   }
 
   // AN EXTERNAL IMAGE'S FIRST FAILURE IS RETRIED ONCE (2026-10-01): on the owner's iPhone six
@@ -1705,7 +1746,8 @@
       renderMath(math, () => {
         math.forEach(elem => {
           // console.debug("rendered math", elem.innerHTML)
-          elem.setAttribute('_rendered', Date.now().toString())
+          // a span renderMath marked failed keeps that mark (a frame's typeset that failed: its TeX is text)
+          if (!elem.hasAttribute('_rendered')) elem.setAttribute('_rendered', Date.now().toString())
         })
       })
     })
@@ -2057,6 +2099,7 @@
     // typesets are serialized on the shared queue (see renderMath), but the completion work here
     // must use the PASSED item, not this closure's component (see the ??= note above)
     window['_typeset_queue'] = (window['_typeset_queue'] ?? Promise.resolve())
+      .then(() => window['MathJax'].startup.promise) // the page's automatic scan is off (src/app.html): wait for the startup, as renderMath does
       .then(() => window['MathJax'].typesetPromise(math))
       .then(function () {
         const itemdiv = math[0].closest('.item')

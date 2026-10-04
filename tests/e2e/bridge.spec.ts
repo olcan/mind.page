@@ -78,6 +78,239 @@ test('a canonical reply renders as inert markdown: structure, admitted links, li
   expect(shape.tags, 'a #tag inside the reply is not an item tag').not.toContain('#not_a_tag')
 })
 
+test("a canonical reply's TeX renders as the owner's math, typeset by a plain document of the frame's own under the app's filter", async ({ page }) => {
+  // the owner (2026-10-04): a reply's `$`x`$` and `$$`x`$$` become the app's math spans in the frame
+  // (src/inert_markdown.ts mathExtension), typeset by a MathJax document of the frame's own
+  // (src/inert_math.ts; reviews 0-2): a plain document (no menu) with a fresh TeX parser per frame
+  // over a bounded package set, and the app's own filter of the frame's MathML. Asserted here: the
+  // forms typeset (inline and display); no anchor (`\href`), class (`\class`), id (`\cssId`),
+  // style (`\style`, `\fcolorbox`'s border), font field serialized into css (`\mmlToken`'s
+  // `fontfamily`, `fontweight`, `fontstyle`) or resource-bearing value (`\style{cursor:url(…)}`,
+  // `\color{url(…)}`) in the output, a color name and a font command admitted, no context menu
+  // attached; a frame's
+  // `\def` holds within the frame and reaches neither the next frame of the same item nor the
+  // owner's math; `\unicode` is undefined in a frame and the owner's `\unicode` renders as ever;
+  // the owner's document has no safe filters and its `\Huge` keeps its size, its `\href` an anchor;
+  // a frame whose extension load fails, and a frame whose typeset fails, stay text and marked, the
+  // item counts as rendered (no loading overlay left on the page) and the next typesets work; a
+  // plain `$x$` is text in a frame as it is in the owner's text
+  await loadAdmin(page)
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const turn = (body: string) => `<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`
+  const frames = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)?.elem
+      if (!elem) return null
+      return [...elem.querySelectorAll('.vault-result')].map(frame => {
+        const attrs = [...frame.querySelectorAll('*')].flatMap(e => [...e.attributes].map(a => `${a.name}=${a.value}`))
+        return {
+          inline: frame.querySelectorAll('span.math > mjx-container:not([display])').length,
+          display: frame.querySelectorAll('span.math-display > mjx-container[display="true"]').length,
+          containers: frame.querySelectorAll('mjx-container').length,
+          menus: frame.querySelectorAll('mjx-container[ctxtmenu_counter], mjx-container.CtxtMenu_Attached_0').length,
+          errors: frame.querySelectorAll('[data-mml-node="merror"], mjx-merror').length,
+          anchors: frame.querySelectorAll('a').length,
+          classed: frame.querySelectorAll('.boom, #pwn').length,
+          fixed: attrs.filter(a => /fixed/.test(a)).length,
+          urls: attrs.filter(a => /url\(/.test(a)).length,
+          monospace: attrs.filter(a => /monospace/.test(a)).length,
+          css: attrs.filter(a => /opacity|font-family|font-weight|font-style/.test(a)).length,
+          red: frame.querySelectorAll('[fill="red"]').length,
+          bold: frame.querySelectorAll('[id$="-1D41B"]').length, // the glyph of \mathbf{b}: mathematical bold small b, MathJax's variant, no font attribute
+          // a glyph is a <use> of a cached <path> whose id ends in the code point (fontCache local)
+          sums: frame.querySelectorAll('[id$="-2211"]').length,
+          zeros: frame.querySelectorAll('[id$="-30"]').length,
+          failed: frame.querySelectorAll('span.math[_rendered="failed"]').length,
+          text: [...frame.querySelectorAll('p')].map(p => p.textContent).join('\n'),
+        }
+      })
+    }, label)
+  // the FIRST frame with math on the page loads the frames' extensions: a load that fails (forced
+  // here at the module's call: the loader made to reject once, which bypasses MathJax's package
+  // loader; a package the loader itself failed stays failed until the page reloads) fails that
+  // frame alone, marked, its TeX text, and the next frame loads again and typesets
+  await page.evaluate(() => {
+    const loader = (window as any).MathJax.loader
+    const load = loader.load
+    loader.load = function () {
+      loader.load = load
+      return Promise.reject(new Error('e2e: a forced extension load failure'))
+    }
+  })
+  await page.evaluate(text => void window._create(text), `#e2e_inert_math_load reply\n${turn('unloadable $`x`$ math')}`)
+  await page.evaluate(() => void (location.hash = '#e2e_inert_math_load'))
+  await expect.poll(() => frames('#e2e_inert_math_load').then(f => f?.[0]?.failed ?? -1), { timeout: 15_000 }).toBe(1)
+  expect((await frames('#e2e_inert_math_load'))![0]).toMatchObject({ containers: 0, failed: 1 })
+  await expect.poll(() => page.evaluate(() => !!document.querySelector('.loading.visible')), { timeout: 15_000 }).toBe(false)
+  const first = [
+    'inline $`x^2`$ and display:',
+    '',
+    '$$`\\sum_{i=1}^n x_i`$$',
+    '',
+    'plain $y$ costs $5; a link $`\\href{javascript:window._pwned=7}{link}`$ and a box $`\\fcolorbox{red;position:fixed;top:0;left:0}{white}{x}`$',
+    '',
+    'html-package attributes $`\\class{boom}{y}`$ $`\\cssId{pwn}{w}`$ $`\\style{position:fixed;top:0}{z}`$',
+    '',
+    'resource-bearing values $`\\style{cursor:url(https://example.invalid/cursor.svg),auto}{x}`$ $`\\color{url(https://example.invalid/paint.svg#p)}x`$ and a name $`\\textcolor{red}{r}`$',
+    '',
+    'an undefined macro $`\\unicode[monospace]{65}`$ and a definition $`\\def\\sum{0}`$ used in its frame: $`\\sum_i`$',
+    '',
+    'font fields serialized into css $`\\mmlToken{mi}[fontfamily="serif; opacity: 0.5"]{x}`$ $`\\mmlToken{mi}[fontfamily="serif",fontweight="normal; opacity: 0.5"]{x}`$ $`\\mmlToken{mi}[fontfamily="serif",fontstyle="normal; opacity: 0.5"]{x}`$ and a font command $`\\mathbf{b}`$',
+  ].join('\n')
+  const second = 'the next reply: $`\\sum_{i=1}^n x_i`$'
+  await page.evaluate(text => void window._create(text), `#e2e_inert_math reply\n${turn(first)}\n${turn(second)}`)
+  await page.evaluate(() => void (location.hash = '#e2e_inert_math'))
+  await expect.poll(() => frames('#e2e_inert_math').then(f => f?.map(x => x.containers).join(',') ?? ''), { timeout: 20_000 }).toBe('17,1')
+  const [one, two] = (await frames('#e2e_inert_math'))!
+  expect(one, 'the first frame: sixteen inline results and the display one, nothing of the policy breached, no menu').toMatchObject({
+    inline: 16,
+    display: 1,
+    menus: 0,
+    errors: 0,
+    anchors: 0,
+    classed: 0,
+    fixed: 0,
+    urls: 0,
+    monospace: 0,
+    css: 0,
+    failed: 0,
+  })
+  expect(one.red, 'a color name is admitted').toBeGreaterThan(0)
+  expect(one.bold, "a font command renders through MathJax's variants").toBeGreaterThan(0)
+  expect(one.sums, "the display sum, typeset before the frame's definition, is the summation operator").toBeGreaterThan(0)
+  expect(one.zeros, "the frame's own definition applies to its later formula").toBeGreaterThan(0)
+  expect(one.text).toContain('plain $y$ costs $5')
+  expect(two, 'the next frame of the same item starts from a fresh parser: the definition did not reach it').toMatchObject({
+    containers: 1,
+    errors: 0,
+    zeros: 0,
+  })
+  expect(two.sums).toBeGreaterThan(0)
+  expect(await page.evaluate(() => (window as any)._pwned ?? null)).toBeNull()
+  // the owner's math typeset after the frames: the summation operator, never a frame's 0; the
+  // owner's \href an anchor, its \unicode as ever (no monospace from the frame), its \Huge about
+  // two and a half times the plain x (no size clamp: the page's document carries no safe filters,
+  // and the safe extension is not even loaded, so no recreation of the page's document could add one)
+  await page.evaluate(
+    text => void window._create(text),
+    '#e2e_owner_math owner $`\\sum_{i=1}^n x_i`$ and $`\\href{https://example.com/m}{m}`$ and $`\\unicode{65}`$ and $`x`$ and $`\\Huge x`$'
+  )
+  await page.evaluate(() => void (location.hash = '#e2e_owner_math'))
+  const owner = () =>
+    page.evaluate(() => {
+      const elem = window._item('#e2e_owner_math', true)?.elem
+      if (!elem) return null
+      const heights = [...elem.querySelectorAll('mjx-container > svg')].map(svg => parseFloat(svg.getAttribute('height') ?? '0'))
+      return {
+        containers: elem.querySelectorAll('mjx-container').length,
+        sums: elem.querySelectorAll('[id$="-2211"]').length,
+        zeros: elem.querySelectorAll('[id$="-30"]').length,
+        anchors: [...elem.querySelectorAll('mjx-container a')].map(a => a.getAttribute('href')),
+        monospace: [...elem.querySelectorAll('*')].filter(e => [...e.attributes].some(a => /monospace/.test(a.value))).length,
+        hugeRatio: heights[4] / heights[3],
+        safe: typeof (window as any).MathJax.startup.document.safe,
+        safeLoaded: !!(window as any).MathJax._.ui?.safe,
+        startupTypeset: (window as any).MathJax.config.startup.typeset,
+      }
+    })
+  await expect.poll(() => owner().then(o => o?.containers ?? -1), { timeout: 15_000 }).toBe(5)
+  const o = (await owner())!
+  expect(o).toMatchObject({ zeros: 0, anchors: ['https://example.com/m'], monospace: 0, safe: 'undefined', safeLoaded: false, startupTypeset: false })
+  expect(o.sums, "the owner's sum is the summation operator").toBeGreaterThan(0)
+  expect(o.hugeRatio, "the owner's \\Huge is unclamped").toBeGreaterThan(2)
+  // a frame whose typeset fails (an internal error, forced here: the TeX constructor the module
+  // instantiates, the startup's registry entry, made to throw for as long as the failing item is
+  // on the page: a re-render retries a frame, and would succeed with the real constructor) keeps
+  // its TeX as text and its mark, the item counts as rendered (no loading overlay intercepting
+  // the page), and once the constructor is back the owner's next math typesets
+  await page.evaluate(() => {
+    const constructors = (window as any).MathJax.startup.constructors
+    ;(window as any).__e2e_tex = constructors.tex
+    constructors.tex = function () {
+      throw new Error('e2e: a forced typeset failure')
+    }
+  })
+  await page.evaluate(text => void window._create(text), `#e2e_inert_math_fail reply\n${turn('failing $`x`$ math')}`)
+  await page.evaluate(() => void (location.hash = '#e2e_inert_math_fail'))
+  await expect.poll(() => frames('#e2e_inert_math_fail').then(f => f?.[0]?.failed ?? -1), { timeout: 15_000 }).toBe(1)
+  const failed = (await frames('#e2e_inert_math_fail'))![0]
+  expect(failed).toMatchObject({ containers: 0, failed: 1 })
+  expect(failed.text, 'the TeX stays text').toContain('$x$')
+  await expect.poll(() => page.evaluate(() => !!document.querySelector('.loading.visible')), { timeout: 15_000 }).toBe(false)
+  await page.evaluate(() => void ((window as any).MathJax.startup.constructors.tex = (window as any).__e2e_tex))
+  await page.evaluate(text => void window._create(text), '#e2e_owner_math2 owner $`\\sum_{i=1}^n x_i`$')
+  await page.evaluate(() => void (location.hash = '#e2e_owner_math2'))
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_owner_math2', true)?.elem?.querySelectorAll('[id$="-2211"]').length ?? 0), { timeout: 15_000 })
+    .toBeGreaterThan(0)
+})
+
+test("a reply's math present before MathJax's startup completes is typeset by the frame's own parser, never by a startup scan", async ({ page }) => {
+  // inert_math review 2 R1: MathJax's automatic typesetting at startup scans the whole page with
+  // the owner's parser; the app turns it off (src/app.html `startup.typeset: false`) and its own
+  // passes wait for the startup (Item.svelte), so content rendered before the startup completes is
+  // typeset by the right parser once it is done. The startup is held at its pageReady step (an
+  // init script replaces the page's config's `startup.pageReady` with a promise this test
+  // releases; the library's own methods exist by then, so the pending state is the unresolved
+  // `startup.promise`); meanwhile a frame with a definition and an owner formula are created and
+  // their raw spans seen attached; released, the owner's sum is the summation operator and the
+  // frame's definition applies within the frame alone
+  await page.addInitScript(() => {
+    let current: any
+    Object.defineProperty(window, 'MathJax', {
+      configurable: true,
+      get: () => current,
+      set: (value: any) => {
+        current = value
+        // the page's configuration object (the library's own object, assigned later, carries `version`)
+        if (current && !current.version)
+          current.startup = {
+            ...(current.startup ?? {}),
+            pageReady: () => new Promise<void>(resolve => void ((window as any).__e2e_release_startup = resolve)),
+          }
+      },
+    })
+  })
+  await loadAdmin(page)
+  await page.evaluate(() => void (window as any).MathJax.startup.promise.then(() => ((window as any).__e2e_started = true)))
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(
+    text => void window._create(text),
+    `#e2e_early_frame reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('early $`\\def\\sum{0}`$ then $`\\sum_i`$')}`
+  )
+  await page.evaluate(text => void window._create(text), '#e2e_early_owner owner $`\\sum_{i=1}^n x_i`$')
+  await page.evaluate(() => void (location.hash = '#e2e_early_owner'))
+  const spans = () =>
+    page.evaluate(() => ({
+      owner: window._item('#e2e_early_owner', true)?.elem?.querySelectorAll('span.math:not([_rendered])').length ?? 0,
+      frame: window._item('#e2e_early_frame', true)?.elem?.querySelectorAll('.vault-result span.math:not([_rendered])').length ?? 0,
+      held: typeof (window as any).__e2e_release_startup === 'function' && !(window as any).__e2e_started,
+    }))
+  await expect.poll(() => spans().then(s => `${s.owner},${s.frame},${s.held}`), { timeout: 15_000 }).toBe('1,2,true')
+  await page.evaluate(() => void (window as any).__e2e_release_startup())
+  const shape = () =>
+    page.evaluate(() => {
+      const owner = window._item('#e2e_early_owner', true)?.elem
+      const frame = window._item('#e2e_early_frame', true)?.elem?.querySelector('.vault-result')
+      return {
+        started: !!(window as any).__e2e_started,
+        ownerContainers: owner?.querySelectorAll('mjx-container').length ?? 0,
+        ownerSums: owner?.querySelectorAll('[id$="-2211"]').length ?? 0,
+        ownerZeros: owner?.querySelectorAll('[id$="-30"]').length ?? 0,
+        frameContainers: frame?.querySelectorAll('mjx-container').length ?? 0,
+        frameZeros: frame?.querySelectorAll('[id$="-30"]').length ?? 0,
+      }
+    })
+  await expect.poll(() => shape().then(s => s.ownerContainers), { timeout: 30_000 }).toBe(1)
+  const s = await shape()
+  expect(s.started, 'the startup completed on release').toBe(true)
+  expect(s.ownerSums, "the owner's sum is the summation operator").toBeGreaterThan(0)
+  expect(s.ownerZeros, "the frame's definition did not reach the owner's parser").toBe(0)
+  await page.evaluate(() => void (location.hash = '#e2e_early_frame'))
+  await expect.poll(() => shape().then(s => s.frameContainers), { timeout: 30_000 }).toBe(2)
+  expect((await shape()).frameZeros, "the frame's definition applies within the frame").toBeGreaterThan(0)
+})
+
 test("a reply's child tags are the item's tags: marks in the frame, navigation, search, the frame otherwise dead", async ({ page, context }) => {
   // vault design mind_chat_children 2.2: the `#/name` tokens of a canonical reply are visible
   // tags of the labeled item (resolved against its label), rendered in the dead frame as the

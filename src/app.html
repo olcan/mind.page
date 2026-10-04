@@ -92,7 +92,13 @@
     <div id="cache-div" style="position: fixed; left: -100000px; width: 750px"></div>
     <script>
       MathJax = {
+        // the app typesets its own math (Item.svelte renderMath, after MathJax's startup): no
+        // automatic scan of the page at startup, which would hand a bridge reply's TeX to the
+        // page's parser (a reply's math is typeset by a document of its own: src/inert_math.ts)
+        startup: { typeset: false },
         // http://docs.mathjax.org/en/latest/input/tex/extensions/color.html
+        // (a bridge reply's math loads its own extensions for a document of its own after the
+        // startup: src/inert_math.ts; the page's document, the owner's math, stays as configured here)
         loader: { load: ['[tex]/color'] },
         // http://docs.mathjax.org/en/latest/options/input/tex.html
         tex: {

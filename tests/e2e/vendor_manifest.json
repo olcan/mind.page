@@ -38,7 +38,31 @@
   "https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js": {
     "type": "application/javascript"
   },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/bbox.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/boldsymbol.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/cancel.js": {
+    "type": "application/javascript"
+  },
   "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/color.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/enclose.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/html.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/mhchem.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/unicode.js": {
+    "type": "application/javascript"
+  },
+  "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/input/tex/extensions/verb.js": {
     "type": "application/javascript"
   },
   "https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.1.2/es5/tex-svg.min.js": {
