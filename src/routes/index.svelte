@@ -3121,6 +3121,7 @@
         matchingTerms: [],
         matchingTermsSecondary: [],
         missingTags: [],
+        danglingTags: [],
         time: now + 1000, // +1000 to dominate any time offsets used above
         id: null, // used below to find dummy after ranking
       })
@@ -4230,6 +4231,23 @@
     return resolveRelativeTag(label, tag)
   }
 
+  // the item's tags no other item carries, split by the token's form (the owner, 2026-10-04, after a chat
+  // child carrying `#//why_each_row`, a sibling no item has, kept surfacing at the top of the list): a
+  // visible tag every occurrence of which is a RELATIVE token (`#/x`, `#//x`, `#///x`, an inert body's
+  // child tags included; item.tagsRelative, resolved) is DANGLING, which only renders the faded dead mark
+  // (Item.svelte, inert_markdown.ts); a visible tag an absolute token names is MISSING (the red mark, the
+  // error border, the ranking's and the show-more cut's prominence); a hidden tag is a dependency and is
+  // missing when not a unique label; a "special" tag toggles a feature and is neither. tagCounts include
+  // prefix tags, deduplicated at item level
+  function updateMissingTags(item) {
+    const missing = t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1
+    const relative = new Set<string>(item.tagsRelative ?? [])
+    item.danglingTags = item.tagsVisible.filter(t => relative.has(t) && missing(t))
+    item.missingTags = item.tagsVisible
+      .filter(t => !relative.has(t) && missing(t))
+      .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+  }
+
   function resolveTags(label, tags) {
     return tags.map(tag => resolveTag(label, tag)).filter(t => t) // drop unresolved tags
   }
@@ -4314,6 +4332,8 @@
       'lcsearch',
       'tagsExpanded',
       'missingTags',
+      'danglingTags',
+      'tagsRelative',
       'text',
     ])
     // derive expanded search text from the expanded scan's CASE-PRESERVING grammar
@@ -4435,6 +4455,13 @@
     // (its text carries the raw markers), as the search text does (review 188 §2.1)
     const expandedPass = item.inertBodies !== undefined
     if (!expandedPass) item.childTagMarkers = childTagRegions(item.vaultScan)
+    // the visible tokens as the owner wrote them, captured BEFORE an inert body's resolved child tags join
+    // tagsVisible: the relative ones resolve into item.tagsRelative below, the absolute ones keep a tag out
+    // of it (review 0 B1: captured after the join, an absolute `#chat/gone` in the owner's text was
+    // subtracted away by the reply's `#/gone`)
+    const relativeTokens = item.tagsVisible.filter(t => t.startsWith('#/'))
+    const absoluteTokens = item.tagsVisible.filter(t => !t.startsWith('#/'))
+    let resolvedChildTags: string[] = [] // all relative by construction (see updateMissingTags)
     if (item.label) {
       const bodies = new Map<string, string>([
         ...((item.inertBodies as Map<string, string> | undefined) ?? []),
@@ -4449,7 +4476,7 @@
       // visible tags, never `#_autodep` or another hidden tag (review 15 B1: a root chat's
       // `#//_autodep` would have made it a carrier through tagsRaw); the renderer shows such a
       // token as text (inert_markdown.ts), so a mark is always a tag the item carries
-      const resolvedChildTags = resolveTags(item.label, childTags).filter(tag => !tag.startsWith('#_'))
+      resolvedChildTags = resolveTags(item.label, childTags).filter(tag => !tag.startsWith('#_'))
       if (resolvedChildTags.length) {
         item.tags = _.uniq(item.tags.concat(resolvedChildTags))
         item.tagsVisible = _.uniq(item.tagsVisible.concat(resolvedChildTags))
@@ -4466,6 +4493,12 @@
       item.tagsAlt = resolveTags(item.label, item.tagsAlt)
       item.tagsHiddenAlt = resolveTags(item.label, item.tagsHiddenAlt)
     }
+    // the visible tags named by relative tokens only (the owner's and an inert body's), resolved like the
+    // rest above; an absolute token naming the same tag keeps it out (updateMissingTags)
+    item.tagsRelative = _.difference(
+      _.uniq(resolvedChildTags.concat(item.label ? resolveTags(item.label, relativeTokens) : [])),
+      absoluteTokens
+    )
     if (item.label != prevLabel) {
       item.labelUnique = false
       if (prevLabel) {
@@ -4530,21 +4563,13 @@
       // hidden tags are considered "missing" if not a UNIQUE label (for unambiguous dependencies)
       // "special" tags (visible or hidden) are not considered "missing" since they toggle special features
       // NOTE: tagCounts include prefix tags, deduplicated at item level
-      item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
-        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+      updateMissingTags(item)
 
       // if label changed, update missingTags on all items tagged with current OR previous label
       if (item.label != prevLabel) {
         for (let tagger of items) {
           if (tagger == item) continue
-          if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) {
-            tagger.missingTags = tagger.tagsVisible
-              .filter(t => t != tagger.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
-              .concat(
-                tagger.tagsHidden.filter(t => t != tagger.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1)
-              )
-          }
+          if (tagger.tags.includes(prevLabel) || tagger.tags.includes(item.label)) updateMissingTags(tagger)
         }
       }
     }
@@ -8558,6 +8583,7 @@
     item.matchingTerms = []
     item.matchingTermsSecondary = []
     item.missingTags = []
+    item.danglingTags = []
     item.hasError = false
     item.failedTests = false
     // state from updateItemLayout
@@ -8692,11 +8718,9 @@
     // changes are handled in itemTextChanged (w/ update_deps==true)
     deriveLineage()
     items.forEach((item, index) => {
-      // initialize missingTags based on labels & tags (initialized above)
+      // initialize missingTags (and danglingTags) based on labels & tags (initialized above)
       // changes are handled in itemTextChanged (w/ update_deps==true)
-      item.missingTags = item.tagsVisible
-        .filter(t => t != item.label && !isSpecialTag(t) && (tagCounts.get(t) || 0) <= 1)
-        .concat(item.tagsHidden.filter(t => t != item.label && !isSpecialTag(t) && idsFromLabel.get(t)?.length != 1))
+      updateMissingTags(item)
       // the carrier flag (the tag applies to the carrier's descendants; the derivation above
       // read it through the raw tags)
       item.autodepRoot = item.tagsRaw.includes('#_autodep')
@@ -11530,6 +11554,7 @@
                 bind:version={item.version}
                 contextLabel={item.contextLabel}
                 missingTags={item.missingTags.join(' ')}
+                danglingTags={(item.danglingTags ?? []).join(' ')}
                 matchingTerms={item.matchingTerms.join(' ')}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
                 matching={item.matching}

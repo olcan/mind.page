@@ -145,7 +145,7 @@ test('child tags: the relative shorthands a reply may use as tags, recognized an
   // case, no inline handler, `renderTag`'s display), or as a DANGLING mark showing the token as
   // written when no item carries the tag (the item's computed missing state; the owner, 2026-10-03);
   // everything else stays text, and `inertChildTags` names exactly the tokens the marks render
-  const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', missingTags: new Set(['#chat/gone']) }
+  const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', danglingTags: new Set(['#chat/gone']) }
   const render = (body: string, c = ctx) => renderInertMarkdown(body, c)
   const marks = (h: string) => [...h.matchAll(/<mark([^>]*)>([^<]*)<\/mark>/g)].map(m => m[1] + '|' + m[2])
   const reltags = (h: string) => [...h.matchAll(/data-reltag="([^"]*)"/g)].map(m => m[1].replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).toLowerCase())
@@ -245,7 +245,7 @@ test('child tags: the relative shorthands a reply may use as tags, recognized an
   // no label, no context: text; the context is not retained across renders
   expect(render('#/x', { ...ctx, label: '', labelText: '' })).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
   expect(renderInertMarkdown('#/x')).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
-  expect(render('#/gone', { ...ctx, missingTags: new Set() })).not.toMatch(/missing|dangling/)
+  expect(render('#/gone', { ...ctx, danglingTags: new Set() })).not.toMatch(/missing|dangling/)
   expect(render('#/gone')).toContain('class="dangling"')
   expect(renderInertMarkdown('#/gone')).not.toContain('<mark')
   // the extraction walks every structure

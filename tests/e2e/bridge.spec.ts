@@ -93,7 +93,9 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   const child = (name: string) =>
     `${CHAT}/${name}\n<<agent('vault/default · created in run ab12cd34')>>\n${inert(`${name} body <<not_a_macro>> #/deeper`)}`
   const body = ['## Findings', '', 'see #/alpha and #/beta, code `#/no`, [docs #/alpha](https://example.com/d), x#/none, [gone #/zed](https://example.com/z)', '', '```', '#/fenced', '```'].join('\n')
-  await page.evaluate(text => void window._create(text), `${CHAT} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`)
+  // the owner's text names #e2e_cc/beta absolutely while the reply names it relatively (review 0 B1 of the
+  // dangling_rank change: the mixed case)
+  await page.evaluate(text => void window._create(text), `${CHAT} chat, also #e2e_cc/beta\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`)
   await page.evaluate(text => void window._create(text), child('alpha'))
   await page.evaluate(() => void (location.hash = '#e2e_cc'))
   const marks = () =>
@@ -125,6 +127,21 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
     { tag: '#e2e_cc/zed', rel: '#/zed', text: '#/zed', missing: false, dangling: true, selected: false, inAnchor: true },
   ])
   // (this fixture's `<<user>>`/`<<agent>>` macros error in the lanes' corpus, so the error border is asserted on the macro-free items below)
+  // the lists (index.svelte updateMissingTags): the absolute occurrence keeps #e2e_cc/beta MISSING (the red
+  // plain mark, the rank) and out of danglingTags, while the frame's relative mark above renders dangling
+  // (an absent target, whichever list holds it); zed, relative only, is dangling
+  const lists = (name: string) =>
+    page.evaluate(n => {
+      const i = ((window as any).__items as any[]).find(i => i.label == n)!
+      return { missing: [...i.missingTags].sort(), dangling: [...i.danglingTags].sort() }
+    }, name)
+  const absoluteMark = () =>
+    page.evaluate(
+      n => [...window._item(n, true)!.elem!.querySelectorAll('.content mark:not(.label):not([data-tag])')].map(m => [m.className.split(' ').filter(Boolean).sort(), (m as HTMLElement).title]),
+      CHAT
+    )
+  await expect.poll(() => lists(CHAT), { message: 'the mixed case: beta missing, zed dangling' }).toEqual({ missing: ['#e2e_cc/beta'], dangling: ['#e2e_cc/zed'] })
+  expect(await absoluteMark(), "the owner's absolute mark").toEqual([[['missing'], '#e2e_cc/beta']])
   const chat = (await facts(CHAT))!
   const alpha = (await facts(`${CHAT}/alpha`))!
   expect(chat.tags, "the child tags are the item's; nothing from code, a link target or an unbounded token").toEqual(['#e2e_cc', '#e2e_cc/alpha', '#e2e_cc/beta', '#e2e_cc/zed'])
@@ -255,20 +272,26 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   await expect.poll(() => marks().then(m => m[1].selected)).toBe(true)
   await page.evaluate(text => void window._create(text), child('beta'))
   await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: false, dangling: false, selected: true, inAnchor: false })
+  await expect.poll(() => lists(CHAT), { message: 'beta exists: carried, in neither list' }).toEqual({ missing: [], dangling: ['#e2e_cc/zed'] })
+  expect(await absoluteMark(), "the owner's absolute mark live (the box holds its tag: selected)").toEqual([[['selected'], '#e2e_cc/beta']])
   const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
   await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy() // saved: deletable on the server
   await firestore().collection('items').doc((await betaDoc())!).delete()
   await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: '#/beta', missing: false, dangling: true, selected: true, inAnchor: false })
+  await expect.poll(() => lists(CHAT), { message: 'beta gone: missing again' }).toEqual({ missing: ['#e2e_cc/beta'], dangling: ['#e2e_cc/zed'] })
+  expect(await absoluteMark(), "the owner's absolute mark missing again").toEqual([[['missing', 'selected'], '#e2e_cc/beta']])
   await page.evaluate(text => void window._create(text), child('beta'))
   await expect.poll(() => marks().then(m => m[1].dangling), { timeout: 15_000 }).toBe(false)
-  // Down enters the first child from the chat, Right moves to the next sibling, Up returns
+  await expect.poll(() => lists(CHAT)).toEqual({ missing: [], dangling: ['#e2e_cc/zed'] })
+  // Down enters the first child from the chat (the chat's tag order: the owner's absolute #e2e_cc/beta
+  // precedes the reply's child tags since the mixed case above), Right moves to the next sibling, Up returns
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
   await expect.poll(query).toMatch(/^#e2e_cc ?$/)
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
   await page.keyboard.press('ArrowDown')
-  await expect.poll(query).toBe('#e2e_cc/alpha ')
-  await page.keyboard.press('ArrowRight')
   await expect.poll(query).toBe('#e2e_cc/beta ')
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(query).toBe('#e2e_cc/alpha ')
   await page.keyboard.press('ArrowUp')
   await expect.poll(query).toMatch(/^#e2e_cc ?$/)
   // a tag search for a child lists the chat (the tag is its) with the mark selected

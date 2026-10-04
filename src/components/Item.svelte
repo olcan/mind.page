@@ -61,6 +61,7 @@
     INERT_MARKER_SOURCE,
     INVALID_INERT_REGION,
     childTagRegions, chatResetOffsets, CHAT_BOUNDARY_RESET,
+    resolveRelativeTag,
   } from '../inert'
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
@@ -106,6 +107,7 @@
   export let headerMinimal: boolean
   export let contextLabel: string
   export let missingTags: any
+  export let danglingTags: any // the resolved relative tags no item carries (index.svelte updateMissingTags)
   export let matchingTerms: any
   export let matchingTermsSecondary: any
   export let matching: boolean
@@ -334,6 +336,7 @@
     contextLabel: string,
     // NOTE: passing in arrays has proven problematic (e.g. infinite render loops)
     missingTags: any, // space-separated string converted to Set
+    danglingTags: any, // space-separated string converted to Set
     matchingTerms: any, // space-separated string converted to Set
     matchingTermsSecondary: any, // space-separated string converted to Set
     depsString: string,
@@ -442,6 +445,7 @@
     matchingTerms = new Set<string>(matchingTerms.split(' ').filter(t => t))
     matchingTermsSecondary = new Set<string>(matchingTermsSecondary.split(' ').filter(t => t))
     missingTags = new Set<string>(missingTags.split(' ').filter(t => t))
+    danglingTags = new Set<string>(String(danglingTags ?? '').split(' ').filter(t => t))
     if (label) {
       Array.from(matchingTerms).forEach((term: string) => {
         if (
@@ -665,19 +669,22 @@
             // drop hidden tag prefix
             const hidden = tag.startsWith('#_')
             tag = tag.replace(/^#_/, '#')
-            // make relative tags absolute (the token as written is kept for a dangling mark)
+            // make relative tags absolute with the shared resolver (src/inert.ts), as the item's tags are: the
+            // component's own arithmetic made a root's `#//x` the child `#root/x`, so the mark and the tags
+            // disagreed (the owner's ranking row, 2026-10-04). The token as written is kept for a dangling
+            // mark, and a token no label can resolve (`#///x` under a root) is dangling as well
             const relative = label && tag != label && tag.startsWith('#/')
             const raw = tag
-            if (label && tag != label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
-            else if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
-            else if (label && tag != label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
+            const resolved = relative ? resolveRelativeTag(labelText, tag) : tag
+            const unresolvable = relative && !resolved
+            if (resolved) tag = resolved
 
             const lctag = tag.toLowerCase()
             let classNames = ''
             // a VISIBLE relative tag no item carries is DANGLING, not missing (the owner, 2026-10-03): the
             // token as written, styled like inline code, faded, a dim dashed border, not clickable; no error
             // border. A hidden one (a dependency, absent or duplicated) keeps its missing diagnostic
-            const dangling = relative && !hidden && missingTags.has(lctag)
+            const dangling = relative && !hidden && (unresolvable || danglingTags.has(lctag))
             if (dangling) classNames += ' dangling'
             else if (missingTags.has(lctag)) classNames += ' missing'
             if (hidden) classNames += ' hidden'
@@ -835,14 +842,14 @@
       } else if (href.startsWith('#')) {
         // tag link
         let tag = href
-        // make relative tag absolute
+        // make relative tag absolute with the shared resolver, as for the plain tag marks above
         const relative = label && tag.startsWith('#/')
-        if (label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
-        else if (label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
-        else if (label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
+        const resolved = relative ? resolveRelativeTag(labelText, tag) : tag
+        const unresolvable = relative && !resolved
+        if (resolved) tag = resolved
         const lctag = tag.toLowerCase()
         let classNames = 'link'
-        const dangling = relative && missingTags.has(lctag) // as for the plain tag marks above
+        const dangling = relative && (unresolvable || danglingTags.has(lctag)) // as for the plain tag marks above
         if (dangling) classNames += ' dangling'
         else if (missingTags.has(lctag)) classNames += ' missing'
         classNames = classNames.trim()
@@ -1309,14 +1316,19 @@
     // listeners route a mark's mousedown (the keyboard navigation dispatches a non-bubbling
     // one on the mark) to the app's tag handler and cancel the mark's click (a mark inside a
     // link's label must not fire the anchor); everything else in the frame stays dead. (the
-    // missingTags PROP is the space-separated string the caller wires; toHTML converts its own
-    // parameter, never the prop)
-    const missing = new Set<string>(String(missingTags ?? '').split(' ').filter(t => t))
-    const childTagContext = { id, label, labelText, missingTags: missing }
-    const missingKey = (elem: Element) =>
+    // danglingTags and missingTags PROPS are the space-separated strings the caller wires; toHTML
+    // converts its own parameters, never the props). A frame's marks are relative tokens: an ABSENT
+    // target renders dangling whether the item's state calls the tag dangling (relative occurrences
+    // only) or missing (an absolute occurrence in the owner's text names it too and keeps the red
+    // mark, the border and the rank there; review 0 B1), so the frame's set is the union of both
+    const absentSet = new Set<string>(
+      [...String(danglingTags ?? '').split(' '), ...String(missingTags ?? '').split(' ')].filter(t => t)
+    )
+    const childTagContext = { id, label, labelText, danglingTags: absentSet }
+    const danglingKey = (elem: Element) =>
       [...elem.querySelectorAll('mark[data-tag]')]
         .map(mark => mark.getAttribute('data-tag')!.toLowerCase())
-        .filter(tag => missing.has(tag))
+        .filter(tag => absentSet.has(tag))
         .sort()
         .join(' ')
     itemdiv?.querySelectorAll('.vault-result').forEach(elem => {
@@ -1330,7 +1342,7 @@
       const rendered = elem.getAttribute('data-inert-rendered') ?? ''
       if (!rendered.startsWith(marker + '|')) {
         elem.innerHTML = renderInertMarkdown(value, childTagMarkers.has(marker) ? childTagContext : null)
-        elem.setAttribute('data-inert-rendered', marker + '|' + missingKey(elem))
+        elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
         if (!elem.hasAttribute('data-child-tags-wired')) {
           elem.setAttribute('data-child-tags-wired', '')
           const childMark = (e: Event) => {
@@ -1358,15 +1370,15 @@
             true
           )
         }
-      } else if (rendered !== marker + '|' + missingKey(elem)) {
+      } else if (rendered !== marker + '|' + danglingKey(elem)) {
         elem.querySelectorAll('mark[data-tag]').forEach(mark => {
           // the frame's marks are relative tags: their missing state is dangling, with the token as written
-          const dangling = missing.has(mark.getAttribute('data-tag')!.toLowerCase())
+          const dangling = absentSet.has(mark.getAttribute('data-tag')!.toLowerCase())
           mark.classList.toggle('dangling', dangling)
           const reltag = mark.getAttribute('data-reltag')!
           mark.textContent = dangling ? reltag : renderTag(reltag)
         })
-        elem.setAttribute('data-inert-rendered', marker + '|' + missingKey(elem))
+        elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
       }
     })
     // always report container height for potential changes
@@ -2220,6 +2232,7 @@
           labelUnique,
           contextLabel,
           missingTags,
+          danglingTags,
           matchingTerms,
           matchingTermsSecondary,
           depsString,

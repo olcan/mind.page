@@ -1537,6 +1537,66 @@ test('down with two modifiers undoes a scroll to the top: Back to the position w
   await expect(mindbox(page)).toHaveValue('#e2e pending')
 })
 
+test('a dangling relative tag neither ranks an item up nor counts as missing; an absolute missing tag still does both', async ({ page }) => {
+  // the owner's report (2026-10-04): a chat child carrying `#//why_each_row`, a sibling no item has, kept
+  // surfacing at the top of the list, as if its time were updated: the dangling tag sat in missingTags,
+  // which ranks items by their count just before the time and gives them show-more prominence. The split
+  // (index.svelte updateMissingTags): a resolved tag no item carries is DANGLING when every occurrence is
+  // a relative token (danglingTags: the faded mark and nothing else) and MISSING when an absolute token
+  // names it (missingTags: the red mark, the error border, the rank)
+  await loadAdmin(page)
+  const create = async (text: string, name: string) => {
+    await page.evaluate(t => void window._create(t), text)
+    await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+  }
+  await create('#e2e_rank_c absolute #e2e_missing_rank', '#e2e_rank_c') // the oldest of the three: a missing absolute tag
+  await create('#e2e_rank_a sibling #//nowhere_rank and #///nope', '#e2e_rank_a') // older than b: a dangling relative tag (a root's sibling: `#nowhere_rank`) and a token no label resolves
+  await create('#e2e_rank_b plain', '#e2e_rank_b') // the newest, nothing missing
+  const state = (name: string) =>
+    page.evaluate(name => {
+      const item = ((window as any).__items as any[]).find(item => item.label == name)!
+      return { missing: item.missingTags, dangling: item.danglingTags }
+    }, name)
+  await expect.poll(() => state('#e2e_rank_a'), { message: 'a: dangling, not missing' }).toEqual({ missing: [], dangling: ['#nowhere_rank'] })
+  expect(await state('#e2e_rank_c'), 'c: missing').toEqual({ missing: ['#e2e_missing_rank'], dangling: [] })
+  expect(await state('#e2e_rank_b')).toEqual({ missing: [], dangling: [] })
+  // the shown order: the missing one first (promoted over newer items), then by time, b before a (the old
+  // state promoted a too, above c by time). The newest items sit behind the show-more cut while prominent
+  // items fill it (c is pulled in by its prominence): expand until all three show
+  const names = ['#e2e_rank_c', '#e2e_rank_b', '#e2e_rank_a']
+  const showAll = async () => {
+    for (let i = 0; i < 4; i++) {
+      const shown = await visible(page)
+      if (names.every(n => shown.includes(n)) || !(await page.locator('.toggle.show').count())) return shown
+      await expand(page)
+    }
+    return visible(page)
+  }
+  const order = await showAll()
+  const at = (name: string) => order.indexOf(name)
+  expect(names.every(n => at(n) >= 0), `all three shown: ${order.join(' ')}`).toBe(true)
+  expect(at('#e2e_rank_c'), 'the missing tag promotes c').toBeLessThan(at('#e2e_rank_b'))
+  expect(at('#e2e_rank_b'), 'the dangling tag does not promote a over the newer b').toBeLessThan(at('#e2e_rank_a'))
+  // the marks and borders: a's faded dangling marks with the tokens as written (the sibling resolved by the
+  // shared resolver to `#nowhere_rank`, as the item's tags are, not to a child of a; the unresolvable `#///nope`
+  // dangling too) and no error border; c's red missing mark with the border
+  const marks = (name: string) =>
+    page.evaluate(name => {
+      const elem = window._item(name, true)!.elem!
+      return {
+        marks: [...elem.querySelectorAll('.content mark:not(.label)')].map(m => [m.textContent, m.className]),
+        error: !!elem.querySelector('.container.error'),
+      }
+    }, name)
+  await expect.poll(() => marks('#e2e_rank_a'), { message: "a's marks" }).toEqual({ marks: [['#//nowhere_rank', 'dangling'], ['#///nope', 'dangling']], error: false })
+  await expect.poll(() => marks('#e2e_rank_c'), { message: "c's marks" }).toEqual({ marks: [['e2e_missing_rank', 'missing']], error: true })
+  // once a sibling named #nowhere_rank exists, a's tag is carried: the mark goes live, nothing dangling
+  await create('#nowhere_rank now here', '#nowhere_rank')
+  await expect.poll(() => state('#e2e_rank_a')).toEqual({ missing: [], dangling: [] })
+  await showAll() // the layout re-ran: a may sit behind the cut again
+  await expect.poll(() => marks('#e2e_rank_a').then(m => m.marks)).toEqual([['nowhere_rank', ''], ['#///nope', 'dangling']])
+})
+
 test("ctrl+arrows in a tall item bring the caret's edge into view", async ({ page }) => {
   // the textarea is as tall as its text, so the caret moved to the start or end sits at its top or
   // bottom edge, possibly far outside the viewport: the Ctrl move brings that edge into view (review 0
