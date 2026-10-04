@@ -990,7 +990,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     ;(window as any).Notification = Recorder
   })
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done; this device: granted')
   const NOTIFY_STORE = 'e2e-notify-store'
   const notifyState = (reason: string, epoch: number, rev: number, more: Record<string, unknown> = {}) => ({ _agent: { state: { held: 'owner', reason, epoch, rev, updated: Date.now(), worktree: null, phase: 'idle', acked: {}, ...more } } })
   const notified = () => page.evaluate(() => ((window as any).__notified as any[]).map(n => ({ title: n.title, tag: n.options.tag, body: n.options.body, requireInteraction: n.options.requireInteraction, closed: n.closed })))
@@ -998,20 +998,21 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 1, 1))
   await expect.poll(notified, { timeout: 30_000 }).toEqual([{ title: '[question] answer the agent some context', tag: `todoer:${notifyId}`, body: NOTIFY, requireInteraction: true, closed: false }])
   expect(await page.evaluate(() => [JSON.parse(localStorage.getItem('mindpage_todoer_notifier')!).id, (window._item('#todoer') as any).store.notifier_id]), 'this window holds the election').toEqual([await page.evaluate(() => (window._item('#todoer') as any).store.notifier_id), expect.any(String)])
-  // a stats refresh of the same state and a reason not enabled notify nothing; a blocked hand-back
-  // under a new epoch does: each write awaited on the item's store before the next
+  // a stats refresh of the same state and a reason not enabled (`taken`, the owner's own take-back)
+  // notify nothing; a blocked hand-back under a new epoch does: each write awaited on the item's
+  // store before the next
   const applied = (rev: number) => expect.poll(() => page.evaluate(id => (window._item('id:' + id, true) as any)?._global_store?._agent?.state?.rev, notifyId), { timeout: 30_000 }).toBe(rev)
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 1, 2, { stats: { workers: 1, cost: 0.5 } }))
   await applied(2)
-  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('done', 2, 3))
+  await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('taken', 2, 3))
   await applied(3)
-  expect((await notified()).map(n => n.title), 'a stats refresh and a done hand-back notify nothing').toEqual(['[question] answer the agent some context'])
+  expect((await notified()).map(n => n.title), 'a stats refresh and a taken hand-back notify nothing').toEqual(['[question] answer the agent some context'])
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('blocked', 3, 4))
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context'])
   // the minute scan (review 0, B1): a delivery the app announces to no hook (this tab owed a save
   // for that store) leaves the record the tab last saw behind the applied state; the scan,
   // run here directly (the task's minute is not waited for), notices it over the real items
-  await page.evaluate(id => void ((window._item('#todoer') as any).store.notify_seen[window._item('id:' + id, true)!.id] = 'owner:done:2|main'), notifyId)
+  await page.evaluate(id => void ((window._item('#todoer') as any).store.notify_seen[window._item('id:' + id, true)!.id] = 'owner:taken:2:|main'), notifyId)
   expect(await page.evaluate(() => (window._item('#todoer') as any).eval('_scan_notify()'))).toBeGreaterThanOrEqual(1)
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 10_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context'])
   // the click: the notification closed, the item targeted by its name (its todo line selected)
@@ -1025,7 +1026,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 4, 5))
   await applied(5)
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done; this device: granted')
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('proposal', 5, 6))
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context', '[proposal] answer the agent some context'])
   // a project's repeated check-in (2026-10-03, round 3): the bridge counts the resurfacings it
