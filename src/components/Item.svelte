@@ -665,14 +665,21 @@
             // drop hidden tag prefix
             const hidden = tag.startsWith('#_')
             tag = tag.replace(/^#_/, '#')
-            // make relative tags absolute
+            // make relative tags absolute (the token as written is kept for a dangling mark)
+            const relative = label && tag != label && tag.startsWith('#/')
+            const raw = tag
             if (label && tag != label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
             else if (label && tag != label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
             else if (label && tag != label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
 
             const lctag = tag.toLowerCase()
             let classNames = ''
-            if (missingTags.has(lctag)) classNames += ' missing'
+            // a VISIBLE relative tag no item carries is DANGLING, not missing (the owner, 2026-10-03): the
+            // token as written, styled like inline code, faded, a dim dashed border, not clickable; no error
+            // border. A hidden one (a dependency, absent or duplicated) keeps its missing diagnostic
+            const dangling = relative && !hidden && missingTags.has(lctag)
+            if (dangling) classNames += ' dangling'
+            else if (missingTags.has(lctag)) classNames += ' missing'
             if (hidden) classNames += ' hidden'
             if (lctag == label) {
               classNames += ' label'
@@ -727,6 +734,7 @@
               label.substring(0, firstTerm.length) == firstTerm
             )
               reltag = shortened(firstTerm)
+            if (dangling) return `${pfx}<mark${classNames} title="${_.escape(tag)}">${_.escape(raw)}</mark>`
             return (
               `${pfx}<mark${classNames} title="${_.escape(tag)}" onmousedown=` +
               `"_handleTagClick('${id}','${_.escape(tag)}','${_.escape(
@@ -828,12 +836,15 @@
         // tag link
         let tag = href
         // make relative tag absolute
+        const relative = label && tag.startsWith('#/')
         if (label && tag.startsWith('#///')) tag = grandParentLabelText + tag.substring(3)
         else if (label && tag.startsWith('#//')) tag = parentLabelText + tag.substring(2)
         else if (label && tag.startsWith('#/')) tag = labelText + tag.substring(1)
         const lctag = tag.toLowerCase()
         let classNames = 'link'
-        if (missingTags.has(lctag)) classNames += ' missing'
+        const dangling = relative && missingTags.has(lctag) // as for the plain tag marks above
+        if (dangling) classNames += ' dangling'
+        else if (missingTags.has(lctag)) classNames += ' missing'
         classNames = classNames.trim()
         // the click handler maps the caret to a tag component through the DISPLAYED text
         // (index.svelte onTagClick: `renderTag(reltag)` must be the mark's text), so a formatted
@@ -850,6 +861,7 @@
         // apostrophe -- `[can&#39;t](#tag)` -- made the handler a syntax error, and a code
         // label's literal `&amp;` reached the callback decoded twice)
         const label_arg = _.escape(JSON.stringify(_.escape(label_text)))
+        if (dangling) return `<mark class="${classNames}" title="${_.escape(tag)}">${label_html}</mark>`
         return `<mark class="${classNames}" title="${_.escape(tag)}" onmousedown="_handleTagClick('${id}','${_.escape(
           tag
         )}',${label_arg},event)" onclick="event.preventDefault();event.stopPropagation();">${label_html}</mark>`
@@ -1329,7 +1341,9 @@
             'mousedown',
             (e: MouseEvent) => {
               const mark = childMark(e)
-              if (mark) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
+              // a dangling mark (a relative tag no item carries) navigates nowhere; its click is still cancelled
+              // below, so one inside a link does not fire the anchor either
+              if (mark && !mark.classList.contains('dangling')) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
             },
             true
           )
@@ -1346,7 +1360,11 @@
         }
       } else if (rendered !== marker + '|' + missingKey(elem)) {
         elem.querySelectorAll('mark[data-tag]').forEach(mark => {
-          mark.classList.toggle('missing', missing.has(mark.getAttribute('data-tag')!.toLowerCase()))
+          // the frame's marks are relative tags: their missing state is dangling, with the token as written
+          const dangling = missing.has(mark.getAttribute('data-tag')!.toLowerCase())
+          mark.classList.toggle('dangling', dangling)
+          const reltag = mark.getAttribute('data-reltag')!
+          mark.textContent = dangling ? reltag : renderTag(reltag)
         })
         elem.setAttribute('data-inert-rendered', marker + '|' + missingKey(elem))
       }
@@ -2831,6 +2849,18 @@
   }
   .item > :global(:is(.content, .deps-and-dependents) mark.missing) {
     background: #f88;
+  }
+  /* a relative tag no item carries (the owner, 2026-10-03): the token as written, styled like inline code,
+     faded, a dim dashed border, not clickable; the error border is mark.missing's alone */
+  .item > :global(:is(.content, .deps-and-dependents) mark.dangling) {
+    color: #888;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed #555;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 300;
+    padding: 1px 4px;
+    cursor: text;
   }
   .item > :global(:is(.content, .deps-and-dependents) mark.selected) {
     background: #9f9;

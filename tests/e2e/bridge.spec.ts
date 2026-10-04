@@ -85,14 +85,14 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   // state) and routed to the app's tag handler by the frame's capture listeners (a real click;
   // the keyboard navigation's synthetic non-bubbling mousedown); a mark inside a link's label
   // navigates without firing the anchor; everything else in the frame stays dead; the parent's
-  // dependencies gain nothing (a visible tag is no edge); a child appearing or vanishing updates
-  // the mark's class in place with the selection class surviving
+  // dependencies gain nothing (a visible tag is no edge); a child appearing or vanishing re-renders
+  // the mark (the states live, dangling, live with the selection class reapplied; not node identity)
   await loadAdmin(page)
   const CHAT = '#e2e_cc'
   const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
   const child = (name: string) =>
     `${CHAT}/${name}\n<<agent('vault/default · created in run ab12cd34')>>\n${inert(`${name} body <<not_a_macro>> #/deeper`)}`
-  const body = ['## Findings', '', 'see #/alpha and #/beta, code `#/no`, [docs #/alpha](https://example.com/d), x#/none', '', '```', '#/fenced', '```'].join('\n')
+  const body = ['## Findings', '', 'see #/alpha and #/beta, code `#/no`, [docs #/alpha](https://example.com/d), x#/none, [gone #/zed](https://example.com/z)', '', '```', '#/fenced', '```'].join('\n')
   await page.evaluate(text => void window._create(text), `${CHAT} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(body)}`)
   await page.evaluate(text => void window._create(text), child('alpha'))
   await page.evaluate(() => void (location.hash = '#e2e_cc'))
@@ -104,25 +104,30 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
           rel: m.getAttribute('data-reltag'),
           text: m.textContent,
           missing: m.classList.contains('missing'),
+          dangling: m.classList.contains('dangling'),
           selected: m.classList.contains('selected'),
           inAnchor: !!m.closest('a'),
         })),
       CHAT
     )
-  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(3)
+  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(4)
   const facts = (name: string) =>
     page.evaluate(n => {
       const i = window._item(n, true) as any
       return i ? { id: i.id as string, tags: [...i.tags].sort() as string[], deps: [...(i.dependencies ?? [])] as string[] } : null
     }, name)
+  // a relative tag no item carries is DANGLING, not missing (the owner, 2026-10-03): the token as
+  // written, no error border, not clickable
   expect(await marks()).toEqual([
-    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, selected: false, inAnchor: false },
-    { tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: true, selected: false, inAnchor: false },
-    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, selected: false, inAnchor: true },
+    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, dangling: false, selected: false, inAnchor: false },
+    { tag: '#e2e_cc/beta', rel: '#/beta', text: '#/beta', missing: false, dangling: true, selected: false, inAnchor: false },
+    { tag: '#e2e_cc/alpha', rel: '#/alpha', text: 'alpha', missing: false, dangling: false, selected: false, inAnchor: true },
+    { tag: '#e2e_cc/zed', rel: '#/zed', text: '#/zed', missing: false, dangling: true, selected: false, inAnchor: true },
   ])
+  // (this fixture's `<<user>>`/`<<agent>>` macros error in the lanes' corpus, so the error border is asserted on the macro-free items below)
   const chat = (await facts(CHAT))!
   const alpha = (await facts(`${CHAT}/alpha`))!
-  expect(chat.tags, "the child tags are the item's; nothing from code, a link target or an unbounded token").toEqual(['#e2e_cc', '#e2e_cc/alpha', '#e2e_cc/beta'])
+  expect(chat.tags, "the child tags are the item's; nothing from code, a link target or an unbounded token").toEqual(['#e2e_cc', '#e2e_cc/alpha', '#e2e_cc/beta', '#e2e_cc/zed'])
   expect(chat.deps, 'a visible tag is no dependency edge').not.toContain(alpha.id)
   expect(alpha.tags, "the child's own #/deeper is the CHILD's child tag").toEqual(['#e2e_cc/alpha', '#e2e_cc/alpha/deeper'])
   // a child's own `#//name` is a SIBLING tag and `#///name` the parent's sibling (the owner's ask,
@@ -131,18 +136,85 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   await page.evaluate(text => void window._create(text), `${CHAT}/gamma\n<<agent('vault/default · created in run ab12cd34')>>\n${inert('see the sibling #//alpha and #///zeta')}`)
   await expect.poll(() => facts(`${CHAT}/gamma`).then(f => f?.tags ?? null), { timeout: 15_000 }).toEqual(['#e2e_cc/alpha', '#e2e_cc/gamma', '#zeta'])
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/gamma`)
+  const gammaMarks = () =>
+    page.evaluate(
+      label =>
+        [...(window._item(label, true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => [
+          m.getAttribute('data-tag'),
+          m.getAttribute('data-reltag'),
+          m.textContent,
+          m.classList.contains('missing'),
+          m.classList.contains('dangling'),
+        ]),
+      `${CHAT}/gamma`
+    )
+  // the sibling exists: a live mark showing the name; the parent's sibling does not: a dangling mark
+  // showing the token as written, no error border, a real click doing nothing
+  await expect.poll(gammaMarks, { timeout: 15_000 }).toEqual([
+    ['#e2e_cc/alpha', '#//alpha', 'alpha', false, false],
+    ['#zeta', '#///zeta', '#///zeta', false, true],
+  ])
+  const gammaElem = await page.evaluate(label => window._item(label, true)!.elem!.id, `${CHAT}/gamma`)
+  await page.locator(`[id="${gammaElem}"] .vault-result mark.dangling`).click()
+  await page.waitForTimeout(300)
+  expect(await mindbox(page).inputValue(), 'a click on the dangling mark changes nothing').toMatch(/^#e2e_cc\/gamma ?$/)
+  expect(await page.evaluate(id => !!document.querySelector(`[id="${id}"] textarea, .container.editing`), gammaElem), 'no editor either').toBe(false)
+  // the same in OWNER-typed bodies (no frame, no macros): a relative tag no item carries is a dangling
+  // mark with the token as written and no handler, and the item has no error border; an absolute tag no
+  // item carries stays a missing mark with the error border
+  await page.evaluate(text => void window._create(text), `${CHAT}/plain\nplain #//nowhere`)
+  await page.evaluate(text => void window._create(text), `${CHAT}/plain_abs\nplain #e2e_nowhere_abs`)
+  await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/plain_abs`), { timeout: 30_000 }).toBeTruthy()
+  const plainMarks = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)?.elem
+      return (
+        elem && {
+          marks: [...elem.querySelectorAll('.content mark:not(.label)')].map(m => [m.textContent, m.className, m.hasAttribute('onmousedown'), (m as HTMLElement).title]),
+          error: !!elem.querySelector('.container.error'),
+        }
+      )
+    }, label)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/plain`)
+  await expect.poll(() => plainMarks(`${CHAT}/plain`), { timeout: 15_000 }).toEqual({ marks: [['#//nowhere', 'dangling', false, '#e2e_cc/nowhere']], error: false })
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/plain_abs`)
+  await expect.poll(() => plainMarks(`${CHAT}/plain_abs`), { timeout: 15_000 }).toEqual({ marks: [['e2e_nowhere_abs', 'missing', true, '#e2e_nowhere_abs']], error: true })
+  // HIDDEN relative tags are dependencies and keep their missing diagnostic (review 0 B2): one absent,
+  // one whose label two items carry; both `missing hidden`, never dangling, the error border on
+  for (const text of [`${CHAT}/dup one`, `${CHAT}/dup two`, `${CHAT}/hid\nhidden deps #_//gone #_//dup`]) await page.evaluate(t => void window._create(t), text)
+  await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/hid`), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/hid`)
+  await expect.poll(() => plainMarks(`${CHAT}/hid`), { timeout: 15_000 }).toEqual({
+    marks: [
+      ['gone', 'missing hidden', true, '#e2e_cc/gone'],
+      ['dup', 'missing hidden', true, '#e2e_cc/dup'],
+    ],
+    error: true,
+  })
+  // the LINK emitter on its own: an owner body's link destinations are item tags too (the tag parser
+  // reads the whole text, `#//lost` inside `[..](#//lost)` included), so the link mark is `link dangling`
+  // with the label markup kept and no handler, like the plain mark beside it; a live one stays a handled
+  // `link`. (Its own name: the hidden row above carries `gone` as a dependency, which made a first
+  // cut's link live under the other-carrier rule)
+  await page.evaluate(t => void window._create(t), `${CHAT}/plain_link\n#//lost [**see** here](#//lost) and [go](#//alpha)`)
+  await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/plain_link`), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/plain_link`)
   await expect
     .poll(
       () =>
-        page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => [m.getAttribute('data-tag'), m.getAttribute('data-reltag'), m.classList.contains('missing')]), `${CHAT}/gamma`),
+        page.evaluate(label => {
+          const elem = window._item(label, true)?.elem
+          return elem && [...elem.querySelectorAll('.content mark:not(.label)')].map(m => [m.innerHTML, m.className, m.hasAttribute('onmousedown'), (m as HTMLElement).title])
+        }, `${CHAT}/plain_link`),
       { timeout: 15_000 }
     )
     .toEqual([
-      ['#e2e_cc/alpha', '#//alpha', false],
-      ['#zeta', '#///zeta', true],
+      ['#//lost', 'dangling', false, '#e2e_cc/lost'],
+      ['<strong>see</strong> here', 'link dangling', false, '#e2e_cc/lost'],
+      ['go', 'link', true, '#e2e_cc/alpha'],
     ])
   await page.evaluate(() => void (location.hash = '#e2e_cc'))
-  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(3)
+  await expect.poll(() => marks().then(m => m.length), { timeout: 15_000 }).toBe(4)
   const elemId = await page.evaluate(label => window._item(label, true)!.elem!.id, CHAT)
   const query = () => mindbox(page).inputValue()
   const editing = () => page.evaluate(id => !!document.querySelector(`[id="${id}"] textarea, .container.editing`), elemId)
@@ -153,26 +225,42 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   // the mark inside the link's label navigates and the anchor does not fire (no new page)
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
   await expect.poll(query).toMatch(/^#e2e_cc ?$/)
-  await page.locator(`[id="${elemId}"] .vault-result a mark[data-tag]`).click()
+  await page.locator(`[id="${elemId}"] .vault-result a mark[data-tag]`).first().click()
   await expect.poll(query).toBe('#e2e_cc/alpha ')
   await page.waitForTimeout(300)
   expect(context.pages().length, 'the anchor did not open').toBe(1)
-  // the keyboard navigation's synthetic non-bubbling mousedown on a mark reaches the handler
-  await page.evaluate(
-    id => (document.querySelector(`[id="${id}"] .vault-result mark[data-tag="#e2e_cc/beta"]`) as HTMLElement).dispatchEvent(new MouseEvent('mousedown', { altKey: true })),
-    elemId
-  )
-  await expect.poll(query).toBe('#e2e_cc/beta ')
-  // the second child appears: its mark loses `missing` in place while the selection class (the
-  // box holds its tag) survives; vanishes: `missing` again, still selected; appears again
+  // a DANGLING mark inside a link (review 0 B1): the click navigates nowhere AND still cancels the anchor
+  await page.locator(`[id="${elemId}"] .vault-result a mark.dangling`).click()
+  await page.waitForTimeout(300)
+  expect(await query(), 'the dangling mark navigated nowhere').toBe('#e2e_cc/alpha ')
+  expect(context.pages().length, 'and its anchor did not open').toBe(1)
+  // the dangling mark is not clickable: the synthetic mousedown the keyboard navigation uses leaves
+  // the box as it is, while the same mousedown on a live mark reaches the handler
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  await expect.poll(query).toMatch(/^#e2e_cc ?$/)
+  const synthetic = (tag: string) =>
+    page.evaluate(
+      ([id, tag]) => (document.querySelector(`[id="${id}"] .vault-result mark[data-tag="${tag}"]`) as HTMLElement).dispatchEvent(new MouseEvent('mousedown', { altKey: true })),
+      [elemId, tag] as const
+    )
+  await synthetic('#e2e_cc/beta')
+  await page.waitForTimeout(300)
+  expect(await query(), 'the dangling mark did nothing').toMatch(/^#e2e_cc ?$/)
+  await synthetic('#e2e_cc/alpha')
+  await expect.poll(query).toBe('#e2e_cc/alpha ')
+  // the second child appears: its mark is live (the frame's render key follows the missing state and
+  // the markup is re-rendered) with the selection class reapplied (the box holds its tag); vanishes:
+  // dangling again, still selected; appears again. The STATES are asserted, not node identity
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/beta`)
+  await expect.poll(() => marks().then(m => m[1].selected)).toBe(true)
   await page.evaluate(text => void window._create(text), child('beta'))
-  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: false, selected: true, inAnchor: false })
+  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: false, dangling: false, selected: true, inAnchor: false })
   const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
   await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy() // saved: deletable on the server
   await firestore().collection('items').doc((await betaDoc())!).delete()
-  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: 'beta', missing: true, selected: true, inAnchor: false })
+  await expect.poll(() => marks().then(m => m[1]), { timeout: 15_000 }).toEqual({ tag: '#e2e_cc/beta', rel: '#/beta', text: '#/beta', missing: false, dangling: true, selected: true, inAnchor: false })
   await page.evaluate(text => void window._create(text), child('beta'))
-  await expect.poll(() => marks().then(m => m[1].missing), { timeout: 15_000 }).toBe(false)
+  await expect.poll(() => marks().then(m => m[1].dangling), { timeout: 15_000 }).toBe(false)
   // Down enters the first child from the chat, Right moves to the next sibling, Up returns
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
   await expect.poll(query).toMatch(/^#e2e_cc ?$/)
@@ -265,7 +353,7 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   }
 })
 
-test('a deleted child that held macro expansions turns its tags missing: the marks in the frame and plain tags alike', async ({ page }) => {
+test('a deleted child that held macro expansions turns its tags missing (dangling for the frame\'s relative marks): the marks in the frame and plain tags alike', async ({ page }) => {
   // the owner's report (2026-10-01): the bridge's children carry an `<<agent(...)>>` macro, so a
   // child once rendered or pre-expanded holds expansion state (expanded.item); deleting it cleared
   // its text with that stale expansion still merged into its tag counts (tagsExpandedWithMacros),
@@ -282,29 +370,30 @@ test('a deleted child that held macro expansions turns its tags missing: the mar
   await page.evaluate(text => void window._create(text), `${CHAT}/plain a plain tag ${CHAT}/gamma`)
   for (const name of ['alpha', 'beta', 'gamma']) await page.evaluate(text => void window._create(text), child(name))
   await page.evaluate(() => (window as any).MindBox.set('e2e_cc_gone', { scroll: true })) // a text query: every item renders
-  // the state the marks report, [text, missing]: the chat's frame marks and the plain item's tag mark
+  // the state the marks report, [text, missing, dangling]: the chat's frame marks (relative: dangling
+  // once their item is gone, the token as written) and the plain item's absolute tag mark (missing)
   const state = () =>
     page.evaluate(label => {
       const marks = (n: string, sel: string) =>
         [...(window._item(n, true)?.elem?.querySelectorAll(sel) ?? [])]
           .filter(m => /alpha|beta|gamma/.test(m.textContent ?? ''))
-          .map(m => [m.textContent, m.classList.contains('missing')])
+          .map(m => [m.textContent, m.classList.contains('missing'), m.classList.contains('dangling')])
       return { chat: marks(label, '.vault-result mark[data-tag]'), plain: marks(`${label}/plain`, 'mark') }
     }, CHAT)
-  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false], ['beta', false]], plain: [['gamma', false]] })
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false, false], ['beta', false, false]], plain: [['gamma', false, false]] })
   // each child holds expansion state: the macro-evaluating read records it (expandMacros' path)
   for (const name of ['alpha', 'beta', 'gamma'])
     expect(await page.evaluate(n => window._item(n)!.read('', { eval_macros: true }), `${CHAT}/${name}`)).toContain('created in run ab12cd34')
-  // the app's own deletion (no confirmation): the plain tag and the frame's mark turn missing alike
+  // the app's own deletion (no confirmation): the plain tag turns missing and the frame's mark dangling alike
   expect(await page.evaluate(n => window._item(n)!.delete(false), `${CHAT}/gamma`)).toBe(true)
-  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false], ['beta', false]], plain: [['gamma', true]] })
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false, false], ['beta', false, false]], plain: [['gamma', true, false]] })
   expect(await page.evaluate(n => window._item(n)!.delete(false), `${CHAT}/alpha`)).toBe(true)
-  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', true], ['beta', false]], plain: [['gamma', true]] })
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['#/alpha', false, true], ['beta', false, false]], plain: [['gamma', true, false]] })
   // the listener's removal (the server's delete)
   const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
   await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy()
   await firestore().collection('items').doc((await betaDoc())!).delete()
-  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', true], ['beta', true]], plain: [['gamma', true]] })
+  await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['#/alpha', false, true], ['#/beta', false, true]], plain: [['gamma', true, false]] })
 })
 
 test('an inert body supplies visible tags only: a sibling form resolving to a control tag is refused', async ({ page }) => {

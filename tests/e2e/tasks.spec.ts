@@ -918,12 +918,12 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   for (const name of [CC, `${CC}/0`, `${CC}/0/alpha`]) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
   const ccMarks = () =>
     page.evaluate(
-      n => [...window._item(n, true)!.elem!.querySelectorAll('.vault-result mark[data-tag]')].map(m => ({ tag: m.getAttribute('data-tag'), missing: m.classList.contains('missing') })),
+      n => [...window._item(n, true)!.elem!.querySelectorAll('.vault-result mark[data-tag]')].map(m => ({ tag: m.getAttribute('data-tag'), missing: m.classList.contains('missing'), dangling: m.classList.contains('dangling') })),
       `${CC}/0`
     )
   await expect.poll(ccMarks, { timeout: 15_000 }).toEqual([
-    { tag: '#e2e_cc/0/alpha', missing: false },
-    { tag: '#e2e_cc/0/beta', missing: true },
+    { tag: '#e2e_cc/0/alpha', missing: false, dangling: false },
+    { tag: '#e2e_cc/0/beta', missing: false, dangling: true }, // a child not yet created: dangling, not missing (2026-10-03)
   ])
   // the delimiters expanded under the template (the message headers, not error spans), with the
   // boundary reset before the reply's header leaving no text behind

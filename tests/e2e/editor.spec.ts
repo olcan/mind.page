@@ -970,6 +970,9 @@ const scrollDown = async (page: Page) => {
 }
 const nearTop = async (page: Page, message: string) =>
   expect.poll(async () => Math.abs((await scrollTop(page)) - (await headerTop(page))) <= 2, { message }).toBe(true)
+// the shown names as a SET (sorted): the rank of an unrelated item can shift under a row (the
+// dependency row's items relog on a timer), and these assertions guard against a collapse, not an order
+const asSet = (names: string[]) => [...names].sort()
 // shows more items (the set a visibility reset would collapse) and returns the shown names
 const expand = async (page: Page) => {
   const shown = await visible(page)
@@ -1036,7 +1039,7 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
   }, dispatchArrow.toString())
   await nearTop(page, 'scrolled to the top')
   await expect(mindbox(page), 'the MindBox keeps the focus: no item editor opened').toBeFocused()
-  expect(await visible(page), 'the expanded items stay').toEqual(expanded)
+  expect(asSet(await visible(page)), 'the expanded items stay').toEqual(asSet(expanded))
   expect(await entries(page), 'one history entry pushed').toEqual([length + 1, index + 1])
   expect(await page.evaluate(() => [history.state.scrollPosition, history.state.hideIndex])).toEqual([await headerTop(page), expanded.length])
   expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index), 'the live position on the entry left').toBe(before)
@@ -1062,11 +1065,11 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
     before,
     await headerTop(page),
   ])
-  expect(await visible(page)).toEqual(expanded)
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
   await page.goForward()
   await nearTop(page, 'Forward returns to the top')
   expect(await entries(page)).toEqual([length + 1, index + 1])
-  expect(await visible(page)).toEqual(expanded)
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
   // a fresh scroll on the destination while the departed view's write is pending (review 2 B2): one turn
   // arms a write for the top entry (a scroll event), goes Back, and scrolls the destination further
   // 120 ms later, while that write is still pending (it fires at 250 ms); the restore, two frames,
@@ -1240,14 +1243,14 @@ test('cmd/ctrl+arrows from the window scroll a scrolled page to the top with a h
   await page.keyboard.press('Control+ArrowUp')
   await nearTop(page, 'scrolled to the top')
   await expect(mindbox(page)).toBeFocused()
-  expect(await visible(page), 'the expanded items stay').toEqual(expanded)
+  expect(asSet(await visible(page)), 'the expanded items stay').toEqual(asSet(expanded))
   expect(await entries(page), 'one history entry pushed').toEqual([length + 1, index + 1])
   await page.goBack()
   await expect.poll(async () => Math.abs((await scrollTop(page)) - before) <= 2, { message: 'Back returns to the position' }).toBe(true)
-  expect(await visible(page)).toEqual(expanded)
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
   await page.goForward()
   await nearTop(page, 'Forward returns to the top')
-  expect(await visible(page)).toEqual(expanded)
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
   // a plain ↑ from the window keeps its documented steps and pushes no entry: on an expanded page it
   // hides the expanded items (no scroll), and with nothing left to hide it scrolls to the top and
   // focuses the MindBox, as before
@@ -1276,7 +1279,7 @@ test('up/down with two modifiers scroll to the top from every context, with a hi
   await page.keyboard.press('Control+Meta+ArrowDown')
   await nearTop(page, 'scrolled to the top from the window')
   await expect(mindbox(page), 'the MindBox not focused').not.toBeFocused()
-  expect(await visible(page)).toEqual(expanded)
+  expect(asSet(await visible(page))).toEqual(asSet(expanded))
   expect(await entries(page)).toEqual([length + 1, index + 1])
   // from the MindBox, the caret at the start (the single-modifier edge jump's position): no history walk
   await scrollDown(page)
@@ -1333,6 +1336,10 @@ test('up/down with two modifiers scroll to the top from every context, with a hi
     [id, await headerTop(page)] as const
   )
   await nearTop(page, 'scrolled to the top from the item editor')
+  // one REAL frame first: the browser dispatches the scroll event of the explicit scroll in its rendering
+  // update, before frame callbacks, and the restore's cancel reads the time of that event (under a loaded
+  // full gate the held frames were released before the event had been dispatched)
+  await page.evaluate(() => new Promise<void>(resolve => (window as any).__raf.call(window, () => resolve())))
   await frame()
   await frame() // the second phase ran: its caret scroll must have yielded to the explicit scroll
   await page.evaluate(() => {

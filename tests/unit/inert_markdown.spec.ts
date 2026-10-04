@@ -142,17 +142,19 @@ test('fenced code: plain without a highlighter, filtered spans with one', () => 
 test('child tags: the relative shorthands a reply may use as tags, recognized and rendered by one Marked', () => {
   // vault design mind_chat_children 2.2: `#/<segment>` at a boundary of its inline run, ending
   // where the app's tag ends, renders as the app's mark (title and data attributes in the label's
-  // case, no inline handler, `renderTag`'s display) with `missing` from the item's computed state;
+  // case, no inline handler, `renderTag`'s display), or as a DANGLING mark showing the token as
+  // written when no item carries the tag (the item's computed missing state; the owner, 2026-10-03);
   // everything else stays text, and `inertChildTags` names exactly the tokens the marks render
   const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', missingTags: new Set(['#chat/gone']) }
   const render = (body: string, c = ctx) => renderInertMarkdown(body, c)
   const marks = (h: string) => [...h.matchAll(/<mark([^>]*)>([^<]*)<\/mark>/g)].map(m => m[1] + '|' + m[2])
   const reltags = (h: string) => [...h.matchAll(/data-reltag="([^"]*)"/g)].map(m => m[1].replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(+d)).toLowerCase())
   const agree = (body: string) => expect(reltags(render(body)), body).toEqual(inertChildTags(body))
-  // the mark: the absolute tag in the label's case, the relative token, the display without `#/`
+  // the mark: the absolute tag in the label's case, the relative token, the display without `#/`;
+  // a tag no item carries: the dangling class and the token as written
   expect(marks(render('see #/alpha and #/gone'))).toEqual([
     ' title="&#35;Chat&#47;alpha" data-tag="&#35;Chat&#47;alpha" data-reltag="&#35;&#47;alpha"|alpha',
-    ' class="missing" title="&#35;Chat&#47;gone" data-tag="&#35;Chat&#47;gone" data-reltag="&#35;&#47;gone"|gone',
+    ' class="dangling" title="&#35;Chat&#47;gone" data-tag="&#35;Chat&#47;gone" data-reltag="&#35;&#47;gone"|&#35;&#47;gone',
   ])
   expect(inertChildTags('see #/alpha and #/gone')).toEqual(['#/alpha', '#/gone'])
   // legal names of the app's grammar: unicode, markdown punctuation, a literal backslash; case kept
@@ -243,8 +245,8 @@ test('child tags: the relative shorthands a reply may use as tags, recognized an
   // no label, no context: text; the context is not retained across renders
   expect(render('#/x', { ...ctx, label: '', labelText: '' })).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
   expect(renderInertMarkdown('#/x')).toBe('<div class="inert-markdown"><p>&#35;&#47;x</p></div>')
-  expect(render('#/gone', { ...ctx, missingTags: new Set() })).not.toContain('missing')
-  expect(render('#/gone')).toContain('class="missing"')
+  expect(render('#/gone', { ...ctx, missingTags: new Set() })).not.toMatch(/missing|dangling/)
+  expect(render('#/gone')).toContain('class="dangling"')
   expect(renderInertMarkdown('#/gone')).not.toContain('<mark')
   // the extraction walks every structure
   expect(inertChildTags('- #/a\n- b #/b\n\n> #/c\n\n| h |\n|---|\n| #/d |\n\n[#/e](https://e.org) `#/no`')).toEqual(['#/a', '#/b', '#/c', '#/d', '#/e'])
