@@ -990,7 +990,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     ;(window as any).Notification = Recorder
   })
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply; this device: granted')
   const NOTIFY_STORE = 'e2e-notify-store'
   const notifyState = (reason: string, epoch: number, rev: number, more: Record<string, unknown> = {}) => ({ _agent: { state: { held: 'owner', reason, epoch, rev, updated: Date.now(), worktree: null, phase: 'idle', acked: {}, ...more } } })
   const notified = () => page.evaluate(() => ((window as any).__notified as any[]).map(n => ({ title: n.title, tag: n.options.tag, body: n.options.body, requireInteraction: n.options.requireInteraction, closed: n.closed })))
@@ -1026,7 +1026,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 4, 5))
   await applied(5)
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply; this device: granted')
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('proposal', 5, 6))
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context', '[proposal] answer the agent some context'])
   // a project's repeated check-in (2026-10-03, round 3): the bridge counts the resurfacings it
@@ -1035,4 +1035,15 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(5)
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 5, 8, { held: 'agent', project: true, surfaced: 2 }))
   await expect.poll(async () => (await notified()).map(n => n.title).slice(-2), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[question] answer the agent some context'])
+  // A BRIDGE REPLY on a task chat (the owner's ask of 2026-10-04): the chat of phase (l) gains a
+  // reply through the bridge's text write (the publisher footer and the inert body); the
+  // notification carries the chat's label and the reply's first line, its click targets the chat
+  const chatId = (await savedId(page, `${CHATTY}/0`))!
+  const repliesBefore = (await notified()).length
+  await rewriteText(chatId, text => `${text.replace(/\s*$/, '')}\n<<agent('vault/default · run ab12cd34 · 2s')>>\n<!--inert-->\nHere is the answer you asked for.\nmore below\n<!--/inert-->`)
+  await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(repliesBefore + 1)
+  expect((await notified()).at(-1)).toMatchObject({ title: `[reply] ${CHATTY}/0`, body: 'Here is the answer you asked for.', tag: `todoer:${chatId}`, requireInteraction: true, closed: false })
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
+  await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${CHATTY}/0 ?$`))
 })
