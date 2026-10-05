@@ -245,6 +245,176 @@ test("a canonical reply's TeX renders as the owner's math, typeset by a plain do
     .toBeGreaterThan(0)
 })
 
+test("a reply's typeset math survives the item's re-renders through the element cache: navigating the children typesets nothing again", async ({ page }) => {
+  // the owner (2026-10-05): every formula of a reply was typeset again, with a visible flicker and reflow,
+  // on changes as small as navigating a chat's children with the arrow keys (a query change re-renders the
+  // item's html, frames included). The element cache (wrapMath's `_cache_key`, cacheElems) puts a typeset
+  // span back in place of the fresh one, but a frame's spans carried no key; now they do (the frame fill):
+  // the same nodes, no new TeX parser, no typeset call, for the frame's and the owner's formulas alike.
+  // The chat's macros evaluate without error here (a stub defines them: the lane has no #chat), as a
+  // production chat's do; an undefined macro's eval would invalidate the item's whole element cache, as
+  // any code error does, and no formula would survive (the row's first cut in this lane)
+  await loadAdmin(page)
+  const CHAT = '#e2e_mc'
+  const DEFS = '#e2e_mcdefs'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), `${DEFS} the chat delimiters, as values\n\`\`\`js\nconst user = ''\nconst agent = (...args) => ''\n\`\`\``)
+  const child = (name: string) => `${CHAT}/${name} #_e2e_mcdefs\n<<agent('vault/default · run ab12cd34')>>\n${inert(`${name} body`)}`
+  await page.evaluate(text => void window._create(text), child('a'))
+  await page.evaluate(text => void window._create(text), child('b'))
+  await page.evaluate(
+    text => void window._create(text),
+    `${CHAT} #_e2e_mcdefs chat with $\`y_0\`$ in the owner's text\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/a and #/b, with $`x^2`$ and\n\n$$`\\sum_{i=1}^n x_i`$$')}`
+  )
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_mc ?$/)
+  const counts = () =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)?.elem
+      const frame = elem?.querySelector('.vault-result')
+      return {
+        frame: frame?.querySelectorAll('mjx-container').length ?? 0,
+        owner: elem ? [...elem.querySelectorAll('mjx-container')].filter(c => !c.closest('.vault-result')).length : 0,
+        marks: frame?.querySelectorAll('mark[data-tag]').length ?? 0,
+        errors: elem?.querySelectorAll('.macro-error').length ?? -1,
+      }
+    }, CHAT)
+  await expect.poll(() => counts().then(c => `${c.frame},${c.owner},${c.marks},${c.errors}`), { timeout: 20_000 }).toBe('2,1,2,0')
+  // the typeset nodes remembered, and the two typeset entry points and the item's cache invalidation
+  // counted from here on
+  await page.evaluate(label => {
+    const w = window as any
+    const elem = window._item(label, true)!.elem!
+    const frame = elem.querySelector('.vault-result')!
+    w.__mc = {
+      frame,
+      frameMath: [...frame.querySelectorAll('mjx-container')],
+      ownerMath: [...elem.querySelectorAll('mjx-container')].filter(c => !c.closest('.vault-result')),
+      tex: 0,
+      typesets: 0,
+      invalidations: 0,
+    }
+    // every _item() call hands out a FROZEN instance (index.svelte _item): the counter goes on the class
+    const item = window._item(label, true)! as any
+    const proto = Object.getPrototypeOf(item)
+    const invalidate = proto.invalidate_elem_cache
+    proto.invalidate_elem_cache = function (this: any, ...args: unknown[]) {
+      if (this.id === item.id) w.__mc.invalidations++
+      return invalidate.apply(this, args)
+    }
+    const constructors = w.MathJax.startup.constructors
+    const TeX = constructors.tex
+    constructors.tex = function (...args: unknown[]) {
+      w.__mc.tex++
+      return new TeX(...args)
+    }
+    const typesetPromise = w.MathJax.typesetPromise
+    w.MathJax.typesetPromise = (...args: unknown[]) => {
+      w.__mc.typesets++
+      return typesetPromise(...args)
+    }
+  }, CHAT)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  // Down enters the first child, Right the next: two query changes, two re-renders of the chat item
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_mc/a ')
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(query).toBe('#e2e_mc/b ')
+  const after = () =>
+    page.evaluate(label => {
+      const w = window as any
+      const elem = window._item(label, true)!.elem!
+      const frame = elem.querySelector('.vault-result')!
+      const frameMath = [...frame.querySelectorAll('mjx-container')]
+      const ownerMath = [...elem.querySelectorAll('mjx-container')].filter(c => !c.closest('.vault-result'))
+      return {
+        frameRerendered: frame !== w.__mc.frame, // the premise: the item's html was re-rendered, the frame with it
+        frameSame: frameMath.length === w.__mc.frameMath.length && frameMath.every((c, i) => c === w.__mc.frameMath[i] && c.isConnected),
+        ownerSame: ownerMath.length === w.__mc.ownerMath.length && ownerMath.every((c, i) => c === w.__mc.ownerMath[i] && c.isConnected),
+        tex: w.__mc.tex,
+        typesets: w.__mc.typesets,
+        invalidations: w.__mc.invalidations,
+        selected: [...frame.querySelectorAll('mark[data-tag]')].map(m => m.classList.contains('selected')),
+      }
+    }, CHAT)
+  await expect.poll(() => after().then(a => a.selected.join(',')), { message: 'the second child\'s mark selected' }).toBe('false,true')
+  const a = await after()
+  expect(a.frameRerendered, 'the frame was re-rendered by the navigation (the premise)').toBe(true)
+  expect(a.invalidations, "the navigation ran no code that invalidates the item's element cache (the premise)").toBe(0)
+  expect([a.frameSame, a.ownerSame], "the frame's and the owner's typeset nodes are the same, connected nodes").toEqual([true, true])
+  expect([a.tex, a.typesets], 'no new TeX parser, no typeset call').toEqual([0, 0])
+})
+
+test("an edited reply re-typesets its frame's math as a whole: a definition edit reaches its use and a use edit keeps the definition, the reply's other frame untouched", async ({ page }) => {
+  // inert_math_cache review 0 B1: a frame's formulas are typeset together by a parser of the frame's own,
+  // so a definition in one formula reaches the formulas after it. A key per formula (the row's first cut)
+  // left a use's cached typeset in place when only the definition was edited, and typeset an edited use
+  // without the cached definition (the reviewer's reproduction); the key is the frame's whole body, so an
+  // edit to any of a frame's formulas re-typesets the frame's math together, while the reply's other frame
+  // keeps its typeset nodes. The edit is the editor's save (Shift+Enter, no run), which invalidates
+  // nothing: the keys alone decide
+  await loadAdmin(page)
+  const LABEL = '#e2e_mc_edit'
+  const DEFS = '#e2e_mcdefs2'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), `${DEFS} the chat delimiters, as values\n\`\`\`js\nconst user = ''\nconst agent = (...args) => ''\n\`\`\``)
+  const text = (def: string, use: string) =>
+    `${LABEL} #_e2e_mcdefs2 reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert(`$\`\\def\\sum{${def}}\`$ then $\`\\sum_${use}\`$`)}\n\nand\n\n${inert('$`\\sum_k`$')}`
+  await page.evaluate(text => void window._create(text), text('0', 'i'))
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), LABEL)
+  // the glyph defs of a frame's typeset (fontCache 'local': one <path> per glyph per container):
+  // the digits, the summation sign and the italic subscripts
+  const glyphs = (frameIndex: number) =>
+    page.evaluate(
+      ([label, i]) => {
+        const frame = window._item(label, true)?.elem?.querySelectorAll('.vault-result')[i]
+        const count = (suffix: string) => frame?.querySelectorAll(`[id$="-${suffix}"]`).length ?? -1
+        return {
+          pending: frame?.querySelectorAll('span.math:not([_rendered]), span.math-display:not([_rendered])').length ?? -1,
+          zeros: count('30'),
+          ones: count('31'),
+          sums: count('2211'),
+          i: count('1D456'),
+          j: count('1D457'),
+          k: count('1D458'),
+        }
+      },
+      [LABEL, frameIndex] as const
+    )
+  const rendered = (def: 0 | 1, use: 'i' | 'j') => ({ pending: 0, zeros: def == 0 ? 1 : 0, ones: def == 1 ? 1 : 0, sums: 0, i: use == 'i' ? 1 : 0, j: use == 'j' ? 1 : 0, k: 0 })
+  await expect.poll(() => glyphs(0), { timeout: 20_000 }).toEqual(rendered(0, 'i'))
+  await expect.poll(() => glyphs(1)).toEqual({ pending: 0, zeros: 0, ones: 0, sums: 1, i: 0, j: 0, k: 1 }) // the definition stays in its frame
+  const otherFrame = () =>
+    page.evaluate(label => {
+      const w = window as any
+      const container = window._item(label, true)!.elem!.querySelectorAll('.vault-result')[1].querySelector('mjx-container')!
+      const same = w.__mcOther ? container === w.__mcOther && container.isConnected : null
+      w.__mcOther = container
+      return same
+    }, LABEL)
+  await otherFrame() // remembered
+  // the editor's save with the text changed: the use only, then the definition only
+  const edit = async (def: string, use: string) => {
+    const id = await page.evaluate(label => window._item(label, true)!.id, LABEL)
+    const paragraph = page.locator(`#item-${id} p`).first()
+    const box = (await paragraph.boundingBox())!
+    await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+    const textarea = page.locator(`#textarea-${id}`)
+    await expect(textarea).toBeVisible()
+    await textarea.fill(text(def, use))
+    await page.keyboard.press('Shift+Enter') // save, no run
+    await expect(textarea).toBeHidden()
+  }
+  await edit('0', 'j')
+  await expect.poll(() => glyphs(0), { timeout: 20_000 }).toEqual(rendered(0, 'j')) // the definition applies to the edited use
+  expect(await otherFrame(), "the other frame's typeset node survives the edit").toBe(true)
+  await edit('1', 'j')
+  await expect.poll(() => glyphs(0), { timeout: 20_000 }).toEqual(rendered(1, 'j')) // the edited definition reaches the unchanged use
+  expect(await otherFrame(), "the other frame's typeset node survives the second edit").toBe(true)
+  await expect.poll(() => glyphs(1)).toEqual({ pending: 0, zeros: 0, ones: 0, sums: 1, i: 0, j: 0, k: 1 })
+})
+
 test("a reply's math present before MathJax's startup completes is typeset by the frame's own parser, never by a startup scan", async ({ page }) => {
   // inert_math review 2 R1: MathJax's automatic typesetting at startup scans the whole page with
   // the owner's parser; the app turns it off (src/app.html `startup.typeset: false`) and its own

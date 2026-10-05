@@ -1383,6 +1383,18 @@
       const rendered = elem.getAttribute('data-inert-rendered') ?? ''
       if (!rendered.startsWith(marker + '|')) {
         elem.innerHTML = renderInertMarkdown(value, childTagMarkers.has(marker) ? childTagContext : null)
+        // the frame's math spans join the ELEMENT CACHE (cacheElems below, as the owner's math does through
+        // wrapMath's keys): a re-render of the item (a query change re-renders its html, frames included)
+        // gets a frame's typeset spans back instead of typesetting them anew through a document of the
+        // frame's own (a flicker and a reflow of every formula on a child navigation: the owner, 2026-10-05).
+        // the KEY is the frame's whole body (with the item, the frame's marker and the span's position, for
+        // duplicates), never the one formula: a frame's formulas are typeset together by one parser, so a
+        // definition in one reaches the formulas after it, and an edit to any of them re-typesets the
+        // frame's math as a whole (inert_math_cache review 0 B1). the cache's invalidation (util.js
+        // invalidateElemCache: a code error's eval, a script pass, the owner's run or write) applies to
+        // these spans as to the owner's
+        const bodyKey = `${id}-${marker}-${_hash(value)}`
+        elem.querySelectorAll('span.math, span.math-display').forEach((span, n) => span.setAttribute('_cache_key', `${bodyKey}-${n}`))
         elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
         if (!elem.hasAttribute('data-child-tags-wired')) {
           elem.setAttribute('data-child-tags-wired', '')
