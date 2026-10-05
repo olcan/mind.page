@@ -1423,8 +1423,7 @@ test('down with two modifiers undoes a scroll to the top: Back to the position w
   await focusMindboxInPlace(page)
   await page.keyboard.type('#e2e')
   await expect.poll(() => entries(page), { message: 'the typed query pushed its entry' }).toEqual([length + 2, index + 2])
-  // at the top of the new query, so only the text check stands between Down and a Back that would
-  // scroll down to the previous entry's position (and change the query)
+  // at the top of the new query: its entry is no Up's (and its text another), so Down does nothing
   await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
   await nearTop(page, 'at the top of the typed query')
   await down()
@@ -1541,8 +1540,8 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   // the owner's fallback (2026-10-04): the query names an item (the listing item, the one a tag click
   // lands on) out of view, below or above: Down brings it to the upper middle of the view, as the tag
   // click's last step does, with an entry so Back returns to the position; the query, the caret, the
-  // focus and the entries' texts stay. In view: nothing. Back comes first (the Back row): after an upward
-  // jump the next Down returns to the position left (the alternation); after a downward jump it does not.
+  // focus and the entries' texts stay. In view: nothing. The jump's entry is no Back candidate (Down undoes
+  // an Up alone, the Back row), so a further Down does nothing and a scroll by hand brings the fallback again.
   // A short view, where the destination can equal the position: no entry (review 0 B1). A typed query not
   // yet applied: nothing (review 0 B2). A query naming no item: nothing. Each fallback press asserts its
   // premise, that Back does not apply (the previous entry another text, or a position not below)
@@ -1568,13 +1567,14 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   const targetTop = () => page.evaluate(() => (document.querySelector('.super-container.target') as HTMLElement).offsetTop)
   // the item below the view's lower band (the tag click's rule)
   const below = () => page.evaluate(() => (document.querySelector('.super-container.target') as HTMLElement).offsetTop > document.body.scrollTop + visualViewport!.height - 200)
-  // the premise of a fallback press: Back does not apply (scrollBackWithHistory's test)
+  // the premise of a fallback press: Back does not apply (scrollBackWithHistory's test: the current entry an
+  // Up's, the page still at its top)
   const noBack = () =>
     page.evaluate(() => {
       const w = window as any
       const current = w._history[w._history_index]
-      const previous = w._history[w._history_index - 1]
-      return !previous || (previous.editorText || '') !== (current.editorText || '') || !((previous.scrollPosition ?? -Infinity) > document.body.scrollTop + 2)
+      const header = (document.querySelector('.header') as HTMLElement).offsetTop
+      return !current?.scrolledToTop || document.body.scrollTop > header + 2
     })
   const selection = () =>
     page.evaluate(() => {
@@ -1648,9 +1648,9 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   await page.waitForTimeout(300)
   await atPosition(dest, 'still at the item: the item in view')
   expect(await entries(page)).toEqual([length + 1, index + 1])
-  // scrolled PAST the item: Down brings it back up with an entry; the entry makes the next Down a Back that
-  // scrolls down within the same query, back to the position left, and the Down after that lands at the
-  // item again (Down alternates between the item and the position)
+  // scrolled PAST the item: Down brings it back up with an entry (the browser's Back returns to the position);
+  // the entry is no Up's, so the next Down does nothing with the item in view (no toggle: the owner,
+  // 2026-10-04); scrolled up by hand past the item, Down brings it back down, again with an entry
   const top = await targetTop()
   await page.evaluate(y => document.body.scrollTo(0, y), top + 400)
   await expect.poll(() => scrollTop(page), { message: 'scrolled past the item' }).toBeGreaterThan(top + 300)
@@ -1661,22 +1661,140 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   await atPosition(dest, 'at the item, as a tag click lands')
   expect(await entries(page)).toEqual([length + 2, index + 2])
   expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index + 1), 'the position left, kept in the previous entry').toBe(pos)
+  expect(await noBack(), 'no Back after the jump: its entry is no Up\'s').toBe(true)
   await down()
-  await atPosition(pos, 'Back to the position left')
-  expect(await entries(page)).toEqual([length + 2, index + 1])
-  await down()
-  await atPosition(dest, 'at the item again')
+  await page.waitForTimeout(300)
+  await atPosition(dest, 'still at the item: no toggle')
   expect(await entries(page)).toEqual([length + 2, index + 2])
-  // Back comes first: after Up, Down returns to the position Up left, not to the item
+  await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
+  await nearTop(page, 'scrolled up by hand, past the item')
+  await noWritePending(page)
+  expect([await below(), await noBack()], 'the item below the view, no Back').toEqual([true, true])
+  await down()
+  await atPosition(dest, 'at the item again, from above')
+  expect(await entries(page)).toEqual([length + 3, index + 3])
+  expect(await page.evaluate(i => (window as any)._history[i].scrollPosition, index + 2), 'the top, kept in the previous entry').toBe(await headerTop(page))
+  // Back comes first: after Up, Down returns to the position Up left, not to the item; scrolled away from
+  // that top by hand, the undo is gone and Down follows the fallback (the item below: to it, with an entry)
   await noWritePending(page)
   const pos2 = await scrollDown(page)
   expect(Math.abs(pos2 - dest), 'the position differs from the destination').toBeGreaterThan(50)
   await up()
   await nearTop(page, 'scrolled to the top')
-  expect(await entries(page)).toEqual([length + 3, index + 3])
+  expect(await entries(page)).toEqual([length + 4, index + 4])
+  expect(await noBack(), 'Back applies at the top of an Up').toBe(false)
   await down()
   await atPosition(pos2, 'Back to the position, not to the item')
-  expect(await entries(page)).toEqual([length + 3, index + 2])
+  expect(await entries(page)).toEqual([length + 4, index + 3])
+  await up()
+  await nearTop(page, 'scrolled to the top again')
+  await page.evaluate(y => document.body.scrollTo(0, y), (await headerTop(page)) + 60)
+  await expect.poll(() => scrollTop(page), { message: 'scrolled away from the top by hand' }).toBeGreaterThan((await headerTop(page)) + 40)
+  await noWritePending(page)
+  expect([await below(), await noBack()], 'the item below the view, the undo gone').toEqual([true, true])
+  await down()
+  await atPosition(dest, 'at the item: the fallback, not Back')
+  expect(await entries(page)).toEqual([length + 5, index + 5])
+  // the jump's entry is never an Up's (review 0 B1): Up, then a 60 px scroll by hand and Down in ONE turn
+  // (before the listener's write), so the fallback clones the still-marked Up entry; its entry carries no
+  // mark, and back at the top by hand Down jumps to the item again instead of going Back to header + 60
+  await up()
+  await nearTop(page, 'at the top once more')
+  const marked = await page.evaluate(() => (window as any)._history[(window as any)._history_index].scrolledToTop === true)
+  expect(marked, "the Up's entry carries its mark").toBe(true)
+  const marks = await page.evaluate(header => {
+    const w = window as any
+    document.body.scrollTo(0, header + 60)
+    const before = w._history[w._history_index].scrolledToTop
+    document
+      .getElementById('textarea-mindbox')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+    return { before, after: w._history[w._history_index].scrolledToTop, index: w._history_index }
+  }, await headerTop(page))
+  await atPosition(dest, 'at the item, from 60 px below the top in the same turn')
+  expect(await entries(page), "the Up's entry and the jump's").toEqual([length + 7, index + 7])
+  expect([marks.before, marks.after, marks.index], "the Up's entry marked, the jump's entry unmarked, in the key's turn").toEqual([true, false, index + 7])
+  await noWritePending(page)
+  await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
+  await nearTop(page, 'back at the top by hand')
+  await noWritePending(page)
+  await down()
+  await atPosition(dest, 'the item again, not Back to header + 60')
+  expect(await entries(page)).toEqual([length + 8, index + 8])
+  // a departure by hand ENDS the undo (review 0 B2): Up, a 60 px scroll by hand, the listener's write (the
+  // mark cleared), back to the top by hand: Down is no Back to the position Up left but the fallback
+  await up()
+  await nearTop(page, 'at the top for the departure')
+  await page.evaluate(header => document.body.scrollTo(0, header + 60), await headerTop(page))
+  await expect.poll(() => scrollTop(page), { message: 'departed by hand' }).toBeGreaterThan((await headerTop(page)) + 40)
+  await noWritePending(page)
+  expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index].scrolledToTop), "the Up's mark cleared by the departure").toBe(false)
+  await page.evaluate(y => document.body.scrollTo(0, y), await headerTop(page))
+  await nearTop(page, 'back at the top by hand after the departure')
+  await noWritePending(page)
+  expect(await noBack(), 'the undo is gone').toBe(true)
+  const [lengthD, indexD] = await entries(page)
+  await down()
+  await atPosition(dest, 'the fallback, not the position Up left')
+  expect(await entries(page)).toEqual([lengthD + 1, indexD + 1])
+  // a departure and a return both seen by the listener BEFORE its position write (review 1 B2 of
+  // scroll_target2): the scroll events dispatched in one turn; the entry's mark is cleared at the departure
+  // event itself, and Down in that turn is the fallback, its entry pushed, never a Back
+  await up()
+  await nearTop(page, 'at the top for the quick departure')
+  const indexA = (await entries(page))[1] // the Up's entry, revisited below
+  const quick = await page.evaluate(header => {
+    const w = window as any
+    const scroll = (y: number) => {
+      document.body.scrollTo(0, y)
+      document.body.dispatchEvent(new Event('scroll'))
+    }
+    scroll(header + 60)
+    scroll(header)
+    const mark = w._history[w._history_index].scrolledToTop
+    const before = [w._history.length, w._history_index, document.body.scrollTop]
+    document
+      .getElementById('textarea-mindbox')!
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', metaKey: true, altKey: true, bubbles: true, cancelable: true }))
+    return { mark, before, after: [w._history.length, w._history_index] }
+  }, await headerTop(page))
+  expect(quick.mark, 'the mark cleared at the departure event, before any position write').toBe(false)
+  expect(quick.before[2], 'back at the top when the key arrived').toBeLessThanOrEqual((await headerTop(page)) + 2)
+  expect(quick.after, 'the fallback pushed its entry, no Back').toEqual([quick.before[0] + 1, quick.before[1] + 1])
+  await atPosition(dest, 'the fallback, from the top, after a departure and return in one turn')
+  // the cleared mark belongs to the entry (review 2 B2 of scroll_target2): a later Up, then the browser's Back
+  // twice, through the jump's entry back to the departed Up entry at its top: Down is the fallback, its entry
+  // pushed (the cursor advances; a Back would have moved it down), not a return to the position that Up left
+  await noWritePending(page)
+  await up()
+  await nearTop(page, 'a later Up')
+  await page.goBack()
+  await atPosition(dest, "Back to the jump's entry")
+  await page.goBack()
+  await nearTop(page, 'Back to the departed Up entry at its top')
+  await noWritePending(page)
+  expect(await page.evaluate(() => [(window as any)._history_index, (window as any)._history[(window as any)._history_index].scrolledToTop]), 'the departed entry revisited, its mark cleared').toEqual([indexA, false])
+  await down()
+  await atPosition(dest, 'the fallback from the revisited entry')
+  expect(await entries(page), 'its entry pushed over the forward entries').toEqual([indexA + 2, indexA + 1])
+  // the same departure and return, then the position write: the mark stays cleared, Down the fallback
+  await noWritePending(page)
+  await up()
+  await nearTop(page, 'at the top for the persisted departure')
+  await page.evaluate(header => {
+    const scroll = (y: number) => {
+      document.body.scrollTo(0, y)
+      document.body.dispatchEvent(new Event('scroll'))
+    }
+    scroll(header + 60)
+    scroll(header)
+  }, await headerTop(page))
+  await noWritePending(page)
+  expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index].scrolledToTop), 'the mark cleared, through the write').toBe(false)
+  const [lengthQ, indexQ] = await entries(page)
+  await down()
+  await atPosition(dest, 'the fallback after the persisted departure')
+  expect(await entries(page)).toEqual([lengthQ + 1, indexQ + 1])
   // a query naming no item (a term the tall items carry): a long page, no target, so Down changes nothing
   await focusMindboxInPlace(page)
   await mindbox(page).fill('line')

@@ -2108,6 +2108,7 @@
       index: ++sessionStateHistoryIndex,
       scrollPosition: headerdiv.offsetTop,
       final: true,
+      scrolledToTop: true, // the entry Down undoes (scrollBackWithHistory)
     })
     sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
     pushState(top)
@@ -2115,23 +2116,32 @@
     return true
   }
 
-  // the inverse (the owner, 2026-10-03): Back when Back would scroll DOWN within the same query, which is
-  // the state scrollToTopWithHistory leaves (the previous entry shows this query at a position below the
-  // current one): the cursor returns to that entry and Down adds no entry (the top entry stays reachable by
-  // Forward). Nothing otherwise: an arrow never changes the query (a tag
-  // click's entry is another text; a query typed and still debouncing has a live text the entry lacks:
-  // review 0 B1, Back would have discarded it), and never scrolls up (the page scrolled past the position
-  // since). history.back() is asynchronous, so a second press before its popstate lands is ignored (the
-  // flag is cleared by onPopState, and after a second if no popstate comes). Returns whether it navigated
-  // or is navigating
+  // the inverse (the owner, 2026-10-03): Down UNDOES an Up. Back when the current entry is the one an Up
+  // pushed (scrolledToTop) and the page is still at the top it brought it to: the cursor returns to the
+  // previous entry, the position Up left, and Down adds no entry (the top entry stays reachable by
+  // Forward). Nothing otherwise: a page seen away from that top by a scroll event has lost the undo for
+  // good (the scroll listener clears the entry's mark at once, so a return to the top by hand, a later Up
+  // or a traversal back to the entry does not revive it; the fallback below takes over), another entry is never a Back candidate (a jump's entry is pushed unmarked) (the owner, 2026-10-04: the
+  // earlier rule, Back whenever the previous entry showed the same query below, made a jump to the named
+  // item's own entry a candidate, so Down toggled between the item and the position, and a scroll by hand
+  // after the jump sent Down back to the old position instead of the item), an arrow never changes the
+  // query (a tag click's entry is another text; a query typed and still debouncing has a live text the
+  // entry lacks: review 0 B1 of scroll_back, Back would have discarded it). history.back() is
+  // asynchronous, so a second press before its popstate lands is ignored (the flag is cleared by
+  // onPopState, and after a second if no popstate comes). Returns whether it navigated or is navigating
   let scrollBackPending = false
   let scrollBackTimer: ReturnType<typeof setTimeout> | undefined
+  // a traversal's restore pending (onPopState): the page still shows the departed view under the
+  // destination's index, so the scroll listener reads no departure from an Up's top meanwhile
+  let popStateScrollPending = false
   function scrollBackWithHistory() {
     if (scrollBackPending) return true
-    const entry = (i: number) => sessionStateHistory[i] as { editorText?: string; scrollPosition?: number } | undefined
+    const entry = (i: number) =>
+      sessionStateHistory[i] as { editorText?: string; scrollPosition?: number; scrolledToTop?: boolean } | undefined
     const current = entry(sessionStateHistoryIndex)
     const previous = entry(sessionStateHistoryIndex - 1)
-    if (!current || !previous || (previous.editorText || '') != (current.editorText || '')) return false
+    if (!current?.scrolledToTop || !scrolledToTop()) return false // only the undo of an Up, at its top
+    if (!previous || (previous.editorText || '') != (current.editorText || '')) return false
     if ((editorText || '') != (current.editorText || '')) return false // a query typed, not yet in the entry
     if (!((previous.scrollPosition ?? -Infinity) > document.body.scrollTop + 2)) return false
     scrollBackPending = true
@@ -2145,8 +2155,10 @@
   // click lands on), exactly as a tag click's last step does (targetScrollPosition: the item brought to the
   // upper middle of the view when it sits above or below the view, nothing when it is in view), with a
   // history entry when it moves, as Up records one (the current entry keeps the position left, a copy at
-  // the new position is pushed as a final state), so Back returns to the position. The query, the focus
-  // and the item's time stay as they are (a tag click would touch the time and push the query's state).
+  // the new position is pushed as a final state), so the browser's Back returns to the position; the entry
+  // is no Back candidate for Down itself (not an Up's), so a further Down does nothing with the item in view.
+  // The query, the focus and the item's time stay as they are (a tag click would touch the time and push
+  // the query's state).
   // Nothing when the query names no item, or while a typed query is not yet applied (its live text differs
   // from the current entry's, the test scrollBackWithHistory makes: its own layout scrolls to its target
   // when it settles; a re-rank's pending debounce is no typed query). Returns whether it scrolled
@@ -2167,6 +2179,7 @@
       index: ++sessionStateHistoryIndex,
       scrollPosition: y,
       final: true,
+      scrolledToTop: false, // never an Up's entry, whatever the entry it was cloned from (review 0 B1)
     })
     sessionStateHistory.length = sessionStateHistoryIndex + 1 // may truncate
     pushState(moved)
@@ -3796,6 +3809,7 @@
       // since the state object is shared with history.state and a writer could reach it before the frames
       // below (see onScroll)
       const scrollPosition = state.scrollPosition || 0
+      popStateScrollPending = true // no departure is read off the departed view meanwhile (onScroll)
       update_dom().then(() => {
         if (scrollToTopOnPopState) {
           scrollTo(headerdiv.offsetTop)
@@ -3804,6 +3818,7 @@
           // scroll to last recorded scroll position at this state
           scrollTo(scrollPosition)
         }
+        popStateScrollPending = false
       })
     }
     skipScrollForPopState = false
@@ -7615,6 +7630,15 @@
     // departed view's position while its restore awaited layout, and stayed there; scroll_top reviews 1-2,
     // 2026-10-03), while a replace of the same entry (Show more) keeps the index and the write; a scroll
     // on another entry while a write is pending re-arms the timer for that entry, so its position is kept
+    // a scroll away from an Up's top ends that Up's undo for good, on the entry itself and at once: its mark
+    // is cleared by a write of its own (one per Up entry departed), so a return to the top by hand, a later
+    // Up or a traversal back to the entry revives nothing (the owner, 2026-10-04; scroll_target2 reviews
+    // 0-2, B2: a delayed clearing forgot a departure the page returned from within the write's 250 ms, and
+    // a remembered index was reset by a later Up while the entry survived). Not while a traversal's restore
+    // is pending: the page still shows the departed view under the destination's index
+    const scrolledEntry = sessionStateHistory[sessionStateHistoryIndex] as { scrolledToTop?: boolean } | undefined
+    if (!popStateScrollPending && scrolledEntry?.scrolledToTop && !scrolledToTop())
+      replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { scrolledToTop: false }))
     if (!historyUpdatePending || historyUpdateIndex != sessionStateHistoryIndex) {
       clearTimeout(historyUpdateTimer)
       historyUpdatePending = true
@@ -10388,8 +10412,8 @@
 
     // the global scroll to the top and back: Up or Down with two or more of Ctrl, Alt and Cmd, from every
     // context (the window, the MindBox, an item editor, which let the key through). Up scrolls a scrolled
-    // page to the top with its history entry (scrollToTopWithHistory); Down goes Back when that would
-    // scroll down within the same query, the inverse of Up (scrollBackWithHistory), otherwise scrolls to
+    // page to the top with its history entry (scrollToTopWithHistory); Down undoes an Up the page is still
+    // at the top of (scrollBackWithHistory), otherwise scrolls to
     // the item the query names, as a tag click does (scrollToTargetWithHistory; the owner, 2026-10-04),
     // and otherwise does nothing; neither changes anything else, not even the focus (the owner, 2026-10-03)
     if ((key == 'ArrowUp' || key == 'ArrowDown') && [e.ctrlKey, e.altKey, e.metaKey].filter(Boolean).length >= 2) {
