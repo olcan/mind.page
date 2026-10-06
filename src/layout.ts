@@ -14,6 +14,12 @@ export type LayoutConfig = {
   hideIndex: number // items past this index are hidden (movers are only marked when visible)
   fixed: boolean // fixed (shared) pages render no time strings
   timeString: (time: number) => string
+  // false keeps every item's time row as it is (its text refreshed, none appearing or disappearing):
+  // the rows are regrouped on a query change (and a column change or the owner's explicit time
+  // change), the inputs a reader expects to re-lay the page out, not on every layout (the owner, 2026-10-05: a row appearing above the item being read, pushing it down,
+  // whenever a passive re-ranking soft-touched the named item). the first item and a column leader
+  // keep their rows in either mode
+  regroupTimeRows?: boolean
 }
 
 export type LayoutAggregates = {
@@ -32,12 +38,14 @@ export type LayoutAggregates = {
 // exactly as the original loop did, and returns the aggregates the caller scrolls/sizes with
 export function layoutItems(items: any[], config: LayoutConfig): LayoutAggregates {
   const { columnCount, screenHeight, defaultItemHeight, separatorHeight, hideIndex, fixed } = config
+  const regroup = config.regroupTimeRows ?? true
   const columnHeights = new Array(columnCount).fill(0)
   const columnLastItem = new Array(columnCount).fill(-1)
   const columnItemCount = new Array(columnCount).fill(0)
   columnHeights[0] = config.headerHeight // first column includes header
   const topMovers = new Array(columnCount).fill(items.length) // see definition of "mover" below
   let lastTimeString = ''
+  let prevBucket = '' // the previous unpinned item's bucket: the out-of-order mark compares neighbors (review 0)
   let newestTime = 0
   let oldestTime = Infinity
   let oldestTimeString = ''
@@ -52,13 +60,15 @@ export function layoutItems(items: any[], config: LayoutConfig): LayoutAggregate
     }
     if (item.time > newestTime) newestTime = item.time
 
+    const hadTimeString = !!item.timeString
     item.timeString = ''
     item.timeOutOfOrder = false
-    if (!fixed && !item.pinned && (index == 0 || timeString != lastTimeString)) {
+    if (!fixed && !item.pinned && (regroup ? index == 0 || timeString != lastTimeString : index == 0 || hadTimeString)) {
       item.timeString = timeString
-      item.timeOutOfOrder = index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != lastTimeString
+      item.timeOutOfOrder = index > 0 && !lastItem.pinned && item.time > lastItem.time && timeString != prevBucket
       lastTimeString = timeString // for grouping of subsequent items
     }
+    if (!item.pinned) prevBucket = timeString
 
     // calculate item height (zero if dotted, or not yet calculated and default is zero)
     item.outerHeight = item.dotted ? 0 : item.height || defaultItemHeight

@@ -1374,6 +1374,136 @@ test('up with two modifiers scrolls to the top from every context, with a histor
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
 })
 
+test('time rows regroup on a query change, not on every layout: a passive re-ranking inserts no row above the item being read; the next query change regroups', async ({ page }) => {
+  // the owner (2026-10-05): reading an item with its children below, a time row ("now") appeared above it
+  // and pushed everything down whenever a passive re-ranking (an item's running state, a remote change)
+  // soft-touched the named item to now; a reload showed it at once. The geometry: the item's ancestor is
+  // listed above it as context, in the same time group, so the item had no row of its own until its
+  // bucket changed. The layout now regroups the time rows on a query change (the input a reader expects
+  // to re-lay the page out); every other layout keeps each row as it is, its text refreshed
+  await loadAdmin(page)
+  const ROOT = '#e2e_tr'
+  const ITEM = `${ROOT}/0`
+  await page.evaluate(text => void window._create(text), `${ROOT} root`)
+  await page.evaluate(text => void window._create(text), `${ITEM} the item being read`)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_tr ?$/)
+  // both an hour old (through their records: the index button's gesture cannot age the named item, every
+  // re-ranking soft-touches it back to now), then Down enters the item with times kept, as the owner's
+  // navigation does: the root listed above it as context, one group an hour old with the root's row
+  await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${ITEM} `)
+  // the time row above each of the two items (null: none), through the item's element
+  const rows = () =>
+    page.evaluate(labels =>
+      labels.map(label => {
+        const row = window._item(label, true)?.elem?.closest('.super-container')?.querySelector(':scope > .time')
+        return row ? row.textContent!.trim() : null
+      }),
+      [ROOT, ITEM]
+    )
+  const order = () => page.evaluate(labels => labels.map(label => (window as any).__items.findIndex((i: any) => i.label == label)), [ROOT, ITEM])
+  // the layout's distance from the root's top edge to the item's: a row inserted between them is 24 px of
+  // it, while a scroll (the navigation's, settling late) moves both edges alike
+  const gap = () => page.evaluate(labels => labels.map(label => window._item(label, true)!.elem!.getBoundingClientRect().top).reduce((a, b) => b - a), [ROOT, ITEM])
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', null])
+  const [rootIndex, itemIndex] = await order()
+  expect(rootIndex, 'the root listed above the item, as context').toBeLessThan(itemIndex)
+  const before = await gap()
+  // the passive re-ranking: the item soft-touched to now (as a running-state change or a remote change does
+  // through onEditorChange); before the fix a "now" row appeared above it; now the rows stay, the item unmoved
+  await page.evaluate(label => (window._item(label, true) as any).touch(), ITEM)
+  await expect.poll(() => page.evaluate(label => Date.now() - (window as any).__items.find((i: any) => i.label == label).time < 60_000, ITEM)).toBe(true)
+  expect(await rows(), 'no row above the item being read').toEqual(['1h', null])
+  expect(await gap(), 'the item did not move relative to the root').toBe(before)
+  // a query change regroups: up to the root (alt on its label keeps times), then Down to the item again,
+  // whose group is now its own (the typed query and the fresh load have rows of their own below)
+  await page.evaluate(label => window._item(label, true)!.elem!.querySelector('mark.label')!.dispatchEvent(new MouseEvent('mousedown', { altKey: true })), ROOT)
+  await expect.poll(query).toMatch(/^#e2e_tr ?$/)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${ITEM} `)
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', 'now'])
+})
+
+test('time rows: a query TYPED into the mindbox regroups when it applies, not at a layout run while it is pending', async ({ page }) => {
+  // review 0 B2: a layout during the editor's debounce must not stand in for the query's own regroup.
+  // A root and the item under it, both aged an hour, the root queried with times kept; the pre-query
+  // display asserted; the item's query typed, then a layout pass run while it is pending (window.__layout,
+  // the pass checkLayout and an item's resize run; the layout count and the pending flag read with it:
+  // the premise); then the query applies, soft-touches the item to now, and its row appears
+  await loadAdmin(page)
+  const ROOT = '#e2e_tr2'
+  const ITEM = `${ROOT}/0`
+  await page.evaluate(text => void window._create(text), `${ROOT} root`)
+  await page.evaluate(text => void window._create(text), `${ITEM} the item`)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_tr2 ?$/)
+  const rows = () =>
+    page.evaluate(labels =>
+      labels.map(label => {
+        const row = window._item(label, true)?.elem?.closest('.super-container')?.querySelector(':scope > .time')
+        return row ? row.textContent!.trim() : null
+      }),
+      [ROOT, ITEM]
+    )
+  await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM])
+  // the root queried with times kept: Down to the item (a nested child, times kept) and alt on the root's label
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${ITEM} `)
+  await page.evaluate(label => window._item(label, true)!.elem!.querySelector('mark.label')!.dispatchEvent(new MouseEvent('mousedown', { altKey: true })), ROOT)
+  await expect.poll(query).toMatch(/^#e2e_tr2 ?$/)
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', null]) // the pre-query display: the root's row, the item behind the shown count
+  await focusMindbox(page)
+  await mindbox(page).press('ControlOrMeta+a')
+  await mindbox(page).pressSequentially(ITEM)
+  const witnessed = await page.evaluate(() => {
+    const w = window as any
+    const before = w.__layoutCount as number
+    const pending = !!w._mindboxDebounced
+    w.__layout()
+    return { before, after: w.__layoutCount as number, pending }
+  })
+  expect(witnessed.after > witnessed.before && witnessed.pending, `a layout ran while the typed query was pending (the premise): ${JSON.stringify(witnessed)}`).toBe(true)
+  await expect.poll(() => page.evaluate(() => !!(window as any)._mindboxDebounced), { timeout: 10_000 }).toBe(false) // the query applied
+  await expect.poll(query).toMatch(/^#e2e_tr2\/0 ?$/)
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', 'now']) // the item, soft-touched to now, starts its group: the typed query's regroup
+})
+
+test('time rows: a fresh load groups the corpus although layouts ran over an empty corpus before the items arrived', async ({ browser }) => {
+  // review 0 B1: the layouts before the items arrive certify no query. A COLD context (the warm page's
+  // Firestore cache answers the first snapshot at once), a read-only visitor of the anonymous account,
+  // the first delivery held back by a route so that layouts run over an empty corpus first (the premise);
+  // the first populated layout then groups the whole corpus (the seeded items span days), read off the
+  // items' layout state (the empty query shows the pinned items alone, which carry no group header)
+  const cold = await browser.newContext()
+  const fresh = await cold.newPage()
+  let heldOnce = false
+  await fresh.route('**/Listen/channel**', async route => {
+    if (!heldOnce) {
+      heldOnce = true
+      await new Promise(resolve => setTimeout(resolve, 1500))
+    }
+    await route.continue()
+  })
+  await fresh.goto('/?user=anonymous')
+  await expect
+    .poll(() => fresh.evaluate(() => ({ layouts: ((window as any).__layoutCount as number) ?? 0, items: ((window as any).__items?.length as number) ?? 0 })).then(s => s.layouts > 0 && s.items == 0), {
+      message: 'a layout before the items arrive (the premise)',
+      timeout: 10_000,
+    })
+    .toBe(true)
+  const stay = fresh.getByText('Stay Anonymous', { exact: true })
+  if (await stay.isVisible({ timeout: 3000 }).catch(() => false)) await stay.click()
+  await expect.poll(() => fresh.evaluate(() => ((window as any).__items ?? []).filter((i: any) => i.timeString).length), { timeout: 30_000 }).toBeGreaterThan(1)
+  await cold.close()
+})
+
 test('down with two modifiers undoes a scroll to the top: Back to the position when the previous entry shows the same query below, nothing otherwise', async ({ page }) => {
   // the owner's inverse (2026-10-03): Up with two modifiers pushes the top entry (the row above); Down goes
   // Back when Back would scroll DOWN within the same query: the cursor returns to the previous entry without

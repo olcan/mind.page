@@ -337,6 +337,7 @@
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
+    Object.defineProperty(window, '__layout', { value: () => updateItemLayout() }) // a layout pass on demand (tests: a geometry layout at a chosen moment)
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })
     // v1 reader readiness (reviews 85-88): the rollout checklist's per-device observable — true
@@ -2258,6 +2259,14 @@
   // trace below; see issues/MindPage Column Layout Stalls After Growing Back.md
   let lastDocumentWidth = 0
   let layoutCount = 0 // exposed as window.__layoutCount for tests
+  // the time rows regroup when the APPLIED ranking's query changed (set where onEditorChange sorts, so a
+  // layout during the editor's debounce or before the items are initialized certifies no query: time_rows
+  // review 0 B1/B2), on the owner's explicit time change (onItemTouch) and on a column change; the first
+  // layout regroups (see updateItemLayout and regroupTimeRows in src/layout.ts)
+  let regroupTimeRowsPending = true
+  let lastRankedQuery = null
+  let lastTimeRowsColumns = null
+
   function updateItemLayout() {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
     //       second is via initialize -> onEditorChange w/ >0 items, 0 height
@@ -2309,6 +2318,13 @@
     // when — a rendered layout field actually changed
     const layoutSignature = () => items.map(item => `${item.column},${item.nextColumn},${item.timeString}`).join('|')
     const layoutBefore = layoutSignature()
+    // the time rows are regrouped on a QUERY CHANGE (the applied ranking's, see regroupTimeRowsPending) or a
+    // change of the columns, the explicit inputs a reader expects to re-lay the page out; every other
+    // layout (an item's render or resize, a remote change, a re-ranking soft-touching the named item)
+    // keeps each row as it is, its text refreshed (see regroupTimeRows in src/layout.ts). the shown count
+    // plays no part: the grouping runs over every item, hidden ones included, so a "show more" reveals
+    // rows already grouped, and the count itself follows the time groups a soft touch changes
+    const regroupTimeRows = regroupTimeRowsPending || columnCount != lastTimeRowsColumns
     const layout = layoutItems(items, {
       columnCount,
       headerHeight: headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight,
@@ -2318,7 +2334,10 @@
       hideIndex,
       fixed,
       timeString: itemTimeString,
+      regroupTimeRows,
     })
+    if (regroupTimeRows && items.length) regroupTimeRowsPending = false // an empty corpus consumes nothing
+    lastTimeRowsColumns = columnCount
     if (layoutSignature() != layoutBefore) items = items // render the new layout
     const topMovers = layout.topMovers
     newestTime = layout.newestTime
@@ -3179,6 +3198,13 @@
       //   for (let j = 0; j < xJ.length; ++j) if (xJ[j] >= 0 && (jmin < 0 || xJ[j] < xJ[jmin])) jmin = j
       //   return jmin
       // }
+
+      // the ranking applied for this query: a query change regroups the time rows at the next layout
+      const rankedQuery = text.trim().toLowerCase()
+      if (rankedQuery != lastRankedQuery) {
+        lastRankedQuery = rankedQuery
+        regroupTimeRowsPending = true
+      }
 
       // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
       //       (even assigning a single index, e.g. items[0]=items[0] triggers toHTML on ALL items)
@@ -7475,6 +7501,7 @@
       items[index].time = Date.now()
     }
     saveItem(items[index].id)
+    regroupTimeRowsPending = true // an explicit time change (the index button; a run with touch_first): the next layout regroups the time rows
     lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText) // item time has changed
     // onEditorChange(""); // item time has changed, and editor cleared
@@ -8800,6 +8827,7 @@
       })
     })
     finalizeStateOnEditorChange = true // make initial empty state final
+    regroupTimeRowsPending = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
     onEditorChange('') // initial sorting
     // the label tree of every item (the tag parents, ancestries, adoptions and closures at once)
     // changes are handled in itemTextChanged (w/ update_deps==true)

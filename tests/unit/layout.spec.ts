@@ -112,6 +112,61 @@ test('an out-of-order newer item is marked when it starts a new time group', () 
   expect(oldestTimeString).toBe('1d')
 })
 
+test('without a regroup, time rows stay where they are: none appears or disappears, their text refreshes, the first item keeps one', () => {
+  // the owner (2026-10-05): a passive re-ranking soft-touched the named item to now and the next
+  // layout put a row above the item being read; rows are regrouped only on a query change
+  const items = [item(3, 100), item(3, 100), item(2, 100), item(1, 100)]
+  layoutItems(items, config({ columnCount: 1 }))
+  expect(items.map(it => it.timeString)).toEqual(['3d', '', '2d', '1d'])
+  // the first item touched to now: a regroup would give the second its own row (and mark nothing out of order)
+  items[0].time = 9
+  layoutItems(items, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(items.map(it => it.timeString), 'the rows as before, the first refreshed').toEqual(['9d', '', '2d', '1d'])
+  // a later item touched to now: its row's text refreshes, no row appears before or after it
+  items[2].time = 8
+  layoutItems(items, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(items.map(it => it.timeString)).toEqual(['9d', '', '8d', '1d'])
+  expect(items[2].timeOutOfOrder, 'out of order against the item before it').toBe(true)
+  // the same bucket as its neighbor now: a regroup would drop its row; kept, and no longer out of order
+  items[2].time = 3
+  layoutItems(items, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(items.map(it => it.timeString)).toEqual(['9d', '', '3d', '1d'])
+  expect(items[2].timeOutOfOrder).toBe(false)
+  // the regroup (a query change) catches up
+  items[2].time = 8
+  layoutItems(items, config({ columnCount: 1 }))
+  expect(items.map(it => it.timeString)).toEqual(['9d', '3d', '8d', '1d'])
+  expect(items[2].timeOutOfOrder).toBe(true)
+})
+
+test('the out-of-order mark compares neighbors in either mode: a newer item behind a kept row of another bucket is marked', () => {
+  const items = [item(3, 100), item(3, 100), item(2, 100)]
+  layoutItems(items, config({ columnCount: 1 }))
+  expect(items.map(it => it.timeString)).toEqual(['3d', '', '2d'])
+  items[1].time = 2
+  items[2].time = 3
+  layoutItems(items, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(items.map(it => it.timeString)).toEqual(['3d', '', '3d'])
+  expect(items.map(it => it.timeOutOfOrder), 'the third is newer than the second, whatever row it kept').toEqual([false, false, true])
+  layoutItems(items, config({ columnCount: 1 }))
+  expect(items.map(it => it.timeString)).toEqual(['3d', '2d', '3d'])
+  expect(items.map(it => it.timeOutOfOrder)).toEqual([false, false, true])
+})
+
+test('without a regroup, a new first item still gets a row, a pinned item none, and a fixed page none', () => {
+  const items = [item(3, 100), item(3, 100), item(2, 100)]
+  layoutItems(items, config({ columnCount: 1 }))
+  const moved = [items[1], items[0], items[2]] // the second item moved to the top (no row of its own before)
+  layoutItems(moved, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(moved.map(it => it.timeString)).toEqual(['3d', '3d', '2d'])
+  const pinned = [item(3, 100), item(3, 100, { pinned: true, timeString: '3d' })]
+  layoutItems(pinned, config({ columnCount: 1, regroupTimeRows: false }))
+  expect(pinned.map(it => it.timeString)).toEqual(['3d', ''])
+  const fixed_items = [item(3, 100, { timeString: '3d' }), item(2, 100, { timeString: '2d' })]
+  layoutItems(fixed_items, config({ columnCount: 1, fixed: true, regroupTimeRows: false }))
+  expect(fixed_items.map(it => it.timeString)).toEqual(['', ''])
+})
+
 test('a column leader gets a time string (and its height) even mid-group', () => {
   const items = [item(3, 600), item(3, 600), item(3, 600)]
   layoutItems(items, config())
