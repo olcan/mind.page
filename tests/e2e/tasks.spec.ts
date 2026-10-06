@@ -918,7 +918,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   for (const name of [CC, `${CC}/0`, `${CC}/0/alpha`]) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
   const ccMarks = () =>
     page.evaluate(
-      n => [...window._item(n, true)!.elem!.querySelectorAll('.vault-result mark[data-tag]')].map(m => ({ tag: m.getAttribute('data-tag'), missing: m.classList.contains('missing'), dangling: m.classList.contains('dangling') })),
+      // the element can be absent at a tick right after the creations (issues/The Delegation Row Reads A Null Elem.md, 2026-10-05): the poll waits for it instead of failing on the throw
+      n => [...(window._item(n, true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => ({ tag: m.getAttribute('data-tag'), missing: m.classList.contains('missing'), dangling: m.classList.contains('dangling') })),
       `${CC}/0`
     )
   await expect.poll(ccMarks, { timeout: 15_000 }).toEqual([
