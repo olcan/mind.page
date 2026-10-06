@@ -916,6 +916,14 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(text => void window._create(text), `${CC}/0 #_chat #_autodep\n<<user>> what now?\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('Two parts: #/alpha and #/beta.')}`)
   await page.evaluate(text => void window._create(text), `${CC}/0/alpha\n<<agent('vault/default · created in run ab12cd34')>>\n${inert('Alpha body')}`)
   for (const name of [CC, `${CC}/0`, `${CC}/0/alpha`]) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+  // an item is shown before its element is read: after a _create the page holds only the item
+  // created last, so another item's element is absent until a re-render happens to include it,
+  // which the reads below raced (issues/The Delegation Row Reads A Null Elem.md)
+  const shown = async (name: string) => {
+    await page.evaluate(n => void (window as any).MindBox.set(n, { scroll: true }), name)
+    await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem, name), { timeout: 30_000 }).toBe(true)
+  }
+  await shown(`${CC}/0`)
   const ccMarks = () =>
     page.evaluate(
       // the element can be absent at a tick right after the creations (issues/The Delegation Row Reads A Null Elem.md, 2026-10-05): the poll waits for it instead of failing on the throw
@@ -951,6 +959,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(await depsOf(`${CC}/0`), 'the chat gains no edge from its reply').not.toContain(await idOf(`${CC}/0/alpha`))
   // the child renders its agent message under the template: the body in its frame, the
   // attribution shown (no publisher footer: a run id and duration it does not have)
+  await shown(`${CC}/0/alpha`)
   const alphaShape = await page.evaluate(n => {
     const e = window._item(n, true)!.elem!
     return { body: e.querySelector('.vault-result')?.textContent ?? '', attribution: e.textContent?.includes('created in run ab12cd34') ?? false }
@@ -958,6 +967,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(alphaShape.body).toContain('Alpha body')
   expect(alphaShape.attribution, 'the attribution is displayed').toBe(true)
   // a mark click in the chat navigates to the child
+  await shown(`${CC}/0`)
   const ccElem = await page.evaluate(n => window._item(n, true)!.elem!.id, `${CC}/0`)
   await page.locator(`[id="${ccElem}"] .vault-result mark[data-tag="#e2e_cc/0/alpha"]`).click()
   await expect.poll(box).toBe(`${CC}/0/alpha `)
