@@ -1224,13 +1224,19 @@
       if (!frames.has(frame)) frames.set(frame, [])
       frames.get(frame)!.push(elem)
     }
+    // a typeset marks its spans AS IT COMPLETES (the owner's, then each frame's), not at the job's end: the
+    // frames' first typeset awaits the load of their extensions, and a re-render of the item meanwhile is
+    // handed the already typeset spans back by the element cache; unmarked, the pass above took them for
+    // raw TeX without delimiters and put `$$` around their output (the owner, 2026-10-05)
+    const mark = spans => spans.forEach(span => span.hasAttribute('_rendered') || span.setAttribute('_rendered', Date.now().toString()))
     window['_typeset_queue'] = (window['_typeset_queue'] ?? Promise.resolve())
       .then(() => window['MathJax'].startup.promise)
-      .then(() => (owner.length ? window['MathJax'].typesetPromise(owner) : null))
+      .then(() => (owner.length ? window['MathJax'].typesetPromise(owner).then(() => mark(owner)) : null))
       .then(async () => {
         for (const spans of frames.values()) {
           try {
             await typesetInertMath(spans)
+            mark(spans)
           } catch (e) {
             console.error(e)
             spans.forEach(span => span.setAttribute('_rendered', 'failed'))
@@ -1747,6 +1753,10 @@
       let math = []
       itemdiv.querySelectorAll('span.math,span.math-display').forEach(elem => {
         if (elem.hasAttribute('_rendered')) return
+        // a span already typeset whose mark is pending (handed back by the element cache to a re-render while its
+        // job was still running, see renderMath) is rendered: never delimiters around its output (the owner,
+        // 2026-10-05: inline math shown between `$$`)
+        if (elem.querySelector('mjx-container')) return void elem.setAttribute('_rendered', Date.now().toString())
         // console.debug("rendering math", elem.innerHTML);
         // unwrap code blocks (should exist for both $``$ and $$``$$)
         let code

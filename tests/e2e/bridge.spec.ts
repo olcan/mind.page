@@ -415,6 +415,118 @@ test("an edited reply re-typesets its frame's math as a whole: a definition edit
   await expect.poll(() => glyphs(1)).toEqual({ pending: 0, zeros: 0, ones: 0, sums: 1, i: 0, j: 0, k: 1 })
 })
 
+test("the owner's math typeset before a reply frame's is marked at once: a re-render while the frame's typeset waits keeps it, no delimiters are inserted around rendered output", async ({ page }) => {
+  // the owner (2026-10-05, after inert_math_cache): "all inline math rendered with double dollar-signs on both
+  // sides as in $$...$$", the item's text intact, a re-render fixing it. The typeset pass inserts `$$`
+  // delimiters around a span whose text lacks them (the multi-line _math block's case) and tested that on
+  // any span not yet marked `_rendered`; an item's job marked its spans only at its end, after the frames'
+  // typesets, whose first prepare() on a page loads seven extension scripts, so a span already typeset but
+  // unmarked was handed back by the element cache to a re-render during that wait, and the pass wrapped
+  // its rendered output in `$$`. Now a typeset marks its spans as it completes, and the pass never inserts
+  // delimiters around a container. Here the frame's typeset is held at its document's render through
+  // MathJax's own retry signal (the frame document comes from HTMLHandler.prototype.create; its first
+  // render() throws `{retry}` with a promise this test releases, and handleRetriesFor re-runs it after):
+  // the owner's formulas are asserted typeset AND marked in that state, before any re-render (the early
+  // mark), then a child navigation re-renders the item (the frame element replaced: the premise) and the
+  // owner's spans come back from the element cache without delimiters; released, the frame typesets, and
+  // the re-render's own pass is seen to have run (a second frame document, for the frame's unmarked spans)
+  await loadAdmin(page)
+  const CHAT = '#e2e_mm'
+  const DEFS = '#e2e_mmdefs'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), `${DEFS} the chat delimiters, as values\n\`\`\`js\nconst user = ''\nconst agent = (...args) => ''\n\`\`\``)
+  await page.evaluate(text => void window._create(text), `${CHAT}/a #_e2e_mmdefs\n<<agent('vault/default · run ab12cd34')>>\n${inert('a body')}`)
+  await page.evaluate(() => {
+    const w = window as any
+    const proto = w.MathJax.startup.constructors.HTMLHandler.prototype
+    const create = proto.create
+    w.__e2e_hold_frame = true
+    w.__e2e_frame_docs = 0
+    proto.create = function (this: any, ...args: unknown[]) {
+      const doc = create.apply(this, args)
+      w.__e2e_frame_docs++
+      if (!w.__e2e_hold_frame) return doc
+      w.__e2e_hold_frame = false // the first frame document after arming, once
+      const render = doc.render.bind(doc)
+      let first = true
+      doc.render = () => {
+        if (first) {
+          first = false
+          w.__e2e_frame_held = true
+          throw { retry: new Promise<void>(resolve => void (w.__e2e_release_frame = resolve)) }
+        }
+        return render()
+      }
+      return doc
+    }
+  })
+  await page.evaluate(
+    text => void window._create(text),
+    `${CHAT} #_e2e_mmdefs chat with $\`y_0\`$ and $\`z^2\`$ in the owner's text\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/a, with $`x^2`$')}`
+  )
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_mm ?$/)
+  const state = () =>
+    page.evaluate(label => {
+      const w = window as any
+      const elem = window._item(label, true)?.elem
+      const frame = elem?.querySelector('.vault-result') ?? null
+      const all = elem ? [...elem.querySelectorAll('span.math, span.math-display')] : []
+      const shape = (spans: Element[]) => ({
+        spans: spans.length,
+        containers: spans.filter(s => s.querySelector('mjx-container')).length,
+        marked: spans.filter(s => s.hasAttribute('_rendered')).length,
+        // text of the span's own text nodes (inserted delimiters would be among them): a `$` present?
+        dollars: spans.filter(s => /\$/.test([...s.childNodes].filter(n => n.nodeType === Node.TEXT_NODE).map(n => n.textContent).join(''))).length,
+      })
+      return {
+        owner: shape(all.filter(s => !s.closest('.vault-result'))),
+        frame: shape(all.filter(s => !!s.closest('.vault-result'))),
+        held: !!w.__e2e_frame_held,
+        docs: w.__e2e_frame_docs as number,
+        frameReplaced: w.__mm ? frame !== w.__mm.frame : null,
+        ownerSame: w.__mm ? (() => {
+          const now = elem ? [...elem.querySelectorAll('mjx-container')].filter(c => !c.closest('.vault-result')) : []
+          return now.length === w.__mm.owner.length && now.every((c: Element, i: number) => c === w.__mm.owner[i] && c.isConnected)
+        })() : null,
+      }
+    }, CHAT)
+  // the window: the owner's formulas typeset, the frame's held
+  await expect.poll(() => state().then(s => `${s.owner.containers},${s.frame.containers},${s.held}`), { timeout: 20_000 }).toBe('2,0,true')
+  const before = await state()
+  // the early mark: the owner's spans are marked as their typeset completes, while the frame's typeset waits
+  // (soft, so the unfixed runtime also shows what the re-render then does to the unmarked spans)
+  expect.soft(before.owner, "the owner's spans while the frame's typeset waits: typeset, marked, no delimiters").toEqual({ spans: 2, containers: 2, marked: 2, dollars: 0 })
+  expect(before.docs, 'one frame document so far (the held one)').toBe(1)
+  await page.evaluate(label => {
+    const w = window as any
+    const elem = window._item(label, true)!.elem!
+    w.__mm = { frame: elem.querySelector('.vault-result'), owner: [...elem.querySelectorAll('mjx-container')].filter(c => !c.closest('.vault-result')) }
+  }, CHAT)
+  // a re-render while the frame waits: Down enters the child (the chat item re-renders, frames included)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_mm/a ')
+  await expect.poll(() => state().then(s => s.frameReplaced), { message: 'the frame element replaced by the re-render (the premise)' }).toBe(true)
+  // the re-render's typeset pass runs on a timeout: its verdict on the owner's spans is the mark it finds or
+  // the delimiters it inserted (the unfixed runtime); the pass is seen to have run once released (below)
+  await expect.poll(() => state().then(s => s.owner.marked + s.owner.dollars > 0), { timeout: 10_000 }).toBe(true)
+  const during = await state()
+  expect(during.owner, "the owner's spans after the re-render: typeset, marked, no delimiters").toEqual({ spans: 2, containers: 2, marked: 2, dollars: 0 })
+  expect(during.ownerSame, "the owner's typeset nodes came back from the element cache").toBe(true)
+  expect(during.frame.containers, 'the frame still waits').toBe(0)
+  await page.evaluate(() => void (window as any).__e2e_release_frame())
+  await expect.poll(() => state().then(s => `${s.frame.containers},${s.frame.marked}`), { timeout: 20_000 }).toBe('1,1')
+  // the re-render's pass queued a typeset for the frame's spans (cached untypeset, unmarked at the time): its
+  // job runs after the released one with a frame document of its own, and finds the math typeset
+  await expect.poll(() => state().then(s => s.docs), { message: "the re-render's pass ran: a second frame document" }).toBeGreaterThanOrEqual(2)
+  const after = await state()
+  expect(after.owner, "the owner's spans after the frame's typeset").toEqual({ spans: 2, containers: 2, marked: 2, dollars: 0 })
+  expect(after.frame, 'the frame: one formula, typeset, marked, no delimiters').toEqual({ spans: 1, containers: 1, marked: 1, dollars: 0 })
+  expect(after.ownerSame, "the owner's typeset nodes are the ones from before the re-render").toBe(true)
+})
+
 test("a reply's math present before MathJax's startup completes is typeset by the frame's own parser, never by a startup scan", async ({ page }) => {
   // inert_math review 2 R1: MathJax's automatic typesetting at startup scans the whole page with
   // the owner's parser; the app turns it off (src/app.html `startup.typeset: false`) and its own
