@@ -527,6 +527,96 @@ test("the owner's math typeset before a reply frame's is marked at once: a re-re
   expect(after.ownerSame, "the owner's typeset nodes are the ones from before the re-render").toBe(true)
 })
 
+test('the Down arrow prefers integer-named children, the smallest number first, over the children tagged in the item; Right and Left enumerate them in that order', async ({ page }) => {
+  // the owner (2026-10-05): a chat's turns and replies are its integer-named children (#chat/0, #chat/1, ...);
+  // Down from the chat should enter them in numeric order (1 before 10, not the label order) before the
+  // preference stack it had (the first child tag in the item, then the shortest nested name, then a tag
+  // child), and Right/Left enumerate the children in that same order (the owner's clarification): the
+  // numbers ascending, then the tagged children as before
+  await loadAdmin(page)
+  const CHAT = '#e2e_ic'
+  const DEFS = '#e2e_icdefs'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), `${DEFS} the chat delimiters, as values\n\`\`\`js\nconst user = ''\nconst agent = (...args) => ''\n\`\`\``)
+  for (const name of ['b', 'a']) await page.evaluate(text => void window._create(text), `${CHAT}/${name} #_e2e_icdefs\n<<agent('vault/default · run ab12cd34')>>\n${inert(`${name} body`)}`)
+  for (const n of ['2', '10', '1']) await page.evaluate(text => void window._create(text), `${CHAT}/${n} turn ${n}`)
+  await page.evaluate(
+    text => void window._create(text),
+    `${CHAT} #_e2e_icdefs chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/b and #/a')}`
+  )
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), CHAT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_ic ?$/)
+  // the chat's frame renders its two child tags (the first of them, #/b, was Down's choice before)
+  await expect
+    .poll(() => page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('.vault-result mark[data-tag]') ?? [])].map(m => m.getAttribute('data-tag')), CHAT), { timeout: 20_000 })
+    .toEqual(['#e2e_ic/b', '#e2e_ic/a'])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_ic/1 ')
+  // Right and Left enumerate the children in the same order: the numbers ascending, then the tagged
+  // children as before (#/b then #/a, the frame's order), wrapping around
+  for (const next of ['#e2e_ic/2 ', '#e2e_ic/10 ', '#e2e_ic/b ', '#e2e_ic/a ', '#e2e_ic/1 ']) {
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(query).toBe(next)
+  }
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(query).toBe('#e2e_ic/a ')
+})
+
+test('a _context parent: Down enters the smallest integer child and Right/Left enumerate the numbers, tagged or not, then the visible tags', async ({ page }) => {
+  // int_children review 0 B1: a parent tagged #_context steps its visible tags with the side arrows;
+  // Down's entry into an untagged integer child was a dead end there, and a tagged one skipped the
+  // untagged numbers. The numbers (here /1 and /2 untagged, /10 tagged) come first in numeric order,
+  // the parent's other visible tags after them in their order
+  await loadAdmin(page)
+  const PARENT = '#e2e_icx'
+  for (const n of ['10', 'b', '2', '1']) await page.evaluate(text => void window._create(text), `${PARENT}/${n} child ${n}`)
+  await page.evaluate(text => void window._create(text), `${PARENT} #_context see #/10 and #/b`)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), PARENT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_icx ?$/)
+  await expect.poll(() => page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('mark[title]') ?? [])].map(m => m.getAttribute('title')).filter(t => t?.startsWith(label + '/')), PARENT)).toEqual(['#e2e_icx/10', '#e2e_icx/b'])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_icx/1 ')
+  for (const next of ['#e2e_icx/2 ', '#e2e_icx/10 ', '#e2e_icx/b ', '#e2e_icx/1 ']) {
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(query).toBe(next)
+  }
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(query).toBe('#e2e_icx/b ')
+})
+
+test('Down takes an immediate integer child, not one a parent tag moved deeper in the subtree', async ({ page }) => {
+  // int_children review 0 B2: /1 carries a parent tag naming /branch, so its tree parent is the branch
+  // (its ancestors: the branch, then the root); the root's immediate children are /2 and /branch, and
+  // Down enters /2, as it did before the integer preference
+  await loadAdmin(page)
+  const ROOT = '#e2e_icm'
+  // a parent tag's target must be a CHAT item (src/lineage.ts): the lane has no #chat, so a stub root is
+  // created for the row and deleted at its end (as the tasks lane's row does), the branch depending on it
+  const savedId = (label: string) => page.evaluate(label => window._item(label, true)?.saved_id ?? null, label)
+  const hadChat = !!(await savedId('#chat'))
+  if (!hadChat) await page.evaluate(text => void window._create(text), '#chat #_autodep\nconfig')
+  await expect.poll(() => savedId('#chat'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(text => void window._create(text), `${ROOT} see #/2`)
+  await page.evaluate(text => void window._create(text), `${ROOT}/branch #_chat a branch`)
+  await page.evaluate(text => void window._create(text), `${ROOT}/1 #_e2e_icm/branch moved under the branch`)
+  await page.evaluate(text => void window._create(text), `${ROOT}/2 two`)
+  await expect.poll(() => page.evaluate(label => (window._item(label, true) as any)?.ancestors ?? null, `${ROOT}/1`), { timeout: 15_000 }).toEqual(['#e2e_icm/branch', '#e2e_icm'])
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_icm ?$/)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe('#e2e_icm/2 ')
+  if (!hadChat) {
+    await firestore().collection('items').doc((await savedId('#chat'))!).delete()
+    await expect.poll(() => savedId('#chat'), { timeout: 30_000 }).toBeNull()
+  }
+})
+
 test("a reply's math present before MathJax's startup completes is typeset by the frame's own parser, never by a startup scan", async ({ page }) => {
   // inert_math review 2 R1: MathJax's automatic typesetting at startup scans the whole page with
   // the owner's parser; the app turns it off (src/app.html `startup.typeset: false`) and its own

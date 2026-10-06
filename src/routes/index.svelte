@@ -4215,6 +4215,28 @@
     if (ids?.length == 1) return __item(ids[0]).ancestors ?? []
     return lineage?.ancestorsOfLabel(label) ?? []
   }
+  // the integer a child label carries right under its parent (`#x/12` under `#x`: 12), else null
+  function integerSuffix(label: string, parentLabel: string): number | null {
+    const prefix = parentLabel + '/'
+    if (!label.startsWith(prefix)) return null
+    const suffix = label.slice(prefix.length)
+    return /^\d+$/.test(suffix) ? parseInt(suffix) : null
+  }
+  // the parent's IMMEDIATE tree children named `<parent>/<integer>` (unique labels whose nearest
+  // ancestor is the parent: a child moved deeper by a parent tag is not one, review 0 B2), in numeric order
+  function integerChildLabels(parentLabel: string): string[] {
+    return _labels((label, ids) => ids.length == 1 && integerSuffix(label, parentLabel) !== null && labelLevels(label)[0] == parentLabel).sort(
+      (a, b) => integerSuffix(a, parentLabel)! - integerSuffix(b, parentLabel)!
+    )
+  }
+  // the labels with the parent's integer-named children first, in numeric order (1 before 10), the
+  // others after them in the order given: the order Down enters a parent's children and Right/Left
+  // enumerate them (a chat's turns and replies are its integer-named children)
+  function integerChildrenFirst(labels: string[], parentLabel: string): string[] {
+    const numbered = labels.filter(label => integerSuffix(label, parentLabel) !== null)
+    numbered.sort((a, b) => integerSuffix(a, parentLabel)! - integerSuffix(b, parentLabel)!)
+    return numbered.concat(labels.filter(label => integerSuffix(label, parentLabel) === null))
+  }
   // the tree's parent label of a label (lowercase): the unique item's tag parent when it has one,
   // else the textual parent (the label itself for a root)
   function parentLabelOf(label: string): string {
@@ -10545,13 +10567,17 @@
 
         // if context is based on nesting (vs _context tag), then we only navigate among other nested descendants, thus giving preference to nested context navigation over unstructured context navigation which can be much more confusing; we also extend navigation to untagged children
         const contextBasedOnNesting = contextLabel && !item(lastContext.getAttribute('data-item-id')).context
+        const selectedMarkIndex = selectedIndex // the selected visible tag (the _context stepping below)
+        // the children Right/Left enumerate, by label: the integer-named ones first in numeric order (the
+        // owner, 2026-10-05: a chat's turns and replies), then the others in the order they come
+        let labels: string[] = []
+        const targetLabel = editorText.trim().toLowerCase()
         if (contextBasedOnNesting) {
           // restrict visible tags to the tree's descendants (a tag child of the context qualifies)
           visibleTags = visibleTags.filter(t => labelLevels(t['title']?.toLowerCase() ?? '').includes(contextLabel))
           // expand w/ non-visible children, if any (the nested ones whose tree parent the context
           // still is, then its tag children), and determine selection based on target (i.e. query)
-          let labels = visibleTags.map(e => e['title'].toLowerCase())
-          const targetLabel = editorText.trim().toLowerCase()
+          labels = visibleTags.map(e => e['title'].toLowerCase())
           if (labelLevels(targetLabel).includes(contextLabel)) {
             labels = _.uniq(
               labels.concat(
@@ -10581,6 +10607,14 @@
           //   )
           // }
 
+        } else if (contextLabel && integerChildLabels(contextLabel).length) {
+          // a _context parent with integer-named children (review 0 B1): they are enumerated with the
+          // parent's visible tags (the tags in their order after the numbers), tagged or not, so Down's
+          // entry into one of them is no dead end
+          labels = _.uniq(integerChildLabels(contextLabel).concat(visibleTags?.map(e => e['title'].toLowerCase()) ?? []))
+        }
+        if (labels.length) {
+          labels = integerChildrenFirst(labels, contextLabel)
           // console.debug({ visibleTags, labels, contextLabel, targetLabel })
           selectedIndex = labels.indexOf(targetLabel)
           if (selectedIndex >= 0 && labels.length > 1) {
@@ -10595,11 +10629,12 @@
             update_dom().then(scrollToTarget)
             return
           }
-        } else if (selectedIndex >= 0) {
-          if (key == 'ArrowRight' && selectedIndex < visibleTags.length - 1)
-            visibleTags[selectedIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-          else if (key == 'ArrowLeft' && selectedIndex > 0)
-            visibleTags[selectedIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+        }
+        if (!contextBasedOnNesting && selectedMarkIndex >= 0) {
+          if (key == 'ArrowRight' && selectedMarkIndex < visibleTags.length - 1)
+            visibleTags[selectedMarkIndex + 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+          else if (key == 'ArrowLeft' && selectedMarkIndex > 0)
+            visibleTags[selectedMarkIndex - 1].dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
           return
         }
       }
@@ -10610,6 +10645,19 @@
       if (!_exists(targetLabel, false /* allow_multiple */)) targetLabel = null // avoid id-matching or multiple targets
       let nextTargetId
       if (targetLabel) {
+        // INTEGER-NAMED children come first, the smallest number first (the owner, 2026-10-05): the
+        // target's immediate tree children named `<target>/<integer>` (a chat's replies and turns), before
+        // the child tags of the item and the other nested names below; Right/Left enumerate them in the
+        // same order (integerChildrenFirst below)
+        const integerChild = integerChildLabels(targetLabel)[0]
+        if (integerChild) {
+          lastEditorChangeTime = 0 // force immediate update
+          forceNewStateOnEditorChange = true // add to history like click-based nav
+          onEditorChange(integerChild + ' ', true) // keep_times for consistency w/ mousedown w/ altKey:true
+          // note since we are using onEditorChange, we need to handle scrolling as needed
+          update_dom().then(scrollToTarget)
+          return
+        }
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context; note however target may not be treated as context if there are multiple nested children with the same label
         let child
         if (item(_item(targetLabel).id).context) {
