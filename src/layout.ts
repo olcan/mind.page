@@ -175,10 +175,7 @@ export function previewLayout<T>(items: any[], config: LayoutConfig, read: () =>
 // moves from the item onto the one above leaves the text where it is). a row right after a section
 // separator (the item returned to a column another item had left) overlaps the separator by its own
 // height (the css), as the pass's discount says, so it leaves the text where the row's top is (review 0
-// B1: a regroup that changed whether the item follows a separator read as no move). the owner
-// (2026-10-07): the arrow keys navigate through a query change, so the regroup at a navigation pushed
-// the item being read down; a regroup that would move the item in view is skipped (updateItemLayout in
-// index.svelte)
+// B1: a regroup that changed whether the item follows a separator read as no move)
 export function regroupMovesItem(items: any[], config: LayoutConfig, index: number): boolean {
   const place = (regroupTimeRows: boolean) =>
     previewLayout(items, { ...config, regroupTimeRows }, () => {
@@ -188,4 +185,42 @@ export function regroupMovesItem(items: any[], config: LayoutConfig, index: numb
       return `${item.column}:${item.pos + (item.timeString && !afterSeparator ? 24 : 0)}`
     })
   return place(true) != place(false)
+}
+
+// whether a query change's regroup of the time rows would move what the reader is looking at (the owner,
+// 2026-10-07: the arrow keys navigate through a query change, and a row the regroup put above the item
+// being read, or took from it, shifted it). the item held in place is the target when it stands in view
+// in its place (its column and top in the keeping pass as in the layout before the change: Down to a
+// child shown below the item, Up to the item above); else, with the previous target in view, the target
+// when it takes the previous target's place (Left or Right to a sibling, which lands below the same
+// context) WITH the row that place had, which the target takes over (written to it for the keeping pass
+// to read: its own row says where it stood among the rest, and a row is 24 px of the box, which decides
+// the column the box lands in, so the candidate is tried with the place's row and the target's own row
+// restored when it is not the place; review 0 B1), or the previous target itself when it keeps its place
+// (Down to a child the shown count hid, which appears below the item being read). nothing is held when
+// neither stands in view in a place the layout keeps (a target in view that the ranking moves elsewhere
+// included): the regroup runs, and the navigation's scroll finds the target. the regroup moves the held
+// item when its text's place differs between the regrouping and the keeping pass (regroupMovesItem); the
+// caller keeps the rows then (updateItemLayout in index.svelte). up to four passes previewed: the places
+// of the target and the previous target in one keeping pass, the candidate with the place's row in
+// another, then the two of the move check. index and previousIndex may be -1 (no target); inView reads
+// the page's layout before the change, for the target in its place and for the previous target
+export function regroupMovesReader(items: any[], config: LayoutConfig, index: number, previousIndex: number, inView: (item: any) => boolean): boolean {
+  const slot = (item: any) => `${item.column}:${item.pos}`
+  const keeping = { ...config, regroupTimeRows: false }
+  const target = index >= 0 ? items[index] : null
+  const previous = previousIndex >= 0 && previousIndex != index ? items[previousIndex] : null
+  const [targetKept, previousKept] = previewLayout(items, keeping, () => [target && slot(target), previous && slot(previous)])
+  let held = -1
+  if (target && targetKept == slot(target) && inView(target)) held = index
+  else if (previous && inView(previous)) {
+    if (target) {
+      const own = target.timeString
+      target.timeString = previous.timeString // the row of the place
+      if (previewLayout(items, keeping, () => slot(target)) == slot(previous)) held = index
+      else target.timeString = own
+    }
+    if (held < 0 && previousKept == slot(previous)) held = previousIndex
+  }
+  return held >= 0 && regroupMovesItem(items, config, held)
 }

@@ -1645,6 +1645,118 @@ test('time rows: the arrows navigate through a query change, which regroups noth
   await expect.poll(groups, { timeout: 15_000 }).toEqual(['now', null, '1h'])
 })
 
+test('time rows: the side arrows swap a sibling into the place of the item being read, which takes over the row of the place: no row for a sibling grouped apart from the parent, and the regroup runs for one whose grouping agrees', async ({ page }) => {
+  // the owner (2026-10-07): reloaded into a chat's child and stepping through its siblings with Left and
+  // Right, the siblings touched within the hour showed a "now" row above them and the others none, so the
+  // item being read shifted up and down with every step. A sibling navigation is a query change whose
+  // target lands where the previous target stood, below the same parent as context: the regroup gives it
+  // a row by its own bucket against the parent's, the keeping pass the row it had among the rest, and
+  // neither is where the eyes are; the target now takes over the row of the place (the previous
+  // target's), and the regroup runs only when its own grouping lands the text there too
+  // (regroupMovesReader). A root an hour old with three integer children: /0 and /2 an hour old (the
+  // root's bucket), /1 thirty minutes old (a bucket of its own in the lane, so a regroup heads its group
+  // among the rest)
+  await loadAdmin(page)
+  const ROOT = '#e2e_trs'
+  const [C0, C1, C2] = [0, 1, 2].map(i => `${ROOT}/${i}`)
+  for (const text of [`${ROOT} root`, `${C0} the first child`, `${C1} the second child`, `${C2} the third child`]) await page.evaluate(text => void window._create(text), text)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_trs ?$/)
+  await page.evaluate(ages => Object.entries(ages).forEach(([label, age]) => ((window as any).__items.find((i: any) => i.label == label).time -= age)), { [ROOT]: 3600e3, [C0]: 3600e3, [C1]: 1800e3, [C2]: 3600e3 })
+  const rows = (labels: string[]) =>
+    page.evaluate(labels =>
+      labels.map(label => {
+        const row = window._item(label, true)?.elem?.closest('.super-container')?.querySelector(':scope > .time')
+        return row ? row.textContent!.trim() : null
+      }),
+      labels
+    )
+  const group = (label: string) => page.evaluate(label => (window as any).__items.find((i: any) => i.label == label).timeString || null, label)
+  // the distance from the root's text to the target's (the inner containers, below the rows): the target's
+  // own row is 24 px of it, while a scroll moves both alike
+  const gap = (label: string) => page.evaluate(labels => labels.map(label => window._item(label, true)!.elem!.querySelector(':scope > .container')!.getBoundingClientRect().top).reduce((a, b) => b - a), [ROOT, label])
+  // an item's element against the band (the viewport's height less 200 px from the scroll position)
+  const inBand = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)!.elem!
+      return elem.offsetTop >= document.body.scrollTop && elem.offsetTop <= document.body.scrollTop + visualViewport!.height - 200
+    }, label)
+  const navigate = async (key: 'ArrowDown' | 'ArrowLeft' | 'ArrowRight', label: string) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+    await page.keyboard.press(key)
+    await expect.poll(query).toBe(`${label} `)
+  }
+  await navigate('ArrowDown', C0)
+  await expect.poll(() => rows([ROOT, C0]), { timeout: 15_000 }).toEqual(['1h', null]) // the first child, in the root's bucket, has no row
+  const place = await gap(C0)
+  await expect.poll(() => inBand(C0), { message: 'the item being read in the band (the premise; the navigation scrolls it there)' }).toBe(true)
+  await navigate('ArrowRight', C1)
+  expect(await rows([ROOT, C1]), 'the thirty-minute sibling takes over the place without a row').toEqual(['1h', null])
+  expect(await gap(C1), "its text where the first child's was").toBe(place)
+  await navigate('ArrowRight', C2)
+  expect(await rows([ROOT, C2]), 'the third child, in the root\'s bucket, takes over the place without a row').toEqual(['1h', null])
+  expect(await gap(C2), 'its text there too').toBe(place)
+  // the regroup ran for it, its own grouping agreeing with the place: the thirty-minute sibling, back among
+  // the rest, heads its group again (the layout's state; it may sit behind the shown count)
+  await expect.poll(() => group(C1), { timeout: 15_000 }).toMatch(/^\d+m$/)
+  await navigate('ArrowLeft', C1)
+  expect(await rows([ROOT, C1]), 'back on the thirty-minute sibling: the row of the place, none').toEqual(['1h', null])
+  expect(await gap(C1), 'its text in place').toBe(place)
+})
+
+test('time rows: Down into a child the shown count hides holds the item being read in place: the regroup that would give it a row is skipped', async ({ page }) => {
+  // the owner (2026-10-07: "Up/Down is also good to fix"): the earlier guard held the target's element
+  // alone, and a child behind the show toggle has none, so Down into it regrouped, and a row the regroup
+  // put above the item being read (soft-touched to now by a passive re-ranking after its rows were
+  // grouped) pushed it down, the child appearing below. The previous target in view keeping its place is
+  // held now (regroupMovesReader). The fixture of the arrows row: a root, its item and the item's child,
+  // an hour old; Down into the item; the child left behind the show toggle
+  await loadAdmin(page)
+  const ROOT = '#e2e_trh'
+  const ITEM = `${ROOT}/0`
+  const CHILD = `${ITEM}/0`
+  for (const text of [`${ROOT} root`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_trh ?$/)
+  await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM, CHILD])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${ITEM} `)
+  const rows = () =>
+    page.evaluate(labels =>
+      labels.map(label => {
+        const row = window._item(label, true)?.elem?.closest('.super-container')?.querySelector(':scope > .time')
+        return row ? row.textContent!.trim() : null
+      }),
+      [ROOT, ITEM]
+    )
+  const groups = () => page.evaluate(labels => labels.map(label => (window as any).__items.find((i: any) => i.label == label).timeString || null), [ROOT, ITEM, CHILD])
+  const shown = (label: string) => page.evaluate(label => !!window._item(label, true)?.elem, label)
+  const gap = () => page.evaluate(labels => labels.map(label => window._item(label, true)!.elem!.querySelector(':scope > .container')!.getBoundingClientRect().top).reduce((a, b) => b - a), [ROOT, ITEM])
+  const inBand = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)!.elem!
+      return elem.offsetTop >= document.body.scrollTop && elem.offsetTop <= document.body.scrollTop + visualViewport!.height - 200
+    }, label)
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', null])
+  expect(await shown(CHILD), 'the child behind the show toggle (the premise)').toBe(false)
+  const place = await gap()
+  // the passive re-ranking: the item soft-touched to now; the rows kept
+  await page.evaluate(label => (window._item(label, true) as any).touch(), ITEM)
+  await expect.poll(() => page.evaluate(label => Date.now() - (window as any).__items.find((i: any) => i.label == label).time < 60_000, ITEM)).toBe(true)
+  expect(await rows(), 'no row from the passive touch').toEqual(['1h', null])
+  expect(await shown(CHILD), 'the child still behind the show toggle').toBe(false)
+  await expect.poll(() => inBand(ITEM), { message: 'the item being read in the band (the premise)' }).toBe(true)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${CHILD} `)
+  expect(await rows(), 'the regroup skipped: no row on the item').toEqual(['1h', null])
+  expect(await gap(), "the item's text where it was").toBe(place)
+  expect(await groups(), 'the rows kept in the layout\'s state, the child\'s too').toEqual(['1h', null, null])
+})
+
 test('time rows: a fresh load groups the corpus although layouts ran over an empty corpus before the items arrived', async ({ browser }) => {
   // review 0 B1: the layouts before the items arrive certify no query. A COLD context (the warm page's
   // Firestore cache answers the first snapshot at once), a read-only visitor of the anonymous account,

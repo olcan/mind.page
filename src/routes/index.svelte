@@ -2268,6 +2268,7 @@
   // regroupTimeRows in src/layout.ts)
   let regroupTimeRowsPending = true
   let regroupTimeRowsForced = true // the pending regroup runs whatever it moves
+  let lastLayoutTarget = null // the target of the last layout: the item the reader was on at a query change
   let lastRankedQuery = null
   let lastTimeRowsColumns = null
 
@@ -2339,13 +2340,16 @@
       timeString: itemTimeString,
     }
     let regroupTimeRows = columnCount != lastTimeRowsColumns
+    const previousTarget = lastLayoutTarget
+    lastLayoutTarget = target
     if (regroupTimeRowsPending && items.length) {
-      // a query change's regroup is decided here, once: skipped when it would move the text of the target
-      // the owner is reading (its element on the page, in the band the navigation's scroll leaves alone;
-      // the owner, 2026-10-07: the arrow keys navigate through a query change too, and a row the regroup
-      // inserted above the item being read pushed it down), unless forced (an explicit time change, the
-      // initial grouping); an empty corpus consumes nothing
-      regroupTimeRows ||= regroupTimeRowsForced || !(targetInView(target) && regroupMovesItem(items, config, target.index))
+      // a query change's regroup is decided here, once: skipped when it would move what the owner is
+      // reading (regroupMovesReader: the target in view in its place, or the previous target in view,
+      // whose place the target takes or which keeps its own; an element on the page, in the band the
+      // navigation's scroll leaves alone; the owner, 2026-10-07: the arrow keys navigate through a query
+      // change too, and a row the regroup put above the item being read, or took from it, shifted it),
+      // unless forced (an explicit time change, the initial grouping); an empty corpus consumes nothing
+      regroupTimeRows ||= regroupTimeRowsForced || !regroupMovesReader(items, config, target ? target.index : -1, items.indexOf(previousTarget), targetInView)
       regroupTimeRowsPending = regroupTimeRowsForced = false
     }
     const layout = layoutItems(items, { ...config, regroupTimeRows })
@@ -3608,10 +3612,11 @@
   function inScrollBand(elem: HTMLElement): boolean {
     return elem.offsetTop >= document.body.scrollTop && elem.offsetTop <= document.body.scrollTop + visualViewport.height - 200
   }
-  // whether the target's element on the page stands in that band: the item the owner is reading, which a
-  // regroup of the time rows must not move (updateItemLayout; at the query change's layout the page still
-  // shows the layout before it, the DOM following a layout at the next flush). an item the shown count
-  // hides has no element, and one rendered off-screen (the hidden column) is not in view
+  // whether an item's element on the page stands in that band: the target or the previous target, the item
+  // the owner is reading, which a regroup of the time rows must not move (updateItemLayout; at the query
+  // change's layout the page still shows the layout before it, the DOM following a layout at the next
+  // flush). an item the shown count hides has no element, and one rendered off-screen (the hidden column)
+  // is not in view
   function targetInView(target): boolean {
     const elem = target && document.getElementById('super-container-' + target.id)
     if (!elem || elem.closest('.column')?.classList.contains('hidden')) return false
@@ -8148,7 +8153,7 @@
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence, overlayForeignKeys } from '../hidden_persistence'
   import { authStateAction } from '../session'
-  import { layoutItems, regroupMovesItem } from '../layout'
+  import { layoutItems, regroupMovesReader } from '../layout'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { layoutItems, previewLayout, regroupMovesItem, type LayoutConfig } from '../../src/layout.js'
+import { layoutItems, previewLayout, regroupMovesItem, regroupMovesReader, type LayoutConfig } from '../../src/layout.js'
 
 // synthetic-height tables for the per-item layout pass (see src/layout.ts): these pin the column
 // assignment thresholds, separator arrows, time-string grouping, above-fold marking and mover
@@ -217,6 +217,103 @@ test('a regroup that changes whether the item follows a section separator moves 
   items[1].time = 3
   expect(previewLayout(items, { ...cfg, regroupTimeRows: true }, () => [columns(), place()]), 'the regroup: the same column, position and row, no separator before it').toEqual([[[0, 5, 6], [1, 2, 3, 4]], [0, 520, '1d']])
   expect(regroupMovesItem(items, cfg, 6)).toBe(true)
+})
+
+test('what a query change holds in place: the target in view in its place; else the target taking the previous target\'s place, with that place\'s row; else the previous target in view keeping its place; nothing otherwise', () => {
+  // the owner (2026-10-07): Left and Right swap a sibling into the place of the item being read, below the
+  // same context, and its row there followed its own bucket (the regroup) or its stale row among the rest
+  // (the keeping pass), so the item being read shifted; Down into a child the shown count hid regrouped
+  // with nothing held, and a row above the item being read pushed it down. A root and its children: the
+  // first in the root's bucket, the second newer (a row of its own), then the rest; the children's query
+  // lists the root above the child as context
+  const cfg = config({ columnCount: 1 })
+  const [root, first, second, rest] = [item(3, 100), item(3, 100), item(5, 100), item(1, 100)]
+  const onFirst = [root, first, second, rest] // the first child's query: the second among the rest
+  layoutItems(onFirst, cfg)
+  expect(onFirst.map(it => [it.timeString, it.pos])).toEqual([['3d', 100], ['', 232], ['5d', 340], ['1d', 472]])
+  const before = onFirst.map(it => ({ ...it }))
+  // Right to the second child: it takes the first child's place, below the root; the first child, on the
+  // page, is the previous target. the regroup would row it (its bucket against the root's) 24 px below
+  // where the first child's text was, the keeping pass by the row it had among the rest: it takes over the
+  // row of the place instead (none), and the regroup moves it
+  const onSecond = [root, second, first, rest]
+  const onPage = (it: any) => it === root || it === first
+  expect(regroupMovesReader(onSecond, cfg, 1, 2, onPage)).toBe(true)
+  expect(second.timeString, 'the row of the place, written for the keeping pass').toBe('')
+  expect(onSecond.map(it => ({ ...it, timeString: it === second ? '5d' : it.timeString })), 'nothing else written, on the second child or the others').toEqual([before[0], before[2], before[1], before[3]])
+  layoutItems(onSecond, { ...cfg, regroupTimeRows: false })
+  expect([second.pos, second.timeString], "the keeping pass: the second child's text where the first's was").toEqual([232, ''])
+  // Right again, to the third child, in the root's bucket: it takes over the place's row (none), and its
+  // own grouping agrees: no move, the regroup runs
+  const third = item(3, 100)
+  const onThird = [root, third, second, first, rest]
+  expect(regroupMovesReader(onThird, cfg, 1, 2, it => it === root || it === second)).toBe(false)
+  layoutItems(onThird, cfg)
+  expect(onThird.map(it => it.timeString), 'the regroup: the second child heads its group among the rest').toEqual(['3d', '', '5d', '3d', '1d'])
+  // Left, back to the second child, which takes over the third's row (none) again; a sibling taking over a
+  // ROW (a place whose item was rowed) keeps it with its own text: the regroup would lift its text
+  const backToSecond = [root, second, third, first, rest]
+  expect(regroupMovesReader(backToSecond, cfg, 1, 2, it => it === root || it === third)).toBe(true)
+  layoutItems(backToSecond, { ...cfg, regroupTimeRows: false })
+  expect([second.pos, second.timeString]).toEqual([232, ''])
+  const [parent, rowed, plain] = [item(3, 100), item(5, 100), item(3, 100)]
+  layoutItems([parent, rowed, plain], cfg)
+  expect(rowed.timeString).toBe('5d')
+  expect(regroupMovesReader([parent, plain, rowed], cfg, 1, 2, it => it === parent || it === rowed), 'the regroup would drop the row the place had').toBe(true)
+  layoutItems([parent, plain, rowed], { ...cfg, regroupTimeRows: false })
+  expect([plain.pos, plain.timeString], 'the row kept, with the text of its own bucket').toEqual([232, '3d'])
+})
+
+test('what a query change holds in place: Down into a hidden child holds the item above it, a target in view in its place is held, a previous target that leaves its place holds nothing, nor does no target in view', () => {
+  const cfg = config({ columnCount: 1 })
+  const [root, parent, child] = [item(3, 100), item(3, 100), item(3, 100)]
+  const items = [root, parent, child]
+  layoutItems(items, cfg)
+  expect(items.map(it => it.timeString)).toEqual(['3d', '', ''])
+  parent.time = 9 // touched to now by a passive re-ranking: a regroup would row it, pushing the child down
+  // Down into the child, behind the shown count (no element): the parent, the previous target, keeps its
+  // place in view and is held; the regroup moves it
+  expect(regroupMovesReader(items, cfg, 2, 1, it => it === parent)).toBe(true)
+  // the child shown: the target in view in its place is held, and the parent's row moves it too
+  expect(regroupMovesReader(items, cfg, 2, 1, () => true)).toBe(true)
+  // nothing in view: nothing held
+  expect(regroupMovesReader(items, cfg, 2, 1, () => false)).toBe(false)
+  // no target (an empty query) with the previous target in view in its place: held
+  expect(regroupMovesReader(items, cfg, -1, 1, it => it === parent)).toBe(true)
+  // the same target (a re-ranking under the same name) in view in its place: as before
+  expect(regroupMovesReader(items, cfg, 1, 1, () => true)).toBe(true)
+  expect(regroupMovesReader(items, cfg, 1, -1, () => true), 'no previous target').toBe(true)
+  // a typed query that puts the child first, the root and the parent below it: the previous target (the
+  // parent) leaves its place, the target takes a new one; nothing held although the regroup rows the parent
+  const retyped = [child, root, parent]
+  expect(regroupMovesReader(retyped, cfg, 0, 2, () => true)).toBe(false)
+  expect(previewLayout(retyped, { ...cfg, regroupTimeRows: true }, () => retyped.map(it => it.timeString)), 'the regroup rows the parent').toEqual(['3d', '', '9d'])
+  expect(items.map(it => [it.timeString, it.pos]), 'the layout as before').toEqual([['3d', 100], ['', 232], ['', 340]])
+})
+
+test('a sibling takes the place with the row of the place: its own stale row would push it over a column break, which read as another place', () => {
+  // review 0 B1 (the reviewer's table): two columns, a root and two children of equal height, the second
+  // newer than the root's bucket; under the first child's query the second, rowed, spills to the second
+  // column. Right to the second child: with its stale row its box is 24 px taller and spills again in the
+  // keeping pass, so the first cut read it as not taking the first child's place and held nothing (the
+  // regroup ran, the second child landing in the second column, rowed); with the row of the place (none)
+  // it fits the first column exactly, where the first child's text was, and the regroup moves it
+  const cfg = config({ columnCount: 2, headerHeight: 100, screenHeight: 1000 })
+  const [root, first, second] = [item(3, 468), item(3, 212), item(5, 212)]
+  layoutItems([root, first, second], cfg)
+  expect([root, first, second].map(it => [it.column, it.pos, it.timeString])).toEqual([[0, 100, '3d'], [0, 600, ''], [1, 0, '5d']])
+  const swapped = [root, second, first]
+  const skip = regroupMovesReader(swapped, cfg, 1, 2, it => it === first)
+  expect(skip).toBe(true)
+  layoutItems(swapped, { ...cfg, regroupTimeRows: !skip })
+  expect([second.column, second.pos, second.timeString], "the second child where the first's text was, no row").toEqual([0, 600, ''])
+  // a sibling that takes no place (a third column's worth of context above it) has its own row restored
+  const [parent, before, after] = [item(3, 100), item(3, 100), item(5, 100)]
+  layoutItems([parent, before, after], config({ columnCount: 1 }))
+  expect(after.timeString).toBe('5d')
+  const far = item(3, 2000)
+  expect(regroupMovesReader([far, parent, after, before], config({ columnCount: 1 }), 2, 3, it => it === before)).toBe(false)
+  expect(after.timeString, 'its own row restored, the place not taken').toBe('5d')
 })
 
 test('a column leader gets a time string (and its height) even mid-group', () => {
