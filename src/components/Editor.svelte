@@ -751,6 +751,24 @@
       return
     }
 
+    // extend the selection to the text's start/end (the owner, 2026-10-06): Shift with Cmd/Ctrl keeps
+    // the selection's anchor and moves its focus to the edge, as Cmd does natively on a Mac (Ctrl has
+    // no native move here). The anchor is the end the focus is not at (`selectionDirection`); a
+    // DIRECTIONLESS selection (a mouse selection on a Mac, a restored one) has no focus yet, so the
+    // first Shift+arrow decides, as the browser does: Up keeps the far end, Down the near end; a
+    // collapsed caret is its own anchor. The edge comes into view as for the caret moves below; never
+    // an item jump. The two-modifier combinations returned above as the global shortcuts
+    if ((key == 'ArrowUp' || key == 'ArrowDown') && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+      e.preventDefault()
+      const direction = textarea.selectionDirection
+      const anchor =
+        direction == 'backward' || (direction == 'none' && key == 'ArrowUp') ? textarea.selectionEnd : textarea.selectionStart
+      if (key == 'ArrowUp') textarea.setSelectionRange(0, anchor, 'backward')
+      else textarea.setSelectionRange(anchor, textarea.value.length, 'forward')
+      revealEdge(key == 'ArrowUp')
+      return
+    }
+
     // jump to the previous/next item from the edges of the text: Cmd on a Mac, and Ctrl too, since
     // Super+arrows belong to the window manager on Linux. Away from the edge the caret goes there first:
     // Cmd+arrows do that natively on a Mac (left to the browser); Ctrl maps explicitly to the item's edges

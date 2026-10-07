@@ -881,6 +881,67 @@ test('ctrl+arrows at the edges of an item editor jump to the neighboring items, 
   await expect(page.locator(`#textarea-${first}`)).toBeHidden()
 })
 
+test('shift with cmd/ctrl+arrows in an item editor extends the selection to the start/end of the text around its anchor', async ({
+  page,
+}) => {
+  // the owner, 2026-10-06: Shift+⌘/⌃+↑/↓ keep the selection's anchor and move its focus to the text's
+  // edge (⌘ does this natively on a Mac; ⌃ has no native move, and the editor handles both the same
+  // way), never jumping to a neighboring item, even from the edge itself
+  await loadAdmin(page)
+  await page.evaluate(() => void window._create('#e2e_select/a item with a longer text to select in'))
+  await expect.poll(() => savedId(page, '#e2e_select/a'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => (window as any).MindBox.set('#e2e_select/a', { scroll: true }))
+  const id = await page.evaluate(() => window._item('#e2e_select/a', true)!.id)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  const textarea = page.locator(`#textarea-${id}`)
+  await expect(textarea).toBeFocused()
+  const caret = (at: number) =>
+    page.evaluate(([id, at]) => (document.getElementById('textarea-' + id) as HTMLTextAreaElement).setSelectionRange(at, at), [id, at] as const)
+  const selection = () =>
+    page.evaluate(id => {
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      return [t.selectionStart, t.selectionEnd, t.selectionDirection, t.value.length] as const
+    }, id)
+  const length = (await selection())[3]
+  await caret(5)
+  await page.keyboard.press('Shift+Control+ArrowUp')
+  expect(await selection(), 'the selection runs from the start to the caret, its focus at the start').toEqual([0, 5, 'backward', length])
+  await page.keyboard.press('Shift+Control+ArrowDown')
+  expect(await selection(), 'the anchor stays: the selection flips to run to the end').toEqual([5, length, 'forward', length])
+  await page.keyboard.press('Shift+Meta+ArrowUp')
+  expect(await selection(), 'Cmd the same, around the same anchor').toEqual([0, 5, 'backward', length])
+  await expect(textarea, 'from the start, Shift keeps the editor (no jump to a neighbor)').toBeFocused()
+  await page.keyboard.press('Shift+Control+ArrowUp')
+  await expect(textarea).toBeFocused()
+  expect(await selection(), 'and the selection is unchanged').toEqual([0, 5, 'backward', length])
+  await caret(0)
+  await page.keyboard.press('Shift+Meta+ArrowDown')
+  expect(await selection(), 'from the start, the whole text').toEqual([0, length, 'forward', length])
+  // a collapsed caret at an edge: the key moves nothing (the direction of a collapsed selection is
+  // immaterial, and a range set with one reports it)
+  await caret(0)
+  await page.keyboard.press('Shift+Control+ArrowUp')
+  expect((await selection()).slice(0, 2), 'a caret at the start stays a caret').toEqual([0, 0])
+  await caret(length)
+  await page.keyboard.press('Shift+Control+ArrowDown')
+  expect((await selection()).slice(0, 2), 'a caret at the end stays a caret').toEqual([length, length])
+  // a DIRECTIONLESS selection, as the mouse makes one on a Mac (review 0 B1): the first Shift+arrow
+  // decides which end moves, so Up keeps the selection's far end as the anchor and Down its near end
+  await page.evaluate(id => (document.getElementById('textarea-' + id) as HTMLTextAreaElement).setSelectionRange(5, 15), id)
+  expect((await selection())[2], 'the platform keeps a directionless selection (else this row proves nothing)').toBe('none')
+  await page.keyboard.press('Shift+Control+ArrowUp')
+  expect(await selection(), 'Up extends to the start keeping the far end').toEqual([0, 15, 'backward', length])
+  await page.keyboard.press('Shift+Control+ArrowDown')
+  expect(await selection(), 'the reversal keeps that anchor').toEqual([15, length, 'forward', length])
+  await page.evaluate(id => (document.getElementById('textarea-' + id) as HTMLTextAreaElement).setSelectionRange(5, 15), id)
+  await page.keyboard.press('Shift+Meta+ArrowDown')
+  expect(await selection(), 'Down from a directionless selection keeps the near end').toEqual([5, length, 'forward', length])
+  await page.keyboard.press('Escape') // nothing edited: the editor closes
+  await expect(textarea).toBeHidden()
+})
+
 test('ctrl+alt+i opens the image dialog like shift+cmd+i, in an item editor and from the window', async ({ page }) => {
   // the image shortcut's Ctrl form (2026-09-28): Ctrl+Shift+I is the browsers' devtools, so Ctrl+Alt+I
   await loadAdmin(page)
