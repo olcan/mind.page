@@ -138,3 +138,54 @@ export function layoutItems(items: any[], config: LayoutConfig): LayoutAggregate
 
   return { columnHeights, columnLastItem, columnItemCount, topMovers, newestTime, oldestTime, oldestTimeString, totalItemHeight }
 }
+
+// the per-item fields the pass writes (the ones previewLayout restores)
+const LAYOUT_FIELDS = [
+  'timeString',
+  'timeOutOfOrder',
+  'outerHeight',
+  'nextColumn',
+  'nextItemInColumn',
+  'column',
+  'arrows',
+  'aboveFold',
+  'leader',
+  'pos',
+  'mover',
+  'lastVisible',
+  'lastColumn',
+  'lastPos',
+] as const
+
+// runs the pass to answer a question and leaves no layout behind: every field the pass writes is
+// restored (a pass reads the rows and positions of the one before it)
+export function previewLayout<T>(items: any[], config: LayoutConfig, read: () => T): T {
+  const saved = items.map(item => LAYOUT_FIELDS.map(field => item[field]))
+  try {
+    layoutItems(items, config)
+    return read()
+  } finally {
+    items.forEach((item, index) => LAYOUT_FIELDS.forEach((field, f) => (item[field] = saved[index][f])))
+  }
+}
+
+// whether regrouping the time rows (against keeping them) moves an item's text: its column, or its top
+// in the column together with its own row, which sits above the text (a row appearing or disappearing
+// above the item in its column, on the item itself, or a column break the row heights flip; a row that
+// moves from the item onto the one above leaves the text where it is). a row right after a section
+// separator (the item returned to a column another item had left) overlaps the separator by its own
+// height (the css), as the pass's discount says, so it leaves the text where the row's top is (review 0
+// B1: a regroup that changed whether the item follows a separator read as no move). the owner
+// (2026-10-07): the arrow keys navigate through a query change, so the regroup at a navigation pushed
+// the item being read down; a regroup that would move the item in view is skipped (updateItemLayout in
+// index.svelte)
+export function regroupMovesItem(items: any[], config: LayoutConfig, index: number): boolean {
+  const place = (regroupTimeRows: boolean) =>
+    previewLayout(items, { ...config, regroupTimeRows }, () => {
+      const item = items[index]
+      const afterSeparator =
+        index > 0 && items[index - 1].column != item.column && items.slice(0, index - 1).some(it => it.column == item.column)
+      return `${item.column}:${item.pos + (item.timeString && !afterSeparator ? 24 : 0)}`
+    })
+  return place(true) != place(false)
+}

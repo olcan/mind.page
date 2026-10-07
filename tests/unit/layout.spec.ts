@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { layoutItems, type LayoutConfig } from '../../src/layout.js'
+import { layoutItems, previewLayout, regroupMovesItem, type LayoutConfig } from '../../src/layout.js'
 
 // synthetic-height tables for the per-item layout pass (see src/layout.ts): these pin the column
 // assignment thresholds, separator arrows, time-string grouping, above-fold marking and mover
@@ -165,6 +165,58 @@ test('without a regroup, a new first item still gets a row, a pinned item none, 
   const fixed_items = [item(3, 100, { timeString: '3d' }), item(2, 100, { timeString: '2d' })]
   layoutItems(fixed_items, config({ columnCount: 1, fixed: true, regroupTimeRows: false }))
   expect(fixed_items.map(it => it.timeString)).toEqual(['', ''])
+})
+
+test('a preview leaves no layout behind: every field the pass writes is restored', () => {
+  const items = [item(3, 100), item(3, 100), item(2, 100)]
+  layoutItems(items, config({ columnCount: 1 }))
+  items[1].time = 2 // a regroup would give it a row
+  const before = items.map(it => ({ ...it }))
+  const rows = previewLayout(items, config({ columnCount: 1 }), () => items.map(it => it.timeString))
+  expect(rows).toEqual(['3d', '2d', ''])
+  expect(items).toEqual(before)
+})
+
+test('whether a regroup moves an item: a row it would add above the item or on it, or drop above, moves it; a row below it, or one moving onto the item above, does not', () => {
+  // the owner (2026-10-07): the arrows navigate through a query change, and the regroup at one pushed the
+  // item being read down; such a regroup is skipped (updateItemLayout in index.svelte decides with this)
+  const items = [item(3, 100), item(3, 100), item(3, 100), item(2, 100)]
+  layoutItems(items, config({ columnCount: 1 }))
+  expect(items.map(it => it.timeString)).toEqual(['3d', '', '', '2d'])
+  items[1].time = 9 // touched to now: a regroup would give it a row, above the third item
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 2), 'a row above').toBe(true)
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 1), 'its own row, above its text').toBe(true)
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 0), 'the first item keeps its row').toBe(false)
+  items[1].time = 3
+  items[3].time = 1 // the last row's text refreshes either way, the row stays
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 2), 'a change below').toBe(false)
+  items[3].time = 3 // the last row would go: nothing above the third item changes
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 2)).toBe(false)
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 3), 'the dropped row lifts its text').toBe(true)
+  items[2].time = items[3].time = 2 // the last row would move onto the third item: the last item's text stays where it is
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 3)).toBe(false)
+  expect(regroupMovesItem(items, config({ columnCount: 1 }), 2), 'the third item gains the row').toBe(true)
+  expect(items.map(it => it.timeString), 'the layout as before').toEqual(['3d', '', '', '2d'])
+})
+
+test('a regroup that changes whether the item follows a section separator moves its text: a row after a separator overlaps it', () => {
+  // review 0 B1: two columns; the target (the last item) returns to the first column after a separator,
+  // its row overlapping the separator (the css pulls a timed item up by the row's height there, the
+  // pass's discount), so its text sits at the row's top; the regroup rows the second item, which spills
+  // to the second column, and the sixth returns to the first column before the target, which then
+  // follows it directly with its row above its text: the same column, position and row, the text 24 px
+  // lower. the first cut compared the column, position and row alone and read no move
+  const heights = [108, 92, 212, 260, 260, 92, 44]
+  const items = [2, 2, 1, 1, 3, 2, 1].map((time, i) => item(time, heights[i]))
+  const cfg = config({ columnCount: 2, headerHeight: 200, screenHeight: 600 })
+  layoutItems(items, cfg)
+  const columns = () => [0, 1].map(column => items.map((it, i) => (it.column == column ? i : -1)).filter(i => i >= 0))
+  expect(columns()).toEqual([[0, 1, 6], [2, 3, 4, 5]])
+  const place = () => [items[6].column, items[6].pos, items[6].timeString]
+  expect(place()).toEqual([0, 520, '1d'])
+  items[1].time = 3
+  expect(previewLayout(items, { ...cfg, regroupTimeRows: true }, () => [columns(), place()]), 'the regroup: the same column, position and row, no separator before it').toEqual([[[0, 5, 6], [1, 2, 3, 4]], [0, 520, '1d']])
+  expect(regroupMovesItem(items, cfg, 6)).toBe(true)
 })
 
 test('a column leader gets a time string (and its height) even mid-group', () => {

@@ -2261,9 +2261,13 @@
   let layoutCount = 0 // exposed as window.__layoutCount for tests
   // the time rows regroup when the APPLIED ranking's query changed (set where onEditorChange sorts, so a
   // layout during the editor's debounce or before the items are initialized certifies no query: time_rows
-  // review 0 B1/B2), on the owner's explicit time change (onItemTouch) and on a column change; the first
-  // layout regroups (see updateItemLayout and regroupTimeRows in src/layout.ts)
+  // review 0 B1/B2), unless the regroup would move the target in view (the owner, 2026-10-07: the arrow
+  // keys navigate through a query change, and a row inserted above the item being read pushed it down;
+  // see updateItemLayout), on the owner's explicit time change (onItemTouch, forced: the groups follow
+  // whatever moves) and on a column change; the first layout regroups (see updateItemLayout and
+  // regroupTimeRows in src/layout.ts)
   let regroupTimeRowsPending = true
+  let regroupTimeRowsForced = true // the pending regroup runs whatever it moves
   let lastRankedQuery = null
   let lastTimeRowsColumns = null
 
@@ -2324,8 +2328,7 @@
     // keeps each row as it is, its text refreshed (see regroupTimeRows in src/layout.ts). the shown count
     // plays no part: the grouping runs over every item, hidden ones included, so a "show more" reveals
     // rows already grouped, and the count itself follows the time groups a soft touch changes
-    const regroupTimeRows = regroupTimeRowsPending || columnCount != lastTimeRowsColumns
-    const layout = layoutItems(items, {
+    const config = {
       columnCount,
       headerHeight: headerdiv ? headerdiv.offsetHeight : defaultHeaderHeight,
       screenHeight: outerHeight,
@@ -2334,9 +2337,18 @@
       hideIndex,
       fixed,
       timeString: itemTimeString,
-      regroupTimeRows,
-    })
-    if (regroupTimeRows && items.length) regroupTimeRowsPending = false // an empty corpus consumes nothing
+    }
+    let regroupTimeRows = columnCount != lastTimeRowsColumns
+    if (regroupTimeRowsPending && items.length) {
+      // a query change's regroup is decided here, once: skipped when it would move the text of the target
+      // the owner is reading (its element on the page, in the band the navigation's scroll leaves alone;
+      // the owner, 2026-10-07: the arrow keys navigate through a query change too, and a row the regroup
+      // inserted above the item being read pushed it down), unless forced (an explicit time change, the
+      // initial grouping); an empty corpus consumes nothing
+      regroupTimeRows ||= regroupTimeRowsForced || !(targetInView(target) && regroupMovesItem(items, config, target.index))
+      regroupTimeRowsPending = regroupTimeRowsForced = false
+    }
+    const layout = layoutItems(items, { ...config, regroupTimeRows })
     lastTimeRowsColumns = columnCount
     if (layoutSignature() != layoutBefore) items = items // render the new layout
     const topMovers = layout.topMovers
@@ -3591,18 +3603,27 @@
     replaceState(Object.assign(history.state ?? sessionStateHistory[sessionStateHistoryIndex] ?? {}, { hideIndex }))
   }
 
+  // whether an element's top stands in the band of the viewport a target is left alone in: at or below the
+  // scroll position and above the lowest 200 px (a target outside it is brought to the upper quarter)
+  function inScrollBand(elem: HTMLElement): boolean {
+    return elem.offsetTop >= document.body.scrollTop && elem.offsetTop <= document.body.scrollTop + visualViewport.height - 200
+  }
+  // whether the target's element on the page stands in that band: the item the owner is reading, which a
+  // regroup of the time rows must not move (updateItemLayout; at the query change's layout the page still
+  // shows the layout before it, the DOM following a layout at the next flush). an item the shown count
+  // hides has no element, and one rendered off-screen (the hidden column) is not in view
+  function targetInView(target): boolean {
+    const elem = target && document.getElementById('super-container-' + target.id)
+    if (!elem || elem.closest('.column')?.classList.contains('hidden')) return false
+    return inScrollBand(elem)
+  }
   // the position that brings the target item (the item the query names) into view, or null when there is
   // no target (can happen even under unique match, e.g. for #log items) or it is already in view: if the
   // target is too far up or down, it goes to ~upper-middle, snapping up to the header
   function targetScrollPosition(): number | null {
     const target = document.querySelector(`.super-container.target`) as HTMLElement
-    if (!target) return null
-    if (
-      target.offsetTop < document.body.scrollTop ||
-      target.offsetTop > document.body.scrollTop + visualViewport.height - 200
-    )
-      return Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4)
-    return null
+    if (!target || inScrollBand(target)) return null
+    return Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4)
   }
   function scrollToTarget() {
     const y = targetScrollPosition()
@@ -7501,7 +7522,7 @@
       items[index].time = Date.now()
     }
     saveItem(items[index].id)
-    regroupTimeRowsPending = true // an explicit time change (the index button; a run with touch_first): the next layout regroups the time rows
+    regroupTimeRowsPending = regroupTimeRowsForced = true // an explicit time change (the index button; a run with touch_first): the next layout regroups the time rows, whatever it moves
     lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText) // item time has changed
     // onEditorChange(""); // item time has changed, and editor cleared
@@ -8127,7 +8148,7 @@
   import { prefetchThenInstall, runInitializationAttempt, settleAuthorityLease } from '../startup'
   import { createHiddenPersistence, overlayForeignKeys } from '../hidden_persistence'
   import { authStateAction } from '../session'
-  import { layoutItems } from '../layout'
+  import { layoutItems, regroupMovesItem } from '../layout'
 
   let consoleLog = []
   const consoleLogMaxSize = 10000
@@ -8827,7 +8848,7 @@
       })
     })
     finalizeStateOnEditorChange = true // make initial empty state final
-    regroupTimeRowsPending = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
+    regroupTimeRowsPending = regroupTimeRowsForced = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
     onEditorChange('') // initial sorting
     // the label tree of every item (the tag parents, ancestries, adoptions and closures at once)
     // changes are handled in itemTextChanged (w/ update_deps==true)

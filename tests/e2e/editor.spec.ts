@@ -1536,6 +1536,115 @@ test('time rows: a query TYPED into the mindbox regroups when it applies, not at
   await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', 'now']) // the item, soft-touched to now, starts its group: the typed query's regroup
 })
 
+test('time rows: the arrows navigate through a query change, which regroups nothing when the regroup would move the item in view; the skip is consumed; a target out of view regroups; an explicit touch regroups whatever moves', async ({ page }) => {
+  // the owner (2026-10-07): the time rows regroup on a query change, and the arrow keys navigate through
+  // one, so a row the regroup inserted above the item being read pushed it down at the navigation. A root,
+  // the item under it and the item's child, all an hour old; Down enters the item with the root above it
+  // as context, the child shown below it; the item soft-touched to now (the passive re-ranking, as in the
+  // first row); Down to the child, whose regroup would give the item a "now" row above the child and the
+  // child its own "1h" row: skipped, the rows unchanged and the item's text where it was. The skip is
+  // consumed, not deferred: with the page at its top (the child below the band a navigation leaves
+  // stationary) a layout pass still keeps the rows. A navigation to the item there, below the band,
+  // regroups: the rows catch up in the layout's state. The owner's explicit touch (the index button) then
+  // regroups whatever moves: the root touched to now while the item, the target, stands in the band
+  await loadAdmin(page)
+  const ROOT = '#e2e_trn'
+  const ITEM = `${ROOT}/0`
+  const CHILD = `${ITEM}/0`
+  for (const text of [`${ROOT} root`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  await expect.poll(query).toMatch(/^#e2e_trn ?$/)
+  await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM, CHILD])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${ITEM} `)
+  // the child shown below the item (the lanes' shown count leaves it behind the show toggle)
+  const shown = (label: string) => page.evaluate(label => !!window._item(label, true)?.elem, label)
+  const reveal = async (label: string) => {
+    if (!(await shown(label))) await page.evaluate(() => document.querySelector('.toggle.show')!.dispatchEvent(new Event('click')))
+    await expect.poll(() => shown(label)).toBe(true)
+  }
+  await reveal(CHILD)
+  const rows = () =>
+    page.evaluate(labels =>
+      labels.map(label => {
+        const row = window._item(label, true)?.elem?.closest('.super-container')?.querySelector(':scope > .time')
+        return row ? row.textContent!.trim() : null
+      }),
+      [ROOT, ITEM, CHILD]
+    )
+  const groups = () => page.evaluate(labels => labels.map(label => (window as any).__items.find((i: any) => i.label == label).timeString || null), [ROOT, ITEM, CHILD])
+  // an item's element against the band (the viewport's height less 200 px from the scroll position)
+  const band = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)!.elem! // the super-container
+      const [top, scrollTop, height] = [elem.offsetTop, document.body.scrollTop, visualViewport!.height]
+      return { top, scrollTop, height, inside: top >= scrollTop && top <= scrollTop + height - 200 }
+    }, label)
+  // scrolls the page to y and retries until the position is still there at a sample 200 ms later: a
+  // navigation's deferred scroll to its target and a layout's scroll to a target a late height has moved
+  // land a few frames late on the full lane's busier page (two full gates found the page back at the
+  // child after a scroll to its top, where the row alone never did)
+  const settleScroll = async (y: number) => {
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(y => document.body.scrollTo(0, y), y)
+          await new Promise(resolve => setTimeout(resolve, 200))
+          return page.evaluate(y => Math.abs(document.body.scrollTop - y) <= 2, y)
+        },
+        { timeout: 15_000 }
+      )
+      .toBe(true)
+  }
+  await expect.poll(rows, { timeout: 15_000 }).toEqual(['1h', null, null])
+  // the distance from the root's text to the item's (the inner containers, below the rows): a row on the
+  // item, the one the regroup would put above the child, is 24 px of it, while a scroll moves both alike;
+  // the child's position is no witness, since the lanes' hide toggle above the revealed child leaves with
+  // the query change
+  const gap = () => page.evaluate(labels => labels.map(label => window._item(label, true)!.elem!.querySelector(':scope > .container')!.getBoundingClientRect().top).reduce((a, b) => b - a), [ROOT, ITEM])
+  const before = await gap()
+  // the passive re-ranking: the item soft-touched to now (as a running-state change or a remote change does
+  // through onEditorChange); the rows kept, the child shown still (revealed again should the count hide it)
+  await page.evaluate(label => (window._item(label, true) as any).touch(), ITEM)
+  await expect.poll(() => page.evaluate(label => Date.now() - (window as any).__items.find((i: any) => i.label == label).time < 60_000, ITEM)).toBe(true)
+  await reveal(CHILD)
+  expect(await rows(), 'no row from the passive touch').toEqual(['1h', null, null])
+  const premise = await band(CHILD)
+  expect(premise.inside, `the child in the band before the navigation: ${JSON.stringify(premise)}`).toBe(true)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query).toBe(`${CHILD} `)
+  expect(await rows(), 'the regroup skipped: no row on the item or the child').toEqual(['1h', null, null])
+  expect(await gap(), "the item's text did not move relative to the root's").toBe(before)
+  // consumed, not deferred: at the page's top the child (the target) stands below the band, and a layout
+  // pass (the test hook) still keeps the rows: a deferred regroup would run here, the target out of view
+  await settleScroll(0)
+  const outside = await band(CHILD)
+  expect(outside.inside, `the child outside the band at the page's top: ${JSON.stringify(outside)}`).toBe(false)
+  await page.evaluate(() => (window as any).__layout())
+  expect(await rows(), 'the rows kept by a layout with the target out of view').toEqual(['1h', null, null])
+  // the catch-up: a navigation to the item, below the band too (alt on its label keeps times), regroups: the
+  // item's "now" row and the child's "1h" row, in the layout's state (the child sits behind the shown
+  // count again under the item's query). The page is scrolled to its top again first: the layout pass
+  // above may scroll to the target it finds moved, which changes nothing about the rows it kept
+  await settleScroll(0)
+  const itemOutside = await band(ITEM)
+  expect(itemOutside.inside, `the item outside the band at the page's top: ${JSON.stringify(itemOutside)}`).toBe(false)
+  await page.evaluate(label => window._item(label, true)!.elem!.querySelector('mark.label')!.dispatchEvent(new MouseEvent('mousedown', { altKey: true })), ITEM)
+  await expect.poll(query).toBe(`${ITEM} `)
+  await expect.poll(groups, { timeout: 15_000 }).toEqual(['1h', 'now', '1h'])
+  // the explicit touch is forced: the root touched to now through its index button with the item, the
+  // target, in the band; the regroup drops the item's row (its text lifted) and runs regardless
+  await settleScroll(await page.evaluate(label => window._item(label, true)!.elem!.offsetTop - 100, ITEM))
+  const inside = await band(ITEM)
+  expect(inside.inside, `the item in the band before the touch: ${JSON.stringify(inside)}`).toBe(true)
+  await page.evaluate(label => window._item(label, true)!.elem!.querySelector('.button.index')!.dispatchEvent(new MouseEvent('click', { bubbles: true })), ROOT)
+  await expect.poll(() => page.evaluate(label => Date.now() - (window as any).__items.find((i: any) => i.label == label).time < 60_000, ROOT)).toBe(true)
+  await expect.poll(groups, { timeout: 15_000 }).toEqual(['now', null, '1h'])
+})
+
 test('time rows: a fresh load groups the corpus although layouts ran over an empty corpus before the items arrived', async ({ browser }) => {
   // review 0 B1: the layouts before the items arrive certify no query. A COLD context (the warm page's
   // Firestore cache answers the first snapshot at once), a read-only visitor of the anonymous account,
