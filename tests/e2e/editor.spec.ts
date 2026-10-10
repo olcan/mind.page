@@ -2441,3 +2441,30 @@ test('no link on the page shows a focus ring', async ({ page }) => {
   })
   expect(rings).toEqual({ inItem: [true, 'none'], outside: [true, 'none'] })
 })
+
+test('a <style> after the label keeps the header minimal and applies as item-specific css; visible html after the label does not', async ({ page }) => {
+  // item-specific css lives in a <style> whose #item the renderer rewrites to the element's id
+  // (Item.svelte); html BEFORE the label is moved off the label line into its own block, so the
+  // place for it is after the label on the first line, where it has no box and must not unset
+  // headerMinimal, which the #chat styles float a chat's role header beside (the owner,
+  // 2026-10-10: the header dropped a line whenever a chat carried such a style)
+  await loadAdmin(page)
+  await page.evaluate(() =>
+    window._create(
+      ['#e2e_hdr_style <style> #item .e2e_hdr_probe { color: rgb(1, 2, 3) } </style>', 'body <span class="e2e_hdr_probe">probe</span>'].join('\n')
+    )
+  )
+  await page.evaluate(() => void window._create('#e2e_hdr_span <span>after</span>'))
+  await expect.poll(() => savedId(page, '#e2e_hdr_style'), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => savedId(page, '#e2e_hdr_span'), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => void (location.hash = '#e2e_hdr_style')) // bring it up so it renders
+  const probe = page.locator('.e2e_hdr_probe')
+  await expect(probe).toBeVisible({ timeout: 30_000 })
+  await expect(probe, 'the style applies to the item').toHaveCSS('color', 'rgb(1, 2, 3)')
+  const elemId = (name: string) => page.evaluate(name => window._item(name, true)?.id ?? null, name) // the element id is the item's id
+  await expect(page.locator(`#item-${await elemId('#e2e_hdr_style')}`)).toHaveClass(/\bheaderMinimal\b/)
+  await page.evaluate(() => void (location.hash = '#e2e_hdr_span'))
+  const span = page.locator(`#item-${await elemId('#e2e_hdr_span')}`)
+  await expect(span).toBeVisible({ timeout: 30_000 })
+  await expect(span, 'visible html after the label is not minimal').not.toHaveClass(/\bheaderMinimal\b/)
+})

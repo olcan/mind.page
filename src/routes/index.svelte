@@ -4571,8 +4571,13 @@
       .trim() // we trim but leave uppercase for labelText
     item.label = item.header.toLowerCase().startsWith(item.tagsVisible[0]) ? item.tagsVisible[0] : ''
     item.labelText = item.header.slice(0, item.label.length /* can be 0 */)
-    // header is "minimal" if it is just the label (if any), hidden tags, and whitespace
+    // header is "minimal" if it is just the label (if any), hidden tags, and whitespace; a style
+    // tag after the label (item-specific css, see Item.svelte's #item rewrite) has no box and
+    // counts as nothing, unlike visible html, which would widen a floated header (the #chat
+    // styles); [s] keeps the literal tag out of this file, like Item.svelte's rewrite
     item.headerMinimal = item.header
+      .replace(/<[s]tyle>.*?<\/[s]tyle>/g, '')
+      .trim()
       .split(/\s+/)
       .every(t => t == item.label || (t.startsWith('#_') && tagRegex.test(t)))
     item.labelUnique ??= false
