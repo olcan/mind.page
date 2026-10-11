@@ -2399,6 +2399,268 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   await expect(mindbox(page)).toHaveValue('#e2e_named/p')
 })
 
+test('a change of the document width scrolls the item the query names back into view: at the layout at the new width and at the one its re-measured heights trigger; a scroll by hand or an Up after the first correction supersedes it; the window expires', async ({ page }) => {
+  // the owner (2026-10-11): going full-screen and back lost the position, the reflow moving the items under
+  // a scroll position that stays. A layout at a new document width opens a 2 s window in which every layout
+  // brings the target back into view (updateItemLayout's scroll, through scrollToTarget: a no-op for a target
+  // in view) unless the page was scrolled away from the position the last target scroll left (reflowCorrecting).
+  // A page without a target is deferred.
+  // THE FIXTURE: a root whose block is four viewport widths high (8000 px at 2000, 6000 at 1500, 4000 at
+  // 1000), a middle item of a fixed height, and a short leaf, the query naming the leaf (the pinned items,
+  // the root and the middle item list above it). The layout's balancing walk (layoutItems) puts the middle
+  // item in the column the root is not in, and the leaf after it stays in that column only while it is at
+  // most 450 px above the root's, or fits within 810 px of it (670 px for a short leaf). The middle item's
+  // height is 7260 px plus the SPLIT, the root's column base less the other column's height, measured with
+  // the root laid out (the seed's pinned items are not balanced: one is tall): at 2000 (the root 8000) the
+  // leaf follows the middle item, 7260 < 8670; at 1500 (the root 6000) it goes to the root's column,
+  // 7260 > 6670. The layout at a new width still uses the root's height of the old width, so the leaf changes
+  // column only at the layout its re-measured height triggers (the reflow re-renders the items, their
+  // afterUpdate re-measures, tryLayout runs 250 ms later, held 500 ms past a scroll): at 2000 the second
+  // layout takes it from below the 8000 px root to below the middle item, 820 px up; at 1500 from below the
+  // middle item to below the 6000 px root, 1180 px up. The root's block is read at every width (the
+  // premise), and so is each layout (window.__layoutCount)
+  const S = 2000 // two columns of 1000 px (the column's maximum width)
+  const N = 1500 // two columns of 750 px (the minimum)
+  await page.setViewportSize({ width: S, height: 900 })
+  await loadAdmin(page)
+  const names = ['#e2e_reflow', '#e2e_reflow/mid', '#e2e_reflow/mid/leaf'] as const
+  const columns = () => page.evaluate(() => document.querySelectorAll('.column:not(.hidden)').length)
+  const layouts = () => page.evaluate(() => (window as any).__layoutCount as number)
+  const targetTop = () => page.evaluate(() => (document.querySelector('.super-container.target') as HTMLElement).offsetTop)
+  // the target in the band a target scroll leaves alone (inScrollBand)
+  const inBand = () =>
+    page.evaluate(() => {
+      const top = (document.querySelector('.super-container.target') as HTMLElement).offsetTop
+      return top >= document.body.scrollTop && top <= document.body.scrollTop + visualViewport!.height - 200
+    })
+  const rootHeight = () =>
+    page.evaluate(() => (document.getElementById('super-container-' + window._item('#e2e_reflow', true)!.id) as HTMLElement).offsetHeight)
+  // no layout for `ms` (tryLayout's retry is 250 ms, its hold past a scroll 500 ms)
+  const quiet = async (ms = 800) => {
+    let last = await layouts()
+    let since = Date.now()
+    await expect
+      .poll(
+        async () => {
+          const count = await layouts()
+          if (count != last) [last, since] = [count, Date.now()]
+          return Date.now() - since >= ms
+        },
+        { message: `no layout for ${ms} ms`, timeout: 20_000 }
+      )
+      .toBe(true)
+  }
+  // the view resized: the layout at the new width awaited, the root's block following the width (the premise)
+  const resize = async (width: number) => {
+    const before = await layouts()
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(layouts, { message: `the layout at ${width}`, timeout: 15_000 }).toBeGreaterThan(before)
+    const height = await rootHeight()
+    expect(height >= 4 * width && height < 4 * width + 300, `the root's block follows the width (${height} at ${width})`).toBe(true)
+  }
+  // a correction observed: the position at the tag click's destination (the target's top less a quarter of the
+  // view, no higher than the header)
+  const corrected = (message: string) =>
+    expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const target = document.querySelector('.super-container.target') as HTMLElement
+            const destination = Math.max((document.querySelector('.header') as HTMLElement).offsetTop, target.offsetTop - visualViewport!.height / 4)
+            return Math.abs(document.body.scrollTop - destination) <= 2
+          }),
+        { message, timeout: 10_000 }
+      )
+      .toBe(true)
+  // the view resized for the phases that watch the layouts: the count before the resize anchors them (the
+  // first layout is before + 1, the second before + 2, whenever each is observed)
+  const reflowTo = async (width: number) => {
+    const before = await layouts()
+    await page.setViewportSize({ width, height: 900 })
+    return before
+  }
+  // THE FIRST LAYOUT, WATCHED FRAME BY FRAME IN THE PAGE: the frame the first layout's correction landed (the
+  // position at the destination) or, with the target in the band, the frame of the layout itself; then
+  // FOUR FRAMES LATER, once that layout's correction has flushed (a tick and two frames; a scroll inside
+  // that gap is still overridden by the first correction, which is admitted whatever position the resize
+  // left: a known limit of about 50 ms), the action: a scroll by hand to the top, or an Up (two modifiers,
+  // the window handler) with its entry checked. Resolves with the count at the action (the second layout
+  // comes about 270 ms after a first layout that scrolled nothing, 500 ms past a correction's scroll: a
+  // poll from the test could read the count after it), the target's top at the first layout, and whether
+  // the position held across the four frames (the first correction scrolled nothing more)
+  const firstLayout = (before: number, action: 'none' | 'hand' | 'up' = 'none') =>
+    page.evaluate(
+      ({ before, action }) =>
+        new Promise<{ count: number; top: number; at: boolean; inBand: boolean; held: boolean; pushed: boolean | null }>((resolve, reject) => {
+          const w = window as any
+          const started = Date.now()
+          const tick = () => {
+            const target = document.querySelector('.super-container.target') as HTMLElement | null
+            if ((w.__layoutCount as number) > before && target) {
+              const header = (document.querySelector('.header') as HTMLElement).offsetTop
+              const top = target.offsetTop
+              const position = document.body.scrollTop
+              const at = Math.abs(position - Math.max(header, top - visualViewport!.height / 4)) <= 2
+              const inBand = top >= position && top <= position + visualViewport!.height - 200
+              if (at || inBand) {
+                let frames = 4
+                const act = () => {
+                  if (--frames > 0) return requestAnimationFrame(act)
+                  const held = Math.abs(document.body.scrollTop - position) <= 2
+                  const count = w.__layoutCount as number
+                  let pushed: boolean | null = null
+                  if (action == 'hand') document.body.scrollTo(0, header)
+                  if (action == 'up') {
+                    const length = w._history.length as number
+                    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))
+                    pushed = w._history.length == length + 1 && w._history[w._history_index].scrolledToTop === true
+                  }
+                  resolve({ count, top, at, inBand, held, pushed })
+                }
+                requestAnimationFrame(act)
+                return
+              }
+            }
+            if (Date.now() - started > 15_000) reject(new Error('no first layout with the target placed'))
+            else requestAnimationFrame(tick)
+          }
+          tick()
+        }),
+      { before, action }
+    )
+  // the second layout, the one the re-measured root triggers, awaited inside the window
+  const second = async (before: number, message: string) => {
+    const t = Date.now()
+    await expect.poll(layouts, { message, timeout: 5_000 }).toBeGreaterThanOrEqual(before + 2)
+    expect(Date.now() - t, 'the second layout came inside the window').toBeLessThan(2000)
+  }
+  const rootFollows = async (width: number) => {
+    const height = await rootHeight()
+    expect(height >= 4 * width && height < 4 * width + 300, `the root's block follows the width (${height} at ${width})`).toBe(true)
+  }
+  const targeted = (id: string) =>
+    expect.poll(() => page.evaluate(id => !!document.querySelector(`.super-container.target #item-${id}`), id), { timeout: 15_000 }).toBe(true)
+  await expect.poll(columns, { timeout: 15_000 }).toBe(2)
+  // the root first, laid out under its own query to measure the split (its pos is its column's height at its
+  // placement, the header's included; the other column's height is its items' pos plus outerHeight)
+  await page.evaluate(() => void window._create('#e2e_reflow\n\n<div style="height: 400vw"></div>'))
+  await expect.poll(() => savedId(page, '#e2e_reflow'), { timeout: 30_000 }).toBeTruthy()
+  const rootId = await page.evaluate(() => window._item('#e2e_reflow', true)!.id)
+  await focusMindboxInPlace(page)
+  await mindbox(page).fill('#e2e_reflow')
+  await targeted(rootId)
+  await quiet()
+  const split = await page.evaluate(id => {
+    const w = window as any
+    const root = w.__items.find((item: any) => item.id == id)
+    const others = w.__items.slice(0, w.__hideIndex).filter((item: any) => item.column != root.column)
+    return root.pos - Math.max(0, ...others.map((item: any) => item.pos + item.outerHeight))
+  }, rootId)
+  const middle = Math.round(7260 + split)
+  await page.evaluate(h => void window._create(`#e2e_reflow/mid\n\n<div style="height: ${h}px"></div>`), middle)
+  await page.evaluate(() => void window._create('#e2e_reflow/mid/leaf the leaf'))
+  for (const name of names) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+  const id = await page.evaluate(() => window._item('#e2e_reflow/mid/leaf', true)!.id)
+  await focusMindboxInPlace(page)
+  await mindbox(page).fill('#e2e_reflow/mid/leaf')
+  await targeted(id)
+  await quiet()
+  expect(await inBand(), "the query's own scroll put the leaf in view").toBe(true)
+  await blur(page)
+  // 1. the owner's case, one column: the leaf lies far below the position left (the premise) and the layout
+  // at the new width scrolls to its upper middle; the re-measured root moves nothing in one column
+  const left1 = await scrollTop(page)
+  await resize(1000)
+  expect((await targetTop()) - left1, 'the premise: at the position left the leaf would lie below the view').toBeGreaterThan(700)
+  await corrected('scrolled to the leaf at one column')
+  await quiet()
+  expect(await inBand(), 'the leaf in view at one column').toBe(true)
+  // 2. two columns of 750: the leaf lands in the root's column at the layout at the new width and stays there
+  await resize(N)
+  await expect.poll(inBand, { message: 'the leaf in view at two columns of 750' }).toBe(true)
+  await quiet()
+  // 3. the layout the re-measure triggers: at 2000 the root grows by 2000 px above the leaf, which the layout at
+  // the new width keeps in the root's column (the first correction); the re-measured root then sends the
+  // leaf to the middle item's column, 820 px up and out of the band at the position the first correction
+  // left (the premise); the second layout corrects again, inside the window
+  const left3 = await scrollTop(page)
+  const before3 = await reflowTo(S)
+  const first3 = await firstLayout(before3)
+  await rootFollows(S)
+  expect([first3.count, first3.at, first3.held], 'the first correction, the second layout not yet run').toEqual([before3 + 1, true, true])
+  expect(first3.top - left3, 'the premise: the leaf below the view at the position left').toBeGreaterThan(700)
+  await second(before3, 'the layout the re-measured root triggers')
+  await expect.poll(targetTop, { message: 'the second layout moved the leaf up, out of the band' }).toBeLessThan(first3.top - 225)
+  await expect.poll(inBand, { message: 'the second correction brought the leaf back' }).toBe(true)
+  await quiet()
+  // 4. a scroll by hand after the layout at the new width supersedes the correction of the second layout: at
+  // 1500 the leaf keeps its place at the first layout (the middle item's column, in view, nothing to
+  // correct), the page is scrolled to the top four frames after that layout (its correction flushed, a
+  // no-op), and the second layout, which moves the leaf to the root's column, leaves the page at the top
+  const before4 = await reflowTo(N)
+  const first4 = await firstLayout(before4, 'hand')
+  await rootFollows(N)
+  expect([first4.count, first4.inBand, first4.held], 'the premise: the leaf in view after the first layout, its correction a no-op, the second layout not yet run').toEqual([before4 + 1, true, true])
+  await nearTop(page, 'scrolled to the top by hand')
+  await second(before4, 'the second layout after the scroll by hand')
+  await page.waitForTimeout(300) // the correction's flush (two frames) would have scrolled by now
+  await nearTop(page, 'the scroll by hand survives the second layout')
+  expect(await inBand(), 'the leaf out of view at the top: the second layout had something to correct').toBe(false)
+  // 5. an Up (the scroll to the top with a history entry) after the first correction supersedes the second:
+  // at 2000 the first layout corrects (the leaf back in the root's column, 2000 px lower), the Up follows four
+  // frames after the correction landed, and the second layout leaves the page at the top with the entry Down
+  // undoes intact (a settled query sets no explicitScrollQuery, so the Up relies on this)
+  const before5 = await reflowTo(S)
+  const first5 = await firstLayout(before5, 'up')
+  await rootFollows(S)
+  expect([first5.count, first5.at, first5.held, first5.pushed], 'the first correction, the second layout not yet run, the Up pushed its entry').toEqual([before5 + 1, true, true, true])
+  await nearTop(page, 'the Up scrolled to the top')
+  await second(before5, 'the second layout after the Up')
+  await page.waitForTimeout(300)
+  await nearTop(page, 'the Up survives the second layout')
+  expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index].scrolledToTop), 'the entry Down undoes is intact').toBe(true)
+  expect(await inBand(), 'the leaf out of view at the top').toBe(false)
+  // 6. the window expires: at 1500 both corrections run from the top (the leaf out of view at the first layout,
+  // moved up at the second); then, 2 s after the second with no scroll, the middle item's block shrinks to
+  // 1000 px (selected inside its .content: the .item's first styled child is the menu placeholder) and its
+  // model takes the container's measurement, the one onItemResized reads, so the measurement callback the
+  // re-render triggers finds no change and no further layout follows; the layout on demand sends the leaf
+  // to the middle item's column, above the position kept: nothing scrolls
+  const before6 = await reflowTo(N)
+  const first6 = await firstLayout(before6)
+  await rootFollows(N)
+  expect([first6.count, first6.at, first6.held], 'the first correction at 1500, from the top').toEqual([before6 + 1, true, true])
+  await second(before6, 'the second layout at 1500')
+  await expect.poll(inBand, { message: 'the second correction at 1500' }).toBe(true)
+  const t6 = Date.now()
+  await quiet(2200)
+  expect(Date.now() - t6, 'the window expired').toBeGreaterThanOrEqual(2000)
+  const position6 = await scrollTop(page)
+  const shrunk = await page.evaluate(() => {
+    const w = window as any
+    const mid = w.__items.find((item: any) => item.label == '#e2e_reflow/mid')
+    const container = document.getElementById('super-container-' + mid.id)!.querySelector('.container') as HTMLElement
+    const block = container.querySelector('.item > .content div[style]') as HTMLElement
+    block.style.height = '1000px'
+    const measured = container.offsetHeight
+    mid.height = measured
+    const count = w.__layoutCount as number
+    w.__layout()
+    return { block: block.offsetHeight, measured, layouts: (w.__layoutCount as number) - count, count: w.__layoutCount as number }
+  })
+  expect(shrunk.block, 'the middle block shrunk').toBe(1000)
+  expect(shrunk.measured >= 1000 && shrunk.measured < 1300, `the container measured with the block (${shrunk.measured})`).toBe(true)
+  expect(shrunk.layouts, 'one layout ran').toBe(1)
+  await expect.poll(targetTop, { message: 'the layout moved the leaf above the position kept (the premise)' }).toBeLessThan(position6)
+  await page.waitForTimeout(300)
+  expect(Math.abs((await scrollTop(page)) - position6), 'no correction after the window').toBeLessThanOrEqual(2)
+  expect(await layouts(), 'no further layout: the measurement callback found the model consistent').toBe(shrunk.count)
+  // the fixture, deleted by its saved ids and the deletions persisted (deleteDoc is fire-and-forget)
+  const ids = await Promise.all(names.map(name => savedId(page, name)))
+  await page.evaluate(names => names.forEach(name => window._item(name, true)!.delete(false)), [...names])
+  for (const doc of ids) await expect.poll(async () => (await firestore().collection('items').doc(doc!).get()).exists, { timeout: 30_000 }).toBe(false)
+})
+
 test('a dangling relative tag neither ranks an item up nor counts as missing; an absolute missing tag still does both', async ({ page }) => {
   // the owner's report (2026-10-04): a chat child carrying `#//why_each_row`, a sibling no item has, kept
   // surfacing at the top of the list, as if its time were updated: the dangling tag sat in missingTags,

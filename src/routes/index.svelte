@@ -2258,6 +2258,10 @@
   // every later check said "width-same" and nothing ever relaid out. Diagnosed from the decision
   // trace below; see issues/MindPage Column Layout Stalls After Growing Back.md
   let lastDocumentWidth = 0
+  // THE TIME OF THE LAST LAYOUT AT A NEW DOCUMENT WIDTH (a window resize, a rotation, a zoom) and the position
+  // the last target scroll left: a reflow is corrected by the layouts of its window (reflowCorrecting below)
+  let widthChangeTime = 0
+  let reflowScrollTop = null
   let layoutCount = 0 // exposed as window.__layoutCount for tests
   // the time rows regroup when the APPLIED ranking's query changed (set where onEditorChange sorts, so a
   // layout during the editor's debounce or before the items are initialized certifies no query: time_rows
@@ -2272,6 +2276,17 @@
   let lastRankedQuery = null
   let lastTimeRowsColumns = null
 
+  // whether a layout corrects the target's position for a reflow: within 2 s of the layout at the new document
+  // width, a bound that covers the layouts its re-measured heights trigger (a multi-column reflow distributes
+  // the items by the heights measured at the old width first; the bound is a safety net, not a proof that the
+  // reflow settled), and only while nobody scrolled away from the position the last target scroll left (the
+  // owner's scroll, an Up, a Back, a clamp: a newer scroll supersedes the correction, which neither the
+  // mover rule nor explicitScrollQuery covers for a settled query; the correction's own scroll lands on that
+  // position and keeps the window). Checked at the layout and again when its flush completes
+  function reflowCorrecting() {
+    return Date.now() - widthChangeTime < 2000 && (reflowScrollTop == null || Math.abs(document.body.scrollTop - reflowScrollTop) <= 2)
+  }
+
   function updateItemLayout() {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
     //       second is via initialize -> onEditorChange w/ >0 items, 0 height
@@ -2285,6 +2300,13 @@
     // set zoom (if any) on items div
     if (itemsdiv && itemsdiv.style.zoom != zoom) itemsdiv.style.zoom = zoom
     const documentWidth = getDocumentWidth()
+    // a reflow (a window resize, a rotation, a zoom): the layouts of its window correct the target's position
+    // (see the scrolling below), and the items re-render below so their heights are re-measured at once
+    const reflow = lastDocumentWidth > 0 && documentWidth != lastDocumentWidth
+    if (reflow) {
+      widthChangeTime = Date.now()
+      reflowScrollTop = null
+    }
     const minColumnWidth = 750 // minimum column width for multiple columns (columns grow to .column max-width)
     columnCount = Math.max(1, Math.floor(documentWidth / minColumnWidth))
     let target = null
@@ -2354,7 +2376,11 @@
     }
     const layout = layoutItems(items, { ...config, regroupTimeRows })
     lastTimeRowsColumns = columnCount
-    if (layoutSignature() != layoutBefore) items = items // render the new layout
+    // a reflow re-renders the items whatever the signature: the heights are re-measured in their afterUpdate
+    // (onItemResized), and a drift past the threshold lays out again within the correction window above;
+    // a layout that kept the distribution otherwise left the model's heights stale until the time-string
+    // pass below re-rendered the items, up to 10 s later
+    if (layoutSignature() != layoutBefore || reflow) items = items // render the new layout
     const topMovers = layout.topMovers
     newestTime = layout.newestTime
     oldestTime = layout.oldestTime
@@ -2421,17 +2447,24 @@
       // at this point we know we are not actively editing any item
       // if target (highlighted) item exists and has moved, we scroll it back into view if needed
       // we do not scroll to unchanged target except while still rendering visible items (e.g. page init)
+      // or while a reflow is corrected (reflowCorrecting; the owner, 2026-10-11): a change of the document
+      // width moves the items under a scroll position that stays, so the target is brought back into view
+      // when the reflow pushed it out (scrollToTarget is a no-op for a target in view); the no-target branch
+      // below is as it was
       // if no target & no narration, we scroll to the top (upper-most) mover across all columns
       // we do NOT cancel for other scrolling during dispatch as multiple layouts/scrolls are common (e.g. page init)
-      if (target?.mover && (target.id != lastScrolledTarget || renderingVisibleItems)) {
+      const moved = target?.mover && (target.id != lastScrolledTarget || renderingVisibleItems)
+      if (target && (moved || reflowCorrecting())) {
         // console.debug('target moved')
         const dispatchTime = Date.now()
         const explicit = explicitScrollQuery === editorText // an explicit scroll to the top won for this query
         update_dom().then(() => {
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+          if (!moved && !reflowCorrecting()) return // the correction superseded while the layout flushed
           // console.debug('scrolling to target')
           if (!explicit) scrollToTarget()
           lastScrolledTarget = target.id
+          reflowScrollTop = document.body.scrollTop // the position this scroll left (reflowCorrecting)
         })
       } else if (!target && !narrating && _.min(topMovers) < items.length) {
         // console.debug('detected movers', !!target)
