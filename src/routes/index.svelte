@@ -10866,6 +10866,26 @@
     // disable various "unfocused" item editor shortcuts, focus on editor instead
     if (focusedItem >= 0) return // already focused on an item
 
+    // copy the target item's name with Cmd/Ctrl+C when nothing is selected (the owner, 2026-10-11): the item
+    // the MindBox names, as its unique label (a tag, and a query) or `id:<saved id>` (a query; the local id of
+    // an item created in this session is temporary, so an unlabeled item not yet saved copies nothing); a
+    // selection anywhere keeps the native copy, and so does a focused input or editable element (an input
+    // embedded in an item); Shift or Alt is not this shortcut (Shift+Cmd+C targets elements in Safari); an
+    // editor's Cmd/Ctrl+C never reaches the window, since the Editor stops modified keys
+    if (key == 'KeyC' && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
+      if (!document.getSelection()?.isCollapsed) return // a selection: the native copy
+      const active = document.activeElement as HTMLElement | null
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement || active?.isContentEditable) return
+      const name = editorText.trim()
+      if (!_exists(name, false /* allow_multiple */)) return // no unique target: nothing to copy
+      const target = item(_item(name).id)
+      const copy = target.labelUnique ? target.labelText : target.savedId ? 'id:' + target.savedId : null
+      if (!copy) return // an unlabeled item not yet saved: its id is this session's
+      e.preventDefault()
+      navigator.clipboard.writeText(copy).catch(error => console.error('copy failed', error))
+      return
+    }
+
     // Cmd/Ctrl+arrows with the page scrolled down: only the scroll (with its history entry, so Back
     // returns to the position) and the MindBox focus; the expanded items are kept, unlike the reset
     // below (the owner's "just scroll+focus if not on top", 2026-10-03). At the top, as before

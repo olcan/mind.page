@@ -974,6 +974,119 @@ test('ctrl+alt+i opens the image dialog like shift+cmd+i, in an item editor and 
   await expect(modal).toBeHidden()
 })
 
+test('cmd/ctrl+c from the window copies the name of the item the MindBox names (its label, or id:<saved id> when unlabeled); a selection, a focused input, no target or an unsaved id keeps the native copy', async ({
+  page,
+  context,
+}) => {
+  // the owner's ask (2026-10-11): Cmd/Ctrl+C with no editor focused copies the target item's name, as a
+  // fallback when nothing is selected. The positive cases press the key and read the clipboard back
+  // through the async clipboard API under granted permissions; the negative cases dispatch the key as a
+  // synthetic event (no native copy follows one, so a kept sentinel means the app wrote nothing) and
+  // assert the default was not prevented. An editor's copy is out of reach: the Editor stops the
+  // propagation of modified keys. An unlabeled item copies its SAVED id (review 0 B1: the local id of an
+  // item created in this tab is temporary), checked to resolve after a reload
+  await loadAdmin(page)
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  const L = '#e2e_Copy_Name' // mixed case: the copy is the label as written, whatever case the query has
+  await page.evaluate(l => void window._create(`${l} an item with a label\n\n<input type="text" id="e2e_copy_input" value="typed">`), L)
+  await page.evaluate(() => void window._create('e2e_copy_unlabeled an item without a label'))
+  await expect.poll(() => savedId(page, L), { timeout: 30_000 }).toBeTruthy()
+  const unlabeled = () => page.evaluate(() => window._items().find(i => i.text.startsWith('e2e_copy_unlabeled')) ?? null)
+  await expect.poll(async () => (await unlabeled())?.id, { timeout: 30_000 }).toBeTruthy()
+  const id = (await unlabeled())!.id
+  await expect.poll(() => savedId(page, id), { timeout: 30_000 }).toBeTruthy()
+  const saved = (await savedId(page, id))!
+  expect(saved, 'an item created in this tab has a temporary local id').not.toBe(id)
+  expect((await unlabeled())!.name, "the app's own name of an unlabeled item is its local id").toBe(`id:${id}`)
+  const clipboard = () => page.evaluate(() => navigator.clipboard.readText())
+  const sentinel = async () => {
+    await page.evaluate(() => navigator.clipboard.writeText('sentinel'))
+    await expect.poll(clipboard).toBe('sentinel')
+  }
+  const target = async (name: string) => {
+    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+  }
+  // the key as a synthetic event from the active element (the window handler reads the physical code)
+  const synthetic = () =>
+    page.evaluate(() => {
+      const e = new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true, bubbles: true, cancelable: true })
+      ;(document.activeElement ?? document.body).dispatchEvent(e)
+      return e.defaultPrevented
+    })
+  // the labeled target, by Ctrl and by Cmd, the query in lower case
+  await sentinel()
+  await target(L.toLowerCase())
+  await page.keyboard.press('Control+KeyC')
+  await expect.poll(clipboard, { message: 'Ctrl+C copied the label as written' }).toBe(L)
+  await sentinel()
+  await page.keyboard.press('Meta+KeyC')
+  await expect.poll(clipboard, { message: 'Cmd+C copied the label' }).toBe(L)
+  // the unlabeled target, named by its local id: the copy is its saved id
+  await sentinel()
+  await target(`id:${id}`)
+  await page.keyboard.press('Control+KeyC')
+  await expect.poll(clipboard, { message: 'the unlabeled item copies as id:<saved id>' }).toBe(`id:${saved}`)
+  // an unlabeled item not yet saved copies nothing (the policy's witness through the internal state: the
+  // saved id withheld for one synthetic press, then restored)
+  await sentinel()
+  expect(
+    await page.evaluate(
+      ([id, saved]) => {
+        const item = window.__items.find(i => i.id === id)!
+        item.savedId = undefined
+        const e = new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true, bubbles: true, cancelable: true })
+        document.body.dispatchEvent(e)
+        item.savedId = saved
+        return e.defaultPrevented
+      },
+      [id, saved]
+    ),
+    'no saved id yet: not prevented'
+  ).toBe(false)
+  // a selection (the labeled item's text) keeps the native copy
+  await target(L)
+  const itemId = (await page.evaluate(l => window._item(l, true)?.id, L))!
+  await expect(page.locator(`#item-${itemId} p`).first()).toBeVisible()
+  await page.evaluate(id => {
+    const range = document.createRange()
+    range.selectNodeContents(document.querySelector(`#item-${id} p`)!)
+    const selection = document.getSelection()!
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }, itemId)
+  expect(await page.evaluate(() => document.getSelection()!.toString()), 'the fixture selected text').toContain('an item with a label')
+  expect(await synthetic(), 'a selection: not prevented').toBe(false)
+  await page.evaluate(() => document.getSelection()!.removeAllRanges())
+  // a focused input embedded in an item (typed: an untyped <input> is the app's image upload), with a caret
+  // alone, keeps the native copy too
+  const input = page.locator('#e2e_copy_input')
+  await input.evaluate((el: HTMLInputElement) => {
+    el.focus()
+    el.setSelectionRange(2, 2)
+  })
+  await expect(input).toBeFocused()
+  expect(await page.evaluate(() => document.getSelection()!.isCollapsed), 'the document selection is collapsed').toBe(true)
+  expect(await synthetic(), 'a focused input: not prevented').toBe(false)
+  await input.evaluate(el => el.blur())
+  // no unique target: nothing
+  await target('#e2e_copy_none')
+  expect(await synthetic(), 'no target: not prevented').toBe(false)
+  // the app wrote nothing in the negative cases (a write is a microtask away, so a settle first)
+  await page.waitForTimeout(100)
+  expect(await clipboard(), 'the sentinel kept').toBe('sentinel')
+  // after a reload the copied queries resolve to the same items (the saved id is the item's id then)
+  await loadAdmin(page)
+  expect(await page.evaluate(q => window._item(q, true)?.text ?? null, `id:${saved}`)).toBe('e2e_copy_unlabeled an item without a label')
+  expect(await page.evaluate(q => window._item(q, true)?.id ?? null, `id:${saved}`), 'the saved id is the id after a reload').toBe(saved)
+  expect(await itemText(page, L)).toContain('an item with a label')
+  // the fixture, deleted by its saved identifiers and the deletions persisted (deleteDoc is fire-and-forget)
+  const labeledSaved = (await savedId(page, L))!
+  await page.evaluate(names => names.forEach(name => window._item(name, true)!.delete(false)), [L, `id:${saved}`])
+  for (const doc of [labeledSaved, saved])
+    await expect.poll(async () => (await firestore().collection('items').doc(doc).get()).exists, { timeout: 30_000 }).toBe(false)
+})
+
 test("the MindBox's focus wrapper forwards preventScroll: a restore keeps the page's scroll position", async ({ page }) => {
   // the window's focus restore (after a workspace switch) focuses the last focused element with
   // { preventScroll: true }; the Editor's own focus wrapper (visibility first, then the native focus)
