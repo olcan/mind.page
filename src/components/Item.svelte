@@ -100,8 +100,13 @@
   export let selectionEnd = 0
   // an Item created while editing continues the session of the Item destroyed in its place (a layout moved
   // the item to another column, or hid it and showed it again): its Editor resumes the destroyed editor's
-  // textarea state (editorStates in Editor.svelte)
-  const resumeEditor = editing
+  // textarea state (editorStates in Editor.svelte). the resume is asked for only until that session ends:
+  // the next session's Editor mounts in a later flush with resume false and drops the entry the session's
+  // end wrote (kept for the Item's whole life, the resume brought that entry back at a later edit of the
+  // item: a discarded draft in the textarea with the model holding the saved text, a MindBox data-selection
+  // caret overridden by the old range; review 1)
+  let resumeEditor = editing
+  $: if (!editing) resumeEditor = false
   // NOTE: required props should not have default values
   export let index: number
   export let name: string

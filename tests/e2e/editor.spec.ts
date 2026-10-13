@@ -2887,9 +2887,12 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
   const stamp = () => textarea.evaluate((t: HTMLTextAreaElement) => void ((t as any).__stamped = true))
   expect(await columns()).toBe(2)
   expect(await column(), 'the leaf opens column 1 at two columns (the premise)').toBe(1)
-  const paragraph = page.locator(`#item-${id} p`).first()
-  const box = (await paragraph.boundingBox())!
-  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  // the live item's paragraph (the measuring column is hidden), clicked at its center, past its label tag
+  // (a tag navigates); the click auto-waits, since the item re-renders after the save below and an explicit
+  // box read null for a moment in the lane
+  const paragraph = page.locator(`.column:not(.hidden) #item-${id} p`).first()
+  const clickParagraph = () => paragraph.click()
+  await clickParagraph()
   await expect(textarea).toBeFocused()
   await stamp()
   await textarea.press('ControlOrMeta+a')
@@ -2909,7 +2912,42 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
   }
   await page.keyboard.press('Shift+Enter') // save
   await expect(textarea).toBeHidden()
-  await expect.poll(() => itemText(page, '#e2e_remount/leaf')).toBe('#e2e_remount/leaf draft survives typed')
+  const saved = '#e2e_remount/leaf draft survives typed'
+  await expect.poll(() => itemText(page, '#e2e_remount/leaf')).toBe(saved)
+  // the save persisted before the discard below: a cancel while the item is still saving discards without
+  // the prompt (onItemEditing), which the lane's load made ordinary
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const item = window.__items.find(item => item.id == id)!
+          return !item.saving && item.savedText
+        }, id),
+      { timeout: 30_000 }
+    )
+    .toBe(saved)
+  // a later session of the Item the remount created does not resume the entry the saved session's end
+  // wrote (the Item withdraws the resume at that end; review 1: kept for the Item's life, it brought the
+  // entry back at every later edit): a re-edit opens on a fresh element at the Item's retained selection
+  // (pre-existing: a click sets no caret), a suffix is typed from a collapsed caret and discarded, and the
+  // next re-edit shows the SAVED text with a collapsed caret, not the entry's draft and backward range
+  await clickParagraph()
+  await expect(textarea).toBeFocused()
+  await expect.poll(state).toEqual({ value: saved, start: 35, end: 38, direction: expect.any(String), focused: true, fresh: true })
+  await stamp()
+  await textarea.press('ArrowRight') // collapses the selection to its end (End scrolls on a Mac)
+  await textarea.pressSequentially(' discarded')
+  await page.keyboard.press('Escape')
+  await expect(page.getByText(/Discard unsaved changes to #e2e_remount\/leaf/)).toBeVisible()
+  await page.locator('.modal .button.confirm', { hasText: 'Discard' }).click()
+  await expect(textarea).toBeHidden()
+  await expect.poll(() => itemText(page, '#e2e_remount/leaf')).toBe(saved)
+  await clickParagraph()
+  await expect(textarea).toBeFocused()
+  await expect.poll(state, { message: 'the re-edit after the discard' }).toEqual({ value: saved, start: 38, end: 38, direction: expect.any(String), focused: true, fresh: true })
+  expect((await state()).direction, 'not the entry\'s backward range').not.toBe('backward')
+  await page.keyboard.press('Escape') // nothing to discard
+  await expect(textarea).toBeHidden()
   // the fixture, deleted by its saved ids and the deletions persisted (deleteDoc is fire-and-forget)
   const names = ['#e2e_remount', '#e2e_remount/leaf']
   for (const name of names) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()

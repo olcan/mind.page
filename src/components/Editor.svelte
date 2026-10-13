@@ -7,7 +7,9 @@
   // model (the owner, 2026-10-13: unsaved edits reverted at a layout, recoverable by the close button's
   // Cancel, which assigns the draft back to item.text); an item hidden past the shown count and shown again
   // is the same. the entry is written at every destroy (an edit's end too) and removed by the next mount of
-  // the id: consumed by an editor that resumes it, dropped by one that does not (a new edit of the item). it
+  // the id: consumed by the editor that resumes it, dropped by one that does not (the next session's: the
+  // Item asks for the resume only until the session it was created in ends, so an edit's end leaves nothing
+  // for the next edit; the MindBox never asks). it
   // holds the exact value (not editorText: a url typed since the last augmentation is off by its ZWSPs
   // there), the selection with its direction, and the editor's own `focused` at the destroy: true on a
   // browser that fires no blur for a removal (and on Chromium while the page has no system focus, where it
@@ -15,14 +17,12 @@
   // before it destroys the effects), settled true a microtask later by the blur handler once the removal
   // shows (Chromium blurs a removed textarea while it is still connected, so the handler cannot tell a
   // removal from a click elsewhere before that). the entry also holds the model's draft (editorText, bound
-  // to the item) as the guard against a STALE entry: an editor destroyed without a mount in between (an
-  // edit ended and begun again from code: a discard, then editing set true; _render_item) left the old
-  // session's END state, a discarded draft and a focus claim among it, and a session begun from code starts
-  // with editorText = text (index.svelte), so a mount resumes the entry only when its editorText equals the
-  // entry's with the ZWSPs removed (the same model field at the intended remount, read in one flush; a
-  // draft that was not saved differs from the text a session starts with): a stale entry is voided, its
-  // focus claim with it (a draft that equals the text, an unchanged or saved session's end, resumes with
-  // that text, the old selection and focus; nothing is lost)
+  // to the item) as a second check: a mount resumes the entry only when its own editorText equals the
+  // entry's with the ZWSPs removed (the same model field at a remount, read in one flush: the entry a
+  // remount meets is the one the Item destroyed in the same flush wrote, so the check refuses nothing in
+  // the reachable paths). it tells no session's end from a remount: the binding reads the draft live at
+  // the destroy, so a discard's entry carries the saved text the next session starts with, its value the
+  // discarded draft (review 1), which is why the Item withdraws the resume at the session's end
   type EditorState = {
     value: string
     selectionStart: number
@@ -1206,8 +1206,8 @@
     }
     setSelection(selectionStart, selectionEnd)
     // resume the state of the editor destroyed in this one's place (editorStates); a mount that does not
-    // resume, or finds a stale entry (another session's: its draft is not this editor's editorText, the
-    // ZWSPs aside; see the module script), drops the entry
+    // resume (the Item withdraws the resume at its session's end), or finds an entry whose draft is not this
+    // editor's editorText (the ZWSPs aside; the second check of the module script), drops the entry
     const state = editorStates.get(id_suffix)
     if (!resume || !state || removeZWSP(state.editorText) != removeZWSP(editorText)) editorStates.delete(id_suffix)
     else {
@@ -1231,7 +1231,8 @@
     // the textarea's state for an editor created in this one's place (editorStates): the element is out of
     // the document by now and keeps its value and selection; `focused` is this editor's own, false on
     // Chromium once its removal blur has run (the blur handler's microtask settles it), true on a browser
-    // that fires no blur for a removal; editorText is the model's draft, the guard against a stale entry
+    // that fires no blur for a removal; editorText is the model's draft as the binding reads it now (a
+    // discard's is the saved text already), the second check of the module script
     if (textarea)
       editorStates.set(id_suffix, {
         value: textarea.value,
