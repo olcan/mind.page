@@ -12100,6 +12100,39 @@
   :global(body::-webkit-scrollbar) {
     display: none;
   }
+  /* a browser that paints classic scrollbars (html.classic-scrollbars, probed in app.html: Linux,
+     Windows, macOS with "always show") gets slim scrollbars of the app's own on every inner scroller
+     (code blocks, item panels, the modal's pre): a thumb over the element's own background and no
+     arrow buttons, which Chrome's native bars keep even at scrollbar-width: thin; an overlay one
+     (macOS, iOS) is left alone, since a styled ::-webkit-scrollbar is always visible. Chrome ignores
+     these pseudo-elements on an element with scrollbar-width or scrollbar-color set (html and body
+     keep their none above, so no item may set them), and Firefox, without them, gets the standard
+     properties, with the buttons it never paints */
+  :global(.classic-scrollbars *::-webkit-scrollbar) {
+    width: 11px;
+    height: 11px;
+  }
+  :global(.classic-scrollbars *::-webkit-scrollbar-thumb) {
+    background-color: #555;
+    border: 2px solid transparent; /* a gap around the thumb, the track showing through */
+    background-clip: padding-box;
+    border-radius: 6px;
+  }
+  :global(.classic-scrollbars *::-webkit-scrollbar-thumb:hover) {
+    background-color: #777;
+  }
+  :global(.classic-scrollbars *::-webkit-scrollbar-track),
+  :global(.classic-scrollbars *::-webkit-scrollbar-corner) {
+    background: transparent;
+  }
+  @supports not selector(::-webkit-scrollbar) {
+    :global(.classic-scrollbars) {
+      scrollbar-color: #555 transparent;
+    }
+    :global(.classic-scrollbars *) {
+      scrollbar-width: thin;
+    }
+  }
 
   /* customize selection colors */
   /* see https://css-tricks.com/almanac/selectors/s/selection/ */

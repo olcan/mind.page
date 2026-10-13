@@ -548,7 +548,7 @@
     margin: 0;
     max-width: 100%;
     max-height: 40vh; /* max 40% of viewport height */
-    overflow: scroll;
+    overflow: auto; /* scroll paints both classic scrollbars even when nothing overflows */
     background: #222;
     border-radius: 4px;
     word-break: break-all; /* prevent horizontal expansion out of screen bounds */

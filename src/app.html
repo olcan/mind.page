@@ -31,6 +31,18 @@
     <!-- color-scheme disabled for now as it requires ALL windows (e.g. password prompts) to be dark -->
     <!-- <meta name="color-scheme" content="dark light" /> -->
     <!-- <style> html { color-scheme: dark light; } </style> -->
+    <!-- a browser whose scrollbars take space (classic: Linux, Windows, macOS with "always show")
+         gets the app's own slim scrollbars (index.svelte, the .classic-scrollbars rules); an overlay
+         one (macOS, iOS) is left alone, since a styled ::-webkit-scrollbar is always visible -->
+    <script>
+      {
+        const probe = document.createElement('div')
+        probe.style.cssText = 'position:absolute;top:-1000px;width:100px;height:100px;overflow:scroll;visibility:hidden'
+        document.documentElement.appendChild(probe)
+        if (probe.offsetWidth > probe.clientWidth) document.documentElement.classList.add('classic-scrollbars')
+        probe.remove()
+      }
+    </script>
     <link rel="stylesheet" href="/global.css" />
     <link href="https://cdn.jsdelivr.net/npm/c3@0.7.20/c3.min.css" rel="stylesheet" />
     <link
