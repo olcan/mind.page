@@ -9,15 +9,27 @@
   // is the same. the entry is written at every destroy (an edit's end too) and removed by the next mount of
   // the id: consumed by an editor that resumes it, dropped by one that does not (a new edit of the item). it
   // holds the exact value (not editorText: a url typed since the last augmentation is off by its ZWSPs
-  // there), the selection with its direction, and whether the textarea left the document focused, settled a
-  // microtask after the destroy (Chromium blurs a removed textarea while it is still connected, so the blur
-  // handler cannot tell a removal from a click elsewhere until the removal shows)
+  // there), the selection with its direction, and the editor's own `focused` at the destroy: true on a
+  // browser that fires no blur for a removal (and on Chromium while the page has no system focus, where it
+  // dispatches none), false on Chromium, whose removal blur ran before the teardown (svelte removes the DOM
+  // before it destroys the effects), settled true a microtask later by the blur handler once the removal
+  // shows (Chromium blurs a removed textarea while it is still connected, so the handler cannot tell a
+  // removal from a click elsewhere before that). the entry also holds the model's draft (editorText, bound
+  // to the item) as the guard against a STALE entry: an editor destroyed without a mount in between (an
+  // edit ended and begun again from code: a discard, then editing set true; _render_item) left the old
+  // session's END state, a discarded draft and a focus claim among it, and a session begun from code starts
+  // with editorText = text (index.svelte), so a mount resumes the entry only when its editorText equals the
+  // entry's with the ZWSPs removed (the same model field at the intended remount, read in one flush; a
+  // draft that was not saved differs from the text a session starts with): a stale entry is voided, its
+  // focus claim with it (a draft that equals the text, an unchanged or saved session's end, resumes with
+  // that text, the old selection and focus; nothing is lost)
   type EditorState = {
     value: string
     selectionStart: number
     selectionEnd: number
     selectionDirection: 'forward' | 'backward' | 'none'
     focused: boolean
+    editorText: string
   }
   const editorStates = new Map<string, EditorState>()
 </script>
@@ -1194,35 +1206,40 @@
     }
     setSelection(selectionStart, selectionEnd)
     // resume the state of the editor destroyed in this one's place (editorStates); a mount that does not
-    // resume drops the entry an edit's end left
+    // resume, or finds a stale entry (another session's: its draft is not this editor's editorText, the
+    // ZWSPs aside; see the module script), drops the entry
     const state = editorStates.get(id_suffix)
-    if (!resume || !state) editorStates.delete(id_suffix)
+    if (!resume || !state || removeZWSP(state.editorText) != removeZWSP(editorText)) editorStates.delete(id_suffix)
     else {
       textarea.value = state.value
       updateTextDivs() // the overlay follows the value (as after an input)
       textarea.setSelectionRange(state.selectionStart, state.selectionEnd, state.selectionDirection)
-      textarea.blur() // as setSelection: Safari can focus on a selection change; the focus is resumed below
-      // the focus settles a microtask after the destroy (see the blur handler): the microtask of the
-      // destroyed editor's blur runs before this one (a browser that fires no blur for a removal leaves the
-      // bound `focused` true instead). no scroll: the layout scrolls to the caret itself (restoreItemEditor
-      // in index.svelte)
+      // as setSelection (Safari can focus on a selection change), unconditional where setSelection blurs
+      // only an element that was not focused before: the same for a fresh element; the focus is resumed below
+      textarea.blur()
+      // the entry's focus is the destroyed editor's own at its destroy, settled a microtask after it by its
+      // blur handler on Chromium (see there), whose microtask runs before this one. no scroll: the layout
+      // scrolls to the caret itself (restoreItemEditor in index.svelte)
       queueMicrotask(() => {
         editorStates.delete(id_suffix)
-        if ((state.focused || focused) && textarea) textarea.focus({ preventScroll: true })
+        if (state.focused && textarea) textarea.focus({ preventScroll: true })
       })
     }
   })
   onDestroy(() => {
     document.removeEventListener('selectionchange', onSelectionChange)
     // the textarea's state for an editor created in this one's place (editorStates): the element is out of
-    // the document by now and keeps its value and selection
+    // the document by now and keeps its value and selection; `focused` is this editor's own, false on
+    // Chromium once its removal blur has run (the blur handler's microtask settles it), true on a browser
+    // that fires no blur for a removal; editorText is the model's draft, the guard against a stale entry
     if (textarea)
       editorStates.set(id_suffix, {
         value: textarea.value,
         selectionStart: textarea.selectionStart,
         selectionEnd: textarea.selectionEnd,
         selectionDirection: textarea.selectionDirection,
-        focused: false,
+        focused,
+        editorText,
       })
   })
 </script>

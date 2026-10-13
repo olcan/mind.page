@@ -2854,9 +2854,10 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
   // Editor with it, and the new textarea seeded from the SAVED text prop (the draft lived on in
   // item.editorText, bound to the model, which the close button's Cancel assigned back to item.text: the
   // recovery). Now the Editor stashes its textarea's state at its destroy (editorStates in Editor.svelte)
-  // and the Editor created in its place resumes it (the Item created while editing asks for it): the
-  // value, the selection with its direction, and the focus (a removal fires blur in Chromium, so the
-  // state is read while the element is still in the document).
+  // and the Editor created in its place resumes it (the Item created while editing asks for it, and the
+  // entry's draft is the model's): the value and the selection with its direction, read at the destroy
+  // from the DETACHED element (which keeps them), and the focus, the destroyed editor's own, which its
+  // removal blur (fired while the element is still connected in Chromium) settles a microtask later.
   // THE FIXTURE: a root with a 1200 px block and a short leaf, the query naming the leaf (the root lists
   // above it): at two columns the root fills column 0 past the balancing threshold (layoutItems: half a
   // screen height over the other column), so the leaf opens column 1; at one column every item is in
@@ -2867,7 +2868,7 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
   await page.evaluate(() => void window._create('#e2e_remount/leaf draft survives'))
   await focusMindbox(page)
   await mindbox(page).pressSequentially('#e2e_remount/leaf')
-  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_remount/leaf')!.elem), { timeout: 10_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_remount/leaf', true)?.elem), { timeout: 10_000 }).toBe(true)
   const id = await page.evaluate(() => window._item('#e2e_remount/leaf')!.id)
   const textarea = page.locator(`#textarea-${id}`)
   const column = () => page.evaluate(id => window.__items.find(item => item.id == id)!.column as number, id)
@@ -2909,5 +2910,10 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
   await page.keyboard.press('Shift+Enter') // save
   await expect(textarea).toBeHidden()
   await expect.poll(() => itemText(page, '#e2e_remount/leaf')).toBe('#e2e_remount/leaf draft survives typed')
-  await expect.poll(() => savedId(page, '#e2e_remount/leaf'), { timeout: 30_000 }).toBeTruthy()
+  // the fixture, deleted by its saved ids and the deletions persisted (deleteDoc is fire-and-forget)
+  const names = ['#e2e_remount', '#e2e_remount/leaf']
+  for (const name of names) await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+  const ids = await Promise.all(names.map(name => savedId(page, name)))
+  await page.evaluate(names => names.forEach(name => window._item(name, true)!.delete(false)), names)
+  for (const doc of ids) await expect.poll(async () => (await firestore().collection('items').doc(doc!).get()).exists, { timeout: 30_000 }).toBe(false)
 })
