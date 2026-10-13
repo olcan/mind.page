@@ -1,3 +1,27 @@
+<script context="module" lang="ts">
+  // the textarea state of an editor destroyed mid-edit, by id_suffix, for the editor created in its place
+  // (resume, below): the page renders its items per column (index.svelte: a keyed each over the items inside
+  // a block per column), and a keyed each cannot move a component between two blocks, so a layout that moves
+  // an item to another column destroys its Item and Editor in one block and creates them in the other, the
+  // new textarea seeded from the SAVED text prop while the draft lived on in editorText, bound to the item
+  // model (the owner, 2026-10-13: unsaved edits reverted at a layout, recoverable by the close button's
+  // Cancel, which assigns the draft back to item.text); an item hidden past the shown count and shown again
+  // is the same. the entry is written at every destroy (an edit's end too) and removed by the next mount of
+  // the id: consumed by an editor that resumes it, dropped by one that does not (a new edit of the item). it
+  // holds the exact value (not editorText: a url typed since the last augmentation is off by its ZWSPs
+  // there), the selection with its direction, and whether the textarea left the document focused, settled a
+  // microtask after the destroy (Chromium blurs a removed textarea while it is still connected, so the blur
+  // handler cannot tell a removal from a click elsewhere until the removal shows)
+  type EditorState = {
+    value: string
+    selectionStart: number
+    selectionEnd: number
+    selectionDirection: 'forward' | 'backward' | 'none'
+    focused: boolean
+  }
+  const editorStates = new Map<string, EditorState>()
+</script>
+
 <script lang="ts">
   export let id_suffix = 'editor'
   export let text = ''
@@ -27,6 +51,9 @@
   // Cmd/Ctrl+arrows ask the page to scroll to the top first when it is scrolled down (the MindBox);
   // true means it did and the key is done. Item editors keep their edge jumps wherever the page is
   export let onScrollTop = () => false
+  // created in the place of an editor destroyed mid-edit (an Item created while editing passes it): resume
+  // its textarea's state from editorStates (see the module script above)
+  export let resume = false
 
   const _ = globalThis['_'] // imported in client.ts
 
@@ -1166,8 +1193,38 @@
       editor.closest('.container').removeAttribute('data-selection') // consume attrib
     }
     setSelection(selectionStart, selectionEnd)
+    // resume the state of the editor destroyed in this one's place (editorStates); a mount that does not
+    // resume drops the entry an edit's end left
+    const state = editorStates.get(id_suffix)
+    if (!resume || !state) editorStates.delete(id_suffix)
+    else {
+      textarea.value = state.value
+      updateTextDivs() // the overlay follows the value (as after an input)
+      textarea.setSelectionRange(state.selectionStart, state.selectionEnd, state.selectionDirection)
+      textarea.blur() // as setSelection: Safari can focus on a selection change; the focus is resumed below
+      // the focus settles a microtask after the destroy (see the blur handler): the microtask of the
+      // destroyed editor's blur runs before this one (a browser that fires no blur for a removal leaves the
+      // bound `focused` true instead). no scroll: the layout scrolls to the caret itself (restoreItemEditor
+      // in index.svelte)
+      queueMicrotask(() => {
+        editorStates.delete(id_suffix)
+        if ((state.focused || focused) && textarea) textarea.focus({ preventScroll: true })
+      })
+    }
   })
-  onDestroy(() => document.removeEventListener('selectionchange', onSelectionChange))
+  onDestroy(() => {
+    document.removeEventListener('selectionchange', onSelectionChange)
+    // the textarea's state for an editor created in this one's place (editorStates): the element is out of
+    // the document by now and keeps its value and selection
+    if (textarea)
+      editorStates.set(id_suffix, {
+        value: textarea.value,
+        selectionStart: textarea.selectionStart,
+        selectionEnd: textarea.selectionEnd,
+        selectionDirection: textarea.selectionDirection,
+        focused: false,
+      })
+  })
 </script>
 
 <div bind:this={editor} class="editor" class:focused>
@@ -1185,8 +1242,17 @@
     on:paste={onPaste}
     on:focus={() => onFocused((focused = true))}
     on:blur={() => {
+      const wasFocused = focused
       onFocused((focused = false))
       textarea.style.visibility = '' // hidden again, active element or not (see syncFocusVisibility)
+      // a removed textarea blurs too, still connected at the event (Chromium): once the removal shows, note
+      // the focus on the state the destroy stashed, for the editor resuming it (editorStates)
+      const elem = textarea
+      if (wasFocused)
+        queueMicrotask(() => {
+          const state = elem.isConnected ? null : editorStates.get(id_suffix)
+          if (state) state.focused = true
+        })
     }}
     autocapitalize="off"
     {spellcheck}

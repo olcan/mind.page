@@ -98,6 +98,10 @@
   export let showLogs = false
   export let selectionStart = 0
   export let selectionEnd = 0
+  // an Item created while editing continues the session of the Item destroyed in its place (a layout moved
+  // the item to another column, or hid it and showed it again): its Editor resumes the destroyed editor's
+  // textarea state (editorStates in Editor.svelte)
+  const resumeEditor = editing
   // NOTE: required props should not have default values
   export let index: number
   export let name: string
@@ -2265,6 +2269,7 @@
         bind:focused
         bind:selectionStart
         bind:selectionEnd
+        resume={resumeEditor}
         cancelOnDelete={fixed}
         {onRun}
         {onSave}

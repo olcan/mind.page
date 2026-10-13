@@ -2843,3 +2843,71 @@ test('a <style> after the label keeps the header minimal and applies as item-spe
   await expect(span).toBeVisible({ timeout: 30_000 })
   await expect(span, 'visible html after the label is not minimal').not.toHaveClass(/\bheaderMinimal\b/)
 })
+
+test('an item being edited keeps its unsaved text, its selection and its focus through a layout that moves it to another column, in both directions; the save carries the text', async ({ page }) => {
+  // the owner (2026-10-13): "sometimes when i'm editing an item and haven't saved yet and there is a layout
+  // event and items move around, the text in the item gets reverted to the saved text as if the unsaved
+  // edits were lost. i can recover the unsaved edits by hitting close button and then choosing cancel when
+  // prompted about unsaved edits". The items render per column (index.svelte: a keyed each over the items
+  // inside a block per column), and a keyed each cannot move a component between two blocks: an item a
+  // layout moves to another column is destroyed in one block and created in the other, its Item and
+  // Editor with it, and the new textarea seeded from the SAVED text prop (the draft lived on in
+  // item.editorText, bound to the model, which the close button's Cancel assigned back to item.text: the
+  // recovery). Now the Editor stashes its textarea's state at its destroy (editorStates in Editor.svelte)
+  // and the Editor created in its place resumes it (the Item created while editing asks for it): the
+  // value, the selection with its direction, and the focus (a removal fires blur in Chromium, so the
+  // state is read while the element is still in the document).
+  // THE FIXTURE: a root with a 1200 px block and a short leaf, the query naming the leaf (the root lists
+  // above it): at two columns the root fills column 0 past the balancing threshold (layoutItems: half a
+  // screen height over the other column), so the leaf opens column 1; at one column every item is in
+  // column 0. The viewport crosses the two-column threshold (750 px a column) both ways.
+  await page.setViewportSize({ width: 1600, height: 900 }) // floor(1600 / 750) = 2 columns
+  await loadAdmin(page)
+  await page.evaluate(() => void window._create('#e2e_remount\n\n<div style="height: 1200px"></div>'))
+  await page.evaluate(() => void window._create('#e2e_remount/leaf draft survives'))
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_remount/leaf')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_remount/leaf')!.elem), { timeout: 10_000 }).toBe(true)
+  const id = await page.evaluate(() => window._item('#e2e_remount/leaf')!.id)
+  const textarea = page.locator(`#textarea-${id}`)
+  const column = () => page.evaluate(id => window.__items.find(item => item.id == id)!.column as number, id)
+  const columns = () => page.evaluate(() => document.querySelectorAll('.column:not(.hidden)').length)
+  // the textarea's state, the value ZWSP-insensitive as the suite compares; `fresh` tells an element a
+  // remount created from the one stamped before (the locator resolves to whichever is in the document)
+  const state = () =>
+    textarea.evaluate((t: HTMLTextAreaElement) => ({
+      value: t.value.replaceAll('​', ''),
+      start: t.selectionStart,
+      end: t.selectionEnd,
+      direction: t.selectionDirection,
+      focused: document.activeElement === t,
+      fresh: !(t as any).__stamped,
+    }))
+  const stamp = () => textarea.evaluate((t: HTMLTextAreaElement) => void ((t as any).__stamped = true))
+  expect(await columns()).toBe(2)
+  expect(await column(), 'the leaf opens column 1 at two columns (the premise)').toBe(1)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(textarea).toBeFocused()
+  await stamp()
+  await textarea.press('ControlOrMeta+a')
+  await textarea.pressSequentially('#e2e_remount/leaf draft survives typed')
+  for (let i = 0; i < 3; i++) await textarea.press('Shift+ArrowLeft') // a backward selection over "ped"
+  const typed = await state()
+  expect(typed).toEqual({ value: '#e2e_remount/leaf draft survives typed', start: 35, end: 38, direction: 'backward', focused: true, fresh: false })
+  for (const [width, count, target] of [
+    [900, 1, 0],
+    [1600, 2, 1],
+  ] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect.poll(columns, { message: `${count} column(s) at ${width}`, timeout: 15_000 }).toBe(count)
+    await expect.poll(column, { message: `the leaf moved to column ${target} at ${width}`, timeout: 15_000 }).toBe(target)
+    await expect.poll(state, { message: `the editor's state at ${width}`, timeout: 5_000 }).toEqual({ ...typed, fresh: true })
+    await stamp()
+  }
+  await page.keyboard.press('Shift+Enter') // save
+  await expect(textarea).toBeHidden()
+  await expect.poll(() => itemText(page, '#e2e_remount/leaf')).toBe('#e2e_remount/leaf draft survives typed')
+  await expect.poll(() => savedId(page, '#e2e_remount/leaf'), { timeout: 30_000 }).toBeTruthy()
+})

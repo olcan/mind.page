@@ -98,7 +98,8 @@ own Firestore project (`helpers.ts`: `adminAuth()` vs `admin()`/`firestore()`).
 - `editor.spec.ts` - the editor driven like a user, as admin on the anonymous account: typing in the
   mindbox and creating with shift+enter, search (debounced, ranked after the pinned items, the tag
   in the url hash), escape and shift+backspace, clicking a tag and going back, editing an item in
-  place (click, shift+enter to save, escape with a discard prompt), and `/_undelete`. The mindbox
+  place (click, shift+enter to save, escape with a discard prompt), an edit surviving a layout that
+  moves the item to another column (its text, selection and focus), and `/_undelete`. The mindbox
   textarea is hidden behind a backdrop until focused, so tests click the backdrop.
 - `personal.spec.ts` - a regular account (`alice_e2e`): the first sign-in copies the welcome item
   and prompts for a new secret phrase, items are then stored as `cipher` with `text` and `attr`
