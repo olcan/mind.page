@@ -1057,4 +1057,55 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(() => void (window as any).MindBox.set(''))
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${CHATTY}/0 ?$`))
+  // THE SNOOZE DIALOG'S BOX (2026-10-21): the drop on the snooze bin opens the dialog with its
+  // "notify on unsnooze" box unchecked (no hint: this device's permission is granted); checked,
+  // a duration's click writes the flag beside the snooze time on the todo's own store; the time
+  // moved into the past, the todoer's own sweep (its welcome task run again, the notifier's
+  // baseline taken first) unsnoozes it and the notifier shows `[unsnoozed]` with the row's text,
+  // kept on screen, its click targeting the todo
+  await page.evaluate(() => {
+    ;(window as any).MindBox.set('')
+    document.body.scrollTop = 0
+  })
+  await mainList.locator('> .list-item-container', { hasText: 'answer the agent' }).scrollIntoViewIfNeeded() // the widget sits below the fold by now
+  await grab('answer the agent')
+  {
+    const row = await rowBox('answer the agent')
+    await dragTo(
+      { x: row.x + 52, y: row.y + row.height / 2 },
+      async () => {
+        const bin = (await page.locator('.todoer-widget').first().locator('.snooze.bin').boundingBox())!
+        return { x: bin.x + bin.width / 2, y: bin.y + bin.height / 2 }
+      },
+      { inject: false }
+    )
+  }
+  const snoozeDialog = page.locator('.snooze-modal')
+  await expect(snoozeDialog).toBeVisible({ timeout: 10_000 })
+  const notifyBox = snoozeDialog.locator('.notify input[type=checkbox]')
+  await expect(notifyBox).toBeVisible()
+  await expect(notifyBox).not.toBeChecked()
+  await expect(snoozeDialog.locator('.notify label')).toHaveText('notify on unsnooze')
+  await expect(snoozeDialog.locator('.notify .hint')).toBeHidden()
+  await notifyBox.check()
+  await snoozeDialog.locator('.button', { hasText: /^3h$/ }).click()
+  await expect(snoozeDialog).toBeHidden({ timeout: 10_000 })
+  const snoozeStore = async () => (await serverStore(`global_store_${notifyId}`))?._todoer ?? null
+  await expect.poll(async () => { const t = await snoozeStore(); return t && { later: t.snoozed > Date.now() + 2 * 3_600_000, notify: t.notify ?? null } }, { timeout: 30_000 }).toEqual({ later: true, notify: true })
+  await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(false)
+  // the snooze's time moved into the past (this tab's write: its hook records the new time)
+  await page.evaluate(id => void ((window._item('id:' + id, true) as any).global_store._todoer.snoozed = Date.now() - 1000), notifyId)
+  await expect.poll(async () => ((await snoozeStore())?.snoozed ?? 0) < Date.now(), { timeout: 30_000 }).toBe(true)
+  expect(await page.evaluate(() => (window as any)._primary), 'this tab is the primary instance (the only one that sweeps)').toBe(true)
+  const beforeSweep = (await notified()).length
+  await page.evaluate(() => (window._item('#todoer') as any).eval('_on_welcome()'))
+  await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(beforeSweep + 1)
+  expect((await notified()).at(-1)).toEqual({ title: '[unsnoozed] answer the agent some context', tag: `todoer:${notifyId}`, body: NOTIFY, requireInteraction: true, closed: false })
+  await expect.poll(async () => { const t = await snoozeStore(); return t && { snoozed: t.snoozed, notify: t.notify ?? null } }, { timeout: 30_000 }).toEqual({ snoozed: 0, notify: true })
+  await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(true)
+  await page.waitForTimeout(1500) // a later observation (a render, the hook of the list's save) adds nothing
+  expect((await notified()).length, 'one notification for the unsnooze').toBe(beforeSweep + 1)
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
+  await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${NOTIFY} ?$`))
 })
