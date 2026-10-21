@@ -1093,11 +1093,11 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const snoozeStore = async () => (await serverStore(`global_store_${notifyId}`))?._todoer ?? null
   await expect.poll(async () => { const t = await snoozeStore(); return t && { later: t.snoozed > Date.now() + 2 * 3_600_000, notify: t.notify ?? null } }, { timeout: 30_000 }).toEqual({ later: true, notify: true })
   await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(false)
+  const beforeSweep = (await notified()).length // counted first: the page's own minute sweep may unsnooze it before ours (either notifies once)
   // the snooze's time moved into the past (this tab's write: its hook records the new time)
   await page.evaluate(id => void ((window._item('id:' + id, true) as any).global_store._todoer.snoozed = Date.now() - 1000), notifyId)
   await expect.poll(async () => ((await snoozeStore())?.snoozed ?? 0) < Date.now(), { timeout: 30_000 }).toBe(true)
   expect(await page.evaluate(() => (window as any)._primary), 'this tab is the primary instance (the only one that sweeps)').toBe(true)
-  const beforeSweep = (await notified()).length
   await page.evaluate(() => (window._item('#todoer') as any).eval('_on_welcome()'))
   await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(beforeSweep + 1)
   expect((await notified()).at(-1)).toEqual({ title: '[unsnoozed] answer the agent some context', tag: `todoer:${notifyId}`, body: NOTIFY, requireInteraction: true, closed: false })
@@ -1108,4 +1108,29 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(() => void (window as any).MindBox.set(''))
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${NOTIFY} ?$`))
+  // the box starts unchecked at EVERY opening (review B1): the app's modal keeps an unchanged
+  // {@html} content's DOM across openings, so the box checked above would show checked again
+  // unless the todoer resets it; the dialog cancelled by a background click puts the row back
+  await page.evaluate(() => {
+    ;(window as any).MindBox.set('')
+    document.body.scrollTop = 0
+  })
+  await mainList.locator('> .list-item-container', { hasText: 'answer the agent' }).scrollIntoViewIfNeeded()
+  await grab('answer the agent')
+  {
+    const row = await rowBox('answer the agent')
+    await dragTo(
+      { x: row.x + 52, y: row.y + row.height / 2 },
+      async () => {
+        const bin = (await page.locator('.todoer-widget').first().locator('.snooze.bin').boundingBox())!
+        return { x: bin.x + bin.width / 2, y: bin.y + bin.height / 2 }
+      },
+      { inject: false }
+    )
+  }
+  await expect(snoozeDialog).toBeVisible({ timeout: 10_000 })
+  await expect(notifyBox).not.toBeChecked()
+  await page.locator('.background.visible').click({ position: { x: 4, y: 4 } }) // no buttons: the background cancels the dialog
+  await expect(snoozeDialog).toBeHidden({ timeout: 10_000 })
+  await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(true)
 })
