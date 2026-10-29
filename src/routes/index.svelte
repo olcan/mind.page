@@ -12104,10 +12104,11 @@
      Windows, macOS with "always show") gets slim scrollbars of the app's own on every inner scroller
      (code blocks, item panels, the modal's pre): a thumb over the element's own background and no
      arrow buttons, which Chrome's native bars keep even at scrollbar-width: thin; an overlay one
-     (macOS, iOS) is left alone, since a styled ::-webkit-scrollbar is always visible. Chrome ignores
-     these pseudo-elements on an element with scrollbar-width or scrollbar-color set (html and body
-     keep their none above, so no item may set them), and Firefox, without them, gets the standard
-     properties, with the buttons it never paints */
+     (macOS, iOS, Chrome's overlay-scrollbars flag) keeps its shape, since a styled ::-webkit-scrollbar
+     is always visible, and is recolored below instead. Chrome ignores these pseudo-elements on an
+     element with scrollbar-width or scrollbar-color set (html and body keep their none above, so no
+     item may set them), and Firefox, without them, gets the standard properties, with the buttons it
+     never paints */
   :global(.classic-scrollbars *::-webkit-scrollbar) {
     width: 11px;
     height: 11px;
@@ -12132,6 +12133,13 @@
     :global(.classic-scrollbars *) {
       scrollbar-width: thin;
     }
+  }
+  /* an overlay scrollbar takes no space, so its browser is not marked and the rules above stay out:
+     the standard property recolors it instead (Chrome's overlay bar was the same gray-on-white one,
+     shown on hover: the owner on gen14 with the flag, 2026-10-28); Safari, without the property,
+     keeps its native bar */
+  :global(html:not(.classic-scrollbars) *) {
+    scrollbar-color: #555 transparent;
   }
 
   /* customize selection colors */
