@@ -1154,10 +1154,11 @@ const headerTop = (page: Page) => page.evaluate(() => (document.querySelector('.
 // the page's history entries: the session state history's length and the current index
 const entries = (page: Page) => page.evaluate(() => [(window as any)._history.length, (window as any)._history_index] as const)
 // scrolls 600 px below the header and returns the position; the scroll is repeated until it holds for
-// 150 ms, since a layout landing just after it scrolls back to the top (a settled query's explicit scroll
-// to the top wins over every later layout, scrollToTopWithHistory) or the page is still short (a
-// re-render in flight): one scroll before the poll stayed at the top for 30 s under the full gate, twice
-// (2026-10-28, the scroll right after Control+ArrowUp)
+// 150 ms: one scroll before the poll stayed at the top for 30 s under the full gate, twice (2026-10-28,
+// the scroll right after Control+ArrowUp: the position read 612, the header, where more than 912 was
+// expected; what returned it there, a layout's scroll or a clamp on a page still short, is not identified:
+// lane_races review 0 corrected the first account). the rows that call this test what the keys do from a
+// scrolled page, not whether a first scroll survives, so the repeat hides nothing they assert
 const scrollDown = async (page: Page) => {
   const top = await headerTop(page)
   await expect
@@ -1275,24 +1276,60 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
   expect(await entries(page)).toEqual([length + 1, index + 1])
   expect(asSet(await visible(page))).toEqual(asSet(expanded))
   // a fresh scroll on the destination while the departed view's write is pending (review 2 B2): one turn
-  // arms a write for the top entry (a scroll event), goes Back, and scrolls the destination further
-  // 120 ms later, while that write is still pending (it fires at 250 ms); the restore, two frames,
-  // is normally long done by then. The destination must record the fresh position (the identity
-  // check dropped the write, and the fresh scroll could not re-arm while one was pending)
+  // arms a write for the top entry (a scroll event), goes Back, and scrolls the destination further once
+  // the restore has landed, while that write is still pending. The destination must record the fresh
+  // position (the identity check dropped the write, and the fresh scroll could not re-arm while one was
+  // pending). The overlap is held, not timed (lane_races review 0 B1): the departed write's timer, the one
+  // 250 ms timer the scroll event arms, is captured and released only after the fresh scroll's event has
+  // been processed, so a restore slower than the delay (a loaded host; a fixed 120 ms before the fresh
+  // scroll once let a late restore undo it, 2026-10-28) cannot let the write expire first and pass the
+  // phase without the overlap it tests; the re-arm clears the captured timer as it would the real one.
+  // the pending flag read at the fresh scroll names a history write, not its entry: the restore's own
+  // scroll event may already have re-armed the write for the destination, the behaviour under test
   await noWritePending(page)
-  await page.evaluate(
-    ({ y, at }) => {
-      document.body.dispatchEvent(new Event('scroll'))
-      history.back()
-      // the fresh scroll once the restore has landed (two frames normally; a fixed 120 ms let a late
-      // restore undo the fresh scroll once, on a loaded host, 2026-10-28), inside the pending write
-      const fresh = () => (Math.abs(document.body.scrollTop - at) <= 2 ? document.body.scrollTo(0, y) : requestAnimationFrame(fresh))
-      requestAnimationFrame(fresh)
-    },
+  const overlap = await page.evaluate(
+    ({ y, at }) =>
+      new Promise<{ armed: number; pendingAtFresh: boolean; releasedLate: number }>(resolve => {
+        const setTimeout_ = window.setTimeout
+        const clearTimeout_ = window.clearTimeout
+        const held: { id: number; cb: () => void }[] = []
+        let fakeId = 1 << 30
+        ;(window as any).setTimeout = (cb: () => void, ms?: number, ...args: unknown[]) =>
+          ms == 250 ? (held.push({ id: ++fakeId, cb }), fakeId) : setTimeout_(cb, ms, ...args)
+        ;(window as any).clearTimeout = (id?: number) => {
+          const i = held.findIndex(h => h.id == id)
+          i >= 0 ? held.splice(i, 1) : clearTimeout_(id)
+        }
+        document.body.dispatchEvent(new Event('scroll')) // arms the departed write: captured
+        window.setTimeout = setTimeout_ // every later timer, the re-armed write included, is real
+        const armed = held.length
+        history.back()
+        const fresh = () => {
+          if (Math.abs(document.body.scrollTop - at) > 2) return requestAnimationFrame(fresh) // the restore landed
+          const pendingAtFresh = (window as any)._history_update_pending as boolean
+          document.body.scrollTo(0, y)
+          // the scroll event is dispatched a frame later; the departed write is released after it
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              window.clearTimeout = clearTimeout_
+              const late = held.splice(0)
+              late.forEach(h => h.cb())
+              resolve({ armed, pendingAtFresh, releasedLate: late.length })
+            })
+          )
+        }
+        requestAnimationFrame(fresh)
+      }),
     { y: before + 100, at: before }
   )
+  expect(overlap, 'the scroll event armed the one write, held until its cancellation or release; a history write pending at the fresh scroll').toMatchObject({
+    armed: 1,
+    pendingAtFresh: true,
+  })
   await expect
-    .poll(() => page.evaluate(i => (window as any)._history[i].scrollPosition, index), { message: 'the destination recorded the fresh position' })
+    .poll(() => page.evaluate(i => (window as any)._history[i].scrollPosition, index), {
+      message: `the destination recorded the fresh position (${JSON.stringify(overlap)})`,
+    })
     .toBe(before + 100)
   expect(await page.evaluate(() => [history.state.scrollPosition, document.body.scrollTop])).toEqual([before + 100, before + 100])
   expect(await entries(page)).toEqual([length + 1, index])
