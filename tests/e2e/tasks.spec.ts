@@ -1095,7 +1095,11 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   }
   const snoozeDialog = page.locator('.snooze-modal')
   await expect(snoozeDialog).toBeVisible({ timeout: 10_000 })
-  await expect.poll(pressFacts, { timeout: 10_000 }).toEqual({ chosen: 0, dragging: 0, pending: 0 }) // the deferred renders ran at the release
+  // the deferred renders' marks cleared at the release; that the renders RAN is the todoer node table's
+  // row (tests/todoer_test.js: _run_deferred_renders schedules each), since here another render rebuilds
+  // both widgets' lists before the dialog's answer anyway (a list-identity witness passed with the
+  // scheduled render removed, lane_races round 2)
+  await expect.poll(pressFacts, { timeout: 10_000 }).toEqual({ chosen: 0, dragging: 0, pending: 0 })
   const notifyBox = snoozeDialog.locator('.notify input[type=checkbox]')
   await expect(notifyBox).toBeVisible()
   await expect(notifyBox).not.toBeChecked()

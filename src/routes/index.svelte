@@ -337,6 +337,7 @@
     Object.defineProperty(window, '__hideIndex', { get: () => hideIndex })
     Object.defineProperty(window, '__rendered', { get: () => rendered }) // initial rendering done?
     Object.defineProperty(window, '__layoutCount', { get: () => layoutCount }) // layout passes run
+    Object.defineProperty(window, '__layoutPending', { get: () => layoutPending }) // a layout a re-measure triggered, not yet run (tests)
     Object.defineProperty(window, '__layout', { value: () => updateItemLayout() }) // a layout pass on demand (tests: a geometry layout at a chosen moment)
     // hidden-index authority (see hiddenAuthorityUsable), asserted by cache/authority e2e tests
     Object.defineProperty(window, '__hiddenAuthoritative', { get: () => hiddenAuthorityUsable() })

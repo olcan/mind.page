@@ -295,12 +295,21 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   // finish with REAL modals -- the "Installed <item>" OK confirmation, the updater's own
   // Continue confirmation for missing dependencies, and (once #updater exists as a welcome
   // item) a Reload/Skip recommendation. Production is interactive; the row clicks through
-  // exactly as the install() helper does, never clicking Reload
+  // exactly as the install() helper does, never clicking Reload. Only a VISIBLE button is clicked
+  // (lane_races review 0; the row's failure in two of seven gates, reproduced under load): the
+  // modal keeps its last buttons in the DOM while hidden, their labels included, so a click resolved
+  // by text to the hidden "Skip" of the reload prompt waited for visibility and landed on the same
+  // button once the next modal, the second dependency confirm, showed it as its Cancel
+  const visibleClick = async (label: string) => {
+    const button = page.getByText(label, { exact: true })
+    if (await button.isVisible().catch(() => false)) await button.click({ timeout: 2000 }).catch(() => {})
+  }
   let clicking = true
   const clicks = (async () => {
-    while (clicking)
-      for (const label of ['Continue', 'OK', 'Skip'])
-        await page.getByText(label, { exact: true }).click({ timeout: 200 }).catch(() => {})
+    while (clicking) {
+      for (const label of ['Continue', 'OK', 'Skip']) await visibleClick(label)
+      await page.waitForTimeout(50)
+    }
   })()
   let updated: unknown
   try {
@@ -362,7 +371,10 @@ test('an autodep parent absent from every text tag is installed and joins the ru
   const runUpdate = async (clickLabel: string) => {
     let going = true
     const clicker = (async () => {
-      while (going) await page.getByText(clickLabel, { exact: true }).click({ timeout: 200 }).catch(() => {})
+      while (going) {
+        await visibleClick(clickLabel) // a visible button only (see the first loop)
+        await page.waitForTimeout(50)
+      }
     })()
     try {
       return await page.evaluate(async updates => {

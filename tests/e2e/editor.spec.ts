@@ -281,21 +281,99 @@ test('a focus Chrome dispatches no event for leaves the mindbox painted as it is
     // a focus and a blur within the restore's delay (the full gate of 2026-10-28: the steps between a
     // restore and the next minimize took less than 250 ms): the restore the focus armed must not fire
     // into the page without the system focus, where a focus is silent and left the textarea active and
-    // visible behind the unfocused paint for good; the box is restored at the next focus instead
+    // visible behind the unfocused paint for good; the box is restored at the next focus instead. The
+    // interval is HELD, not timed (lane_races review 0): the restore's timer, the one 250 ms timer the
+    // window focus arms, is captured, so the blur finds it pending whatever the run's pace and must drop
+    // it (the app without the drop keeps it, and released it would focus the box silently), and with
+    // nothing else focused at that blur the element recorded at the first blur is kept for the next focus.
+    // The focus may arm another 250 ms timer (a listener item's _on_focus, the instance update; one run
+    // captured two) and the page's own periodic work (expandMacros, rescheduled every 250 ms) may add a held
+    // timer at any moment, so the assertion is the count of held timers a clearTimeout REMOVED (lane_races
+    // review 2 B1: a queue length read twice is not that count), and the release shows the box unfocused
+    const holdRestore = () =>
+      page.evaluate(() => {
+        const w = window as any
+        const held: { id: number; cb: () => void }[] = (w.__heldRestore = [])
+        w.__droppedRestore = 0
+        const setTimeout_ = (w.__setTimeout = window.setTimeout)
+        const clearTimeout_ = (w.__clearTimeout = window.clearTimeout)
+        w.__fakeTimerId ??= 1 << 30 // unique across the row's holds (a stale id cleared later must match nothing held)
+        ;(window as any).setTimeout = (cb: () => void, ms?: number, ...args: unknown[]) =>
+          ms == 250 ? (held.push({ id: ++w.__fakeTimerId, cb }), w.__fakeTimerId) : setTimeout_(cb, ms, ...args)
+        ;(window as any).clearTimeout = (id?: number) => {
+          const i = held.findIndex(h => h.id == id)
+          if (i >= 0) {
+            held.splice(i, 1)
+            w.__droppedRestore++
+          } else clearTimeout_(id)
+        }
+      })
+    const heldRestores = () => page.evaluate(() => (window as any).__heldRestore.length as number)
+    const droppedRestores = () => page.evaluate(() => (window as any).__droppedRestore as number)
+    const activeIs = (selector: string) => page.evaluate(selector => (document.activeElement as HTMLElement | null)?.matches(selector) ?? false, selector)
+    // the hold ends: the wrappers removed, whatever is still captured fires
+    const releaseRestore = () =>
+      page.evaluate(() => {
+        const w = window as any
+        window.setTimeout = w.__setTimeout
+        window.clearTimeout = w.__clearTimeout
+        const late = w.__heldRestore.splice(0) as { cb: () => void }[]
+        late.forEach(h => h.cb())
+        return late.length
+      })
     await focusMindbox(page)
-    await away()
+    await away() // the box recorded at this blur
     await expect.poll(painted, { message: 'the box after the blur before the quick switch' }).toEqual(unfocused)
-    await back()
-    await page.evaluate(() => document.getElementById('textarea-mindbox')!.focus()) // a real focus (the page has the focus), as the click had
-    expect(await painted(), 'the box focused again before the quick blur').toEqual(focused)
-    await away() // within the delay: back() and away() return as soon as the page's focus state follows
-    await page.waitForTimeout(400) // past the delay
+    // a pre-existing timer may add another held timer (expandMacros reschedules itself every 250 ms); the
+    // removal count below is independent of that growth. The planted callback is an opportunistic
+    // perturbation of that kind: this row does not assert when it fires (before the wrapper, between the
+    // readings or after the release), only that the count stays right whenever it does
+    await page.evaluate(() => setTimeout(() => setTimeout(() => {}, 250), 30))
+    await holdRestore()
+    await back() // the window focus arms the restore: captured
+    const armed = await heldRestores()
+    await away() // within the delay by construction
+    expect([armed >= 1, await droppedRestores()], 'the focus armed the restore and the blur within the delay removed one held timer').toEqual([true, 1])
+    await releaseRestore() // anything else held fires now: not the restore, or the box would be focused silently
     expect(await painted(), 'the box after a focus and a blur within the restore delay').toEqual(unfocused)
-    await back()
+    await back() // the recorded box, kept through the quick switch, restored at this focus
     await expect.poll(painted, { message: 'the box restored at the focus after the quick switch' }).toEqual(focused)
     await page.keyboard.press('Escape')
     await expect(mindbox(page)).not.toBeFocused()
     expect(await painted(), 'the box blurred after the quick switch').toEqual(unfocused)
+    // another element focused before the quick blur replaces the recorded box: the next focus restores it,
+    // not the box. The button keeps its native active state through the system blur (a visible focusable
+    // element, unlike the box, which the component hides), so it is blurred while the page is away and the
+    // next focus's restore is held and released: the button active afterwards is the restore's doing, not a
+    // state that never left (review 2 B2); the app without the replacing branch restores the box here
+    await focusMindbox(page)
+    await away()
+    await expect.poll(painted, { message: 'the box after the blur before the replacing switch' }).toEqual(unfocused)
+    await holdRestore()
+    await back()
+    const other = await page.evaluate(() => {
+      const button = document.querySelector('.header .button') as HTMLElement
+      button.tabIndex = -1
+      button.focus() // a real focus: the page has the system focus
+      return document.activeElement === button
+    })
+    expect(other, 'the premise: another element focused').toBe(true)
+    await away() // the blur records the button in the box's place and drops the pending restore
+    expect(await droppedRestores(), 'the restore dropped at this blur too').toBe(1)
+    await releaseRestore()
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()) // silent while away: the recorded element stays
+    expect(await activeIs('body'), 'the premise: nothing active while away').toBe(true)
+    await holdRestore()
+    await back() // the restore armed: held
+    expect(await activeIs('body'), 'nothing focused before the restore').toBe(true)
+    await releaseRestore() // the restore fires now
+    expect(await activeIs('.header .button'), 'the restore brought the button back, not the box').toBe(true)
+    expect(await painted(), 'the box not restored: the other element replaced it').toEqual(unfocused)
+    await page.evaluate(() => {
+      const button = document.activeElement as HTMLElement
+      button.blur()
+      button.removeAttribute('tabindex')
+    })
   } finally {
     await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
     await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -1252,7 +1330,17 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
   // and Back follows in the same turn while the animation frames the restore awaits are HELD for 400 ms,
   // so the write fires with the destination entry current and the body still at the header. The
   // destination keeps its position and the restore lands there (the write used to take the departed
-  // view's position, and Back stayed at the header)
+  // view's position, and Back stayed at the header). First the previous step's own scroll event and
+  // write are let through (the scroll to the top above): the event is dispatched a frame after the
+  // scroll and its write 250 ms later, and this phase once read the destination recording the header
+  // (the full gate of 2026-10-29: "both positions intact" read [612, 612]), which a late event arriving
+  // after Back explains, re-arming the write on the destination with the body still at the header: an
+  // inference from the position recorded, no event trace; two frames, then no write pending
+  const settledWrites = async () => {
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    await noWritePending(page)
+  }
+  await settledWrites()
   await page.evaluate(() => {
     const raf = window.requestAnimationFrame
     const held: FrameRequestCallback[] = []
@@ -1286,16 +1374,17 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
   // phase without the overlap it tests; the re-arm clears the captured timer as it would the real one.
   // the pending flag read at the fresh scroll names a history write, not its entry: the restore's own
   // scroll event may already have re-armed the write for the destination, the behaviour under test
-  await noWritePending(page)
+  await settledWrites()
   const overlap = await page.evaluate(
     ({ y, at }) =>
       new Promise<{ armed: number; pendingAtFresh: boolean; releasedLate: number }>(resolve => {
         const setTimeout_ = window.setTimeout
         const clearTimeout_ = window.clearTimeout
         const held: { id: number; cb: () => void }[] = []
-        let fakeId = 1 << 30
+        const w = window as any
+        w.__fakeTimerId ??= 1 << 30 // unique across every capture on this page: a stale id in an app variable (historyUpdateTimer) cleared later must match nothing held
         ;(window as any).setTimeout = (cb: () => void, ms?: number, ...args: unknown[]) =>
-          ms == 250 ? (held.push({ id: ++fakeId, cb }), fakeId) : setTimeout_(cb, ms, ...args)
+          ms == 250 ? (held.push({ id: ++w.__fakeTimerId, cb }), w.__fakeTimerId) : setTimeout_(cb, ms, ...args)
         ;(window as any).clearTimeout = (id?: number) => {
           const i = held.findIndex(h => h.id == id)
           i >= 0 ? held.splice(i, 1) : clearTimeout_(id)
@@ -1558,10 +1647,13 @@ test('up with two modifiers scrolls to the top from every context, with a histor
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
   await blur(page) // the Resume shortcut is the window's: nothing focused
   // the hold below catches every frame requested from now on, so the frames the close and the blur
-  // requested (the layout, its scroll) must have run first: two real frames and a pause, or the first
-  // release ran a held layout along with the restore's first phase, and the layout's scroll cancelled
-  // the restore (lastScrollTime past its dispatch), the editor never focused (the full gate, 2026-10-28)
-  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150)))))
+  // requested (the layout, its scroll) must have run first, or the first release ran a held layout along
+  // with the restore's first phase, and the layout's scroll cancelled the restore (lastScrollTime past its
+  // dispatch), the editor never focused (the full gate, 2026-10-28). Observed, not paused for (lane_races
+  // review 0): a layout the close's re-measure triggered is pending until it runs (window.__layoutPending),
+  // and its flush is a tick and two frames
+  await expect.poll(() => page.evaluate(() => (window as any).__layoutPending as boolean), { message: 'no layout pending after the close', timeout: 15_000 }).toBe(false)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await page.evaluate(() => {
     const held: FrameRequestCallback[] = ((window as any).__held = [])
     ;(window as any).__raf = window.requestAnimationFrame
@@ -2576,6 +2668,30 @@ test('a change of the document width scrolls the item the query names back into 
   // first layout is before + 1, the second before + 2, whenever each is observed)
   const reflowTo = async (width: number) => {
     const before = await layouts()
+    // the 250 ms timers armed from the resize to the watcher's action are HELD (lane_races review 0): the
+    // second layout is tryLayout's 250 ms timer, armed by the re-measure right after the first layout, and
+    // on a loaded host it fired inside the four frames the watcher waits, so the premise "the second layout
+    // not yet run" read one past (three of seven full gates, then twice alone); held, it runs after the
+    // action (firstLayout releases it a frame later, the action's scroll event dispatched), where the app's
+    // own rule, a layout waits 500 ms past a scroll, orders it as in production. A write the correction's
+    // scroll arms is held and released the same way; clearTimeout on a held id drops it, as the real one
+    await page.evaluate(() => {
+      const w = window as any
+      const held: { id: number; cb: (...args: unknown[]) => void; args: unknown[] }[] = (w.__heldTimers = [])
+      const setTimeout_ = (w.__setTimeout = window.setTimeout)
+      const clearTimeout_ = (w.__clearTimeout = window.clearTimeout)
+      // the ids are unique across the row's four holds: a hold that restarted them handed a previous hold's
+      // write id to tryLayout, and the next scroll's clearTimeout(historyUpdateTimer), the app's stale id,
+      // dropped the held layout for good (layoutPending stuck; the editor lane once, "the second layout after
+      // the Up" never came)
+      w.__fakeTimerId ??= 1 << 30
+      ;(window as any).setTimeout = (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) =>
+        ms == 250 ? (held.push({ id: ++w.__fakeTimerId, cb, args }), w.__fakeTimerId) : setTimeout_(cb, ms, ...args)
+      ;(window as any).clearTimeout = (id?: number) => {
+        const i = held.findIndex(h => h.id == id)
+        i >= 0 ? held.splice(i, 1) : clearTimeout_(id)
+      }
+    })
     await page.setViewportSize({ width, height: 900 })
     return before
   }
@@ -2591,7 +2707,7 @@ test('a change of the document width scrolls the item the query names back into 
   const firstLayout = (before: number, action: 'none' | 'hand' | 'up' = 'none') =>
     page.evaluate(
       ({ before, action }) =>
-        new Promise<{ count: number; top: number; at: boolean; inBand: boolean; held: boolean; pushed: boolean | null }>((resolve, reject) => {
+        new Promise<{ count: number; top: number; at: boolean; inBand: boolean; held: boolean; pushed: boolean | null; heldTimers: number }>((resolve, reject) => {
           const w = window as any
           const started = Date.now()
           const tick = () => {
@@ -2615,7 +2731,15 @@ test('a change of the document width scrolls the item the query names back into 
                     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))
                     pushed = w._history.length == length + 1 && w._history[w._history_index].scrolledToTop === true
                   }
-                  resolve({ count, top, at, inBand, held, pushed })
+                  // the hold of reflowTo ends a frame later, the action's scroll event dispatched: the wrappers
+                  // removed, the held timers run (tryLayout's among them, which re-arms itself past the scroll)
+                  requestAnimationFrame(() => {
+                    window.setTimeout = w.__setTimeout
+                    window.clearTimeout = w.__clearTimeout
+                    const late = w.__heldTimers.splice(0) as { cb: (...args: unknown[]) => void; args: unknown[] }[]
+                    late.forEach(h => h.cb(...h.args))
+                    resolve({ count, top, at, inBand, held, pushed, heldTimers: late.length })
+                  })
                 }
                 requestAnimationFrame(act)
                 return

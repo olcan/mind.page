@@ -4,8 +4,9 @@ import { firestore, loadAdmin } from './helpers.js'
 
 // the editor lane's longest rows, on their own lane (playwright.config.ts: `editor2`) so the two
 // editor lanes finish in about the same time; each row is self-contained (its own items, its own
-// page loads), unlike the rows of editor.spec.ts that build on each other's items
-test.describe.configure({ mode: 'serial' })
+// page loads), unlike the rows of editor.spec.ts that build on each other's items, so the rows are
+// not a serial group: a failed row leaves the rest running (lane_races review 0: one early failure
+// hid the later rows' evidence for a day), on the lane's one worker as before (fullyParallel is off)
 test.setTimeout(180_000)
 
 test('an edit in one tab reaches another tab sharing the persistent cache', async ({ page }) => {
@@ -132,15 +133,16 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
   const paragraphTop = () =>
     page.evaluate(id => {
       const rect = document.querySelector(`#item-${id} p`)!.getBoundingClientRect()
-      if (rect.top < 0 || rect.top + 20 > innerHeight) document.querySelector(`#item-${id} p`)!.scrollIntoView({ block: 'center' })
-      return rect.top
+      const inside = rect.top >= 0 && rect.top + 20 <= innerHeight // the viewport as measured, not assumed
+      if (!inside) document.querySelector(`#item-${id} p`)!.scrollIntoView({ block: 'center' })
+      return { top: rect.top, inside }
     }, id)
   await expect
     .poll(
       async () => {
-        const top = await paragraphTop()
+        const { top, inside } = await paragraphTop()
         await page.waitForTimeout(200)
-        return top >= 0 && top + 20 <= 720 && (await paragraphTop()) == top
+        return inside && (await paragraphTop()).top == top
       },
       { timeout: 15_000, message: 'the paragraph in the viewport and at rest' }
     )
