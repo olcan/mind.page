@@ -278,6 +278,24 @@ test('a focus Chrome dispatches no event for leaves the mindbox painted as it is
     await page.keyboard.press('Escape')
     await expect(mindbox(page)).not.toBeFocused()
     expect(await painted(), 'the box blurred after the restore').toEqual(unfocused)
+    // a focus and a blur within the restore's delay (the full gate of 2026-10-28: the steps between a
+    // restore and the next minimize took less than 250 ms): the restore the focus armed must not fire
+    // into the page without the system focus, where a focus is silent and left the textarea active and
+    // visible behind the unfocused paint for good; the box is restored at the next focus instead
+    await focusMindbox(page)
+    await away()
+    await expect.poll(painted, { message: 'the box after the blur before the quick switch' }).toEqual(unfocused)
+    await back()
+    await page.evaluate(() => document.getElementById('textarea-mindbox')!.focus()) // a real focus (the page has the focus), as the click had
+    expect(await painted(), 'the box focused again before the quick blur').toEqual(focused)
+    await away() // within the delay: back() and away() return as soon as the page's focus state follows
+    await page.waitForTimeout(400) // past the delay
+    expect(await painted(), 'the box after a focus and a blur within the restore delay').toEqual(unfocused)
+    await back()
+    await expect.poll(painted, { message: 'the box restored at the focus after the quick switch' }).toEqual(focused)
+    await page.keyboard.press('Escape')
+    await expect(mindbox(page)).not.toBeFocused()
+    expect(await painted(), 'the box blurred after the quick switch').toEqual(unfocused)
   } finally {
     await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
     await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -1135,11 +1153,23 @@ const scrollTop = (page: Page) => page.evaluate(() => document.body.scrollTop)
 const headerTop = (page: Page) => page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
 // the page's history entries: the session state history's length and the current index
 const entries = (page: Page) => page.evaluate(() => [(window as any)._history.length, (window as any)._history_index] as const)
-// scrolls 600 px below the header and returns the position
+// scrolls 600 px below the header and returns the position; the scroll is repeated until it holds for
+// 150 ms, since a layout landing just after it scrolls back to the top (a settled query's explicit scroll
+// to the top wins over every later layout, scrollToTopWithHistory) or the page is still short (a
+// re-render in flight): one scroll before the poll stayed at the top for 30 s under the full gate, twice
+// (2026-10-28, the scroll right after Control+ArrowUp)
 const scrollDown = async (page: Page) => {
   const top = await headerTop(page)
-  await page.evaluate(y => document.body.scrollTo(0, y), top + 600)
-  await expect.poll(() => scrollTop(page), { message: 'the body scrolled below the header (the page is long enough)' }).toBeGreaterThan(top + 300)
+  await expect
+    .poll(
+      async () => {
+        await page.evaluate(y => document.body.scrollTo(0, y), top + 600)
+        await page.waitForTimeout(150)
+        return scrollTop(page)
+      },
+      { message: 'the body scrolled below the header (the page is long enough)' }
+    )
+    .toBeGreaterThan(top + 300)
   return scrollTop(page)
 }
 const nearTop = async (page: Page, message: string) =>
@@ -1250,11 +1280,17 @@ test('cmd/ctrl+arrows in the MindBox scroll a scrolled page to the top with a hi
   // is normally long done by then. The destination must record the fresh position (the identity
   // check dropped the write, and the fresh scroll could not re-arm while one was pending)
   await noWritePending(page)
-  await page.evaluate(y => {
-    document.body.dispatchEvent(new Event('scroll'))
-    history.back()
-    setTimeout(() => document.body.scrollTo(0, y), 120)
-  }, before + 100)
+  await page.evaluate(
+    ({ y, at }) => {
+      document.body.dispatchEvent(new Event('scroll'))
+      history.back()
+      // the fresh scroll once the restore has landed (two frames normally; a fixed 120 ms let a late
+      // restore undo the fresh scroll once, on a loaded host, 2026-10-28), inside the pending write
+      const fresh = () => (Math.abs(document.body.scrollTop - at) <= 2 ? document.body.scrollTo(0, y) : requestAnimationFrame(fresh))
+      requestAnimationFrame(fresh)
+    },
+    { y: before + 100, at: before }
+  )
   await expect
     .poll(() => page.evaluate(i => (window as any)._history[i].scrollPosition, index), { message: 'the destination recorded the fresh position' })
     .toBe(before + 100)
@@ -1483,6 +1519,12 @@ test('up with two modifiers scrolls to the top from every context, with a histor
   await expect(page.locator(`#textarea-${id}`)).toBeFocused()
   await page.keyboard.press('Escape') // nothing edited: the editor closes, the item is the last edited one
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  await blur(page) // the Resume shortcut is the window's: nothing focused
+  // the hold below catches every frame requested from now on, so the frames the close and the blur
+  // requested (the layout, its scroll) must have run first: two real frames and a pause, or the first
+  // release ran a held layout along with the restore's first phase, and the layout's scroll cancelled
+  // the restore (lastScrollTime past its dispatch), the editor never focused (the full gate, 2026-10-28)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150)))))
   await page.evaluate(() => {
     const held: FrameRequestCallback[] = ((window as any).__held = [])
     ;(window as any).__raf = window.requestAnimationFrame
@@ -1495,7 +1537,6 @@ test('up with two modifiers scrolls to the top from every context, with a histor
       const now = performance.now()
       for (const cb of held.splice(0)) cb(now)
     })
-  await blur(page) // the Resume shortcut is the window's: nothing focused
   await page.keyboard.press('Shift+Meta+KeyS') // Resume: the editor reopens and the caret restore is dispatched
   await frame()
   await frame() // the first phase ran (the editor focused, the caret measured); the second awaits two more frames
@@ -1724,6 +1765,10 @@ test('time rows: the arrows navigate through a query change, which regroups noth
   await expect.poll(() => page.evaluate(label => Date.now() - (window as any).__items.find((i: any) => i.label == label).time < 60_000, ITEM)).toBe(true)
   await reveal(CHILD)
   expect(await rows(), 'no row from the passive touch').toEqual(['1h', null, null])
+  // the page scrolled to the item, as a navigation to it from below the band leaves it, so the child
+  // below it stands in the band (the navigation above scrolls nothing when the item is in the band at
+  // the top already, and the child then sits where the lane's heights put it: once outside, 2026-10-28)
+  await settleScroll(await page.evaluate(label => window._item(label, true)!.elem!.offsetTop - 100, ITEM))
   const premise = await band(CHILD)
   expect(premise.inside, `the child in the band before the navigation: ${JSON.stringify(premise)}`).toBe(true)
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
@@ -2141,6 +2186,24 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   await focusMindbox(page)
   await mindbox(page).pressSequentially('#e2e_named')
   await targeted()
+  // the query's own layout scrolls to its item a few frames after the render, later on the full gate's
+  // busier page (a Down before it landed scrolled to the item itself, with an entry, 2026-10-28): the item
+  // in view and the position at rest for 200 ms before the premise is read
+  const inView = () =>
+    page.evaluate(() => {
+      const top = (document.querySelector('.super-container.target') as HTMLElement).offsetTop
+      return top >= document.body.scrollTop && top <= document.body.scrollTop + visualViewport!.height - 200
+    })
+  await expect
+    .poll(
+      async () => {
+        const y = await scrollTop(page)
+        await page.waitForTimeout(200)
+        return (await inView()) && (await scrollTop(page)) == y
+      },
+      { timeout: 15_000, message: 'the item in view, the position at rest' }
+    )
+    .toBe(true)
   await noWritePending(page)
   const [length, index] = await entries(page)
   // in view (the query's own layout scrolled to its item; the item sits below the pinned items), the previous

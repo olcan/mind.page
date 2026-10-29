@@ -1069,6 +1069,19 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   })
   await mainList.locator('> .list-item-container', { hasText: 'answer the agent' }).scrollIntoViewIfNeeded() // the widget sits below the fold by now
   await grab('answer the agent')
+  // a render landing on the chosen row before the drag's first move is deferred like one during
+  // the drag (2026-10-28): the pinned item's re-render after the query change above destroyed the
+  // list's Sortable about 160 ms after the grab, which released the press without events, and the
+  // drag then found nothing (the lane's failure in most full gates since 2026-10-23); the row stays
+  // chosen on its list, both widgets' renders pending, run at the release
+  await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
+  const pressFacts = () =>
+    page.evaluate(() => ({
+      chosen: document.querySelectorAll('.todoer-widget .list .sortable-chosen').length,
+      dragging: document.querySelectorAll('.todoer-widget.dragging').length,
+      pending: [...document.querySelectorAll('.todoer-widget')].filter(w => (w as any)._renderPendingDragging).length,
+    }))
+  expect(await pressFacts(), 'the render injected on the chosen row found the press and deferred both widgets').toEqual({ chosen: 1, dragging: 0, pending: 2 })
   {
     const row = await rowBox('answer the agent')
     await dragTo(
@@ -1082,6 +1095,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   }
   const snoozeDialog = page.locator('.snooze-modal')
   await expect(snoozeDialog).toBeVisible({ timeout: 10_000 })
+  await expect.poll(pressFacts, { timeout: 10_000 }).toEqual({ chosen: 0, dragging: 0, pending: 0 }) // the deferred renders ran at the release
   const notifyBox = snoozeDialog.locator('.notify input[type=checkbox]')
   await expect(notifyBox).toBeVisible()
   await expect(notifyBox).not.toBeChecked()

@@ -10991,13 +10991,24 @@
   }
 
   let lastFocusedElem
+  let restoreFocusTimer = null // the delayed restore below, pending since the last window focus
   function onFocus() {
     // NOTE: on ios (also android presumably), windows do not defocus when switching among split-screen windows
     if (ios || android) return // focus handled in focus/checkFocus below
     const was_focused = focused
     focused = document.hasFocus()
     // note focused element is not always restored as expected, so we restore manually on re-focus
-    if (!focused && was_focused) lastFocusedElem = document.activeElement
+    if (!focused && was_focused) {
+      // a restore still pending from the last focus (a focus and a blur within its delay) is dropped: a
+      // focus into a page without the system focus is silent (no event), so the element it focused
+      // stayed active and, a textarea, visible behind the unfocused paint (the editor lane's system-blur
+      // row under the full gate, 2026-10-28); its element stays recorded for the next focus unless
+      // something else took the focus meanwhile
+      const active = document.activeElement
+      if (!restoreFocusTimer || (active && active != document.body)) lastFocusedElem = active
+      clearTimeout(restoreFocusTimer)
+      restoreFocusTimer = null
+    }
     // note focus_time tracks interactions beyond focused=true
     if (focused) {
       focus_time = instance.focus_time = Date.now()
@@ -11008,7 +11019,9 @@
       // note delayed dispatch seems necessary in case there is a pending click that will update focus, e.g. when clicking inside editor after a find-on-page that temporarily removes focus from the page (to the browser)
       // the restore keeps the caret only: a native focus scrolls the element into view (centered), which
       // threw away the scroll position of a page scrolled with the caret in the MindBox (2026-09-28)
-      setTimeout(() => {
+      clearTimeout(restoreFocusTimer)
+      restoreFocusTimer = setTimeout(() => {
+        restoreFocusTimer = null
         lastFocusedElem?.focus({ preventScroll: true })
         lastFocusedElem = null
       }, 250)

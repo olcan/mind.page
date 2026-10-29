@@ -27,7 +27,13 @@ async function stored(page: Page, name: string) {
 
 // stores the secret as a returning device would have it, before signing in (see secretFor)
 async function withSecret(page: Page) {
-  await page.goto('/')
+  // the app reloads itself a moment after a sign-out shows its signed-out page (the cache cleared first),
+  // later on a loaded host: a navigation that meets that reload is aborted and is made again (the full
+  // gate, 2026-10-28, twice: the shared-page row's second round after its Sign Out)
+  await page.goto('/').catch(async e => {
+    if (!String(e?.message).includes('ERR_ABORTED')) throw e
+    await page.goto('/')
+  })
   await page.evaluate(secret => {
     localStorage.setItem('mindpage_secret', secret)
     // the reader now DEFAULTS ON (absent flag = enabled; exact 'off' is the emergency/legacy
@@ -70,8 +76,12 @@ test('first sign-in copies the welcome item and sets up a secret phrase that enc
   await expect
     .poll(() => page.evaluate(() => window._items().map(item => item.text.split(' ')[0])))
     .toEqual(['Welcome'])
-  // the phrase is kept as a hash with the uid (see secretFor), never the phrase itself
-  expect(await page.evaluate(() => localStorage.getItem('mindpage_secret'))).toBe(secretFor(ALICE, PHRASE))
+  // the phrase is kept as a hash with the uid (see secretFor), never the phrase itself; it is
+  // published LAST (adoptFreshFixedSecret in src/secret.ts: after the key derivation in the kdf
+  // worker and the server's re-confirmation that the account is still empty), so the dialog's
+  // confirm precedes the stored hash by hundreds of milliseconds on a loaded host (the full
+  // gate of 2026-10-28 read null 400 ms after it)
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('mindpage_secret')), { timeout: 30_000 }).toBe(secretFor(ALICE, PHRASE))
   // items are stored encrypted: cipher only, text and attr nulled
   await page.evaluate(() => void window._create('#e2e_private secret text 12345'))
   await expect.poll(() => savedId(page, '#e2e_private'), { timeout: 30_000 }).toBeTruthy()

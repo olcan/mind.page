@@ -126,6 +126,25 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
     ({ id, len }) => document.querySelector(`#item-${id}`)!.closest('.container')!.setAttribute('data-selection', `0,${len}`),
     { id, len: TODO.length }
   )
+  // the paragraph in the viewport and at rest for 200 ms before the point is taken: the app's scroll to
+  // the query's target lands a few frames after the render, later on the full gate's busier page, and a
+  // point taken before it landed 330 px below the viewport, where the click met nothing (2026-10-28, twice)
+  const paragraphTop = () =>
+    page.evaluate(id => {
+      const rect = document.querySelector(`#item-${id} p`)!.getBoundingClientRect()
+      if (rect.top < 0 || rect.top + 20 > innerHeight) document.querySelector(`#item-${id} p`)!.scrollIntoView({ block: 'center' })
+      return rect.top
+    }, id)
+  await expect
+    .poll(
+      async () => {
+        const top = await paragraphTop()
+        await page.waitForTimeout(200)
+        return top >= 0 && top + 20 <= 720 && (await paragraphTop()) == top
+      },
+      { timeout: 15_000, message: 'the paragraph in the viewport and at rest' }
+    )
+    .toBe(true)
   // click the plain text: the CENTER OF ITS TEXT NODE, not the paragraph's midpoint -- with the
   // 2026-09-05 column widths (1000px columns) the whole line fits on one row and the paragraph
   // midpoint lands on a link, which navigates instead of opening the editor
