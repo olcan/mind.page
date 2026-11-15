@@ -66,7 +66,7 @@ const lane = (name: string, extra: object) => ({
 // lane with its own port and its own project id on the shared emulators, so the lanes overlap
 // freely and only the rows inside a lane are serial (a one-worker cap per project)
 const WRITE_SPECS =
-  /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|vault_renderer|renderer_contract|tasks|lifecycle)\.spec\.ts/
+  /(admin|admin_live|editor|editor2|personal|bridge|store_propagation|sparkle|vault_renderer|renderer_contract|tasks|lifecycle)\.spec\.ts/
 
 export default defineConfig({
   testDir: 'tests',
@@ -92,7 +92,8 @@ export default defineConfig({
     lane('editor', { testMatch: /editor\.spec\.ts/ }),
     lane('bridge', { testMatch: /bridge\.spec\.ts/ }),
     lane('renderer', { testMatch: /vault_renderer\.spec\.ts/ }),
-    lane('propagation', { testMatch: /store_propagation\.spec\.ts/ }),
+    // with the #vault item's sparkle rows over an account of their own (a short lane, and no lane more)
+    lane('propagation', { testMatch: /(store_propagation|sparkle)\.spec\.ts/ }),
     lane('personal', { testMatch: /personal\.spec\.ts/ }),
     // the two longest lanes split in two (see tests/e2e/README.md): the editor's self-contained long rows
     // and the admin lane's renderer contract row run beside the rest of their suites

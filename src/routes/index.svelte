@@ -6405,8 +6405,11 @@
                   await update_dom()
 
                   // invoke _on_install(item)|_on_update(item) if defined as function
+                  // (asked of the item's RECORD: `item` here is its _Item handle, whose debug()
+                  // logging method itemDefinesFunction would read as the record's debug flag
+                  // and answer no for every item, as it did until 2026-11-15)
                   if (!updating) {
-                    if (itemDefinesFunction(item, '_on_install')) {
+                    if (itemDefinesFunction(__item(item.id), '_on_install')) {
                       Promise.resolve(
                         _item(item.id).eval(`_on_install(_item('${item.id}'))`, {
                           trigger: 'install',
@@ -6416,7 +6419,7 @@
                       ).catch(e => {}) // already logged
                     }
                   } else {
-                    if (itemDefinesFunction(item, '_on_update')) {
+                    if (itemDefinesFunction(__item(item.id), '_on_update')) {
                       Promise.resolve(
                         _item(item.id).eval(`_on_update(_item('${item.id}'))`, {
                           trigger: 'update',
