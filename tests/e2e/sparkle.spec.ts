@@ -329,6 +329,17 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await page.mouse.click(over[0], over[1])
   expect([await editing(), (await sparkle(page)).menus, (await sparkle(page)).layers, (await focused())[0], await query()], 'the click was the layer\'s').toEqual([false, 0, 0, null, NOTE])
   expect(await page.locator('.editor textarea:focus').count(), 'no item editor took the focus').toBe(0)
+  // a mouse's press gives the sparkle no focus, whatever its click then does: a button that a
+  // click focused can show its ring at a later key. One click opens the menu and a second
+  // closes it: the sparkle has no focus then, and a key brings no ring to it
+  await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect((await focused())[0]).toBe('menu')
+  await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(0)
+  await page.keyboard.press('Shift')
+  expect([(await focused())[0], await page.locator(NODE).evaluate(node => node.matches(':focus-visible'))], 'a clicked sparkle holds no focus and shows no ring at a key').toEqual([null, false])
+  await page.mouse.move(20, 20) // off the sparkle: the pointer rested on it
 
   // (e2) slice 6. Enter on the focused offer starts nothing: it opens the menu, on its first
   // start, and held there (its repeat goes to that entry, which has the focus by then) it still
