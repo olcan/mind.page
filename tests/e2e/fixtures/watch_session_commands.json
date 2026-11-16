@@ -1,0 +1,55 @@
+{
+  "user": "sparkle_e2e",
+  "secret": "BndDf8Tro5i931MfuYLIiZHYxOzNpFM6gRkmv1FsDu4=",
+  "host": "e2e-host",
+  "agent": "claude",
+  "session": "sess-e2e-1234",
+  "key": "f666800cec11bd53",
+  "took": "2026-11-15T10:00:00.000Z",
+  "commands": {
+    "start": {
+      "doc": "DF9FSlWu51DhK8W4I68L",
+      "data": {
+        "hidden": true,
+        "time": 1794787159859,
+        "attr": null,
+        "text": null,
+        "cipher": "3506e556c36a81d2656a54c45ushX33YOqU88DY/gE/JQ9PLzmIoZnqU58YhujSJj5DdwQQJ/GvuWOnSRaGdgg9wTFx9YsKMOjgV0wv8DWuWHueb+ibbaINE5lFnDZvrpgreMCQecQ5IRv9trk7szqiiWh8Y+Fc3pai91tFSOqbxxZ55AS1wdb/A+CaWOlIGs49ejKDmtotr0Ky90Kd8lWyBDdBIUxWsOymLVmGMS/JIeak3XjrRSI3K26GhFkwppExX8PcoBkw9S/We9ohvCPr+QGUQTT8wB7krbjfTyvohMfLAUdoh9a/AdPAewur7lrU0wEgh9ZnBqscQ8Ipk2r6lHBA=",
+        "user": "sparkle_e2e"
+      }
+    },
+    "cancel": {
+      "doc": "JkGC6xRreZpkF9leFbf6",
+      "data": {
+        "hidden": true,
+        "time": 1794787161014,
+        "attr": null,
+        "text": null,
+        "cipher": "fb00c46b00ff9f3c5aee9e24DC69CPwYWtzD+lTBhp0X8d6a/hp7EjLyuEd+9b+HOTGUXkKWCETxKd56zuT+Wt53VzpyyYXFCmuOJBTyHfpF91wlNBZxTD1tL9vrXxKxyrcZMgKyYoA51tNRoFgQLhrqL5JdPaP3csPhjmJMH+404CInnf955PF2cg3Fz/pZaO/hLpGlawF5KvmIM/eAreWw0nwQ0D4dVhwel3VtKZMZs3apve2xsK4v2cmIHitaqbVYPekXS/OQTUkiaa/f4RUvVc/d2JADLdSK0CkdlOBx1NkhqcdLwxwSeJ5v3/1aSTGhrPN1soXsw6UvyreTcpIyH7s1a2NrusOFOEnmEg==",
+        "user": "sparkle_e2e"
+      }
+    },
+    "resume": {
+      "doc": "mVXElknmcnoNI5VA8M4y",
+      "data": {
+        "hidden": true,
+        "time": 1794787161515,
+        "attr": null,
+        "text": null,
+        "cipher": "a4aadc9b35acc4a0282a181dIL+oc469G2e4T9Bwz80/NwG7P3EOX2xT0SFuHV2rzRfpk0kHkiHmGdq5Jx+8PHuN+mK+zeYj8c2dqJSa4NJW83vbmKcEbbbKtZGyQ6RiglbPNByHnHVRIAqZ5MprCK5F6A4QWsVt/OopChe8iZHQMocHrp6dd6cLp6jd4XFo30I5yBcKK32hy3YuGGmiKvN7AJpWFMdavi6IEXsZdsH60oJFQLAQwe/ytlUsBsJstnyfcU8CjJHVtgVN1SvO48Q+8GKOpp3qckg5+pvGurvPeEgvGN833kCw1doQklyiC9pSbsydTZVS/zcCTceS9M69fiI/KL9d9JnAFKZF",
+        "user": "sparkle_e2e"
+      }
+    },
+    "close": {
+      "doc": "TVYF9coaQNyEumHxOtgA",
+      "data": {
+        "hidden": true,
+        "time": 1794787161998,
+        "attr": null,
+        "text": null,
+        "cipher": "a69d072461d1c4d346913ff2FzZNJxHCpMeQWS9ZxOyB2Hv9ikPW3xowmCl89haPKE1/hwCez4hRSwl288zfkbvZYhv7DNqeWJ+QhYlzMth2zGCJcbBJFHK31dkG9t00oDr5Sesh7pbGug25KVacRW+uGeWyxCIyVJx51wGKXCCSFmnb1Ipi3cFpDsceMZJb+EZ863MCetj1UM1mHzREG1502xCcB3wqnALO4MJGnit53l22WJFg3dveAvZxiIsSmRe7UfDKJzCsNK371rxFq66BmhaH5nvMRNQnK7VmgG7iC1jzjic8WNFl6CxAuQRQNOo9GUum/qSJ44mwk6xZQvTLkcMWJWW7bFQlbEiEAObZ6hSDPg==",
+        "user": "sparkle_e2e"
+      }
+    }
+  }
+}

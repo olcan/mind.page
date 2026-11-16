@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
+import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { customToken, firestore, install, interceptMindItems, secretFor, waitForApp, type TestUser } from './helpers.js'
@@ -15,7 +16,15 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // over an open menu closes it and takes the keys; (d) a watch replaced while the menu is open
 // closes the menu; (e) Stop Watching writes exactly one command document through the app's
 // hidden-document operation, naming the watch the menu showed (recorded as the vault's transport
-// fixture), and the sparkle shows the stop until the watcher goes; (f) another tab's update of
+// fixture), and the sparkle shows the stop until the watcher goes, when it is the dim offer to
+// start one; (e2 to e5, slice 6) a click on the offer sends one start for Claude with the
+// bridge's heartbeat as the page has it, shows as starting, and a second click opens the menu
+// instead; a long press (SIMULATED: pointer events of a touch, a desktop lane has no touch
+// screen) opens the menu and the click that ends it is swallowed, and Cancel Start names that
+// start; after an outcome that is not known a click opens the menu; Resume Last Watcher names
+// the last watcher the menu showed; Close Agent Session asks in the app's real dialog, sends
+// nothing when it is cancelled, and names the take the menu showed though another watch took
+// the account meanwhile (the four documents recorded as the vault's fixture); (f) another tab's update of
 // the item, with the menu open here, replaces the controller: still one element, the menu gone;
 // (g) a visual viewport much shorter than the window hides the sparkle and its return shows it
 // (SIMULATED: a desktop lane has no on-screen keyboard); (g2) the item renamed, its code kept,
@@ -37,7 +46,16 @@ const NOTE = '#e2e_sparkle_note'
 // the recording of the produced document as the vault's transport fixture is EXPLICIT
 // (RECORD_FIXTURES=1); every other run checks that the committed fixture still decodes
 const RECORD = process.env.RECORD_FIXTURES === '1'
+// RECORD_FIXTURES=sessions records slice 6's fixture alone, and leaves the stop's as committed
+const RECORD_SESSIONS = RECORD || process.env.RECORD_FIXTURES === 'sessions'
 const FIXTURE = resolve('tests/e2e/fixtures/watch_command.json')
+// slice 6's four commands, recorded the same way: the vault's consumer reads them
+// (tests/test_mindpage_watch_commands.py). The last watcher's key is the bridge's own for this
+// agent and session (sixteen hex digits of a SHA-256 over both), so the consumer's resume
+// finds the watcher the recorded command names
+const SESSIONS = resolve('tests/e2e/fixtures/watch_session_commands.json')
+const SESSION = 'sess-e2e-1234'
+const KEY = createHash('sha256').update(`claude\0${SESSION}`).digest('hex').slice(0, 16)
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
@@ -89,7 +107,7 @@ const fresh = (page: Page, age_ms = 0) =>
   publish(page, '#status', store => {
     store._status = { v: 1, hosts: { [HOST]: { v: 1, updated: Date.now() - age_ms, boot: 1, publisher: 'bridge', runs: [], finished: [], tasks: [] } } }
   })
-const watched = (page: Page, watcher: Record<string, string> | null) =>
+const watched = (page: Page, watcher: Record<string, any> | null) =>
   publish(page, '#vault', store => {
     store._bridge = { v: 1, host: HOST, boot: 1, updated: Date.now(), runs: {}, queued: {}, workers: {}, worktrees: {}, ...(watcher ? { watcher } : {}) }
   })
@@ -109,9 +127,41 @@ const sparkle = (page: Page) =>
       shown: !!node && !node.hidden && rect.width > 0,
       title: node?.title ?? null,
       answering: node?.classList.contains('answering') ?? null,
+      idle: node?.classList.contains('idle') ?? null,
     }
   })
-const shown = (title: string, more: Record<string, unknown> = {}) => ({ nodes: 1, styles: 1, menus: 0, shown: true, title, answering: false, ...more })
+const shown = (title: string, more: Record<string, unknown> = {}) => ({ nodes: 1, styles: 1, menus: 0, shown: true, title, answering: false, idle: false, ...more })
+// with nobody watching the sparkle is dim: the offer, a start under way, or what became of one
+const offered = (title: string, more: Record<string, unknown> = {}) => shown(title, { idle: true, ...more })
+const OFFER = 'Start Claude Watcher (Shift: Codex)'
+const STARTING = 'An agent is starting to watch'
+// the menu's entries, the bridge's heartbeat as the page has it, and the one command document
+// the account holds (the bridge, played here, deletes each once it is checked)
+const entries = (page: Page) => page.locator(ENTRY).allTextContents()
+const heartbeat = (page: Page) => page.evaluate(host => (window._item('#status', true) as any)._global_store._status.hosts[host].updated as number, HOST)
+const sent = async (kind: string) => {
+  await expect.poll(async () => (await commands()).map(c => c.wrapper.item.kind), { timeout: 30_000 }).toEqual([kind])
+  const [command] = await commands()
+  expect(command.wrapper.name).toBe('watch_command_' + command.wrapper.item.id)
+  expect([command.raw.hidden, command.raw.text, command.raw.user]).toEqual([true, null, USER.uid])
+  await firestore().collection('items').doc(command.doc).delete()
+  return command
+}
+// a press of a touch held `ms` on the sparkle, then lifted, with the click a browser sends
+// after it (SIMULATED: the lane's browser has no touch screen)
+const hold = (page: Page, ms: number) =>
+  page.evaluate(
+    async ([selector, ms]) => {
+      const node = document.querySelector(selector as string)!
+      const rect = node.getBoundingClientRect()
+      const at = { clientX: rect.left + 12, clientY: rect.top + 12, pointerType: 'touch', pointerId: 7, isPrimary: true, bubbles: true }
+      node.dispatchEvent(new PointerEvent('pointerdown', at))
+      await new Promise(resolve => setTimeout(resolve, ms as number))
+      node.dispatchEvent(new PointerEvent('pointerup', at))
+      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    },
+    [NODE, ms]
+  )
 const NODE = '[data-vault-sparkle="node"]'
 const ENTRY = '[data-vault-sparkle="menu"] > button'
 
@@ -244,8 +294,121 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
     expect(Object.keys(wrapper.item).sort(), 'the recorded command has the fields the app writes now').toEqual(Object.keys(stop.wrapper.item).sort())
   }
   await firestore().collection('items').doc(stop.doc).delete() // the bridge deletes what it dealt with
-  await watched(page, null) // and the watcher it stopped is gone from the listing
-  await expect.poll(async () => (await sparkle(page)).shown, { timeout: 30_000 }).toBe(false)
+  await watched(page, null) // and the watcher it stopped is gone from the listing: the offer, dim
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
+
+  // (e2) slice 6. Enter on the focused offer starts nothing: it opens the menu, on its first
+  // start, and held there (its repeat goes to that entry, which has the focus by then) it still
+  // starts nothing. A click on the offer: one start, for Claude, with the bridge's heartbeat as
+  // the page has it; the sparkle shows it at once and does not keep the keyboard, and a second
+  // click starts nothing more
+  await page.locator(NODE).focus()
+  await page.keyboard.down('Enter')
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  await page.keyboard.down('Enter') // the held key repeats
+  await page.keyboard.up('Enter')
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([await entries(page), await focused(), (await commands()).length]).toEqual([['Start Claude Watcher', 'Start Codex Watcher'], [null, 'Start Claude Watcher'], 0])
+  await page.keyboard.press('Escape')
+  expect(await focused()).toEqual(['node', ''])
+  const beat = await heartbeat(page)
+  await page.locator(NODE).click()
+  const start = await sent('start')
+  expect(start.wrapper.item).toEqual({ id: start.wrapper.item.id, kind: 'start', agent: 'claude', seen: beat, at: start.wrapper.item.at })
+  expect(await sparkle(page)).toEqual(offered(STARTING, { answering: true }))
+  expect((await focused())[0], 'the keyboard is the page\'s again').toBeNull()
+  await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([await entries(page), (await commands()).length]).toEqual([['Cancel Start'], 0])
+  await page.keyboard.press('Escape')
+  // the bridge names the start: this tab's own mark is over, and the bridge's record shows
+  const begun = { id: start.wrapper.item.id, agent: 'claude', at: new Date().toISOString(), state: 'starting', tab: true }
+  await watched(page, { state: 'none', start: begun })
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: 30_000 }).toBeNull()
+  expect(await sparkle(page)).toEqual(offered(STARTING, { answering: true }))
+
+  // (e3) a long press opens the menu, and the click that ends the press leaves it open; a
+  // press lifted at once is a click, which opens the menu here too (a start is under way).
+  // Cancel Start names the start the menu showed
+  await hold(page, 800)
+  expect([(await sparkle(page)).menus, await entries(page), (await commands()).length]).toEqual([1, ['Cancel Start'], 0])
+  await page.locator(ENTRY).click()
+  const cancel = await sent('cancel')
+  expect(cancel.wrapper.item).toEqual({ id: cancel.wrapper.item.id, kind: 'cancel', start: begun.id, seen: await heartbeat(page), at: cancel.wrapper.item.at })
+  expect(await sparkle(page)).toEqual(offered('Cancelling the start', { answering: true }))
+  // the bridge could not tell what became of it: a click then opens the menu, and starts nothing
+  await watched(page, { state: 'none', start: { ...begun, state: 'unknown', note: 'no watcher appeared' } })
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered("A start's outcome is unknown: no watcher appeared"))
+  await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([await entries(page), (await commands()).length]).toEqual([['Start Claude Watcher', 'Start Codex Watcher', 'Cancel Start'], 0])
+  await page.keyboard.press('Escape')
+
+  // (e4) the last watcher that can be resumed: the right click opens the menu on the offer,
+  // and the resume names that watcher by the bridge's key
+  await watched(page, { state: 'none', last: { name: AGENT, agent: 'claude', key: KEY } })
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
+  await page.locator(NODE).click({ button: 'right' })
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect(await entries(page)).toEqual(['Start Claude Watcher', 'Start Codex Watcher', 'Resume Last Watcher (Claude)'])
+  await page.locator(ENTRY).nth(2).click()
+  const resume = await sent('resume')
+  expect(resume.wrapper.item).toEqual({ id: resume.wrapper.item.id, kind: 'resume', last: KEY, seen: await heartbeat(page), at: resume.wrapper.item.at })
+  // the bridge names the resume, which ends this tab's mark of it (a watcher alone would only
+  // hide the mark: the page cannot tell whose start a watcher was)
+  const resumed = { id: resume.wrapper.item.id, agent: 'claude', resume: true, at: new Date().toISOString(), state: 'starting', tab: true }
+  await watched(page, { state: 'none', start: resumed, last: { name: AGENT, agent: 'claude', key: KEY } })
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: 30_000 }).toBeNull()
+
+  // (e5) Close Agent Session, for a watcher in a herdr tab the bridge can close: the app's own
+  // dialog first; cancelled, nothing is sent; confirmed, the close names the take the menu
+  // showed, though another watch took the account while the dialog was open
+  await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true })
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  const dialog = page.locator('.modal')
+  for (const answer of ['cancel', 'confirm']) {
+    await page.locator(NODE).click()
+    await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+    expect(await entries(page)).toEqual(['Stop Watching', 'Close Agent Session'])
+    await page.locator(ENTRY).nth(1).click()
+    await expect(dialog).toContainText(`Close ${AGENT}'s session?`)
+    await expect(dialog).toContainText('Its herdr tab closes, which ends the agent. Its conversation can be resumed.')
+    expect([(await sparkle(page)).menus, (await commands()).length]).toEqual([0, 0])
+    if (answer == 'confirm') {
+      await watched(page, { name: AGENT, took: LATER, state: 'watching', tab: true })
+      await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.shown?.took), { timeout: 30_000 }).toBe(LATER)
+    }
+    await page.locator(`.modal .button.${answer}`).click()
+    await expect.poll(() => page.evaluate(() => (window as any)._modal_visible())).toBe(false)
+    if (answer == 'cancel') expect((await commands()).length, 'a close that is not confirmed sends nothing').toBe(0)
+  }
+  const close = await sent('close')
+  expect(close.wrapper.item).toEqual({ id: close.wrapper.item.id, kind: 'close', took: TOOK, seen: await heartbeat(page), at: close.wrapper.item.at })
+  const session = {
+    user: USER.uid,
+    secret: SECRET,
+    host: HOST,
+    agent: 'claude',
+    session: SESSION,
+    key: KEY,
+    took: TOOK,
+    commands: Object.fromEntries([start, cancel, resume, close].map(c => [c.wrapper.item.kind, { doc: c.doc, data: c.raw }])) as Record<string, { doc: string; data: Record<string, any> }>,
+  }
+  if (RECORD_SESSIONS) writeFileSync(SESSIONS, JSON.stringify(session, null, 2) + '\n')
+  else {
+    expect(existsSync(SESSIONS), 'the recorded fixture exists (RECORD_FIXTURES=1 records it)').toBe(true)
+    const recorded = JSON.parse(readFileSync(SESSIONS, 'utf8'))
+    const { decryptWithSecret } = await import('../../src/crypto.js')
+    for (const [kind, command] of Object.entries(session.commands)) {
+      const wrapper = JSON.parse(JSON.parse(await decryptWithSecret(recorded.commands[kind].data.cipher, recorded.secret)).text)
+      const now = JSON.parse(JSON.parse(await decryptWithSecret(command.data.cipher, SECRET)).text)
+      expect([wrapper.name, wrapper.item.kind], `the recorded ${kind}`).toEqual([`watch_command_${wrapper.item.id}`, kind])
+      expect(Object.keys(wrapper.item).sort(), `the recorded ${kind} has the fields the app writes now`).toEqual(Object.keys(now.item).sort())
+    }
+    expect([recorded.key, recorded.took, recorded.session]).toEqual([KEY, TOOK, SESSION])
+  }
+  await watched(page, null)
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
 
   // (f) another tab updates the item while the menu is open here: this tab's controller is
   // replaced (the earlier code's menu, element and style go; one element stays), and the other
