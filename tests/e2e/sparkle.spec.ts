@@ -17,10 +17,12 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // closes the menu; (e) Stop Watching writes exactly one command document through the app's
 // hidden-document operation, naming the watch the menu showed (recorded as the vault's transport
 // fixture), and the sparkle shows the stop until the watcher goes, when it is the dim offer to
-// start one; (e2 to e5, slice 6) a click on the offer sends one start for Claude with the
-// bridge's heartbeat as the page has it, shows as starting, and a second click opens the menu
-// instead; a long press (SIMULATED: pointer events of a touch, a desktop lane has no touch
-// screen) opens the menu and the click that ends it is swallowed, and Cancel Start names that
+// start one; (e1) a menu a pointer opens has no entry highlighted until the pointer or an arrow
+// comes and never two, Escape there gives the focus up, and a click outside lands on the menu's
+// layer: it closes the menu and is nothing to the page under it; the focused offer shows a ring
+// and stays dim; (e2 to e5, slice 6) a click on the offer starts nothing and opens the menu,
+// whose Start Claude Watcher sends one start with the bridge's heartbeat as the page has it and
+// shows as starting, and a click then opens the menu on Cancel Start, which names that
 // start; after an outcome that is not known a click opens the menu; Resume Last Watcher names
 // the last watcher the menu showed; Close Agent Session asks in the app's real dialog, sends
 // nothing when it is cancelled, and names the take the menu showed though another watch took
@@ -124,16 +126,17 @@ const sparkle = (page: Page) =>
       nodes: parts('node').length,
       styles: parts('style').length,
       menus: parts('menu').length,
+      layers: parts('backdrop').length,
       shown: !!node && !node.hidden && rect.width > 0,
       title: node?.title ?? null,
       answering: node?.classList.contains('answering') ?? null,
       idle: node?.classList.contains('idle') ?? null,
     }
   })
-const shown = (title: string, more: Record<string, unknown> = {}) => ({ nodes: 1, styles: 1, menus: 0, shown: true, title, answering: false, idle: false, ...more })
+const shown = (title: string, more: Record<string, unknown> = {}) => ({ nodes: 1, styles: 1, menus: 0, layers: 0, shown: true, title, answering: false, idle: false, ...more })
 // with nobody watching the sparkle is dim: the offer, a start under way, or what became of one
 const offered = (title: string, more: Record<string, unknown> = {}) => shown(title, { idle: true, ...more })
-const OFFER = 'Start Claude Watcher (Shift: Codex)'
+const OFFER = 'Start a watcher'
 const STARTING = 'An agent is starting to watch'
 // the menu's entries, the bridge's heartbeat as the page has it, and the one command document
 // the account holds (the bridge, played here, deletes each once it is checked)
@@ -147,21 +150,6 @@ const sent = async (kind: string) => {
   await firestore().collection('items').doc(command.doc).delete()
   return command
 }
-// a press of a touch held `ms` on the sparkle, then lifted, with the click a browser sends
-// after it (SIMULATED: the lane's browser has no touch screen)
-const hold = (page: Page, ms: number) =>
-  page.evaluate(
-    async ([selector, ms]) => {
-      const node = document.querySelector(selector as string)!
-      const rect = node.getBoundingClientRect()
-      const at = { clientX: rect.left + 12, clientY: rect.top + 12, pointerType: 'touch', pointerId: 7, isPrimary: true, bubbles: true }
-      node.dispatchEvent(new PointerEvent('pointerdown', at))
-      await new Promise(resolve => setTimeout(resolve, ms as number))
-      node.dispatchEvent(new PointerEvent('pointerup', at))
-      node.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    },
-    [NODE, ms]
-  )
 const NODE = '[data-vault-sparkle="node"]'
 const ENTRY = '[data-vault-sparkle="menu"] > button'
 
@@ -171,9 +159,12 @@ test.beforeAll(cleanup)
 test.afterAll(cleanup)
 
 test('the sparkle shows who watches the account, and its menu stops that watch', async ({ page, context }) => {
+  // a `beforeunload` prompt is accepted and recorded: dismissed, it would cancel the reload it
+  // interrupts, and `page.reload()` would wait out the whole test's time for a navigation
   page.on('dialog', dialog => {
-    dialogs.push(dialog.message())
-    void dialog.dismiss()
+    const leaving = dialog.type() == 'beforeunload'
+    dialogs.push(leaving ? `beforeunload: ${dialog.message()}` : dialog.message())
+    void (leaving ? dialog.accept() : dialog.dismiss())
   })
   expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
   await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
@@ -192,7 +183,10 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
   await waitForApp(page)
   expect(await install(page, 'status'), '/_install status').toBeNull()
-  await page.reload()
+  // the install returns before its writes are acknowledged, and the app asks "Discard unsaved
+  // changes?" at a reload over an unsaved item: wait for the writes first
+  await page.waitForFunction(() => (window as any).__items.every((item: any) => item.text == item.savedText), null, { timeout: 30_000 })
+  await page.reload({ timeout: 60_000 })
   await waitForApp(page)
   await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
 
@@ -202,7 +196,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0 })
   expect(await install(page, 'vault'), '/_install vault').toBeNull()
   await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
-  expect(await sparkle(page)).toMatchObject({ nodes: 1, styles: 1, menus: 0, shown: false })
+  expect(await sparkle(page)).toMatchObject({ nodes: 1, styles: 1, menus: 0, layers: 0, shown: false })
   await expect.poll(async () => !!(await savedId(page, '#vault')) && !!(await savedId(page, '#status')), { timeout: 30_000 }).toBe(true)
   const vaultStore = 'global_store_' + (await savedId(page, '#vault'))
   const statusStore = 'global_store_' + (await savedId(page, '#status'))
@@ -297,11 +291,50 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await watched(page, null) // and the watcher it stopped is gone from the listing: the offer, dim
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
 
+  // (e1) a menu a pointer opens. No entry is highlighted until the pointer or an arrow comes,
+  // and one at most: the highlight is the focus, which the pointer over an entry takes there
+  // and an arrow moves on, though the pointer still rests where it was; a mouse that leaves the
+  // menu leaves no entry with it. Escape closes it and the sparkle takes no focus: the
+  // keyboard is the page's
+  const lit = () => page.evaluate(sel => [...document.querySelectorAll(sel)].map(b => getComputedStyle(b).backgroundColor != 'rgba(0, 0, 0, 0)'), ENTRY)
+  await page.locator(NODE).click({ button: 'right' })
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([(await focused())[0], await lit(), (await sparkle(page)).layers]).toEqual(['menu', [false, false], 1])
+  await page.locator(ENTRY).nth(1).hover()
+  expect([(await focused())[1], await lit()]).toEqual(['Start Codex Watcher', [false, true]])
+  await page.keyboard.press('ArrowUp')
+  expect([(await focused())[1], await lit()]).toEqual(['Start Claude Watcher', [true, false]])
+  await page.mouse.move(20, 20)
+  await expect.poll(lit).toEqual([false, false])
+  expect((await focused())[0]).toBe('menu')
+  await page.keyboard.press('Escape')
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(0)
+  expect([(await focused())[0], (await sparkle(page)).layers, (await commands()).length], 'the keyboard is the page\'s: the sparkle took no focus').toEqual([null, 0, 0])
+  // a click outside an open menu lands on its layer, wherever it is: over the plain item, whose
+  // editor a click opens, the menu closes and the item is not touched
+  const noteId = await page.evaluate(label => window._item(label, true)!.id, NOTE)
+  const paragraph = (await page.locator(`#item-${noteId} p`).first().boundingBox())!
+  const over = [paragraph.x + paragraph.width / 2, paragraph.y + paragraph.height / 2]
+  const editing = () => page.evaluate(label => (window._item(label, true) as any).editing as boolean, NOTE)
+  await page.locator(NODE).click({ button: 'right' })
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect(await page.evaluate(([x, y]) => (document.elementFromPoint(x, y) as HTMLElement | null)?.dataset?.vaultSparkle ?? null, over)).toBe('backdrop')
+  // the layer darkens and blurs the page under the menu
+  expect(
+    await page.evaluate(() => {
+      const style = getComputedStyle(document.querySelector('[data-vault-sparkle="backdrop"]')!)
+      return [style.backgroundColor, style.backdropFilter]
+    }),
+  ).toEqual(['rgba(0, 0, 0, 0.4)', 'blur(2px)'])
+  await page.mouse.click(over[0], over[1])
+  expect([await editing(), (await sparkle(page)).menus, (await sparkle(page)).layers, (await focused())[0], await query()], 'the click was the layer\'s').toEqual([false, 0, 0, null, NOTE])
+  expect(await page.locator('.editor textarea:focus').count(), 'no item editor took the focus').toBe(0)
+
   // (e2) slice 6. Enter on the focused offer starts nothing: it opens the menu, on its first
   // start, and held there (its repeat goes to that entry, which has the focus by then) it still
-  // starts nothing. A click on the offer: one start, for Claude, with the bridge's heartbeat as
-  // the page has it; the sparkle shows it at once and does not keep the keyboard, and a second
-  // click starts nothing more
+  // starts nothing. A click on the offer starts nothing either: it opens the menu, whose Start
+  // Claude Watcher sends one start with the bridge's heartbeat as the page has it; the sparkle
+  // shows it at once and does not keep the keyboard, and a click then starts nothing more
   await page.locator(NODE).focus()
   await page.keyboard.down('Enter')
   await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
@@ -311,8 +344,27 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   expect([await entries(page), await focused(), (await commands()).length]).toEqual([['Start Claude Watcher', 'Start Codex Watcher'], [null, 'Start Claude Watcher'], 0])
   await page.keyboard.press('Escape')
   expect(await focused()).toEqual(['node', ''])
+  // the focus shows as a ring alone: under it the offer's star is as dim as it was (how bright
+  // the star is says whether an agent watches), on its circle, a gray a little lighter than an
+  // item's, which never dims; a pointer over the offer brightens the star, where one hovers
+  const look = () =>
+    page.evaluate(sel => {
+      const node = document.querySelector(sel) as HTMLElement
+      const style = getComputedStyle(node)
+      return { ring: node.matches(':focus-visible'), star: style.color, circle: `${style.backgroundColor} ${style.opacity}`, outline: `${style.outlineWidth} ${style.outlineStyle}` }
+    }, NODE)
+  const DIM = 'rgba(245, 227, 137, 0.45)'
+  const CIRCLE = 'rgb(34, 34, 34) 1'
+  expect(await look()).toEqual({ ring: true, star: DIM, circle: CIRCLE, outline: '1px solid' })
+  await page.locator(NODE).hover()
+  expect([(await look()).star, (await look()).circle]).toEqual(['rgba(245, 227, 137, 0.9)', CIRCLE])
+  await page.mouse.move(20, 20)
+  expect((await look()).star).toBe(DIM)
   const beat = await heartbeat(page)
   await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([await entries(page), (await commands()).length], 'a click on the offer starts nothing: it opens the menu').toEqual([['Start Claude Watcher', 'Start Codex Watcher'], 0])
+  await page.locator(ENTRY).first().click()
   const start = await sent('start')
   expect(start.wrapper.item).toEqual({ id: start.wrapper.item.id, kind: 'start', agent: 'claude', seen: beat, at: start.wrapper.item.at })
   expect(await sparkle(page)).toEqual(offered(STARTING, { answering: true }))
@@ -327,11 +379,10 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: 30_000 }).toBeNull()
   expect(await sparkle(page)).toEqual(offered(STARTING, { answering: true }))
 
-  // (e3) a long press opens the menu, and the click that ends the press leaves it open; a
-  // press lifted at once is a click, which opens the menu here too (a start is under way).
-  // Cancel Start names the start the menu showed
-  await hold(page, 800)
-  expect([(await sparkle(page)).menus, await entries(page), (await commands()).length]).toEqual([1, ['Cancel Start'], 0])
+  // (e3) Cancel Start names the start the menu showed
+  await page.locator(NODE).click()
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  expect([await entries(page), (await commands()).length]).toEqual([['Cancel Start'], 0])
   await page.locator(ENTRY).click()
   const cancel = await sent('cancel')
   expect(cancel.wrapper.item).toEqual({ id: cancel.wrapper.item.id, kind: 'cancel', start: begun.id, seen: await heartbeat(page), at: cancel.wrapper.item.at })
@@ -455,14 +506,14 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
       item.write(item.read('').replace(from + ' lists', to + ' lists'), '')
     }, [from, to])
   await relabel('#vault', '#vault_old')
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0 })
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
   expect(await page.evaluate(() => (window._item('#vault_old', true) as any)?._global_store?._bridge?.watcher?.name)).toBe(AGENT)
   await relabel('#vault_old', '#vault')
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
 
   // (h) the item is deleted: its task's next look removes everything the sparkle owned
   await page.evaluate(() => window._item('#vault', true)!.delete(false))
-  await expect.poll(() => sparkle(page), { timeout: 45_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0 })
+  await expect.poll(() => sparkle(page), { timeout: 45_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
   expect(await page.evaluate(() => '_vault_sparkle' in window)).toBe(false)
 
   // (i) installed again and watched, then a successful sign-out: the reloaded page has none
@@ -474,6 +525,6 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
   await page.evaluate(() => void window._create('/_signout', { command: true }))
   await expect.poll(() => page.evaluate(() => window._readonly === true && window._init_time > 0).catch(() => false), { timeout: 90_000 }).toBe(true)
-  expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0, menus: 0 })
+  expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
   expect(dialogs, 'no alert of the sparkle or the installs').toEqual([])
 })
