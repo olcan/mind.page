@@ -414,8 +414,14 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   // (e5) Close Agent Session, for a watcher in a herdr tab the bridge can close: the app's own
   // dialog first; cancelled, nothing is sent; confirmed, the close names the take the menu
   // showed, though another watch took the account while the dialog was open
-  await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true })
+  // The watcher's herdr tab, as the bridge gives it, hangs on the sparkle for a browser's
+  // extension that can bring the tab up (none here: the click is the menu's, below)
+  const JUMP = { tab: 'w4:tB', host: 'm3ultra', herdr: 'm3ultra:default', session: SESSION }
+  const hung = () => page.locator(NODE).getAttribute('data-vault-jump')
+  expect(await hung(), 'nothing to bring up while nobody watches').toBeNull()
+  await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true, jump: JUMP })
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  expect(await hung()).toBe(JSON.stringify(JUMP))
   const dialog = page.locator('.modal')
   for (const answer of ['cancel', 'confirm']) {
     await page.locator(NODE).click()
