@@ -6090,6 +6090,66 @@
                 console.warn(summary, { deleted, skipped })
                 return alert(summary)
               })())
+            } else if (cmd == '/_rename') {
+              // `/_rename #tag #new_tag` renames a tag in every item: the tag itself and every tag
+              // nested under it (`#tag/x` becomes `#new_tag/x`), in the hidden form too (`#_tag`),
+              // where the index reads a tag (src/tag_rename.ts, which also says where the two can
+              // differ: not a longer look-alike, not code, not an inert region; a relative `#/x`
+              // stays as written), after
+              // ONE confirmation naming the count and the first names (as deleteSubtree's), and the
+              // labels the rename would leave on more than one item. a cancel changes nothing and
+              // keeps the command in the box; confirmed, each item is written as an edit of its
+              // whole text (write: the save and its history row are queued, the change hooks run)
+              // with its time kept, so no item gets a fresh edit time (a renamed label can still
+              // regroup it), and the box is cleared. a write that is declined (write's prompt at
+              // 256 KB) is not reported, and a partly done rename is not undone by entering the
+              // command again: with the new tag under the old one (`#a` to `#a/b`), a second run
+              // renames the items the first already changed
+              // the raw arguments (`args` above is escaped for a handler's template literal)
+              const [from, to, ...more] = removeZWSP(text).replace(/^\/\w+/, '').trim().split(/\s+/)
+              if (!to || more.length) return alert(`usage: ${cmd} #tag #new_tag`)
+              const invalid = [from, to].find(tag => !renamableTag(tag))
+              if (invalid) return alert(`${cmd}: invalid tag '${invalid}' (expected a visible absolute tag like #tag)`)
+              // a shared view holds a part of the account: renaming there would leave the tag in two forms
+              if (fixed) return alert('can not rename tags when viewing shared items')
+              const affected = items.filter(item => renameTag(item.text, from, to) != item.text)
+              if (!affected.length) return alert(`${cmd}: nothing to rename (no item would change)`)
+              // a write replaces an open editor's text and is not saved until the editor closes
+              // (write's skip_save): the text typed there would be lost and the rename left unsaved
+              const editing = affected.filter(item => item.editing).map(item => item.name)
+              if (editing.length) return alert(`${cmd}: can not rename while editing ${editing.join(', ')}`)
+              // the items whose own label is renamed first, then by name; ten of a longer list, as deleteSubtree's
+              const listed = (names: string[]) =>
+                names.slice(0, 10).map(name => `\`${name}\``).join('\n') +
+                (names.length > 10 ? `\n... (${names.length - 10} other${names.length == 11 ? '' : 's'})` : '')
+              const names = _.sortBy(affected, [item => renamedTag(item.label, from, to) == item.label, 'name']).map(
+                item => item.name
+              )
+              const conflicts = renameConflicts(items.map(item => item.label), from, to)
+              const ids = affected.map(item => item.id)
+              return (window['_mindbox_return'] = (async () => {
+                await _modal_close() // close/cancel all modals
+                const confirmed = await _modal({
+                  content:
+                    `Rename \`${from}\` to \`${to}\` in ${ids.length} item${ids.length == 1 ? '' : 's'}?\n\n` +
+                    listed(names) +
+                    (conflicts.length ? `\n\nMultiple items would be labeled:\n` + listed(conflicts) : ''),
+                  confirm: 'Rename',
+                  cancel: 'Cancel',
+                  background: 'cancel', // changes many items: background click cancels
+                })
+                if (!confirmed) return
+                // the previewed items that are still here, each renamed from the text it has NOW: a
+                // change that arrived while the dialog was open is kept, never overwritten by the preview
+                for (const id of ids) {
+                  const index = indexFromId.get(id)
+                  if (index === undefined) continue // deleted meanwhile
+                  const renamed = renameTag(items[index].text, from, to)
+                  if (renamed != items[index].text) _item(id).write(renamed, '' /* whole item */, { keep_time: true })
+                }
+                lastEditorChangeTime = 0 // disable debounce even if editor focused
+                onEditorChange('')
+              })())
             } else if (cmd == '/_watch') {
               if (hostname != 'localhost') return alert(`/_watch: can not watch on ${hostname}`)
               let [name, file] = args.split(/\s+/)
@@ -8140,6 +8200,7 @@
   import { autodepParent } from '../install_deps'
   import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
+  import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so

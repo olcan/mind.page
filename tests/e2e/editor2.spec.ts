@@ -396,3 +396,153 @@ test('a second tab sharing the persistent cache, a secondary, confirms on its ow
     await other.close()
   }
 })
+
+// `/_rename #tag #new_tag` (index.svelte): which text is a tag and how it is renamed is the table of
+// tests/unit/tag_rename.spec.ts; the two rows below hold what a table cannot, the command in the page:
+// its dialog, its refusals and what a confirmed rename does to the items and their documents
+
+// text typed into the mindbox (focused in place: its backdrop is covered once the box holds the
+// focus), and a command entered there as the owner does it
+async function typed(page: Page, text: string) {
+  await page.evaluate(() => document.getElementById('textarea-mindbox')!.focus())
+  await mindbox(page).fill(text)
+}
+async function entered(page: Page, text: string) {
+  await typed(page, text)
+  await page.keyboard.press('Shift+Enter') // done once the modifier is released (Editor.svelte)
+}
+// the open dialog's paragraphs, a line break in one as a newline
+const dialog = (page: Page) => page.locator('.modal p').allInnerTexts()
+// the fixture items' ids once every creation is saved, in the order given
+async function saved(page: Page, labels: string[]): Promise<string[]> {
+  const ids = () => page.evaluate(labels => labels.map(label => window._item(label, true)?.saved_id ?? null), labels)
+  await expect.poll(async () => (await ids()).every(Boolean), { timeout: 30_000 }).toBe(true)
+  return (await ids()) as string[]
+}
+// each item's document as the server holds it: its text and its time
+const stored = (ids: string[]) =>
+  Promise.all(
+    ids.map(async id => {
+      const data = (await firestore().collection('items').doc(id).get()).data()
+      return [data?.text, data?.time]
+    })
+  )
+
+test('/_rename renames a tag in every item after one confirmation that names the count and the first ten items; each item is saved as an edit of the text it has by then, its time kept', async ({ page }) => {
+  await loadAdmin(page)
+  const FROM = '#e2e_rename'
+  const TO = '#e2e_renamed'
+  // the fixture under a tag: the tag as a label; a label nested under it, with the hidden form, several
+  // occurrences and one in code; eleven items that mention it, under look-alike labels; and a look-alike
+  // that names it in code alone
+  const refs = Array.from({ length: 11 }, (_, i) => `${FROM}_ref${String(i + 1).padStart(2, '0')}`)
+  const labels = [FROM, `${FROM}/a`, ...refs, `${FROM}s`]
+  const texts = (tag: string) => [
+    `${tag} the root`,
+    `${tag}/a #_${tag.slice(1)} a child that depends on the root\nsee ${tag}, ${tag}/a and \`${FROM}\` (${tag})`,
+    ...refs.map(ref => `${ref} mentions ${tag}/a`),
+    `${FROM}s a look-alike with \`${FROM}\` in code`,
+  ]
+  const [DELETED, EDITED, LOOKALIKE] = [11, 12, 13] // the last two mentions (neither among the ten named) and the look-alike
+  const edited = (tag: string) => `${refs[10]} mentions ${tag}/a and, since the dialog opened, ${tag}`
+  let ids: string[] = []
+  try {
+    for (const text of texts(FROM)) await page.evaluate(text => void window._create(text), text)
+    ids = await saved(page, labels)
+    await expect.poll(async () => (await stored(ids)).map(([text]) => text), { timeout: 30_000 }).toEqual(texts(FROM))
+    await entered(page, `/_rename ${FROM} ${TO}`)
+    // the count, then the items whose own label is renamed, then the others by name, ten in all
+    await expect
+      .poll(() => dialog(page), { timeout: 30_000 })
+      .toEqual([`Rename ${FROM} to ${TO} in 13 items?`, [FROM, `${FROM}/a`, ...refs.slice(0, 8), '... (3 others)'].join('\n')])
+    // while the dialog is open, behind the app: one of the items is edited and one is deleted
+    await firestore().collection('items').doc(ids[EDITED]).update({ text: edited(FROM) })
+    await firestore().collection('items').doc(ids[DELETED]).delete()
+    const shown = () => page.evaluate(ids => ids.map(id => window._item(id, true)?.text ?? null), ids)
+    const expected = (tag: string) => texts(tag).map((text, i) => (i == EDITED ? edited(tag) : i == DELETED ? null : text))
+    await expect.poll(shown, { timeout: 30_000 }).toEqual(expected(FROM))
+    const before = await stored(ids)
+    // each item's time in the page, which a save writes (a created item's is set once more after its
+    // document's, so the two can be a millisecond apart)
+    const times = await page.evaluate(ids => ids.map(id => (window.__items as any[]).find(item => item.savedId == id)?.time ?? null), ids)
+    await page.locator('.modal .button.confirm', { hasText: 'Rename' }).click()
+    await expect(mindbox(page)).toHaveValue('', { timeout: 30_000 }) // a handled command clears the box
+    // in the page: every item by its id (the edit made meanwhile kept and renamed, the deleted item
+    // skipped), the two labels renamed with the tag, the look-alike as it was
+    expect(await shown()).toEqual(expected(TO))
+    const names = [FROM, `${FROM}/a`, TO, `${TO}/a`, `${FROM}s`]
+    expect(await page.evaluate(names => names.map(name => window._exists(name)), names)).toEqual([false, false, true, true, true])
+    // on the server: the renamed text under the time each item had in the page (an edit would have
+    // set it to now and moved the item to the top), the look-alike's document and the deleted one's
+    // absence as they were, and the history row of a saved edit
+    await expect
+      .poll(() => stored(ids), { timeout: 30_000 })
+      .toEqual(expected(TO).map((text, i) => (i == LOOKALIKE || i == DELETED ? before[i] : [text, times[i]])))
+    const history = async () => (await firestore().collection('history').where('item', '==', ids[0]).get()).docs.map(doc => doc.data().text)
+    await expect.poll(history, { timeout: 30_000 }).toContain(`${TO} the root`)
+  } finally {
+    for (const id of ids) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
+
+test('/_rename refuses bad arguments and an item being edited, and a cancelled confirmation changes nothing; a refused or cancelled command stays in the box', async ({ page }) => {
+  await loadAdmin(page)
+  const FROM = '#e2e_rncancel'
+  const TO = '#e2e_rnkept'
+  const created = [`${FROM} the root`, `${FROM}/a a child`, `${TO}/a holds the label the rename would give the child`]
+  // a command run without the box: the message it refuses with, or `unanswered` when it waits on a
+  // dialog instead (a refusal answers at once)
+  const command = (text: string) =>
+    page.evaluate(
+      text =>
+        Promise.race([
+          Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out => (typeof out == 'string' ? out : null)),
+          new Promise<string>(resolve => setTimeout(() => resolve('unanswered'), 10_000)),
+        ]),
+      text
+    )
+  let ids: string[] = []
+  const state = async () => ({ page: await page.evaluate(ids => ids.map(id => window._item(id, true)?.text), ids), server: (await stored(ids)).map(([text]) => text) })
+  try {
+    for (const text of created) await page.evaluate(text => void window._create(text), text)
+    ids = await saved(page, [FROM, `${FROM}/a`, `${TO}/a`])
+    await expect.poll(state, { timeout: 30_000 }).toEqual({ page: created, server: created })
+    // refused: any count of arguments but two, a hidden or a relative form, a tag no item carries (or its own name)
+    for (const args of ['', ` ${FROM}`, ` ${FROM} ${TO} #more`]) expect(await command('/_rename' + args), args).toBe('usage: /_rename #tag #new_tag')
+    for (const [args, invalid] of [[`#_${FROM.slice(1)} ${TO}`, `#_${FROM.slice(1)}`], [`${FROM} #/a`, '#/a']])
+      expect(await command(`/_rename ${args}`)).toBe(`/_rename: invalid tag '${invalid}' (expected a visible absolute tag like #tag)`)
+    for (const args of [`#e2e_rnabsent ${TO}`, `${FROM} ${FROM}`]) expect(await command(`/_rename ${args}`), args).toBe('/_rename: nothing to rename (no item would change)')
+    // refused: an item the rename would change is open in an editor (a write would replace the editor's text)
+    await typed(page, `${FROM}/a`) // the query brings the child into view
+    await expect.poll(() => page.evaluate(label => !!window._item(label, true)?.elem, `${FROM}/a`), { timeout: 10_000 }).toBe(true)
+    const child = await page.evaluate(label => window._item(label)!.id, `${FROM}/a`)
+    await page.locator(`.column:not(.hidden) #item-${child} p`).first().click()
+    await expect(page.locator(`#textarea-${child}`)).toBeFocused()
+    expect(await command(`/_rename ${FROM} ${TO}`)).toBe(`/_rename: can not rename while editing ${FROM}/a`)
+    await page.keyboard.press('Escape') // nothing typed, nothing to discard
+    await expect(page.locator(`#textarea-${child}`)).toBeHidden()
+    // entered into the box: the refusal is shown and the command stays
+    await entered(page, `/_rename ${FROM}`)
+    await expect.poll(() => dialog(page), { timeout: 30_000 }).toEqual(['usage: /_rename #tag #new_tag'])
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.modal')).toBeHidden()
+    await expect(mindbox(page)).toHaveValue(`/_rename ${FROM}`)
+    // the confirmation names the label two items would share; cancelled, nothing changed and the command stays
+    await entered(page, `/_rename ${FROM} ${TO}`)
+    await expect
+      .poll(() => dialog(page), { timeout: 30_000 })
+      .toEqual([`Rename ${FROM} to ${TO} in 2 items?`, `${FROM}\n${FROM}/a`, `Multiple items would be labeled:\n${TO}/a`])
+    await page.locator('.modal .button.cancel', { hasText: 'Cancel' }).click()
+    await expect(page.locator('.modal')).toBeHidden()
+    await expect(mindbox(page)).toHaveValue(`/_rename ${FROM} ${TO}`)
+    expect(await state()).toEqual({ page: created, server: created })
+    // one item, no label shared: the count in the singular and the name alone
+    await entered(page, `/_rename ${FROM}/a #e2e_rnone`)
+    await expect.poll(() => dialog(page), { timeout: 30_000 }).toEqual([`Rename ${FROM}/a to #e2e_rnone in 1 item?`, `${FROM}/a`])
+    await page.locator('.modal .button.cancel', { hasText: 'Cancel' }).click()
+    await expect(page.locator('.modal')).toBeHidden()
+    expect(await state()).toEqual({ page: created, server: created })
+  } finally {
+    for (const id of ids) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
