@@ -558,10 +558,14 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
 // the menu's line says `marked`); the mark is the approved look in the real page, a 15px sparkle
 // before the item's number; (b) a tag saved in the editor shows there, and while that item is
 // edited the 23px sparkle is left of the edit menu's buttons; (c) a stale bridge clears the
-// marks, and its return brings them back; (d) a follow of all items draws none, and the menu's
-// lines and the sparkle's tooltip say it; (e) a list of follows as dense as the bridge publishes
-// is taller than a phone's window: the menu stays inside the window and scrolls, its entries
-// where a pointer and the keyboard reach them
+// marks, and its return brings them back; (d) a watch of all items marks every item, by a
+// stylesheet that names none: an item a rule named is drawn exactly as it was, by its number
+// and in its edit menu, an item no rule ever named has the same sparkle, the menu's lines and
+// the sparkle's tooltip say it, and a stale bridge clears these marks too; (e) a list of
+// follows as dense as the bridge publishes is taller than a phone's window: the menu stays
+// inside the window and scrolls, its entries where a pointer and the keyboard reach them; (f) a
+// look that takes long, the app's listing of the items held up for it, is said in one more line
+// of the menu and warned of in the console, once, and a look that is quick again removes the line
 test('the watched mark is on the items an agent follows, and the menu says what is followed', async ({ page }) => {
   const dialogs: string[] = []
   page.on('dialog', dialog => {
@@ -593,6 +597,8 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const sheet = document.querySelector('[data-vault-sparkle="watched"]')?.textContent ?? ''
       return [...new Set([...sheet.matchAll(/data-item-id="([^"]+)"/g)].map(m => m[1]))].map(id => ((window._item(id, true) as any)?.label as string | undefined) ?? id).sort()
     })
+  const sheet = () => page.evaluate(() => document.querySelector('[data-vault-sparkle="watched"]')?.textContent ?? '')
+  const EVERY = /^\.container\[data-item-id\] / // the one form that names no item: every item's box
   const lines = async () => {
     await page.locator(NODE).click()
     const said = await page.locator('[data-vault-sparkle="menu"] > div').allTextContents()
@@ -609,13 +615,20 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await fresh(page)
   await follows([{ ...RULE, tags: [TAG, KID] }])
   await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', TAG])
-  expect(await lines()).toEqual([`edits: ${TAG}, ${KID} (2 items marked)`])
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (2 items marked)`])
   // the look, in the page: the plain item is shown alone and unmarked; the tag's own item is marked
   const look = (label: string, part: string) =>
     page.evaluate(([label, part]) => {
       const box = document.querySelector(`.container[data-item-id="${window._item(label, true)!.id}"] ${part}`)
       const style = box ? getComputedStyle(box, '::before') : null
       return style ? [style.content.slice(0, 26), style.width, style.backgroundImage.slice(0, 26)] : null
+    }, [label, part])
+  // every computed property of that mark, as one string: what the two forms of the stylesheet must draw alike
+  const drawn = (label: string, part: string) =>
+    page.evaluate(([label, part]) => {
+      const box = document.querySelector(`.container[data-item-id="${window._item(label, true)!.id}"] ${part}`)
+      const style = box ? getComputedStyle(box, '::before') : null
+      return style ? [...style].map(name => `${name}: ${style.getPropertyValue(name)}`).join('; ') : null
     }, [label, part])
   const shows = async (label: string) => {
     await page.evaluate(label => (window as any).MindBox.set(label), label)
@@ -630,24 +643,29 @@ test('the watched mark is on the items an agent follows, and the menu says what 
 
   // (b) the tag saved in the editor: the mark shows on the item, and in its edit menu while it is edited
   const id = await page.evaluate(() => window._item('#e2e_mark_p', true)!.id)
-  const edit = async () => {
+  const edit = async (id: string) => {
     const paragraph = page.locator(`#item-${id} p`).first()
     const box = (await paragraph.boundingBox())!
     await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
     await expect(page.locator(`#textarea-${id}`)).toBeVisible()
   }
-  await edit()
+  const close = async (id: string) => {
+    await page.keyboard.press('Escape')
+    await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  }
+  await edit(id)
   expect((await look('#e2e_mark_p', '.edit-menu'))![2], 'an item nobody follows has no sparkle in its edit menu').toBe('none')
   await page.locator(`#textarea-${id}`).fill(`#e2e_mark_p now carries ${TAG}`)
   await page.keyboard.press('Shift+Enter') // save
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
   await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
   expect(await look('#e2e_mark_p', NUMBER)).toEqual([SPARKLE, '15px', 'none'])
-  expect(await lines()).toEqual([`edits: ${TAG}, ${KID} (3 items marked)`])
-  await edit()
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items marked)`])
+  const by_number = await drawn('#e2e_mark_p', NUMBER)
+  await edit(id)
   expect(await look('#e2e_mark_p', '.edit-menu')).toEqual(['""', '23px', SPARKLE])
-  await page.keyboard.press('Escape')
-  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  const in_editor = await drawn('#e2e_mark_p', '.edit-menu')
+  await close(id)
 
   // (c) a stale bridge: the marks go with the sparkle, and come back with it
   await fresh(page, 4 * 60_000)
@@ -656,12 +674,30 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await fresh(page)
   await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
 
-  // (d) a follow of all items: no item is marked, and the menu and the sparkle say it
+  // (d) a watch of all items: every item is marked, by a stylesheet that names none. The item a
+  // rule named is drawn exactly as it was under that rule; the hidden form's carrier, which no
+  // rule ever named, has the same sparkle by its number and in its edit menu; the menu and the
+  // sparkle say it; and a stale bridge clears these marks as it clears any
   await follows([{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'sweep', all: true }])
-  await expect.poll(marks, { timeout: 30_000 }).toEqual([])
-  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching · edits: all items`)
-  expect(await lines()).toEqual([`edits: ${TAG} (not marked)`, 'edits: all items'])
-  expect((await look('#e2e_mark_p', NUMBER))![0]).toBe('none')
+  await expect.poll(sheet, { timeout: 30_000 }).toMatch(EVERY)
+  expect(await marks(), 'the stylesheet names no item').toEqual([])
+  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching · watched: all items`)
+  expect(await lines()).toEqual([`watched: ${TAG}`, 'watched: all items'])
+  expect(await drawn('#e2e_mark_p', NUMBER), 'by the number, every computed property as under the rule that named the item').toBe(by_number)
+  await edit(id)
+  expect(await drawn('#e2e_mark_p', '.edit-menu'), 'and in the edit menu').toBe(in_editor)
+  await close(id)
+  await shows('#e2e_mark_h')
+  expect(await look('#e2e_mark_h', NUMBER)).toEqual([SPARKLE, '15px', 'none'])
+  const unnamed = await page.evaluate(() => window._item('#e2e_mark_h', true)!.id)
+  await edit(unnamed)
+  expect(await look('#e2e_mark_h', '.edit-menu')).toEqual(['""', '23px', SPARKLE])
+  await close(unnamed)
+  await fresh(page, 4 * 60_000)
+  await expect.poll(sheet, { timeout: 30_000 }).toBe('')
+  expect((await look('#e2e_mark_h', NUMBER))![0]).toBe('none')
+  await fresh(page)
+  await expect.poll(sheet, { timeout: 30_000 }).toMatch(EVERY)
 
   // (e) the menu is never taller than the window (review 54, B2). Eight follows of eight long
   // tags are within the bridge's bounds (its own `rule` and `_bounded` publish them unchanged, 3,872
@@ -692,5 +728,42 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     'the lines are taller than the window, and the menu, its entries and the focus the keyboard moved are inside it; the last line is reached by scrolling',
   ).toEqual({ window: [375, 667], lines: 8, taller: true, menu: true, entries: [['Stop Watching', true, true], ['Close Agent Session', true, true]], focused: 'Close Agent Session', last: true })
   await page.keyboard.press('Escape')
+
+  // (f) the look times itself, by the page's own clock. The app's listing of the items, which a
+  // tag rule's look makes, is held up for longer than the item's bound (a real wait, no fake
+  // clock): the menu says how long the marking took, below the rule's line, and the console is
+  // warned once. With the listing as it was, the next look is quick and the line is gone
+  const warnings: string[] = []
+  page.on('console', message => {
+    if (message.type() == 'warning' && message.text().includes('marking the watched items')) warnings.push(message.text())
+  })
+  await page.evaluate(() => {
+    const app = window as any
+    const listing = (app.__e2e_listing = app._items)
+    app._items = (...args: unknown[]) => {
+      const until = performance.now() + 80
+      while (performance.now() < until);
+      return listing(...args)
+    }
+  })
+  // (the menu is read only once the look for the rule has been made: a look closes an open menu)
+  const looked = (tags: number) =>
+    expect
+      .poll(() => page.evaluate(tags => ((held: any) => held.follows.length == 1 && held.follows[0].tags.length == tags && held.found !== null)((window as any)._vault_sparkle), tags), { timeout: 30_000 })
+      .toBe(true)
+  await follows([{ ...RULE, tags: [TAG] }])
+  await looked(1)
+  const [counted, took] = await lines()
+  expect([counted, /^marking took (\d+) ms$/.test(took) && Number(took.match(/\d+/)![0]) >= 80], took).toEqual([`watched: ${TAG} (3 items)`, true])
+  expect(warnings.length, warnings.join(' | ')).toBe(1)
+  expect(warnings[0]).toMatch(/^vault: marking the watched items took \d+ ms \(3 items marked, 1 rule\)$/)
+  await page.evaluate(() => {
+    const app = window as any
+    app._items = app.__e2e_listing
+  })
+  await follows([{ ...RULE, tags: [TAG, KID] }])
+  await looked(2)
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items marked)`])
+  expect(warnings.length, 'no second warning').toBe(1)
   expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
 })
