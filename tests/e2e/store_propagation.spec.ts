@@ -22,9 +22,9 @@ test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 
 // a DEDICATED uid: every document under it is test-owned, so cleanup deletes them all by
-// ownership (mind.page deliberately leaves a deleted item's store orphaned, so app deletion alone
-// is not cleanup) and the account starts fresh (the kdf profile document is removed too, so the
-// phrase flow is the first-sign-in flow every run)
+// ownership (mind.page deletes a deleted item's store with it only best-effort, so app deletion
+// alone is not cleanup) and the account starts fresh (the kdf profile document is removed too, so
+// the phrase flow is the first-sign-in flow every run)
 const USER: TestUser = { uid: 'store_prop_e2e', displayName: 'Store Propagation', email: 'store_prop@e2e.test' }
 const PHRASE = 'store propagation e2e phrase'
 const SECRET = secretFor(USER, PHRASE)

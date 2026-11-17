@@ -1731,3 +1731,397 @@ test('/device names this browser profile for the instances listing, in every ope
     await sibling.close()
   }
 })
+
+// gives each tab's reporter of invalid hidden records one more run: a plaintext marker item is
+// written behind the app (an arriving item requests the report), and each tab must show the
+// marker and then have a usable index. that is ALL it shows: not that a tab applied any earlier
+// change of the server (a second tab of a profile was seen with a removed store still held past
+// its marker), so a row that needs a removal applied asserts that removal itself (tookIn below).
+// resolves to the marker's document id, for the caller's cleanup
+async function takenIn(tabs: Page[], label: string) {
+  const marker = firestore().collection('items').doc()
+  await marker.set({ user: ALICE.uid, time: Date.now(), text: `${label} marker`, attr: null })
+  for (const tab of tabs) {
+    await expect.poll(() => tab.evaluate(label => !!window._item(label, true), label), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => tab.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+  }
+  return marker.id
+}
+
+test('an item deleted in this tab takes its store with it, with no warning of the store here and no word of its removal in another client; a refused delete and an owed save leave the store, reported then; unusable authority only delays it, and a delayed cascade keeps to the record it saw', async ({ page, browser }) => {
+  // deleteItem's store cascade (design notes/design/mind_page_hidden_gc.md §5 in the vault): once
+  // the server has an item's delete, the tab deletes its global_store_<id> through /_gc's
+  // exact-identity transaction. the store's name is in flight until that cascade has its last
+  // word and the reporter leaves it out, so a store that goes with its item is never announced
+  // and one that stays is reported then, the cascade giving its reason at debug (a refused
+  // owner delete never cascades: its error is all that is logged before the report). each
+  // phase holds every other condition true (a usable index, a settled store), so that the one
+  // it names is all that stands between the delete and the store
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
+  const exists = async (id: string) => (await firestore().collection('items').doc(id).get()).exists
+  const SINGLE = '#e2e_cascade_single'
+  const TREE = '#e2e_cascade'
+  const KIDS = [`${TREE}/a`, `${TREE}/b`]
+  const REFUSED = '#e2e_cascade_refused'
+  const OWED = '#e2e_cascade_owed'
+  const BLIND = '#e2e_cascade_blind'
+  const SWAPPED = '#e2e_cascade_swapped'
+  const CORRUPT = 'e2e-cascade-corrupt'
+  const labels = [SINGLE, TREE, ...KIDS, REFUSED, OWED, BLIND, SWAPPED]
+  const owners: Record<string, string | null> = {}
+  const stores: Record<string, string | null> = {}
+  let replacement: string | null = null // the record written behind the app under SWAPPED's store name
+  const name = (label: string) => `global_store_${owners[label]}`
+  type Line = { type: string; text: string }
+  const watch = (tab: Page) => {
+    const log: Line[] = []
+    tab.on('console', m => void log.push({ type: m.type(), text: m.text() }))
+    return log
+  }
+  const lines = watch(page)
+  // the reporter's warnings that name a label's store; what the cascade says of it, at debug;
+  // the app's line for a removal a tab took in; the one warning that is the emulator's own
+  const reports = (label: string) =>
+    lines.filter(l => l.type == 'warning' && l.text.includes(`orphaned ${name(label)} (${stores[label]})`)).length
+  const said = (label: string) =>
+    lines.filter(l => l.type == 'debug' && l.text.startsWith(`hidden store ${name(label)} `)).map(l => l.text)
+  const left = (label: string, why: string) => `hidden store ${name(label)} left for /_gc: ${why}`
+  const deferred = (label: string, why: string) => `hidden store ${name(label)} deferred to the next authority grant: ${why}`
+  const tookIn = (log: Line[], label: string) => log.some(l => l.type == 'debug' && l.text.includes(`removed hidden ${stores[label]}`))
+  const CACHED = 'hidden-index authority revoked: cached revision'
+  // a second client of the account for the first phase, with a cache and a connection of its
+  // own. a second tab of THIS profile shares this tab's, and on the emulator it never took a
+  // store's removal in: not within 30 s, and not with the server's next change either
+  // (2026-11-17, twice), so it could witness nothing about that removal
+  const elsewhere = await browser.newContext()
+  const other = await elsewhere.newPage()
+  const otherLines = watch(other)
+  const markers: string[] = []
+  try {
+    await withSecret(other)
+    await loadUser(other, ALICE)
+    await waitForApp(other)
+    await page.evaluate(labels => labels.forEach(label => void window._create(`${label} store owner`)), labels)
+    for (const label of labels)
+      await expect.poll(async () => (owners[label] = await savedId(page, label)), { timeout: 30_000 }).toBeTruthy()
+    await page.evaluate(labels => labels.forEach(label => void (window._item(label)!.global_store._e2e = 1)), labels)
+    for (const label of labels)
+      await expect.poll(async () => (stores[label] = await findStoreDoc(name(label))), { timeout: 30_000 }).not.toBeNull()
+    // the other client holds the first item's store too (read through the non-saving accessor)
+    await expect
+      .poll(() => other.evaluate(label => (window._item(label, true) as any)?._global_store?._e2e ?? null, SINGLE), {
+        timeout: 30_000,
+      })
+      .toBe(1)
+    await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+
+    // (1) A SINGLE DELETE takes its store with it and warns of nothing in this tab, where the
+    // reporter leaves the store out while its cascade is in flight; and for the other client a
+    // removed store whose item is gone is what a cascade leaves behind, not worth a line. (that
+    // client did report the store as an orphan when the item's removal reached it, as it always
+    // has.) the one warning left here is the emulator's way of delivering a remote delete: a
+    // cached revision, which revokes authority until the next server revision and says so
+    const quietFrom = lines.length
+    expect(await page.evaluate(label => window._item(label)!.delete(false), SINGLE)).toBe(true)
+    await expect
+      .poll(() => exists(stores[SINGLE]!), { message: `the store of ${SINGLE} deleted with it`, timeout: 30_000 })
+      .toBe(false)
+    markers.push(await takenIn([page, other], '#e2e_cascade_seen'))
+    expect([tookIn(lines, SINGLE), tookIn(otherLines, SINGLE)], 'both clients took the removal in').toEqual([true, true])
+    expect(
+      otherLines.filter(l => l.text.includes('missing local item for remote-removed')).map(l => l.text),
+      'the other client says nothing of the removed store'
+    ).toEqual([])
+    expect(
+      lines
+        .slice(quietFrom)
+        .filter(l => ['warning', 'error'].includes(l.type) && !l.text.includes(CACHED))
+        .map(l => l.text),
+      'a delete that cascades is quiet in its own tab'
+    ).toEqual([])
+    await elsewhere.close()
+
+    // (2) A REFUSED OWNER DELETE NEVER CASCADES, and the store it leaves is reported when the
+    // refusal ends its cascade, not at the delete: once by then (like any invalid record it is
+    // named again at each later run of the reporter). the document is deleted first by a write
+    // of this tab's own client behind the app (what a twin tab's delete amounts to), so the app's
+    // delete, queued right behind it, is refused by the rules: they read fields off a resource
+    // that does not exist (the get pinned in rules.spec.ts). a third delete, queued behind the
+    // app's, shows that refusal and, since writes settle in order, returns only once the app's
+    // own has settled
+    await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+    const refusal = await page.evaluate(async label => {
+      const { getFirestore, doc, deleteDoc } = window.firebase.firestore as any
+      const item = window._item(label)!
+      const ref = doc(getFirestore(window.firebase), 'items', item.saved_id)
+      const first = deleteDoc(ref).then(() => 'deleted', (e: any) => e.code)
+      const deleted = item.delete(false) // synchronous, as before: the item is gone when it returns
+      const gone = !window._item(label, true)
+      const third = await deleteDoc(ref).then(() => 'deleted', (e: any) => e.code)
+      return { deleted, gone, first: await first, third }
+    }, REFUSED)
+    expect(refusal).toEqual({ deleted: true, gone: true, first: 'deleted', third: 'permission-denied' })
+    await expect
+      .poll(async () => ({ kept: await exists(stores[REFUSED]!), reported: reports(REFUSED) }), {
+        message: 'a refused delete leaves its store, reported once at the refusal',
+        timeout: 30_000,
+      })
+      .toEqual({ kept: true, reported: 1 })
+
+    // (3) SEVERAL ITEMS DELETED IN ONE TURN (a subtree: the children, then the item) each take
+    // their own store, and the delete stays synchronous for its caller
+    expect(await page.evaluate(label => window._item(label)!.delete_subtree(false), TREE)).toBe(true)
+    for (const label of [TREE, ...KIDS]) {
+      await expect.poll(() => exists(owners[label]!), { message: `${label} deleted`, timeout: 30_000 }).toBe(false)
+      await expect
+        .poll(() => exists(stores[label]!), { message: `the store of ${label} deleted with it`, timeout: 30_000 })
+        .toBe(false)
+    }
+    // nothing of this phase is in flight when the next one starts: the tab took each removal in
+    await expect
+      .poll(() => [TREE, ...KIDS].every(label => tookIn(lines, label)), { timeout: 30_000 })
+      .toBe(true)
+
+    // (4) A STORE THIS TAB OWES A SAVE IS LEFT ALONE. the item is deleted in the turn its store
+    // save is accepted, from the save task's own completion (an item's code deleting its item),
+    // before that save's write can be issued (it is still to be encrypted): the owner delete is
+    // acknowledged first, with the save still owed. a report is made inside that turn (the index
+    // usable, the refused store to name) with the deleted item still on the eval stack, and the
+    // delete returns all the same
+    await expect.poll(authority, { timeout: 30_000 }).toBe(true)
+    await page.evaluate(label => {
+      const item = window._item(label)!
+      const raw = (window.__items as any[]).find(i => i.id == item.id)
+      item.global_store._owed = 1 // the saving accessor dispatches the save task
+      raw.tasks.save_global_store._on_done = () => {
+        const usable = (window as any).__hiddenAuthoritative
+        ;(window as any).__e2e_owed = { usable, deleted: item.delete(false) }
+      }
+    }, OWED)
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__e2e_owed ?? null), {
+        message: "an item's own delete returns, the index usable",
+        timeout: 30_000,
+      })
+      .toEqual({ usable: true, deleted: true })
+    await expect
+      .poll(() => said(OWED), { message: 'the owed store is left, and why', timeout: 30_000 })
+      .toEqual([left(OWED, 'this tab owes it a save')])
+    // ... reported at that last word of its cascade, not before it
+    const at = (text: string) => lines.findIndex(l => l.text.includes(text))
+    await expect
+      .poll(() => reports(OWED), { message: 'the store an owed save keeps is reported', timeout: 30_000 })
+      .toBeGreaterThan(0)
+    expect(at(`orphaned ${name(OWED)} (`), 'and only once its cascade ended').toBeGreaterThan(at(left(OWED, 'this tab owes it a save')))
+    // ... and the owed save then lands on that same document
+    await expect
+      .poll(
+        async () => {
+          const held = await findStore(name(OWED))
+          return held && [held.id, held.item._owed]
+        },
+        { timeout: 30_000 }
+      )
+      .toEqual([stores[OWED], 1])
+
+    // (5) UNUSABLE AUTHORITY ONLY DELAYS THE CASCADE, AND A DELAYED ONE KEEPS TO THE RECORD IT
+    // SAW: an undecryptable hidden change blocks the gate (as in the corrupt-change row above)
+    // and two cascades wait for the next authority grant. behind the app another document then
+    // takes one store's name (its record deleted, a new one written under the name), and the tab
+    // takes both changes in, its index still blocked. at the grant the store whose record is
+    // still the one first seen goes; under the other name the new record stays, the cascade
+    // says why, and the reporter names it
+    await firestore()
+      .collection('items')
+      .doc(CORRUPT)
+      .set({ user: ALICE.uid, time: Date.now(), hidden: true, cipher: 'not decryptable' })
+    await expect.poll(authority, { timeout: 30_000 }).toBe(false)
+    expect(
+      await page.evaluate(labels => labels.map(label => window._item(label)!.delete(false)), [BLIND, SWAPPED])
+    ).toEqual([true, true])
+    for (const label of [BLIND, SWAPPED])
+      await expect
+        .poll(() => said(label), { message: 'the cascade waits for the index, and says so', timeout: 30_000 })
+        .toEqual([deferred(label, 'hidden-index authority is not usable')])
+    expect(await exists(stores[BLIND]!), 'its store is still there meanwhile').toBe(true)
+    const { encryptWithSecret } = await import('../../src/crypto.js')
+    const envelope = JSON.stringify({
+      hidden: true,
+      attr: null,
+      text: JSON.stringify({ name: name(SWAPPED), item: { _e2e: 2 } }),
+    })
+    await firestore().collection('items').doc(stores[SWAPPED]!).delete()
+    const added = firestore().collection('items').doc()
+    replacement = added.id
+    await added.set({
+      user: ALICE.uid,
+      time: Date.now(),
+      hidden: true,
+      attr: null,
+      text: null,
+      cipher: await encryptWithSecret(envelope, secretFor(ALICE, PHRASE)),
+    })
+    await expect
+      .poll(
+        () => [tookIn(lines, SWAPPED), lines.some(l => l.type == 'debug' && l.text.includes(`added hidden ${added.id}`))],
+        { message: 'the tab holds the other record under the name', timeout: 30_000 }
+      )
+      .toEqual([true, true])
+    expect([await authority(), said(SWAPPED).length], 'its index still blocked, the cascade still waiting').toEqual([
+      false,
+      1,
+    ])
+    await firestore().collection('items').doc(CORRUPT).delete()
+    await expect
+      .poll(() => exists(stores[BLIND]!), { message: 'the store goes once authority is granted again', timeout: 30_000 })
+      .toBe(false)
+    const leftSwapped = left(SWAPPED, `another record holds the name (${added.id}, not ${stores[SWAPPED]})`)
+    await expect
+      .poll(async () => ({ kept: await exists(added.id), said: said(SWAPPED) }), {
+        message: 'a cascade that waited deletes only the record it saw: another under the name stays, and why',
+        timeout: 30_000,
+      })
+      .toEqual({ kept: true, said: [deferred(SWAPPED, 'hidden-index authority is not usable'), leftSwapped] })
+    await expect
+      .poll(
+        () => lines.some(l => l.type == 'warning' && l.text.includes(`orphaned ${name(SWAPPED)} (${added.id})`)),
+        { message: 'the record that stayed is reported', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    // one more report, after the tab took the last cascade's removal in: the stores that were
+    // left are still there, and nothing was ever reported of a store that went with its item
+    await expect.poll(() => tookIn(lines, BLIND), { message: 'the tab took the last removal in', timeout: 30_000 }).toBe(true)
+    markers.push(await takenIn([page], '#e2e_cascade_done'))
+    for (const label of [REFUSED, OWED]) {
+      expect(await exists(owners[label]!), `${label} deleted`).toBe(false)
+      expect(await exists(stores[label]!), `the store of ${label} left for /_gc`).toBe(true)
+    }
+    expect(await exists(added.id), 'the record that took a waiting name is still there').toBe(true)
+    expect(
+      [SINGLE, TREE, ...KIDS, BLIND].filter(label => reports(label)),
+      'no report of a store that went with its item'
+    ).toEqual([])
+    expect(lines.filter(l => l.text.includes('left for /_gc')).map(l => l.text)).toEqual([
+      left(OWED, 'this tab owes it a save'),
+      leftSwapped,
+    ])
+  } finally {
+    // best-effort residue cleanup on every exit (as the /_gc row): whatever exists of the pairs
+    if (!other.isClosed()) await elsewhere.close()
+    await firestore().collection('items').doc(CORRUPT).delete().catch(() => {})
+    for (const id of [...markers, replacement, ...labels.flatMap(label => [owners[label], stores[label]])])
+      if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
+
+test('a subtree of 26 items deleted at once takes every store with it, quietly', async ({ page }) => {
+  // the batch (design notes/design/mind_page_hidden_gc.md §5): every cascade checks authority at
+  // its own delete's acknowledgment, the SDK sends ten writes ahead, and the earlier stores'
+  // removals, coming back through the listener, make authority unusable for the later ones (14
+  // of these 26 stores were left when such a cascade ended there). a cascade that meets an
+  // unsettled index waits for the next authority grant instead and runs again, so every store
+  // goes; none is ever reported, and a removed store whose item is gone is no warning either
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const ROOT = '#e2e_cascade_batch'
+  const labels = [ROOT, ...Array.from({ length: 25 }, (_, i) => `${ROOT}/k${i}`)]
+  const exist = async (ids: (string | null)[]) =>
+    (await Promise.all(ids.map(id => firestore().collection('items').doc(id!).get()))).filter(doc => doc.exists).length
+  let owners: (string | null)[] = []
+  const stores: (string | null)[] = []
+  let marker: string | null = null
+  const lines: { type: string; text: string }[] = []
+  page.on('console', m => void lines.push({ type: m.type(), text: m.text() }))
+  try {
+    await page.evaluate(labels => labels.forEach(label => void window._create(`${label} store owner`)), labels)
+    await expect
+      .poll(
+        async () =>
+          (owners = await page.evaluate(labels => labels.map(l => window._item(l, true)?.saved_id ?? null), labels)).every(Boolean),
+        { timeout: 60_000 }
+      )
+      .toBe(true)
+    await page.evaluate(labels => labels.forEach(label => void (window._item(label)!.global_store._e2e = 1)), labels)
+    for (const [i, owner] of owners.entries())
+      await expect.poll(async () => (stores[i] = await findStoreDoc(`global_store_${owner}`)), { timeout: 30_000 }).not.toBeNull()
+    await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+    const from = lines.length
+    expect(await page.evaluate(label => window._item(label)!.delete_subtree(false), ROOT)).toBe(true)
+    await expect.poll(() => exist(owners), { message: 'every item of the subtree deleted', timeout: 60_000 }).toBe(0)
+    await expect.poll(() => exist(stores), { message: 'every store of the subtree deleted with its item', timeout: 60_000 }).toBe(0)
+    // one more report in the tab (the marker's), and all along it warned of nothing but the
+    // emulator's cached revisions. that the tab had applied all 26 removals by then is NOT
+    // asserted: a line of applied changes names ten at most, and nothing else shows the index
+    marker = await takenIn([page], '#e2e_cascade_batch_done')
+    expect(
+      lines
+        .slice(from)
+        .filter(
+          l =>
+            (['warning', 'error'].includes(l.type) || l.text.includes('left for /_gc')) &&
+            !l.text.includes('hidden-index authority revoked: cached revision')
+        )
+        .map(l => l.text),
+      'a batch that cascades is quiet too, and leaves nothing'
+    ).toEqual([])
+  } finally {
+    for (const id of [marker, ...owners, ...stores]) if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
+
+test('a second tab of the profile that deletes an item takes its store with it too, and never reports the store it deleted', async ({ page }) => {
+  // the tab that deletes may be a second tab of its profile, which shares the first one's cache
+  // and connection. its cascade deletes the store all the same. on the emulator that tab then
+  // does not take the store's removal in (see the cascade row above), so the record stays in
+  // its index: the reporter goes on leaving out the exact record the tab deleted, or every
+  // later report there would name a store that is gone. (where the tab does take the removal
+  // in, there is nothing left to name: the annotation says which case a run met)
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  const LABEL = '#e2e_cascade_twin'
+  let owner: string | null = null
+  let store: string | null = null
+  let marker: string | null = null
+  const twin = await page.context().newPage()
+  const twinLines: { type: string; text: string }[] = []
+  twin.on('console', m => void twinLines.push({ type: m.type(), text: m.text() }))
+  try {
+    await page.evaluate(text => void window._create(text), `${LABEL} store owner`)
+    await expect.poll(async () => (owner = await savedId(page, LABEL)), { timeout: 30_000 }).toBeTruthy()
+    await page.evaluate(label => void (window._item(label)!.global_store._e2e = 1), LABEL)
+    await expect.poll(async () => (store = await findStoreDoc(`global_store_${owner}`)), { timeout: 30_000 }).not.toBeNull()
+    await twin.goto('/')
+    await waitForApp(twin)
+    // the second tab holds the item and its store (the non-saving accessor), its index usable
+    await expect
+      .poll(() => twin.evaluate(label => (window._item(label, true) as any)?._global_store?._e2e ?? null, LABEL), { timeout: 30_000 })
+      .toBe(1)
+    await expect.poll(() => twin.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+    expect(await twin.evaluate(label => window._item(label)!.delete(false), LABEL)).toBe(true)
+    await expect
+      .poll(async () => (await firestore().collection('items').doc(store!).get()).exists, {
+        message: 'the store deleted with its item, from a second tab',
+        timeout: 30_000,
+      })
+      .toBe(false)
+    // a marker's arrival makes the second tab report once more, the deleted record still held or not
+    marker = await takenIn([page, twin], '#e2e_cascade_twin_seen')
+    test.info().annotations.push({
+      type: 'the second tab took the removal in',
+      description: String(twinLines.some(l => l.type == 'debug' && l.text.includes(`removed hidden ${store}`))),
+    })
+    expect(
+      twinLines.filter(l => l.type == 'warning' && l.text.includes(`orphaned global_store_${owner} (`)).map(l => l.text),
+      'the tab that deleted a store never reports it'
+    ).toEqual([])
+  } finally {
+    await twin.close()
+    for (const id of [marker, owner, store]) if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})

@@ -7202,10 +7202,9 @@
     // by default, confirm if item has saved/saving text (not new item) & unique label
     confirm_delete ??= (item.savedText || item.savingText) && item.labelUnique
     if (confirm_delete && !confirm(confirm_msg || `Delete ${item.name}?`)) return false
-    const { name, contextLabel } = item
-    // this item's global_store_<id> (if any) is now an ORPHAN, and the listener echo of our own
-    // removal is classified as ours and skipped, so nothing else requests the reclassification
-    requestHiddenCleanup()
+    // savedId is read BEFORE the removal and is never the session-temporary id: it names the
+    // document deleted below and the hidden store deleted with it (see cascadeStoreDelete)
+    const { name, contextLabel, savedId } = item
     // a deleted item has no expansion: itemTextChanged merges item.expanded.item's tags into the
     // tag counts (tagsExpandedWithMacros), so a stale expansion kept the deleted label counted
     // and no tagger turned `missing` (the owner's report, 2026-10-01: the bridge's children carry
@@ -7230,7 +7229,37 @@
       attr: _.cloneDeep(item.savedAttr),
       text: item.savingText ?? item.savedText, // use saving text if was saving
     }) // for /undelete
-    if (!readonly && item.savedId) deleteDoc(doc(getFirestore(firebase), 'items', item.savedId)).catch(console.error)
+    if (!readonly && savedId) {
+      // the item's hidden store goes with it, but only once THIS delete has resolved: a rejected
+      // owner delete never cascades (it is logged, as before, and a store it leaves is reported
+      // then), and one still pending (offline) cascades when it lands. the principal is captured
+      // here, before that wait, and rechecked after it. the store's name is IN FLIGHT from here
+      // to the cascade's last word (see cascadingStores), so the report below does not announce
+      // as an orphan a store that is about to go with its item. nothing is awaited: deleteItem
+      // stays synchronous and callers read its boolean
+      const db = getFirestore(firebase)
+      const principal = user?.uid
+      const store = 'global_store_' + savedId
+      cascadingStores.set(store, null)
+      deleteDoc(doc(db, 'items', savedId))
+        .then(
+          () => cascadeStoreDelete(db, savedId, principal),
+          e => {
+            console.error(e)
+            settleStoreCascade(store, canonicalHolders(hiddenIndex()).has(store))
+          }
+        )
+        .catch(console.error)
+    }
+    // this item's global_store_<id>, wherever the cascade leaves it or has yet to delete it, is
+    // now an ORPHAN, and the listener echo of our own removal is classified as ours and skipped,
+    // so nothing else requests the reclassification. requested AFTER the local removal (design §5
+    // of notes/design/mind_page_hidden_gc.md in the vault repo): before the splice a usable
+    // authority saw the owner still present and cleared the pending bit, so the orphan went
+    // unreported until an unrelated event; and after the delete is issued, so that nothing the
+    // report does can keep the delete from the server. a store whose cascade is in flight is
+    // left out of this report, and reported at the cascade's last word if it stayed
+    requestHiddenCleanup()
     // if deleted item was being navigated, go back to previous state
     // if (navigated && sessionStateHistoryIndex > 0) update_dom().then(() => history.back())
     return true
@@ -8228,6 +8257,7 @@
   import { removeZWSP } from '../zwsp'
   import {
     buildHiddenIndex,
+    canonicalHolders,
     classifyInvalidHidden,
     quarantineNonCanonical,
     compareIds,
@@ -8665,9 +8695,13 @@
       lease.revoke()
     }
     // settlement still runs behind initialization and in receipt order; `done` resolves only
-    // after this lease's ordered effect is consumed, which is when a deferred cleanup may run
+    // after this lease's ordered effect is consumed, which is when a deferred cleanup may run.
+    // the store cascades that unusable authority deferred run again first (see
+    // cascadeStoreDelete): their names stay out of the report while they do
     void lease.done.then(() => {
-      if (hiddenCleanupPending && hiddenAuthorityUsable()) reportInvalidHiddenCandidates()
+      if (!hiddenAuthorityUsable()) return
+      retryStoreCascades()
+      if (hiddenCleanupPending) reportInvalidHiddenCandidates()
     })
     const settle = async ({ failed }: { failed: boolean }) => {
       if (settled) return
@@ -8714,7 +8748,7 @@
   // failures — including a target that DISAPPEARED, since the rules deny reading a missing
   // document, which the caller reports as a retryable failure. the principal check is the
   // command's identity fence across transaction retries; the rules stay the authorization layer.
-  // used by /_gc, and by the deferred deleteItem cascade when that slice lands (design §5)
+  // used by /_gc and by deleteItem's store cascade (cascadeStoreDelete below; design §5)
   async function gcDeleteExact(db, target: { id: string; name: string }, principal: string) {
     return runTransaction(db, async tx => {
       const ref = doc(db, 'items', target.id)
@@ -8727,6 +8761,92 @@
       tx.delete(ref)
       return 'deleted'
     })
+  }
+
+  // deleteItem's STORE CASCADE (design §5 of notes/design/mind_page_hidden_gc.md in the vault
+  // repo): the deleted item's global_store_<savedId> record is deleted with it, through /_gc's
+  // exact-identity transaction. called only once the OWNER delete has resolved (and from the
+  // top again when it was deferred, below), and everything from its entry to the transaction's
+  // launch is ONE synchronous turn: the principal captured before the wait is still the
+  // signed-in owner, this tab owes the name no save (its write would land on, or re-create, what
+  // this deletes; checked before authority, since that save's own echo can be what holds the
+  // gate), authority is usable, and the target is the name's settled live holder, never a
+  // create or an adoption in flight.
+  // BEST-EFFORT: every branch that does not delete leaves the record, which the reporter then
+  // reports and /_gc collects, and a record this tab does not hold under the name is not looked
+  // for. a save to the same record from another tab or the bridge in the same moment is deleted
+  // with it: race (c) of the /_gc comment, accepted by the owner for this cascade (2026-11-16),
+  // so there is no content fingerprint.
+  // BEYOND THAT CONTRACT (2026-11-17, for the owner's goal of not needing /_gc: design §5):
+  // - UNUSABLE AUTHORITY DEFERS the cascade instead of ending it. in a delete of many items the
+  //   later ones find authority unusable while the index takes in the earlier stores' removals
+  //   (14 of 26 stores were left that way when it ended them). the cascade is queued WITH THE ID
+  //   OF THE SETTLED HOLDER IT SAW and runs again at the next authority grant (see
+  //   reserveHiddenAuthority), every check made afresh, and it deletes only that very record: a
+  //   record that holds the name in its place by then is left and reported (race (b) of the
+  //   /_gc comment is not accepted here), as is a holder not settled, at any try. what the wait
+  //   does widen is race (c): a later PAYLOAD of that same record, saved by another writer
+  //   meanwhile, is deleted with it, and the wait has NO TIME BOUND: CASCADE_RETRIES limits the
+  //   tries made at a grant, not the time until one, and a grant may never come in this tab. a
+  //   changed principal and an owed save end the cascade at any try. since a later try can be
+  //   long after the acknowledgment, the owner item must also still be absent from this tab, by
+  //   the id this tab knows it under: that does NOT see an item this tab created and tooling
+  //   then recreated under its saved id (tempIdFromSavedId still maps that id to the temporary
+  //   one, which is gone), so the store of such an item is still deleted
+  // - the store's name is IN FLIGHT (cascadingStores) from deleteItem to this cascade's last
+  //   word, and the reporter leaves it out: a store that goes with its item is never announced
+  //   as an orphan, and one that stays is reported at that last word (settleStoreCascade), and
+  //   then again at each later report like any invalid record. the record a cascade deleted
+  //   stays out until the tab has taken its removal in: the commit is known here before the
+  //   listener delivers it
+  // says nothing on success; a deferral and a skip give their reason at debug, a failed
+  // transaction warns (a refused OWNER delete never gets here: deleteItem logs its error only)
+  const cascadingStores = new Map<string, string | null>() // name -> null, then the deleted record's id
+  let deferredCascades: { db: any; savedId: string; principal: string; tries: number; target: string }[] = []
+  const CASCADE_RETRIES = 3
+  async function cascadeStoreDelete(db, savedId: string, principal: string, tries = 0, target?: string) {
+    const name = 'global_store_' + savedId
+    const holder = canonicalHolders(hiddenIndex()).get(name)
+    if (!holder) return settleStoreCascade(name, false) // no record held under the name (most items have none)
+    const left = (why: string) => {
+      console.debug(`hidden store ${name} left for /_gc: ${why}`)
+      settleStoreCascade(name, true)
+    }
+    if (readonly || anonymous || !principal || user?.uid !== principal)
+      return left('requires the signed-in owner that deleted the item')
+    // its item is back, under the id this tab knows it by (a later try, and tooling; what this
+    // does not see is said above): the store is no orphan
+    if (_exists(tempIdFromSavedId.get(savedId) ?? savedId)) return settleStoreCascade(name, false)
+    if (hiddenPersistence.owes(name)) return left('this tab owes it a save')
+    // a deferred run keeps to the record its first try saw (target), and only a settled one is deferred
+    if (target && holder.id != target) return left(`another record holds the name (${holder.id}, not ${target})`)
+    if (holder.pending_create || holder.adopt_id) return left('its record is not settled')
+    if (!hiddenAuthorityUsable()) {
+      const unusable = 'hidden-index authority is not usable'
+      if (tries >= CASCADE_RETRIES) return left(`${unusable}, still after ${tries} retries`)
+      deferredCascades.push({ db, savedId, principal, tries: tries + 1, target: holder.id })
+      return console.debug(`hidden store ${name} deferred to the next authority grant: ${unusable}`)
+    }
+    try {
+      const outcome = await gcDeleteExact(db, { id: holder.id, name }, principal)
+      if (outcome == 'deleted') cascadingStores.set(name, holder.id)
+      else left(`the record ${holder.id} changed identity`)
+    } catch (e) {
+      console.warn(`hidden store ${name} (${holder.id}) left for /_gc: delete failed:`, e)
+      settleStoreCascade(name, true)
+    }
+  }
+  // a cascade's last word: its name can be reported again, and a store that stayed is reported now
+  function settleStoreCascade(name: string, left: boolean) {
+    cascadingStores.delete(name)
+    if (left) requestHiddenCleanup()
+  }
+  // the deferred cascades run again: at an authority grant, BEFORE that grant's report
+  function retryStoreCascades() {
+    const deferred = deferredCascades
+    deferredCascades = []
+    for (const { db, savedId, principal, tries, target } of deferred)
+      cascadeStoreDelete(db, savedId, principal, tries, target).catch(console.error)
   }
 
   // recomputes and REPORTS invalid hidden records from CURRENT state — runs INSIDE the
@@ -8782,10 +8902,18 @@
     // duplicate whose canonical record is later removed would otherwise be promoted and
     // resurrect old state, which is the only reason deleting them ever seemed necessary
     quarantineNonCanonical(hiddenIndex(), invalid)
-    if (invalid.length)
+    // a store whose cascade is in flight in this tab is left out of the report: it goes with its
+    // item, or the cascade's last word requests this report again (see cascadingStores). so is
+    // the exact record a cascade deleted, until its removal has come in and it is forgotten here
+    for (const [name, id] of cascadingStores) if (id && !hiddenItems.has(id)) cascadingStores.delete(name)
+    const reported = invalid.filter(({ wrapper, reason }) => {
+      const cascade = reason == 'orphaned' ? cascadingStores.get(wrapper.name) : undefined
+      return cascade !== null && cascade !== wrapper.id
+    })
+    if (reported.length)
       console.warn(
-        `${invalid.length} invalid hidden record(s) reported and quarantined (not deleted):`,
-        invalid.map(({ wrapper, reason }) => `${reason} ${wrapper.name} (${wrapper.id})`).join('; ')
+        `${reported.length} invalid hidden record(s) reported and quarantined (not deleted):`,
+        reported.map(({ wrapper, reason }) => `${reason} ${wrapper.name} (${wrapper.id})`).join('; ')
       )
   }
 
@@ -10389,9 +10517,10 @@
           let replay = true // true until replay below
           log_levels.forEach(function (verb) {
             console[verb] = function (...args) {
-              // NOTE: we indicate full eval stack as prefix
+              // NOTE: we indicate full eval stack as prefix (an item deleted by its own code is
+              // still on the stack with no name left: deleteItem's report after the removal)
               let prefix = evalStack
-                .map(id => items[indexFromId.get(id)].name)
+                .map(id => items[indexFromId.get(id)]?.name)
                 .filter((n, j, nJ) => n != nJ[j - 1]) // remove consecutive duplicates
                 .join(' ')
               if (prefix) prefix = '[' + prefix + ']'
@@ -11422,7 +11551,10 @@
       // also item should exist before its global_store does
       id = tempIdFromSavedId.get(id) ?? id
       if (!_exists(id)) {
-        console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
+        // a REMOVED store whose item is gone is what deleteItem's cascade (in this tab or in
+        // another) and /_gc leave behind them: nothing to say (the applied change is logged like
+        // any other). a store added or modified for a missing item still warns
+        if (change_type != 'removed') console.warn(`missing local item for remote-${change_type} hidden item ${name}`)
         return
       }
       // the owner's dependents re-render for EVERY applied delivery, before the two early returns
