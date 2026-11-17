@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
+import { focusMindbox, mindbox } from './editor_helpers.js'
 import { customToken, firestore, install, interceptMindItems, secretFor, waitForApp, type TestUser } from './helpers.js'
 
 // the task-agents todoer (vault design notes/design/mind_task_agents.md, 2.2-2.4, 6; slice 3):
@@ -131,6 +132,17 @@ const read = (page: Page, name: string) => page.evaluate(name => window._item(na
 const savedId = (page: Page, name: string) => page.evaluate(name => window._item(name, true)?.saved_id ?? null, name)
 const command = (page: Page, text: string) =>
   page.evaluate(text => Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out => (typeof out == 'string' ? out : null)), text)
+
+// a command typed into the mindbox and entered, as the owner does it: a handled /delegate or
+// /takeback leaves the box EMPTY (their null return left the command in it; the owner,
+// 2026-11-16). command() cannot see that: it normalizes every non-string result to null and
+// neither enters the command into the box nor checks the box's value
+async function entered(page: Page, text: string) {
+  await focusMindbox(page)
+  await mindbox(page).fill(text)
+  await page.keyboard.press('Shift+Enter') // done once the modifier is released (Editor.svelte)
+  await expect(mindbox(page)).toHaveValue('', { timeout: 30_000 })
+}
 
 // a refused gesture: the todoer reports it in the browser's alert (item code keeps the native
 // dialogs; the harness dismisses them and keeps their messages) and the command handler returns
@@ -565,8 +577,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(async () => (await lists(page)).main.map(r => r[0])[0], { timeout: 30_000 }).toBe(`${TASK} #todo [question] ${SNIPPET}`)
 
   // (d) a re-delegation under the current epoch, then a take-back that overlays at once and
-  // refuses a further delegate until acknowledged
-  expect(await command(page, `/delegate ${TASK}`)).toBeNull()
+  // refuses a further delegate until acknowledged; both typed into the box, which each clears
+  await entered(page, `/delegate ${TASK}`)
   await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(2)
   const again = (await commands())[1]
   expect([again.wrapper.item.kind, again.wrapper.item.epoch]).toEqual(['delegate', 1])
@@ -577,7 +589,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(afterAgain.match(/#_agent\/vault/g)?.length).toBe(1) // the route tag once
   expect(afterAgain).toContain(ANSWER)
   await expect.poll(async () => (await lists(page)).delegated.map(r => r[1]), { timeout: 30_000 }).toEqual(['delegate'])
-  expect(await command(page, `/takeback ${TASK}`)).toBeNull()
+  await entered(page, `/takeback ${TASK}`)
   await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(3)
   const takeback = (await commands())[2]
   expect(takeback.wrapper.item).toEqual({ task: taskId, id: takeback.wrapper.item.id, kind: 'takeback', epoch: 1, at: takeback.wrapper.item.at })
