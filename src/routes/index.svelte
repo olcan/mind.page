@@ -3532,7 +3532,14 @@
           unsavedTimes: items.filter(item => item.time != item.savedTime).map(item => _.pick(item, ['id', 'time'])),
           orderHash,
           hideIndex,
-          scrollPosition: document.body.scrollTop,
+          // no position before the page has taken its first-load position (the scroll to the header, see
+          // updateItemLayout): the entry that initialization writes comes before the header is on the page,
+          // and the 0 it recorded stayed for good whenever another entry was pushed before the scroll
+          // listener's write (250 ms after the first scroll) reached it: a remote change re-ranking the page
+          // as it launched, or the address's query; Back to the first view then scrolled to the page's very
+          // top, far above the MindBox (the owner, 2026-11-17). an entry without a position restores to the
+          // header (onPopState)
+          scrollPosition: headerScrolled ? document.body.scrollTop : undefined,
           final: finalizeStateOnEditorChange,
           intro,
         }
@@ -3895,15 +3902,16 @@
       // scroll to state.scrollPosition (unless scrollToTopOnPopState is set); the position is read NOW,
       // since the state object is shared with history.state and a writer could reach it before the frames
       // below (see onScroll)
-      const scrollPosition = state.scrollPosition || 0
+      const scrollPosition = state.scrollPosition
       popStateScrollPending = true // no departure is read off the departed view meanwhile (onScroll)
       update_dom().then(() => {
         if (scrollToTopOnPopState) {
           scrollTo(headerdiv.offsetTop)
           scrollToTopOnPopState = false
         } else {
-          // scroll to last recorded scroll position at this state
-          scrollTo(scrollPosition)
+          // scroll to last recorded scroll position at this state; an entry that never recorded one (written
+          // before the page's first-load scroll, see onEditorChange) is at the header, where that scroll left it
+          scrollTo(scrollPosition ?? headerdiv.offsetTop)
         }
         popStateScrollPending = false
       })

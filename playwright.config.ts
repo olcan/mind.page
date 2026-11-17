@@ -99,7 +99,8 @@ export default defineConfig({
     // and the admin lane's renderer contract row run beside the rest of their suites
     lane('editor2', { testMatch: /editor2\.spec\.ts/ }),
     lane('contract', { testMatch: /renderer_contract\.spec\.ts/ }),
-    lane('tasks', { testMatch: /tasks\.spec\.ts/ }), // the task-agents todoer rows over a dedicated account
+    // the todoer rows: the task agents' over a dedicated account, a launch's history over one of its own
+    lane('tasks', { testMatch: /tasks\.spec\.ts/ }),
     // the page-cache restore rows: they write as admin, reload the page, and one of them kills the
     // page's Firestore client with a real pagehide
     lane('lifecycle', { testMatch: /lifecycle\.spec\.ts/ }),
