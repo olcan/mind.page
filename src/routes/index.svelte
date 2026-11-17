@@ -6612,6 +6612,46 @@
       return
     }
 
+    // an UNNAMED target (the owner, 2026-11-16): the box names an item by its id (`id:<id>`, as a
+    // todo's row sets it) that has no unique label, so there was no label to nest a child under
+    // and the text itself became a new item (`id:<id>`, the box cleared). Instead a dialog asks
+    // for the item's name, the next free `thread_<n>` filled in and selected (src/item_name.ts,
+    // which also says what a name is and where it goes in the text): a refused name reopens the
+    // dialog with what was typed and the reason; an accepted one is put in front of the item's
+    // text as its label (write: an edit of the whole text the item has by then, saved under its
+    // last acknowledged time) and the child is created under it as under any named item, by this
+    // function again with the label as its text. a cancel changes nothing and keeps the box. refused before the
+    // dialog: an item open in an editor (a write would replace the editor's text and stay
+    // unsaved, as /_rename refuses) and one that is not editable (its editor takes no input).
+    // only the text as entered asks: not one a command put in its place (/_undelete, /_dependents)
+    const unnamed =
+      e && text == editorText && text.trim().startsWith('id:') ? _item(text.trim(), true /* silent */) : null
+    if (unnamed && !__item(unnamed.id).labelUnique) {
+      const { id } = unnamed
+      if (__item(id).editing) return alert('can not name an item while editing it')
+      if (!__item(id).editable) return alert('can not name an item that is not editable')
+      return (window['_mindbox_return'] = (async () => {
+        await _modal_close() // close/cancel all modals
+        let typed = freeName(_labels())
+        let refusal = ''
+        do {
+          typed = await _modal_prompt(
+            'The selected item is unnamed. Name it (a unique label) to create a child under it:' +
+              (refusal && '\n\n' + refusal),
+            typed
+          )
+          if (typed == null || !_exists(id)) return // cancelled, or the item deleted meanwhile: nothing to name
+          refusal = nameRefusal(nameLabel(typed), _labels())
+        } while (refusal)
+        const name = nameLabel(typed)
+        const target = __item(id)
+        // the last acknowledged time, not the query's soft touch (as the editor's alt+cmd save); known limit: it also replaces the time of a save still pending
+        if (target.savedTime) target.time = target.savedTime
+        if (!_item(id).write(labeledText(target.text, name), '' /* whole item */, { keep_time: true })) return
+        return onEditorDone(name, e, false, run, save, editing, attr, ignore_command, return_alerts)
+      })())
+    }
+
     // if item text matches an existing _unique_ label, then we append '/# ' to avoid conflict w/ target item
     // this also ensures the new item is created _below_ target item (and easily navigated via arrow keys etc)
     // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
@@ -8230,6 +8270,7 @@
   import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
+  import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so

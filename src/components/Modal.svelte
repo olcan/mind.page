@@ -23,6 +23,8 @@
   let ready_image_count = 0
   let _visible = false
   let lastActiveElement = null // element last active when _visible=true (triggering blur and input focus)
+  let lastKeyDown: KeyboardEvent = null // the page's last keydown, noted at the window in the capture phase (before its target's and the bubble phase's handlers)
+  let keyAtShow: KeyboardEvent = null // lastKeyDown when the visible modal was shown (see onKeyDown)
   let enabled = false
   $: enabled =
     canConfirm(input) && (!images || (selected_images.length > 0 && ready_image_count == selected_images.length))
@@ -91,6 +93,7 @@
           selected_images = []
           ready_image_count = 0
           _visible = true
+          keyAtShow = lastKeyDown
           lastActiveElement ??= document.activeElement
           ;(document.activeElement as HTMLElement)?.blur()
 
@@ -275,6 +278,15 @@
       e.preventDefault()
     }
 
+    // the keydown that opened the modal is not its answer, and neither are a held key's repeats:
+    // that one event (the page's last keydown when the modal was shown) and every repeat are
+    // ignored, no more (the timer below still applies a key to whatever modal is visible when it
+    // runs). a modal shown by the microtasks of a keydown handler (the create key on an unnamed
+    // item, /_rename entered with the mindbox unfocused: index.svelte) can be visible before this
+    // listener gets that same event, which then confirmed it unseen (2026-11-17); where this
+    // listener gets the event first, the modal is still hidden and the check above returns
+    if (e.repeat || e == keyAtShow) return
+
     // dispatch to keep modal visible and prevent handling by window onKeyDown (in Index.svelte)
     setTimeout(() => {
       if (key == 'Enter') _onConfirm()
@@ -409,7 +421,7 @@
   </script>
 {/if}
 
-<svelte:window on:keydown={onKeyDown} />
+<svelte:window on:keydown|capture={e => (lastKeyDown = e)} on:keydown={onKeyDown} />
 
 <style>
   .background {

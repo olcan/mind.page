@@ -911,6 +911,22 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   const LEGACY_CHILD = `${LEGACY}/0/0 #_${LEGACY.slice(1)}/0\n<<user>> `
   expect(legacyChild, 'no autodep ancestor: the parent named').toEqual({ value: LEGACY_CHILD, start: LEGACY_CHILD.length, end: LEGACY_CHILD.length })
   await page.keyboard.press('Escape')
+  // an UNNAMED todo, which its row selects by id as in (k) (the owner, 2026-11-16: a chat under such a
+  // todo): the create key first asks for the todo's name, the next free `thread_<n>` offered (index.svelte,
+  // onEditorDone; the dialog's own rows are in editor2.spec.ts); accepted, the label stands before the
+  // #todo tag, as the owner writes it by hand, and the child is the task chat a named todo gets from the hook
+  await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), 'id:' + twinId)
+  await page.waitForTimeout(500)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('Shift+Enter')
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve))) // an answer by that key would have landed (the Modal answers from a timer)
+  await expect(page.locator('#modal-input')).toHaveValue('thread_0', { timeout: 10_000 })
+  await expect(page.locator('#modal-input')).toBeFocused()
+  await page.keyboard.press('Enter')
+  const THREAD = '#thread_0/0 #_chat/vault #_autodep\n<<user>> '
+  await expect.poll(editorState, { timeout: 10_000 }).toEqual({ value: THREAD, start: THREAD.length, end: THREAD.length })
+  expect(await read(page, '#thread_0')).toBe('#thread_0 #todo twin one')
+  await page.keyboard.press('Escape')
 
   // CHAT CHILDREN (vault design mind_chat_children): under the INSTALLED chat template a chat's
   // reply tags its children with `#/name` and the children bind to the chat by autodep; the
