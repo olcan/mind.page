@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { createHash } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
-import { customToken, firestore, install, interceptMindItems, secretFor, waitForApp, type TestUser } from './helpers.js'
+import { customToken, firestore, install, interceptMindItems, loadUser, secretFor, waitForApp, type TestUser } from './helpers.js'
 
 // the #vault item's sparkle (vault design notes/design/mind_bridge_watcher.md, 6.2 and 6.3; slice
 // 5): one self-contained personal account with #status and #vault installed from the local
@@ -32,7 +32,10 @@ import { customToken, firestore, install, interceptMindItems, secretFor, waitFor
 // (SIMULATED: a desktop lane has no on-screen keyboard); (g2) the item renamed, its code kept,
 // is no longer the page's #vault: its sparkle goes, with its store still naming the watcher and
 // the bridge fresh, and comes back when the item is #vault again; (h) the item's deletion
-// removes it at the task's next look; (i) a successful sign-out leaves none
+// removes it at the task's next look; (i) a successful sign-out leaves none.
+// A second row, on the same account as a returning device, is the watched mark (the vault's
+// design note, D25): what the item watcher follows is published as rules in the same value, and
+// the item marks the items the rules name (its phases are at the row)
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 
@@ -544,4 +547,150 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await expect.poll(() => page.evaluate(() => window._readonly === true && window._init_time > 0).catch(() => false), { timeout: 90_000 }).toBe(true)
   expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
   expect(dialogs, 'no alert of the sparkle or the installs').toEqual([])
+})
+
+// the watched mark: the mark of an item whose edit or deletion would wake an agent. The bridge,
+// played as above, publishes what the item watcher follows as rules (`_bridge.watcher.follows`);
+// the item matches them against the page's items. phases: (a) a published tag rule marks the
+// items that carry the tag, as a tag or as their label, and no other: not the hidden form's
+// carrier, and not an item that only has it as the app resolves a RELATIVE tag (the app's real
+// `tags_raw` holds it; the watcher reads the tag as written, so the page leaves it unmarked and
+// the menu's line says `marked`); the mark is the approved look in the real page, a 15px sparkle
+// before the item's number; (b) a tag saved in the editor shows there, and while that item is
+// edited the 23px sparkle is left of the edit menu's buttons; (c) a stale bridge clears the
+// marks, and its return brings them back; (d) a follow of all items draws none, and the menu's
+// lines and the sparkle's tooltip say it; (e) a list of follows as dense as the bridge publishes
+// is taller than a phone's window: the menu stays inside the window and scrolls, its entries
+// where a pointer and the keyboard reach them
+test('the watched mark is on the items an agent follows, and the menu says what is followed', async ({ page }) => {
+  const dialogs: string[] = []
+  page.on('dialog', dialog => {
+    dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+    void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss())
+  })
+  expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+  // a returning device: the account's secret is there, so no phrase is asked for (as tests/e2e/lifecycle.spec.ts)
+  await page.addInitScript(secret => {
+    localStorage.setItem('mindpage_github_token', 'e2e-local')
+    localStorage.setItem('mindpage_secret', secret)
+    localStorage.setItem('mindpage_kdf', 'off')
+  }, SECRET)
+  await loadUser(page, USER)
+  await waitForApp(page)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
+
+  const TAG = '#e2e_watched'
+  const KID = '#e2e_mark_r/kid'
+  const made = [`${TAG} is this item's own label`, `#e2e_mark_a an item that carries ${TAG}`, '#e2e_mark_h carries the hidden form #_e2e_watched', '#e2e_mark_r has a relative tag #/kid', '#e2e_mark_p a plain item']
+  for (const text of made) {
+    await page.evaluate(text => void window._create(text), text)
+    await expect.poll(() => savedId(page, text.split(' ')[0]), { timeout: 30_000 }).toBeTruthy()
+  }
+  // the items the marks' stylesheet names, by label, and the menu's lines
+  const marks = () =>
+    page.evaluate(() => {
+      const sheet = document.querySelector('[data-vault-sparkle="watched"]')?.textContent ?? ''
+      return [...new Set([...sheet.matchAll(/data-item-id="([^"]+)"/g)].map(m => m[1]))].map(id => ((window._item(id, true) as any)?.label as string | undefined) ?? id).sort()
+    })
+  const lines = async () => {
+    await page.locator(NODE).click()
+    const said = await page.locator('[data-vault-sparkle="menu"] > div').allTextContents()
+    await page.keyboard.press('Escape')
+    return said
+  }
+  const follows = (rules: Record<string, any>[]) => watched(page, { name: AGENT, took: TOOK, state: 'watching', follows: rules })
+  const RULE = { watch: 'todos', name: AGENT, since: new Date().toISOString() }
+
+  // (a) the tag rule: its carriers and no other. The app itself reads the resolved relative tag
+  // on its item, which is why the page must not mark by it
+  expect(await page.evaluate(() => (window._item('#e2e_mark_r', true) as any).tags_raw)).toEqual(['#e2e_mark_r', KID])
+  expect(await page.evaluate(() => (window._item('#e2e_mark_h', true) as any).tags_raw)).toEqual(['#e2e_mark_h', '#_e2e_watched'])
+  await fresh(page)
+  await follows([{ ...RULE, tags: [TAG, KID] }])
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', TAG])
+  expect(await lines()).toEqual([`edits: ${TAG}, ${KID} (2 items marked)`])
+  // the look, in the page: the plain item is shown alone and unmarked; the tag's own item is marked
+  const look = (label: string, part: string) =>
+    page.evaluate(([label, part]) => {
+      const box = document.querySelector(`.container[data-item-id="${window._item(label, true)!.id}"] ${part}`)
+      const style = box ? getComputedStyle(box, '::before') : null
+      return style ? [style.content.slice(0, 26), style.width, style.backgroundImage.slice(0, 26)] : null
+    }, [label, part])
+  const shows = async (label: string) => {
+    await page.evaluate(label => (window as any).MindBox.set(label), label)
+    await expect.poll(() => page.evaluate(label => (window as any)._mindboxDebounced === false && !!window._item(label, true)?.elem, label), { timeout: 30_000 }).toBe(true)
+  }
+  const NUMBER = '.item-menu > .button.index'
+  const SPARKLE = 'url("data:image/svg+xml,%3'
+  await shows(TAG)
+  expect(await look(TAG, NUMBER)).toEqual([SPARKLE, '15px', 'none'])
+  await shows('#e2e_mark_p')
+  expect((await look('#e2e_mark_p', NUMBER))![0]).toBe('none')
+
+  // (b) the tag saved in the editor: the mark shows on the item, and in its edit menu while it is edited
+  const id = await page.evaluate(() => window._item('#e2e_mark_p', true)!.id)
+  const edit = async () => {
+    const paragraph = page.locator(`#item-${id} p`).first()
+    const box = (await paragraph.boundingBox())!
+    await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+    await expect(page.locator(`#textarea-${id}`)).toBeVisible()
+  }
+  await edit()
+  expect((await look('#e2e_mark_p', '.edit-menu'))![2], 'an item nobody follows has no sparkle in its edit menu').toBe('none')
+  await page.locator(`#textarea-${id}`).fill(`#e2e_mark_p now carries ${TAG}`)
+  await page.keyboard.press('Shift+Enter') // save
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
+  expect(await look('#e2e_mark_p', NUMBER)).toEqual([SPARKLE, '15px', 'none'])
+  expect(await lines()).toEqual([`edits: ${TAG}, ${KID} (3 items marked)`])
+  await edit()
+  expect(await look('#e2e_mark_p', '.edit-menu')).toEqual(['""', '23px', SPARKLE])
+  await page.keyboard.press('Escape')
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+
+  // (c) a stale bridge: the marks go with the sparkle, and come back with it
+  await fresh(page, 4 * 60_000)
+  await expect.poll(marks, { timeout: 30_000 }).toEqual([])
+  expect((await sparkle(page)).shown).toBe(false)
+  await fresh(page)
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
+
+  // (d) a follow of all items: no item is marked, and the menu and the sparkle say it
+  await follows([{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'sweep', all: true }])
+  await expect.poll(marks, { timeout: 30_000 }).toEqual([])
+  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching · edits: all items`)
+  expect(await lines()).toEqual([`edits: ${TAG} (not marked)`, 'edits: all items'])
+  expect((await look('#e2e_mark_p', NUMBER))![0]).toBe('none')
+
+  // (e) the menu is never taller than the window (review 54, B2). Eight follows of eight long
+  // tags are within the bridge's bounds (its own `rule` and `_bounded` publish them unchanged, 3,872
+  // of its 4,096 bytes), and their lines, wrapped in a phone's width, are taller than its window.
+  // The menu is opened from the keyboard, which then moves to its second entry. (No fullscreen
+  // was asked for in this page, so the viewport is Playwright's to set.)
+  const dense = Array.from({ length: 8 }, (_, n) => ({ ...RULE, watch: `area-${n}`, tags: Array.from({ length: 8 }, (_, m) => `#project-operations-area-weekly-planning-${n}-${m}`) }))
+  await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true, follows: dense })
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.found?.rules.length ?? 0), { timeout: 30_000 }).toBe(8)
+  await page.setViewportSize({ width: 375, height: 667 })
+  await page.locator(NODE).focus()
+  await page.keyboard.press('Enter')
+  await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
+  await page.keyboard.press('ArrowDown')
+  expect(
+    await page.evaluate(() => {
+      const menu = document.querySelector('[data-vault-sparkle="menu"]') as HTMLElement
+      const inside = (box: DOMRect) => box.top >= 0 && box.left >= 0 && box.bottom <= window.innerHeight && box.right <= window.innerWidth
+      // an entry's own rectangle is inside the window, and a pointer at its middle lands on it
+      const entries = [...menu.querySelectorAll('button')].map(button => {
+        const box = button.getBoundingClientRect()
+        return [button.textContent, inside(box), document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2) === button]
+      })
+      const found = { window: [window.innerWidth, window.innerHeight], lines: menu.querySelectorAll(':scope > div').length, taller: menu.scrollHeight > window.innerHeight, menu: inside(menu.getBoundingClientRect()), entries, focused: document.activeElement?.textContent }
+      menu.scrollTop = menu.scrollHeight // the excess scrolls: the last line comes into the window
+      return { ...found, last: inside(menu.lastElementChild!.getBoundingClientRect()) }
+    }),
+    'the lines are taller than the window, and the menu, its entries and the focus the keyboard moved are inside it; the last line is reached by scrolling',
+  ).toEqual({ window: [375, 667], lines: 8, taller: true, menu: true, entries: [['Stop Watching', true, true], ['Close Agent Session', true, true]], focused: 'Close Agent Session', last: true })
+  await page.keyboard.press('Escape')
+  expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
 })
