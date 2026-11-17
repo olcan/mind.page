@@ -3224,6 +3224,7 @@
         uniqueLabel: '',
         target: false,
         editing: false,
+        running: 0, // a count (see initItemState); undefined, the criterion was skipped (NaN) for the dummy alone
         hasError: false,
         failedTests: false,
         previewable: false,
