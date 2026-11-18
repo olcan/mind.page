@@ -1,0 +1,636 @@
+{
+ "about": "Texts with the label and the tags the app reads of each: `label` is the key of the app's label index (lowercase), `label_text` what item code sees as `label`, `tags` what it sees as `tags_raw`. Both readers run over it: the app (tests/e2e/sparkle.spec.ts saves each text as an item and takes the reading from the page) and the vault's item watcher (tests/test_mindpage_reading.py over lib/mindpage_reading.py). A row is added to both by adding it here.",
+ "texts": [
+  {
+   "why": "a relative tag is the label's child, sibling or parent's sibling",
+   "text": "#proj/a/b body #/x #//y #///z",
+   "label": "#proj/a/b",
+   "label_text": "#proj/a/b",
+   "tags": [
+    "#proj/a/b",
+    "#proj/a/b/x",
+    "#proj/a/y",
+    "#proj/z"
+   ]
+  },
+  {
+   "why": "on a root label a sibling is a root tag, and a parent's sibling is no tag",
+   "text": "#root body #/x #//y #///z",
+   "label": "#root",
+   "label_text": "#root",
+   "tags": [
+    "#root",
+    "#root/x",
+    "#y"
+   ]
+  },
+  {
+   "why": "on a label of two levels a parent's sibling is a root tag",
+   "text": "#a/b body #///z",
+   "label": "#a/b",
+   "label_text": "#a/b",
+   "tags": [
+    "#a/b",
+    "#z"
+   ]
+  },
+  {
+   "why": "an unlabelled item keeps its relative tags as written",
+   "text": "a note with #/x and #y",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#/x",
+    "#y"
+   ]
+  },
+  {
+   "why": "a resolved tag that repeats another stays twice",
+   "text": "#a body #a/x #/x",
+   "label": "#a",
+   "label_text": "#a",
+   "tags": [
+    "#a",
+    "#a/x",
+    "#a/x"
+   ]
+  },
+  {
+   "why": "a sibling tag can name the item's own label",
+   "text": "#a/b body #//b",
+   "label": "#a/b",
+   "label_text": "#a/b",
+   "tags": [
+    "#a/b",
+    "#a/b"
+   ]
+  },
+  {
+   "why": "a hidden tag is kept with its underscore, and is no label",
+   "text": "#_hid then #lab #_/x",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#_hid",
+    "#lab",
+    "#_/x"
+   ]
+  },
+  {
+   "why": "a reply's child tags join a labelled item's tags, resolved",
+   "text": "#chat/7 ask\n<<user>>\nwhat?\n<<agent('m')>>\n<!--inert-->\nsee #/kid and #//sib, not `#/code`\n<!--/inert-->",
+   "label": "#chat/7",
+   "label_text": "#chat/7",
+   "tags": [
+    "#chat/7",
+    "#chat/7/kid",
+    "#chat/sib"
+   ]
+  },
+  {
+   "why": "a reply's root-level sibling",
+   "text": "#topic\n<<agent('m')>>\n<!--inert-->\nnew #//other and #/sub\n<!--/inert-->",
+   "label": "#topic",
+   "label_text": "#topic",
+   "tags": [
+    "#topic",
+    "#other",
+    "#topic/sub"
+   ]
+  },
+  {
+   "why": "a reply's tag that resolves to a hidden tag is none",
+   "text": "#topic\n<<agent('m')>>\n<!--inert-->\n#//_autodep #/ok\n<!--/inert-->",
+   "label": "#topic",
+   "label_text": "#topic",
+   "tags": [
+    "#topic",
+    "#topic/ok"
+   ]
+  },
+  {
+   "why": "two replies: their child tags in order, each once",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n#/b #/a\n<!--/inert-->\n<<user>>\nmore\n<<agent('m')>>\n<!--inert-->\n#/a #/z\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/b",
+    "#c/a",
+    "#c/z"
+   ]
+  },
+  {
+   "why": "an unlabelled item has no child tags",
+   "text": "plain\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "",
+   "label_text": "",
+   "tags": []
+  },
+  {
+   "why": "a reply after a blank line is no child-tag region",
+   "text": "#c\n<<agent('m')>>\n\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a reply after prose is no child-tag region",
+   "text": "#c\nprose\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a reply inside a fence is no child-tag region",
+   "text": "#c\n```\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->\n```",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "an unclosed region has no body",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n#/kid",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "the reset ends a removed section the owner left open",
+   "text": "#c\n<!--removed-->\nold\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "the reset ends a comment the owner left open",
+   "text": "#c\n<!-- note\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "an open textarea block declines the reply",
+   "text": "#c\n<textarea>\n\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "an open textarea inside a line declines the reply",
+   "text": "#c see <textarea>\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a closing fence with a tab after it ends no fence: the reply is inside",
+   "text": "#c\n```\ncode\n```\t\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a removed section that takes a tilde fence's closing line leaves the reply inside the fence",
+   "text": "#c\n~~~\ncode\n<!--removed-->\n~~~\n<!--/removed-->\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "an unwrapped markdown block that opens a fence leaves the reply inside it",
+   "text": "#c\n```_md\n~~~\n```\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a reply inside a markdown block that the renderer unwraps has no child tags, beside one that has",
+   "text": "#c\n\n```_md\n<<agent('m')>>\n<!--inert-->\n#/in\n<!--/inert-->\n```\n<<user>>\nmore\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "a tilde fence is closed by a line of tildes and a backtick, to the app's lexer",
+   "text": "#c\n~~~\ncode\n~~~`\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "a markdown block that is closed again leaves the reply its child tags",
+   "text": "#c\n```_md\n~~~\ncode\n~~~\n```\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "an open pre block declines the reply",
+   "text": "#c\n<pre>\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "what an inert region holds is no tag of the item",
+   "text": "#chat/1\n<!--inert-->\n#quoted in a reply, with #todo\n<!--/inert-->\n",
+   "label": "#chat/1",
+   "label_text": "#chat/1",
+   "tags": [
+    "#chat/1"
+   ]
+  },
+  {
+   "why": "a region at the top hides its first line: no label",
+   "text": "<!--inert-->\n#quoted\n<!--/inert-->\n#late\n",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#late"
+   ]
+  },
+  {
+   "why": "a tag after a log block's closing fence, on its line",
+   "text": "#lab\n```_log\n#in\n``` #after\n#next",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#after",
+    "#next"
+   ]
+  },
+  {
+   "why": "an unclosed log block is no code to the tag parser",
+   "text": "#lab\n```_log\n#in",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#in"
+   ]
+  },
+  {
+   "why": "a tab before a log block's fence: its lines are read",
+   "text": "#lab\n\t```_output\n#in\n\t```\n#next",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#in",
+    "#next"
+   ]
+  },
+  {
+   "why": "an inert opener inside a log block is the block's text",
+   "text": "#lab\n```_log\n<!--inert-->\n```\n#x\n<!--/inert-->",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#x"
+   ]
+  },
+  {
+   "why": "a closed log block hides its tags",
+   "text": "#lab\n```js_output\n#in\n```\n#next",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#next"
+   ]
+  },
+  {
+   "why": "html before the label",
+   "text": "<div class=\"x\">\n#Lab text",
+   "label": "#lab",
+   "label_text": "#Lab",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a carriage return inside the html: no label",
+   "text": "<div\rclass=\"x\">\n#lab",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a line separator inside the html: no label",
+   "text": "<i>a\u2028b</i> #lab",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a carriage return between two html lines",
+   "text": "<div>\r</div>\n#lab",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a no-break space and a byte order mark before the label",
+   "text": "\u00a0\ufeff#lab x",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "the label must open the header",
+   "text": "text #lab",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a macro line before the label",
+   "text": "<<style>>\n#lab x",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab"
+   ]
+  },
+  {
+   "why": "a label ends at a delimiter",
+   "text": "#lab: more, (#other) and #a#b",
+   "label": "#lab",
+   "label_text": "#lab",
+   "tags": [
+    "#lab",
+    "#other",
+    "#a"
+   ]
+  },
+  {
+   "why": "mixed case",
+   "text": "#ToDo/Next x #TAG",
+   "label": "#todo/next",
+   "label_text": "#ToDo/Next",
+   "tags": [
+    "#todo/next",
+    "#tag"
+   ]
+  },
+  {
+   "why": "the Kelvin sign lowercases to k",
+   "text": "#\u212a9 x",
+   "label": "#k9",
+   "label_text": "#\u212a9",
+   "tags": [
+    "#k9"
+   ]
+  },
+  {
+   "why": "a capital I with a dot lowercases to two characters, and the label as written takes them from what follows",
+   "text": "#\u0130\u0130 \ud83d\ude00",
+   "label": "#i\u0307i\u0307",
+   "label_text": "#\u0130\u0130 \ud83d",
+   "tags": [
+    "#i\u0307i\u0307"
+   ]
+  },
+  {
+   "why": "a final sigma",
+   "text": "#\u039f\u0394\u039f\u03a3 x",
+   "label": "#\u03bf\u03b4\u03bf\u03c2",
+   "label_text": "#\u039f\u0394\u039f\u03a3",
+   "tags": [
+    "#\u03bf\u03b4\u03bf\u03c2"
+   ]
+  },
+  {
+   "why": "an accented label",
+   "text": "#CAF\u00c9 x",
+   "label": "#caf\u00e9",
+   "label_text": "#CAF\u00c9",
+   "tags": [
+    "#caf\u00e9"
+   ]
+  },
+  {
+   "why": "a label with a character outside the basic plane",
+   "text": "#a\ud83d\ude00 x",
+   "label": "#a\ud83d\ude00",
+   "label_text": "#a\ud83d\ude00",
+   "tags": [
+    "#a\ud83d\ude00"
+   ]
+  },
+  {
+   "why": "a zero-width space is no part of the text",
+   "text": "#to\u200bdo x #a\u200b/b",
+   "label": "#todo",
+   "label_text": "#todo",
+   "tags": [
+    "#todo",
+    "#a/b"
+   ]
+  },
+  {
+   "why": "code, html, comments, macros and math hold no tag",
+   "text": "#g `#code` <a href=\"#frag\">#in</a> <!-- #c --> <<m #mac>> @{ #e }@ $`#m`$ #real",
+   "label": "#g",
+   "label_text": "#g",
+   "tags": [
+    "#g",
+    "#real"
+   ]
+  },
+  {
+   "why": "a fenced block and an indented block hold no tag",
+   "text": "#g\n```\n#fenced\n```\n    #indented\n#real",
+   "label": "#g",
+   "label_text": "#g",
+   "tags": [
+    "#g"
+   ]
+  },
+  {
+   "why": "a tag follows whitespace or a parenthesis",
+   "text": "x#no (#yes) [#no2] #a.b",
+   "label": "",
+   "label_text": "",
+   "tags": [
+    "#yes",
+    "#a"
+   ]
+  },
+  {
+   "why": "a bare url takes all up to whitespace, its scheme in capitals too: a tag inside it is none",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\nHTTPS://example.org/a_(#/alpha) #/beta\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/beta"
+   ]
+  },
+  {
+   "why": "a url inside a link's text is text there: a tag inside it counts",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n[http://example.org/a_(#/alpha)](https://example.net) #/beta\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/alpha",
+    "#c/beta"
+   ]
+  },
+  {
+   "why": "a byte order mark is whitespace to the app: a tag may follow it",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n\ufeff#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "the app counts a reply's line by the tokens before it and loses a repeated definition's lines but one: the reply after it has no child tags",
+   "text": "#c\n\n[ref]: /url\n[ref]: /other\n  \"title\"\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a repeated definition of one line loses no line of the app's count",
+   "text": "#c\n\n[ref]: /url\n[ref]: /other\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "a lone carriage return before a reply shifts the app's count too",
+   "text": "#c\nfoo\rbar\n<<agent('m')>>\n<!--inert-->\n#/kid\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c"
+   ]
+  },
+  {
+   "why": "a url gives back its trailing punctuation, and one without a domain is no url: a tag after either counts",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\nhttp://example.org/,(#/alpha http://(#/beta)\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/alpha",
+    "#c/beta"
+   ]
+  },
+  {
+   "why": "after an image inside a link's text a bare url is a url again",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n[![i](u) http://example.org/(#/alpha)](v) #/beta\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/beta"
+   ]
+  },
+  {
+   "why": "the renderer's line pass ends a list at its blank line: a line indented four spaces after it is code",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n- a\n\n    see #/kid\n\n#/out\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/out"
+   ]
+  },
+  {
+   "why": "a strikethrough of one tilde is one to the app: a tag at its start counts",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n~#/kid~\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "a tag at the end of a strikethrough of one tilde ends before the tilde",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\n~x #/kid~\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "a url takes a link's opener: the link is none, and a tag in its destination counts",
+   "text": "#c\n<<agent('m')>>\n<!--inert-->\nhttp://x.y/[a b](#/kid)\n<!--/inert-->",
+   "label": "#c",
+   "label_text": "#c",
+   "tags": [
+    "#c",
+    "#c/kid"
+   ]
+  },
+  {
+   "why": "no tag at all",
+   "text": "plain text",
+   "label": "",
+   "label_text": "",
+   "tags": []
+  }
+ ]
+}

@@ -608,14 +608,14 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   const follows = (rules: Record<string, any>[]) => watched(page, { name: AGENT, took: TOOK, state: 'watching', follows: rules })
   const RULE = { watch: 'todos', name: AGENT, since: new Date().toISOString() }
 
-  // (a) the tag rule: its carriers and no other. The app itself reads the resolved relative tag
-  // on its item, which is why the page must not mark by it
+  // (a) the tag rule: its carriers and no other. The app reads the resolved relative tag on its
+  // item, and so does the watcher (the reading corpus, below): the page marks by it
   expect(await page.evaluate(() => (window._item('#e2e_mark_r', true) as any).tags_raw)).toEqual(['#e2e_mark_r', KID])
   expect(await page.evaluate(() => (window._item('#e2e_mark_h', true) as any).tags_raw)).toEqual(['#e2e_mark_h', '#_e2e_watched'])
   await fresh(page)
   await follows([{ ...RULE, tags: [TAG, KID] }])
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', TAG])
-  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (2 items marked)`])
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_r', TAG])
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items)`])
   // the look, in the page: the plain item is shown alone and unmarked; the tag's own item is marked
   const look = (label: string, part: string) =>
     page.evaluate(([label, part]) => {
@@ -678,9 +678,9 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await page.locator(`#textarea-${id}`).fill(`#e2e_mark_p now carries ${TAG}`)
   await page.keyboard.press('Shift+Enter') // save
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
   expect(await look('#e2e_mark_p', NUMBER)).toEqual([SPARKLE, '15px', 'none'])
-  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items marked)`])
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (4 items)`])
   const by_number = await drawn('#e2e_mark_p', NUMBER)
   await edit(id)
   expect(await look('#e2e_mark_p', '.edit-menu')).toEqual(['""', '23px', SPARKLE])
@@ -692,7 +692,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await expect.poll(marks, { timeout: 30_000 }).toEqual([])
   expect((await sparkle(page)).shown).toBe(false)
   await fresh(page)
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', TAG])
+  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
 
   // (d) a watch of all items: every item is marked, by a stylesheet that names none. The item a
   // rule named is drawn exactly as it was under that rule; the hidden form's carrier, which no
@@ -783,7 +783,50 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   })
   await follows([{ ...RULE, tags: [TAG, KID] }])
   await looked(2)
-  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items marked)`])
+  expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (4 items)`])
   expect(warnings.length, 'no second warning').toBe(1)
   expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
+})
+
+// ONE READING, the ground of the watched mark: the `#vault` item marks by the app's label index
+// and `tags_raw`, and the vault's item watcher selects by its own port of the app's reading (the
+// vault's lib/mindpage_reading.py). The corpus is what both run over. The watcher's row is the
+// vault's tests/test_mindpage_reading.py; this one saves each text as an item of the lane's
+// account and takes the reading from the page: the key of the label index the item is under,
+// and the `label` and `tags_raw` that item code sees. (As the row above, it signs the account
+// of the first row in again)
+test('the app reads every text of the reading corpus as the corpus says', async ({ page }) => {
+  page.on('dialog', dialog => void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss()))
+  expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+  await page.addInitScript(secret => {
+    localStorage.setItem('mindpage_github_token', 'e2e-local')
+    localStorage.setItem('mindpage_secret', secret)
+    localStorage.setItem('mindpage_kdf', 'off')
+  }, SECRET)
+  await loadUser(page, USER)
+  await waitForApp(page)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+
+  type Reading = { label: string; label_text: string; tags: string[] }
+  const rows: (Reading & { why: string; text: string })[] = JSON.parse(readFileSync(resolve('tests/e2e/fixtures/reading_corpus.json'), 'utf8')).texts
+  expect(rows.length).toBeGreaterThanOrEqual(65)
+  const changed: string[] = [] // the texts the app does not hold as given
+  for (const row of rows) {
+    const id = await page.evaluate(async text => ((await window._create(text)) as any)?.id as string | undefined, row.text)
+    expect(typeof id, row.why).toBe('string')
+    await expect.poll(() => page.evaluate(id => window._item(id!, true)?.saved_id ?? null, id), { timeout: 30_000 }).toBeTruthy()
+    // (as JSON: the app can cut a label's text inside a character, and half of one does not cross the page's boundary whole)
+    const read: Reading & { text: string; keys: number } = JSON.parse(
+      await page.evaluate(id => {
+        const item = window._item(id!, true) as any
+        const keys: string[] = (window as any)._labels((_label: string, ids: string[]) => ids.includes(item.id))
+        return JSON.stringify({ text: item.text, label: keys[0] ?? '', label_text: item.label, tags: item.tags_raw, keys: keys.length })
+      }, id)
+    )
+    expect({ label: read.label, label_text: read.label_text, tags: read.tags }, `${row.why}: ${JSON.stringify(row.text)}`).toEqual({ label: row.label, label_text: row.label_text, tags: row.tags })
+    expect(read.keys, row.why).toBeLessThanOrEqual(1)
+    if (read.text !== row.text) changed.push(row.why)
+  }
+  // an item's text is the corpus's, but for what the app drops at any save
+  expect(changed).toEqual(['a zero-width space is no part of the text'])
 })
