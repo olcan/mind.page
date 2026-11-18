@@ -226,7 +226,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   }, NODE)
   expect(placed).toEqual({ parent: true, right: 14, bottom: 10, size: [24, 24], top: true })
   await watched(page, { name: AGENT, took: TOOK, state: 'answering', by: 'gpt-6-astra-ultra' })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown('gpt-6-astra-ultra is answering a request', { answering: true }))
+  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown('gpt-6-astra-ultra is answering', { answering: true }))
   await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
   await fresh(page, 4 * 60_000) // the bridge's entry four minutes old: stale
