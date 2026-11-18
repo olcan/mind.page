@@ -403,6 +403,7 @@
     window['_delay'] = _delay
     window['_update_dom'] = update_dom
     window['_scroll_to'] = scrollTo
+    window['_reload'] = reloadOnRequest
     window['_encrypt'] = encrypt
     window['_decrypt'] = decrypt
     window['_encrypt_bytes'] = encrypt_bytes
@@ -4066,7 +4067,8 @@
     )
   }
 
-  // set by the page-cache restore's reload (onPageShow): the discard was confirmed in its modal, or nothing was unsaved
+  // set by the page-cache restore's reload (onPageShow) and by a reload asked for on the page (reloadOnRequest):
+  // the discard was confirmed in the app's modal, or there was nothing to lose
   let reloading_after_restore = false
 
   function onBeforeUnload(e) {
@@ -4076,6 +4078,26 @@
     // see https://stackoverflow.com/a/7317311
     e.returnValue = msg // gecko + ie
     return msg // gecko + webkit, safari, chrome, etc
+  }
+
+  // A RELOAD ASKED FOR ON THE PAGE (window._reload: an item's reload button, where the browser shows none, as in
+  // a home-screen web app): at once when nothing would be lost; otherwise only after asking, in the app's own
+  // modal and BEFORE the navigation. two things would be lost. an edit that is not saved (unsaved, the tab
+  // close's predicate). and a save that is not finished (hasLocalIntent): a save queued behind a write that
+  // still awaits its acknowledgement exists only in this page's promise chain, while the three texts that
+  // unsaved compares can all agree (saved A; saved as B, that write in flight; put back to A and saved again:
+  // text, savedText and editorText all say A, B is the one write issued, and a reload leaves B). the browser's
+  // discard prompt (onBeforeUnload) cannot be relied on for either: iOS Safari is documented to omit
+  // beforeunload on a refresh. a reload confirmed here is not prompted for again. resolves to whether the
+  // page is being reloaded (false: the question was cancelled, or closed some other way)
+  function reloadOnRequest(): Promise<boolean> {
+    const reload = () => {
+      reloading_after_restore = true // confirmed in the modal below, or nothing to lose (see onBeforeUnload)
+      location.reload()
+      return true
+    }
+    if (!items.some(item => unsaved(item) || hasLocalIntent(item))) return Promise.resolve(reload())
+    return _modal('Reload and discard unsaved changes?', { confirm: 'Reload', cancel: 'Cancel' }).then(ok => ok === true && reload())
   }
 
   // THE PAGE-CACHE RESTORE (see src/page_lifecycle.ts, table-tested): the browser fired pagehide
@@ -12012,6 +12034,10 @@
 </script>
 
 {#if user && processed}
+  {#if ios}
+    <!-- the top edge on iOS: a strip in the header's color under the header (see .top-edge in the styles) -->
+    <div class="top-edge" aria-hidden="true"></div>
+  {/if}
   <div
     class="items"
     bind:this={itemsdiv}
@@ -12602,6 +12628,29 @@
   }
   .loading > :global(div) {
     opacity: 0.75;
+  }
+  /* the top edge on iOS (the owner's iPhone, iOS 27.2.1, the app run from the Home Screen, 2026-11-17):
+     the system blurs the top of the page there, the tops of the header's buttons and picture with it.
+     this strip is the app's answer: fixed along the top edge in the header's color, at the page's own
+     layer (no z-index) and before .items in the document, so the header and every positioned box that
+     follows paint over it and take the taps: it covers nothing. the evidence is the owner's two trials
+     on the phone with an item's switches (the vault's changelog entries of the `mobile_app` run), and
+     they do not agree about a strip painted OVER the header: in one trial the on-top 12 px strip was
+     reported to work, while covering the tops of the buttons and the picture; in the later trial only
+     three forms worked, a strip UNDER the header (this one), a strip with the header's controls raised
+     over it, and a sticky header (which would make the header a stacking context and put its console
+     under the items). the app's row (tests/e2e/top_edge.spec.ts) holds this placement and that the strip
+     covers nothing. it establishes neither WebKit's mechanism (its source was read, never run:
+     LocalFrameView::fixedContainerEdges looks 4 px below the edge and takes a box's own color only above
+     10 px, hence 12 px) nor the result of this app-rendered strip on the phone, which had not been seen
+     there when this was written. the color is the unfocused header's */
+  .top-edge {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 12px;
+    background: #171717; /* matches .header-container unfocused background */
   }
   .header {
     max-width: 100%;
