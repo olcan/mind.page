@@ -616,6 +616,8 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await follows([{ ...RULE, tags: [TAG, KID] }])
   await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_r', TAG])
   expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items)`])
+  // the sparkle's tooltip says it too, on a second line below who watches (the owner, 2026-11-18)
+  expect((await sparkle(page)).title).toBe(`${AGENT} is watching\nwatched: ${TAG}, ${KID} (3 items)`)
   // the look, in the page: the plain item is shown alone and unmarked; the tag's own item is marked
   const look = (label: string, part: string) =>
     page.evaluate(([label, part]) => {
@@ -701,7 +703,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await follows([{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'sweep', all: true }])
   await expect.poll(sheet, { timeout: 30_000 }).toMatch(EVERY)
   expect(await marks(), 'the stylesheet names no item').toEqual([])
-  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching · watched: all items`)
+  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching\nwatched: ${TAG} · all items`)
   expect(await lines()).toEqual([`watched: ${TAG}`, 'watched: all items'])
   expect(await drawn('#e2e_mark_p', NUMBER), 'by the number, every computed property as under the rule that named the item').toBe(by_number)
   await edit(id)
