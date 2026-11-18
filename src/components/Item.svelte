@@ -1,25 +1,30 @@
 <script context="module" lang="ts">
-  // the .item-menu size per menu shape (its buttons, by class list) and zoom, measured on the first
-  // item that shows that shape and reused by the others: measuring it per item forced a layout per
-  // render (see afterUpdate below). the menu's only per-item content is the item's number, and a
-  // number of at most MENU_INDEX_DIGITS digits gets a FIXED width (.item-menu > .index.reserved,
-  // css below: 4ch, whatever the digits, in whatever font is in use), so such numbers cannot size
-  // the menu; a longer number is not reserved and its item measures its own menu. cleared on a
-  // window resize and when fonts finish loading (ch follows the font, so a size measured in the
-  // fallback font must not be reused after the swap to the web font; spacers already inserted are
-  // not resized, as before)
+  // the .item-menu size per menu shape (its buttons, by class list), digit count and zoom, measured
+  // on the first item that shows that shape and reused by the others: measuring it per item forced
+  // a layout per render (see afterUpdate below). the menu's only per-item content is the item's
+  // number, and a number of at most MENU_INDEX_DIGITS digits gets a FIXED width, that of its own
+  // digits (.item-menu > .index.reserved, css below: one ch a digit, whatever the digits, in
+  // whatever font is in use), so such a number sizes the menu by its digit count alone; a longer
+  // number is not reserved and its item measures its own menu. (the width was 4ch at every count
+  // until 2026-11-17: one size for all, and up to three digits' room kept empty beside a short
+  // number, at the cost of the first line of the item's text.) cleared on a window resize and
+  // when fonts finish loading (ch follows the font, so a size measured in the fallback font must
+  // not be reused after the swap to the web font; spacers already inserted are not resized by
+  // either, as before)
   const MENU_INDEX_DIGITS = 4
-  function menuReserved(index: number) {
-    return String(index + 1).length <= MENU_INDEX_DIGITS
+  // the digit count of a number that gets the fixed width, 0 for a longer one
+  function menuDigits(index: number) {
+    const digits = String(index + 1).length
+    return digits <= MENU_INDEX_DIGITS ? digits : 0
   }
   const menuSizes = new Map<string, { width: number; height: number }>()
   if (typeof window != 'undefined') {
     window.addEventListener('resize', () => menuSizes.clear())
     document.fonts?.addEventListener('loadingdone', () => menuSizes.clear())
   }
-  function menuSize(menu: Element, zoom: string, reserved: boolean) {
-    if (!reserved) return { width: menu.clientWidth, height: menu.clientHeight }
-    const key = zoom + '|' + [...menu.children].map(c => c.className).join(',')
+  function menuSize(menu: Element, zoom: string, digits: number) {
+    if (!digits) return { width: menu.clientWidth, height: menu.clientHeight }
+    const key = zoom + '|' + digits + '|' + [...menu.children].map(c => c.className).join(',')
     let size = menuSizes.get(key)
     if (!size) menuSizes.set(key, (size = { width: menu.clientWidth, height: menu.clientHeight }))
     return size
@@ -1476,22 +1481,32 @@
 
     // insert right-floating div same size as .item-menu, which will also serve as first element of itemdiv
     // NOTE: this is a workaround for a null-parent exception if .item-menu is placed inside .item by Svelte
-    if (itemdiv.firstElementChild?.id != 'menu-' + id) {
+    // the div follows the digit count of the item's number (_digits): the menu is as wide as the
+    // digits, and a re-ranked item's number gains or loses a digit without its children being replaced
+    // (the #vault item's watched mark finds this div as `.item > [id^="menu-"]:first-child` and gives
+    // it a left margin, the room of its sparkle beside the number: mind.items vault.md, vault_watched_css)
+    const digits = menuDigits(index)
+    let div = itemdiv.firstElementChild as HTMLElement | null
+    const inserted = div?.id == 'menu-' + id
+    if (!inserted || div.getAttribute('_digits') != digits.toString()) {
       let menu = itemdiv.parentElement.querySelector('.item-menu')
-      let div = document.createElement('div')
-      // the menu's size is measured once per menu shape and zoom and reused (menuSize, above):
-      // reading it here on every item render forced a synchronous layout per item — a third of a
-      // second of the initial render at desktop speed on a 1600-item corpus (init_perf, 2026-09-07)
+      if (!inserted) div = document.createElement('div')
+      // the menu's size is measured once per menu shape, digit count and zoom and reused (menuSize,
+      // above): reading it here on every item render forced a synchronous layout per item — a third
+      // of a second of the initial render at desktop speed on a 1600-item corpus (init_perf, 2026-09-07)
       const zoom = (itemdiv.closest('.items') as HTMLElement | null)?.style.zoom ?? ''
-      const size = menuSize(menu, zoom, menuReserved(index))
+      const size = menuSize(menu, zoom, digits)
       div.style.width = size.width + 'px'
       div.style.height = size.height + 'px'
-      /* -10px to remove .item padding, +1px for inset (when .bordered), +1px extra clearing space */
-      div.style.marginTop = div.style.marginRight = '-8px'
-      div.style.float = 'right'
-      // div.style.background = "red";
-      div.id = 'menu-' + id
-      itemdiv.insertBefore(div, itemdiv.firstElementChild)
+      div.setAttribute('_digits', digits.toString())
+      if (!inserted) {
+        /* -10px to remove .item padding, +1px for inset (when .bordered), +1px extra clearing space */
+        div.style.marginTop = div.style.marginRight = '-8px'
+        div.style.float = 'right'
+        // div.style.background = "red";
+        div.id = 'menu-' + id
+        itemdiv.insertBefore(div, itemdiv.firstElementChild)
+      }
     }
 
     // we highlight both primary and secondary matching terms
@@ -2293,7 +2308,7 @@
         {#if runnable}
           <div class="button run" on:click={onRunClick}>run</div>
         {/if}
-        <div class="button index" class:leader class:matching class:reserved={menuReserved(index)} on:click={onIndexClick}>
+        <div class="button index" class:leader class:matching class:reserved={menuDigits(index) > 0} style:--index-digits={menuDigits(index)} on:click={onIndexClick}>
           {index + 1}
         </div>
       </div>
@@ -2507,10 +2522,12 @@
   }
 
   /* a number of at most MENU_INDEX_DIGITS digits (see the module script): a fixed width, not a
-     minimum, so the digits cannot size the menu in any font (ch follows the font in use; tabular
-     digits fit it exactly where the font has them); the number keeps its place at the right */
+     minimum, of one ch a digit (--index-digits, set with the number), so the menu is as wide as
+     the digit count makes it in any font and no room is kept beside the digits (ch follows the
+     font in use; tabular digits fit it exactly where the font has them); the number keeps its
+     place at the right */
   .item-menu > .index.reserved {
-    width: 4ch;
+    width: calc(var(--index-digits) * 1ch);
     justify-content: flex-end;
     font-variant-numeric: tabular-nums;
   }

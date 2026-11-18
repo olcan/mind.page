@@ -636,10 +636,30 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   }
   const NUMBER = '.item-menu > .button.index'
   const SPARKLE = 'url("data:image/svg+xml,%3'
+  // the mark's room by the number, in the real page: the sparkle takes none of the number's box,
+  // which is as wide as its digits (its margins sum to minus its width, so the menu is as wide as
+  // an unmarked item's: the app sizes the text's placeholder from a menu measured once for all
+  // items of a digit count), and the placeholder, the float the app puts first in the item's
+  // text, keeps the 18px left of the digits free with a margin that an unmarked item lacks
+  const room = (label: string) =>
+    page.evaluate(label => {
+      const box = document.querySelector(`.container[data-item-id="${window._item(label, true)!.id}"]`)!
+      const [menu, index, spacer] = ['.item-menu', '.item-menu > .button.index', '.item > [id^="menu-"]'].map(part => box.querySelector(part) as HTMLElement)
+      const mark = getComputedStyle(index, '::before')
+      return {
+        digits: index.textContent!.trim().length,
+        menu: menu.clientWidth,
+        placeholder: [spacer === spacer.parentElement!.firstElementChild, getComputedStyle(spacer).marginLeft],
+        mark: mark.content == 'none' ? null : [mark.marginLeft, mark.marginRight],
+      }
+    }, label)
   await shows(TAG)
   expect(await look(TAG, NUMBER)).toEqual([SPARKLE, '15px', 'none'])
+  const marked = await room(TAG)
+  expect([marked.digits, marked.menu > 0, marked.placeholder, marked.mark], 'the sparkle takes no room of the box, and the text keeps out of its 18px').toEqual([1, true, [true, '18px'], ['-18px', '3px']])
   await shows('#e2e_mark_p')
   expect((await look('#e2e_mark_p', NUMBER))![0]).toBe('none')
+  expect(await room('#e2e_mark_p'), 'an item nobody follows: a menu as wide, a placeholder with no margin').toEqual({ digits: 1, menu: marked.menu, placeholder: [true, '0px'], mark: null })
 
   // (b) the tag saved in the editor: the mark shows on the item, and in its edit menu while it is edited
   const id = await page.evaluate(() => window._item('#e2e_mark_p', true)!.id)
