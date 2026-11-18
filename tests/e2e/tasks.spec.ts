@@ -491,6 +491,69 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     await page.waitForTimeout(300) // the swap's animation
     await touch('touchEnd', [])
   }
+  // the widget is a block while no row is dragged: it spans its item's text area whatever the
+  // placeholder beside the item's number takes of it (a flex row is a formatting context of its own,
+  // which the placeholder narrowed over the widget's whole height). A row beside the placeholder gives
+  // way to it with everything it paints: its border when selected, its border and background when
+  // chosen for a drag (a row's own box does not give way, so its .list-item paints them), here with
+  // the room a watched item's mark adds to the placeholder (the vault item's 18 px margin). A later
+  // row runs to the area's edge (a row is shifted 3 px to the left, which its width limit allows
+  // for). And the number stays tappable where a long first row's own box lies under it, also while
+  // that row shows a pending command (its overlay is on the .list-item: on the row's own box it made
+  // a stacking context above the number's button). Every row is made long for the measure, by a
+  // filler that is removed
+  expect(
+    await page.evaluate(() => {
+      const widget = document.querySelector('.todoer-widget')!
+      const content = widget.closest('.item')!
+      const style = getComputedStyle(content)
+      const area = content.getBoundingClientRect().right - parseFloat(style.paddingRight) - parseFloat(style.borderRightWidth)
+      const spacer = content.querySelector('[id^="menu-"]') as HTMLElement
+      const rows = [...widget.querySelectorAll('.list > .list-item-container')]
+      const fillers = rows.map(row => row.querySelector('.list-item')!.appendChild(Object.assign(document.createElement('span'), { textContent: ' filler'.repeat(80) })))
+      spacer.style.marginLeft = '18px'
+      const edge = spacer.getBoundingClientRect().left - 18 // the placeholder's margin edge: what stands beside it ends here
+      // the boxes of the first row that paint a border or a background in a state, by their right ends
+      const painted = (state: string) => {
+        rows[0].classList.add(state)
+        const boxes = [rows[0], rows[0].querySelector('.list-item')!].filter(box => {
+          const style = getComputedStyle(box)
+          return (parseFloat(style.borderTopWidth) > 0 && style.borderTopColor != 'rgba(0, 0, 0, 0)') || style.backgroundColor != 'rgba(0, 0, 0, 0)'
+        })
+        const ends = boxes.map(box => Math.round((box.getBoundingClientRect().right - edge) * 100) / 100)
+        rows[0].classList.remove(state)
+        return ends
+      }
+      // what a tap gets at a point inside both the first row's own box and the number's button, while
+      // the row is pending
+      const tapped = () => {
+        const number = content.closest('.super-container')!.querySelector('.item-menu .index')!
+        const [button, row] = [number.getBoundingClientRect(), rows[0].getBoundingClientRect()]
+        const [left, right] = [Math.max(button.left, row.left), Math.min(button.right, row.right)]
+        const [top, bottom] = [Math.max(button.top, row.top), Math.min(button.bottom, row.bottom)]
+        if (left >= right || top >= bottom) return 'the row does not reach under the number'
+        const pending = rows[0].getAttribute('data-pending')
+        rows[0].setAttribute('data-pending', 'take_back')
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2)
+        if (pending === null) rows[0].removeAttribute('data-pending')
+        else rows[0].setAttribute('data-pending', pending)
+        return hit && number.contains(hit) ? 'the number' : `${hit?.tagName}.${hit?.className}`
+      }
+      const result = {
+        // the premise: more than one row, the first one beside the placeholder, which takes of the text area
+        premise: [rows.length > 1, rows[0].getBoundingClientRect().top < spacer.getBoundingClientRect().bottom, edge < area],
+        widget: Math.round(widget.getBoundingClientRect().right - area),
+        selected: painted('selected'),
+        chosen: painted('sortable-chosen'),
+        later: Math.max(...rows.slice(1).map(row => Math.abs(Math.round(row.getBoundingClientRect().right - area)))),
+        tapped: tapped(),
+      }
+      spacer.style.marginLeft = ''
+      fillers.forEach(filler => filler.remove())
+      return result
+    }),
+    'the widget spans the text area; what a selected or chosen first row paints ends at the placeholder; a later row runs to the edge; a tap on the number over a pending first row gets the number'
+  ).toEqual({ premise: [true, true, true], widget: 0, selected: [0], chosen: [0], later: 0, tapped: 'the number' })
   await grab(SNIPPET)
   {
     // dragged on below the second row, released: the list reorders

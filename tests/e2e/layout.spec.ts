@@ -241,6 +241,43 @@ const numberRoom = (page: Page, id: string, mark = false) =>
     }
   }, { id, mark })
 
+// how near the TEXT of items comes to what their menus show (the number's digits, and the run button
+// before them on a runnable item), in one pass over the positions given that the corpus has: over the
+// text nodes of an item's content, the line boxes that stand beside one of the two (the same lines,
+// by more than 2 px), the smallest distance from a line's right end to its left edge. Infinity when
+// no line stands beside them (an item that starts with a block of its own); a short first line gives
+// a large distance. The content's own box is no measure: it spans the item's width, under the number
+// (the owner, 2026-11-17: "in inspector i see the content div touching or even almost overlapping
+// the digit")
+const textToMenu = (page: Page, positions: number[]) =>
+  page.evaluate(async positions => {
+    const gaps: { runnable: boolean; nearest: number }[] = []
+    for (const position of positions) {
+      const seeded = window.__items[position] as SeededItem | undefined
+      if (!seeded) continue // past the corpus's end
+      const item = window._item(seeded.id)!
+      const elem = item.elem ?? (await window._render_item(item))
+      const menu = elem.querySelector('.item-menu') as HTMLElement
+      const digits = document.createRange()
+      digits.selectNodeContents((menu.querySelector('.index') as HTMLElement).firstChild!)
+      const first = menu.firstElementChild as HTMLElement
+      const runnable = !first.classList.contains('index') // the run button stands before the number
+      const shown = [digits.getBoundingClientRect(), ...(runnable ? [first.getBoundingClientRect()] : [])]
+      let nearest = Infinity
+      const walker = document.createTreeWalker(elem.querySelector('.item')!, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent!.trim()) continue
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        for (const line of range.getClientRects())
+          for (const box of shown)
+            if (line.width && line.bottom > box.top + 2 && line.top < box.bottom - 2) nearest = Math.min(nearest, box.left - line.right)
+      }
+      gaps.push({ runnable, nearest })
+    }
+    return gaps
+  }, positions)
+
 test("an item's number keeps free the room of its own digits, and its placeholder follows it", async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
   const page = await context.newPage()
@@ -261,6 +298,22 @@ test("an item's number keeps free the room of its own digits, and its placeholde
     expect(room.spacer, `the placeholder of ${room.number} is narrower than its menu`).toBeLessThan(room.menu)
     expect([room.clear > 2, room.clear < 5], `the text comes to about 3 px from the digits of ${room.number} (${room.clear})`).toEqual([true, true])
   }
+  // the text itself wraps before the menu: over the first 120 items of the corpus (numbers of one to
+  // three digits) and its first runnable ones, no line that stands beside the digits or the run button
+  // reaches them, and some lines come near (within 14 px: the check is not empty)
+  const runnable = await page.evaluate(() => (window.__items as SeededItem[]).flatMap((item, position) => (item.runnable ? [position] : [])))
+  const gaps = await textToMenu(page, [...new Set([...Array(120).keys(), ...runnable.slice(0, 20)])])
+  const beside = gaps.filter(gap => Number.isFinite(gap.nearest))
+  const nearest = (runnable: boolean) => Math.min(...beside.filter(gap => gap.runnable == runnable).map(gap => gap.nearest))
+  console.log(
+    `layout: text beside the menu on ${beside.length} of ${gaps.length} items (${beside.filter(gap => gap.runnable).length} runnable), ` +
+      `nearest ${nearest(false).toFixed(2)} px to a number and ${nearest(true).toFixed(2)} px to a run button, ` +
+      `within 14 px on ${beside.filter(gap => gap.nearest < 14).length}`,
+  )
+  expect(beside.filter(gap => !gap.runnable).length, 'plain items whose text stands beside their number').toBeGreaterThan(20)
+  expect(beside.filter(gap => gap.runnable).length, 'runnable items whose text stands beside their menu').toBeGreaterThan(0)
+  expect([nearest(false) > 1, nearest(true) > 1], `no text reaches its item's number (${nearest(false)}) or run button (${nearest(true)})`).toEqual([true, true])
+  expect(beside.filter(gap => gap.nearest < 14).length, 'some first lines run up to their menu').toBeGreaterThan(0)
 
   // the first item touched is ranked right below the pinned ones, and each touch after it counts it
   // up by one (in the page's own list: a touched item is offered by the session's toggle, not shown)
