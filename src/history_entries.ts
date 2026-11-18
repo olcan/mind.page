@@ -78,12 +78,20 @@ export const decodedFragment = (hash: string): string => {
 }
 
 // the identity of the state a page was created on, kept to tell whether the browser has moved since then:
-// compared, never used (it can be another notebook's)
-export type LaunchIdentity = { owner?: unknown; run?: unknown; index?: unknown }
+// compared, never used (it can be another notebook's). `own`: whether the WHOLE state was an entry of the
+// notebook it names (ownEntry under its declared owner), which the identity's three fields do not say
+export type LaunchIdentity = { owner?: unknown; run?: unknown; index?: unknown; own?: boolean }
 export const launchIdentity = (state: unknown): LaunchIdentity => {
   const s = (typeof state == 'object' && state !== null ? state : {}) as Record<string, unknown>
-  return { owner: s.owner, run: s.run, index: s.index }
+  return { owner: s.owner, run: s.run, index: s.index, own: ownEntry(state, typeof s.owner == 'string' ? s.owner : null) }
 }
+
+// whether the entry a page was created on can be the return address of a stop while the page is starting
+// (index.svelte's initialize, after a traversal that left it): only an entry of THIS notebook's that the
+// restore can consume. The owner alone is not enough: the notebook's own cleared marker, a fragment's
+// marker and a damaged numbered state name it too, and the app cannot restore any of them
+export const launchAnchor = (launch: LaunchIdentity | null, owner: string | null): boolean =>
+  !!launch && launch.own === true && !!owner && launch.owner === owner
 
 // where a session starts, decided when the notebook is known (index.svelte's initialize), from the state the
 // browser is on THEN and whether a traversal arrived while the page was starting:
@@ -103,6 +111,30 @@ export function startupPlace(owner: string | null, launch: LaunchIdentity | null
   const same = !!own && !!launch && launch.owner === own.owner && launch.run === own.run && launch.index === own.index
   if (traversed && !same) return { deferred: true, index: 0, run: null, held: null }
   return own ? { deferred: false, index: own.index, run: own.run, held: own } : { deferred: false, index: 0, run: null, held: null }
+}
+
+// THE STOP: where the browser goes back to when Back or Forward has landed on a position that holds no entry
+// of the notebook's that the app can take (index.svelte's onPopState), and which way it had moved. The
+// browser moves first and tells the app afterwards, and nothing in a `popstate` says from where or which
+// way: both are read off the Navigation API, whose key names a position of the browser's list for as long as
+// the position lives (across a replacement and a reload) and whose index is the position's present place in
+// that list. `places` is that list as the browser gives it now, `landed` the key of the position the browser
+// is on, `held` the key noted when the browser was last on the entry the session is on. The return is to
+// that KEY, never by a distance (a second Back pressed before the return has landed leaves a distance one
+// short), and the way the browser moved is the side of the held position it landed on (after moves in
+// between that can differ from the button pressed last). No return (`null`)
+// where one cannot be said: a browser without the Navigation API (`places` or `landed` missing), a session
+// that holds no entry at a position it knows, a held position the browser no longer lists, and a landing on
+// the held position itself (what it held was replaced by another writer: there is nowhere else to go).
+// The page then stays on the position, as it did before the stop (2026-11-18)
+export type HistoryPlace = { key: string; index: number }
+export type StopReturn = { key: string; forward: boolean }
+export function stopReturn(places: HistoryPlace[] | null, landed: string | null, held: string | null): StopReturn | null {
+  if (!places) return null
+  const from = places.find(place => place.key === held)
+  const to = places.find(place => place.key === landed)
+  if (!from || !to || from.index === to.index) return null
+  return { key: from.key, forward: to.index > from.index }
 }
 
 // a link of the list above the header: an earlier query and the distance to it (what history.go takes)

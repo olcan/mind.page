@@ -2915,7 +2915,7 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   await recorded()
   const before = await page.evaluate(() => [(window as any)._history_index, (window as any)._history[1].scrollPosition, history.length])
   await page.evaluate(() => void (location.hash = '#e2e_no_such_item'))
-  const CLEARED = JSON.stringify({ owner: 'admin|anonymous|', unknown: true })
+  const CLEARED = JSON.stringify({ owner: 'admin|anonymous|', unknown: true, fragment: true })
   await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
   await expect(mindbox(page), 'the page stays').toHaveValue('#e2e_target ')
   await expect(links).toHaveCount(0)
@@ -2927,6 +2927,23 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(1)
   await shows('#e2e_target ', before[1], 'Back: the entry it was navigated from, where it was left')
   await expect(links).toHaveText(['#e2e_source', '#e2e_target'])
+  // Forward onto it again: NO STOP at a native fragment's own position (the stop, below: this position lies
+  // between the notebook's own entries, and the entries before it are reached through it). The browser
+  // stays on it and the page as it is, without a note: no return is asked for (the calls are counted)
+  await page.evaluate(() => {
+    const w = window as any
+    const real = w.navigation.traverseTo.bind(w.navigation)
+    w.__returnsAsked = 0
+    w.navigation.traverseTo = (...args: unknown[]) => (w.__returnsAsked++, real(...args))
+  })
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
+  await settled(page)
+  expect(await page.evaluate(() => [JSON.stringify(history.state), document.querySelectorAll('.background.visible').length, (window as any).__returnsAsked]), "no return from a fragment's own position, and no note").toEqual([CLEARED, 0, 0])
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(1)
+  await shows('#e2e_target ', before[1], 'Back again: the entry before it')
 
   // a MALFORMED fragment (a `%` that is no escape: decoding it throws) names nothing either, and the leave to
   // take a fragment's position ends with its handler: Back, a new query, and Back from that is the original
@@ -2949,6 +2966,593 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   await waitForApp(page)
   await expect(mindbox(page)).toHaveValue('')
   expect(errors, 'no decoding error reached the page').toEqual([])
+  expect(warnings).toEqual([])
+})
+
+// THE STOP (the owner, 2026-11-18: "if i go back twice past the start, i have to come forward twice as well;
+// i'm a bit puzzled why we don't just stop at starting point"). Back or Forward onto a position that holds
+// no entry of the notebook's that the app can take (one of the app's older code here, which names no owner:
+// every earlier entry of a window that was open across the release of 2026-11-17) moved the browser while
+// the page stayed. The browser has moved before the app hears of it, so the app goes back at once to the
+// position of the entry the page shows (by the Navigation API's key) and the page stays EXACTLY as it is; a
+// note says why nothing moved. The two rows share the fixture: the three queries' entries, the first query's
+// rewritten as older code wrote one and the first view's as another script's state (no index), and the page
+// on the tag click's entry with one entry ahead
+const asOlderCode = (page: Page) =>
+  page.evaluate(() => {
+    const { index, editorText, scrollPosition } = history.state
+    history.replaceState({ index, editorText, scrollPosition }, '')
+  })
+const olderEntryBehind = async (page: Page, reads: ReturnType<typeof historyReads>) => {
+  const { index, atTarget, atSub } = await threeQueries(page, reads)
+  await page.goBack()
+  await reads.shows('#e2e_target ', atTarget, "Back to the tag click's entry")
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await reads.recorded()
+  await page.evaluate(() => history.replaceState({ custom: true }, ''))
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await reads.recorded()
+  await asOlderCode(page)
+  await page.goForward()
+  await reads.shows('#e2e_target ', atTarget, "the tag click's entry, an entry of older code behind it and one entry ahead")
+  await reads.recorded()
+  return { index, atTarget, atSub }
+}
+const note = (page: Page) => page.locator('.background.visible .modal')
+// (a modal is shown from a promise's callback, and a restore scrolls from a later frame: two frames and the
+// timers due, no fixed wait)
+const settled = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve)))))
+const noNote = async (page: Page, message: string) => {
+  await settled(page)
+  await expect(page.locator('.background.visible'), message).toHaveCount(0)
+}
+
+test('Back onto an entry of older code stops: the browser returns at once to the entry the page shows, the page stays as it is and a note says so, dismissed by a click outside; Forward still reaches the entry ahead; a jump onto a state without an index stops as quietly; a second Back stops again; no note while an editor or the MindBox has the focus, typing goes on across the stop, and none behind another dialog; without the Navigation API the page stays on the position as before', async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings, recorded, shows } = reads
+  const { index, atTarget, atSub } = await olderEntryBehind(page, reads)
+  const targetId = await page.evaluate(() => window._item('#e2e_target')!.id)
+  // what would show a restore, a jump or a re-render: every state a traversal brings, every position the
+  // page is asked for, every scroll and every change of the list above the header (`moves`), the layout
+  // passes run and the shown item's element
+  // (every warning and error of the console from here on, the handler's own among them; not the browser's
+  // note on a stylesheet preloaded and not used, which comes a few seconds after a load whatever the page does)
+  const noise: string[] = []
+  page.on('console', msg => void (['warning', 'error'].includes(msg.type()) && !msg.text().includes('was preloaded using link preload') && noise.push(msg.text())))
+  await page.evaluate(id => {
+    const w = window as any
+    w.__moves = []
+    const scrollTo = Element.prototype.scrollTo as (...args: any[]) => void
+    Element.prototype.scrollTo = function (this: Element, ...args: any[]) {
+      if (this === document.body) w.__moves.push('asked')
+      return scrollTo.apply(this, args)
+    }
+    document.body.addEventListener('scroll', () => w.__moves.push('scrolled'))
+    window.addEventListener('popstate', e => w.__moves.push(e.state?.unknown ? 'cleared' : e.state?.owner ? `own ${e.state.index}` : 'index' in (e.state ?? {}) ? 'older' : 'custom'), true)
+    new MutationObserver(() => w.__moves.push('list')).observe(document.querySelector('.history-container')!, { childList: true, subtree: true, characterData: true, attributes: true })
+    w.__shown = document.getElementById('item-' + id)
+  }, targetId)
+  const moves = (): Promise<string[]> => page.evaluate(() => (window as any).__moves.splice(0))
+  const traversed = () => page.evaluate(() => (window as any).__moves.filter((move: string) => /^(own|cleared|older|custom)/.test(move))) // the states the traversals brought, so far
+  const still = () =>
+    page.evaluate(id => {
+      const w = window as any
+      return {
+        box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+        at: document.body.scrollTop,
+        layouts: w.__layoutCount,
+        element: w.__shown === document.getElementById('item-' + id) && w.__shown.isConnected,
+        links: [...document.querySelectorAll('.history-item')].map(e => (e.textContent ?? '').trim()),
+        entry: [history.state.index, history.state.editorText, history.state.scrollPosition, location.hash],
+        session: [w._history.length, w._history_index],
+      }
+    }, targetId)
+  const HERE = { box: '#e2e_target ', at: atTarget, element: true, links: ['#e2e_source', '#e2e_target'], entry: [index + 1, '#e2e_target ', atTarget, '#e2e_target'], session: [index + 3, index + 1] }
+
+  // (1) Back onto the entry of older code: the browser went there and came back, and nothing else happened
+  const before = await still()
+  expect(before).toMatchObject(HERE)
+  await page.goBack()
+  await expect(note(page), 'the note of a stop after Back').toHaveText('nothing to go back to')
+  await settled(page)
+  expect(await moves(), 'the entry of older code, then the entry the page shows again: no position asked for, no scroll, the list untouched').toEqual(['older', `own ${index + 1}`])
+  expect(await still(), 'the page is exactly as it was: its view, the MindBox, the position, its entry, the list above the header').toEqual(before)
+  // Back again with the note still shown: the same stop, on the position the first one cleared, and one note
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => (window as any).__moves), { message: 'a stop while the note shows' }).toEqual(['cleared', `own ${index + 1}`])
+  await moves()
+  // a click outside the note dismisses it (it has no button), and no second note was waiting behind it
+  await expect(note(page).locator('.button')).toHaveCount(0)
+  await page.mouse.click(5, 5)
+  await noNote(page, 'a click outside dismisses the note, and it was the only one')
+  await recorded()
+  expect(await still(), 'after the dismissal: the viewport and the saved position are where they were').toEqual(before)
+  expect({ noise, warnings }, 'nothing warned in the console').toEqual({ noise: [], warnings: [] })
+  // a JUMP of two positions, onto a state that is no entry at all (another script's: no index): the same stop,
+  // back to the entry by its key, and the console as quiet (such a state was cleared with a warning)
+  await page.evaluate(() => history.go(-2))
+  await expect(note(page), 'the note of a stop after a jump').toHaveText('nothing to go back to')
+  await settled(page)
+  expect(await moves(), 'the state without an index, then the entry the page shows again').toEqual(['custom', `own ${index + 1}`])
+  expect(await still()).toEqual(before)
+  await page.mouse.click(5, 5)
+  await noNote(page, 'dismissed')
+  expect({ noise, warnings }, 'nothing warned in the console, for a state without an index either').toEqual({ noise: [], warnings: [] })
+
+  // (2) Forward still reaches the entry ahead. Back from it, and Back again THE MOMENT THAT ONE HAS LANDED
+  // (from a listener of the row's, which runs after the app's: before any write on the entry reached): the
+  // second one stops, and returns to the entry the first one reached, the position noted when it landed
+  // (the entry ahead is given a position of its own first: its write notes ITS position, the last one noted
+  // before the two Backs)
+  await page.goForward()
+  await shows('#e2e_target/sub', atSub, 'Forward: the entry ahead, kept')
+  expect(await reads.place(200), 'the entry ahead, at a position of its own').not.toBe(atTarget)
+  await moves()
+  await page.evaluate(() => void window.addEventListener('popstate', () => history.back(), { once: true }))
+  await page.goBack()
+  await expect(note(page), 'Back from the entry ahead, and at once Back again: a stop').toHaveText('nothing to go back to')
+  await shows('#e2e_target ', atTarget, 'the entry the first Back reached, restored where it was left')
+  expect((await moves()).filter(move => /^(own|cleared|older)/.test(move)), 'the entry reached, the cleared position, the entry reached again').toEqual([`own ${index + 1}`, 'cleared', `own ${index + 1}`])
+  await recorded()
+  expect(await still()).toMatchObject(HERE)
+  await page.mouse.click(5, 5)
+  await noNote(page, 'dismissed')
+
+  // (3) Back once more, onto the cleared position, stops the same way. The MindBox holds the focus this
+  // time, out of view above the window: no note (a modal would blur it, take every key, and give the focus
+  // back with a scroll to it, which the scroll listener would save), and the page is where it was
+  await focusMindboxInPlace(page)
+  await expect(mindbox(page)).toBeFocused()
+  expect(await page.evaluate(() => document.getElementById('textarea-mindbox')!.getBoundingClientRect().bottom < 0), 'the MindBox is above the window').toBe(true)
+  await recorded()
+  await moves()
+  await page.goBack()
+  await expect.poll(traversed, { message: 'a second Back stops again, with the MindBox focused' }).toEqual(['cleared', `own ${index + 1}`])
+  await noNote(page, 'no note while the MindBox has the focus')
+  await recorded()
+  expect(await still(), 'the viewport and the saved position are where they were').toMatchObject(HERE)
+  await expect(mindbox(page), 'the MindBox keeps the focus').toBeFocused()
+  await blur(page)
+
+  // (4) an item's editor holds the focus, with typed text not saved: the stop shows no note there (a modal
+  // takes the focus and every key until it is dismissed), and the typing goes on where it was
+  const paragraph = page.locator(`#item-${targetId} p`).first()
+  const area = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: area.width / 2, y: area.height / 2 } })
+  const textarea = page.locator(`#textarea-${targetId}`)
+  await expect(textarea).toBeFocused()
+  const saved = await textarea.inputValue()
+  await page.keyboard.press('Meta+ArrowDown')
+  await page.keyboard.type(' typed')
+  await expect(textarea).toHaveValue(saved + ' typed')
+  await recorded()
+  await moves()
+  await page.goBack()
+  await expect.poll(traversed, { message: 'the stop, with an editor focused' }).toEqual(['cleared', `own ${index + 1}`])
+  await noNote(page, "no note while an item's editor has the focus")
+  await expect(textarea).toBeFocused()
+  await page.keyboard.type(' on')
+  await expect(textarea, 'the typing goes on in the editor').toHaveValue(saved + ' typed on')
+  await textarea.fill(saved)
+  await page.keyboard.press('Escape')
+  await expect(textarea).toBeHidden()
+
+  // (5) another dialog is open: the stop shows no note behind it, nor one once it is closed
+  await page.evaluate(() => void (window as any)._modal('a dialog of the page', { confirm: 'OK' }))
+  await expect(note(page)).toContainText('a dialog of the page')
+  await moves()
+  await page.goBack()
+  await expect.poll(traversed, { message: 'the stop, with a dialog open' }).toEqual(['cleared', `own ${index + 1}`])
+  await expect(note(page)).toContainText('a dialog of the page')
+  await note(page).locator('.button.confirm').click()
+  await noNote(page, 'no note was waiting behind the dialog')
+
+  // (5b) typing in the MindBox ACROSS a stop: a character before it and one after it are both in the box,
+  // which keeps the focus, and no note comes up. The typed query then applies as any edit of a final entry
+  // does (a new entry), and Back from it is the entry again
+  await focusMindboxInPlace(page, '#e2e_target '.length)
+  await page.keyboard.type('x')
+  await moves()
+  await page.goBack()
+  await expect.poll(traversed, { message: 'the stop, between two typed characters' }).toEqual(['cleared', `own ${index + 1}`])
+  await page.keyboard.type('y')
+  await expect(mindbox(page), 'both characters are in the box').toHaveValue('#e2e_target xy')
+  await expect(mindbox(page)).toBeFocused()
+  await noNote(page, 'no note over the typing')
+  await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { message: 'the typed query, applied as an edit of the entry', timeout: 10_000 }).toEqual([index + 2, '#e2e_target xy'])
+  await blur(page)
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { timeout: 10_000 }).toEqual([index + 1, '#e2e_target '])
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+
+  // (6) WITHOUT THE NAVIGATION API (hidden here, as in a browser that lacks it) no return can be said: the
+  // page stays on the position, as before the stop, with no note, no link from it and nothing warned;
+  // Forward restores the entry
+  await page.evaluate(() => void Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }))
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: 'the position, cleared at the first Back, and the browser still on it' }).toBe(JSON.stringify({ owner: 'admin|anonymous|', unknown: true }))
+  await noNote(page, 'no note without a stop')
+  await expect(mindbox(page), 'the page stays as it is').toHaveValue('#e2e_target ')
+  await expect(page.locator('.history-item'), 'no link from a position that holds no entry').toHaveCount(0)
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(index + 1)
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await expect(page.locator('.history-item')).toHaveCount(2)
+  expect({ noise, warnings }, 'nothing warned in the console').toEqual({ noise: [], warnings: [] })
+})
+
+// THE STOP WHILE A PAGE IS STILL STARTING. Back during a reload moves the browser before the page shows any
+// entry (the early-Back row above: the position reached is applied once the page is initialized, and nothing
+// is written at startup). When that position holds no entry the app can take, the browser returns to the
+// entry the page was created on, one of the notebook's by the identity noted then, and that entry is shown
+// as any entry reached: its query, where it was left. Nothing is written on the way, so the entry ahead is
+// kept; the position reached is cleared
+test('Back while a reloaded page is still starting, onto an entry of older code, stops once the page is ready: the browser returns to the entry the page was reloaded on, shown where it was left with the note, and the entry ahead is kept; a page reloaded on a cleared position makes no return to it', async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings, shows } = reads
+  const { index, atTarget, atSub } = await olderEntryBehind(page, reads)
+  await page.addInitScript(() => {
+    window._initialize_stall_ms = 3_000
+    window.addEventListener('popstate', e => ((window as any).__moves ??= []).push(e.state?.unknown ? 'cleared' : e.state?.owner ? `own ${e.state.index}` : 'index' in (e.state ?? {}) ? 'older' : 'custom'), true)
+    // every return the page asks for
+    const w = window as any
+    const real = w.navigation.traverseTo.bind(w.navigation)
+    w.__returnsAsked = 0
+    w.navigation.traverseTo = (...args: unknown[]) => (w.__returnsAsked++, real(...args))
+  })
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => window._init_time > 0)).toBe(true)
+  await page.goBack()
+  await expect(page.locator('#sapper > .loading'), 'Back arrived before the page was initialized').toHaveClass(/visible/)
+  expect(await page.evaluate(() => (window as any).__moves), 'the browser is on the entry of older code while the page starts').toEqual(['older'])
+  await waitForApp(page)
+  await expect(note(page), 'the note of the stop, once the page is ready').toHaveText('nothing to go back to')
+  await shows('#e2e_target ', atTarget, 'the entry the page was reloaded on, shown where it was left')
+  expect(await page.evaluate(() => [(window as any).__moves, (window as any).__returnsAsked]), 'one return, to that entry').toEqual([['older', `own ${index + 1}`], 1])
+  expect(await page.evaluate(() => [history.state.index, history.state.editorText, history.state.scrollPosition, location.hash]), "the browser's entry is that one, as it was").toEqual([index + 1, '#e2e_target ', atTarget, '#e2e_target'])
+  expect(await entries(page), 'the session is on it').toEqual([index + 2, index + 1])
+  await page.mouse.click(5, 5)
+  await expect(page.locator('.background.visible')).toHaveCount(0)
+  // nothing was lost: the entry ahead, and the entry itself on the way back
+  await page.goForward()
+  await shows('#e2e_target/sub', atSub, 'Forward: the entry ahead, kept')
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, 'Back')
+  // the position Back had reached was cleared before the browser left it (read where no return is made:
+  // without the Navigation API, hidden here)
+  await page.evaluate(() => void Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }))
+  const CLEARED = JSON.stringify({ owner: 'admin|anonymous|', unknown: true })
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+
+  // A RELOAD ON THAT CLEARED POSITION, and Back while the page is starting, onto the state without an index
+  // behind it (review 6 of scroll_history). The position the page was created on NAMES the notebook and is no
+  // entry of its own, so it is no return address: no return is asked for (by the owner's name alone the
+  // browser was sent back to it, a position the app could not restore either), and the page stays on the
+  // position reached, cleared, as before the stop
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => window._init_time > 0)).toBe(true)
+  await page.goBack()
+  await expect(page.locator('#sapper > .loading'), 'Back arrived before the page was initialized').toHaveClass(/visible/)
+  await waitForApp(page)
+  await noNote(page, 'no note: no stop was made')
+  expect(await page.evaluate(() => [(window as any).__moves, (window as any).__returnsAsked, JSON.stringify(history.state)]), 'the state without an index, cleared, and no trip back to the position the page was reloaded on').toEqual([['custom'], 0, CLEARED])
+  await expect(mindbox(page), 'the page shows its first view').toHaveValue('')
+  expect(warnings).toEqual([])
+})
+
+// WHILE THE RETURN OF A STOP IS ON ITS WAY (review 6 of scroll_history, 2026-11-18). Between the landing and
+// the return the browser is on a position that holds no entry, for a few milliseconds in a browser and for as
+// long as the row holds it here: `navigation.traverseTo` is the row's (it keeps the app's call, then makes the
+// real one, or refuses it). What happened there was decided by that position's rules: a typed update of a
+// query was a push, which dropped the entry the reader was on and the entry ahead; a re-ranking and a scroll
+// write that came due were dropped. They are kept for the entry and made when the browser is on it again.
+// The fixture is four positions over the navigation row's items: the first view rewritten as older code
+// wrote one, a typed query (NOT final: an update of it is a replacement, which keeps what is ahead; a final
+// entry's may rightly drop it), the tag click's entry, and the last query rewritten as older code, AHEAD
+test("while a stop's return is on its way an edit, a re-ranking and a due scroll write are kept for the entry and made on arrival, with the entry ahead kept; a refused return leaves the position as before the stop; another navigation retires the return, and no note follows a later visit; a history link is not followed meanwhile, nor when its click ends an overdue return; a second Back onto a fragment's own position drops the kept edit and keeps every position; an update of the view a kept edit shows is saved on the entry the edit gets", async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings, recorded, shows } = reads
+  const { index, atTarget } = await threeQueries(page, reads)
+  // [the first view, '#e2e_source' typed (index), the tag click's '#e2e_target ' (index + 1), '#e2e_target/sub' (index + 2)], on the last
+  await recorded()
+  await asOlderCode(page)
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, "Back to the tag click's entry")
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  await asOlderCode(page)
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await recorded()
+  const CLEARED = JSON.stringify({ owner: 'admin|anonymous|', unknown: true })
+  const links = page.locator('.history-item')
+  const browser = () => page.evaluate(() => [(window as any).navigation.currentEntry.key, history.length, (window as any).navigation.entries().length] as [string, number, number])
+  const entry = (i = index) => page.evaluate(i => ({ at: JSON.stringify(history.state) == JSON.stringify((window as any)._history[i]) ? i : JSON.stringify(history.state), ...(window as any)._history[i] }), i)
+  const on = (i: number) => expect.poll(() => page.evaluate(() => history.state?.index), { message: `the browser is on entry ${i}`, timeout: 10_000 }).toBe(i)
+  const [keyS, length, positions] = await browser()
+  expect(await entry(), 'the held entry is the typed query, NOT final, with two entries ahead').toMatchObject({ at: index, editorText: '#e2e_source', final: false })
+  expect(await entries(page)).toEqual([index + 3, index])
+
+  // the row's hold on the return: the app's call is kept until the row lets it go (the real method) or refuses it
+  await page.evaluate(() => {
+    const w = window as any
+    const real = w.navigation.traverseTo.bind(w.navigation)
+    w.__returns = []
+    w.navigation.traverseTo = (key: string, options?: unknown) => {
+      let release!: (mode: string) => void
+      const gate = new Promise<string>(resolve => (release = resolve))
+      w.__returns.push(release)
+      const result = gate.then(mode => {
+        if (mode == 'refuse') throw new DOMException('refused by the row', 'AbortError')
+        return real(key, options)
+      })
+      return { committed: result.then((r: any) => r.committed), finished: result.then((r: any) => r.finished) }
+    }
+    // every traversal the page asks for by a distance (a history link's)
+    w.__gone = []
+    const go = history.go.bind(history)
+    history.go = (delta?: number) => (w.__gone.push(delta), go(delta))
+  })
+  const held = (message: string) => expect.poll(() => page.evaluate(() => [(window as any).__returns.length, JSON.stringify(history.state)]), { message }).toEqual([1, CLEARED])
+  const release = (mode: 'go' | 'refuse') => page.evaluate(mode => (window as any).__returns.shift()(mode), mode)
+  const arrived = async (words: string, message: string) => {
+    await expect(note(page), message).toHaveText(words)
+    await page.mouse.click(5, 5)
+    await noNote(page, 'dismissed')
+  }
+
+  // (1) A QUERY UPDATE while the return is held: nothing is decided on the cleared position (no push there:
+  // the browser's positions are what they were), the box shows the update, and the session's entry waits
+  await page.goBack()
+  await held('Back onto the entry of older code: cleared, and the return held')
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  expect([await browser(), await entry(), await page.evaluate(() => (window as any)._history_update_pending)], 'nothing written yet: the position cleared, the positions as they were, the entry as it was, a write kept').toMatchObject([[expect.not.stringMatching(keyS), length, positions], { at: CLEARED, editorText: '#e2e_source' }, true])
+  // on arrival the update is the entry's own: a REPLACEMENT of a query that is not final, and the entry ahead is kept
+  await release('go')
+  await arrived('nothing to go back to', 'the return arrives')
+  expect([await browser(), await entry()], 'the update replaced the held entry, at its own position').toMatchObject([[keyS, length, positions], { at: index, editorText: '#e2e_target/sub', final: false }])
+  expect(await entries(page)).toEqual([index + 3, index])
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward: the entry ahead, kept')
+  const keyT = (await browser())[0]
+  await page.goBack()
+  await on(index)
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await recorded()
+
+  // (2) A RE-RANKING with the query unchanged (an item touched), while the return is held: kept too, and
+  // written on arrival (on the cleared position it took the replacing path, which writes nothing there)
+  // (the item ranked last: touched, it is ranked ahead of the others, so the order changes)
+  const [touched, order] = await page.evaluate(() => [window.__items[window.__items.length - 1].id, history.state.orderHash] as [string, string])
+  expect((await entry()).unsavedTimes.some((time: { id: string }) => time.id == touched), 'the item is not among the times of the entry yet').toBe(false)
+  await page.goBack()
+  await held('Back again: the return held')
+  await page.evaluate(id => void (window._item(id) as any).touch(), touched)
+  await expect.poll(() => page.evaluate(() => (window as any)._history_update_pending), { message: "the re-ranking's write is kept" }).toBe(true)
+  expect(await entry()).toMatchObject({ at: CLEARED, orderHash: order })
+  await release('go')
+  await arrived('nothing to go back to', 'the return arrives')
+  const ranked = await entry()
+  expect([ranked.at, ranked.editorText, ranked.orderHash == order, ranked.unsavedTimes.some((time: { id: string }) => time.id == touched)], 'the entry holds the order and the times shown').toEqual([index, '#e2e_target/sub', false, true])
+  await recorded()
+
+  // (3) A SCROLL WRITE THAT COMES DUE while the return is held. The scroll listener's 250 ms timer is the
+  // row's for this step: armed by a scroll before Back, and run by the row during the return (every timer of
+  // 250 ms set meanwhile is kept and run then: a scroll can also arm the app's focus restore, of the same delay)
+  await page.evaluate(() => {
+    const w = window as any
+    const real = window.setTimeout
+    w.__due = []
+    ;(window as any).setTimeout = (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => (ms === 250 ? (w.__due.push(() => cb(...args)), 0) : real(cb, ms, ...args))
+    w.__timers = () => void ((window as any).setTimeout = real)
+  })
+  const saved = (await entry()).scrollPosition
+  const scrolled = saved + 60
+  await page.evaluate(y => document.body.scrollTo(0, y), scrolled)
+  await expect.poll(() => page.evaluate(() => [(window as any).__due.length > 0, (window as any)._history_update_pending, document.body.scrollTop]), { message: "the scroll's write is armed" }).toEqual([true, true, scrolled])
+  await page.evaluate(() => (window as any).__timers())
+  await page.goBack()
+  await held('Back within the 250 ms: the return held')
+  await page.evaluate(() => (window as any).__due.splice(0).forEach((due: () => void) => due()))
+  expect([await entry(), await page.evaluate(() => (window as any)._history_update_pending)], 'the write came due on the cleared position: kept, not dropped').toMatchObject([{ at: CLEARED, scrollPosition: saved }, true])
+  await release('go')
+  await arrived('nothing to go back to', 'the return arrives')
+  expect([await entry(), await scrollTop(page)], 'the position the reader left is the one saved').toMatchObject([{ at: index, scrollPosition: scrolled }, scrolled])
+
+  // (4) A REFUSED RETURN: the page is on the cleared position as before the stop (its marker, no link from
+  // it, no note), and the next navigation works
+  await page.goBack()
+  await held('Back again: the return held')
+  await expect(links, 'the list stays while the return is on its way').toHaveCount(2)
+  await release('refuse')
+  await expect(links, 'no link from a position that holds no entry').toHaveCount(0)
+  await noNote(page, 'no note for a return that did not happen')
+  expect((await entry()).at).toBe(CLEARED)
+  await page.goForward()
+  await on(index)
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await expect(links).toHaveCount(2)
+
+  // (5) ANOTHER NAVIGATION TAKES OVER: a traversal to another entry of the notebook's while the return is
+  // held is followed and retires it; a later, ordinary visit to the entry the return was going to shows no note
+  await page.goBack()
+  await held('Back again: the return held')
+  await page.evaluate(() => history.go(2))
+  await shows('#e2e_target ', atTarget, "a jump to the tag click's entry, with the return still held")
+  await page.goBack()
+  await on(index)
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await noNote(page, 'no note at an ordinary visit to the entry the retired return was going to')
+  await release('refuse') // the held call ends; nothing of it is left to refuse
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward')
+  await recorded()
+
+  // (6) FORWARD onto the entry of older code AHEAD, the return held: A HISTORY LINK IS NOT FOLLOWED meanwhile
+  // (its distance is from the entry, and the browser is not on it), and the return then arrives
+  await page.evaluate(() => void ((window as any).__gone.length = 0))
+  await page.goForward()
+  await held('Forward onto the entry of older code: cleared, and the return held')
+  await expect(links).toHaveCount(2)
+  await links.first().click()
+  expect(await page.evaluate(() => (window as any).__gone), 'no traversal by a distance while the return is on its way').toEqual([])
+  // (a click in the header leaves the focus in the MindBox, where a stop shows no note: blurred, for the note)
+  expect(await page.evaluate(() => document.activeElement?.id)).toBe('textarea-mindbox')
+  await blur(page)
+  await release('go')
+  await arrived('nothing to go forward to', 'the return arrives, from the other side')
+  expect([(await browser())[0], (await entry(index + 1)).at]).toEqual([keyT, index + 1])
+
+  // (7) A NATIVE FRAGMENT NAVIGATION takes over as well: the return is retired, and a later visit to the
+  // entry it was going to shows no note
+  await page.goForward()
+  await held('Forward again: the return held')
+  await page.evaluate(() => void (location.hash = '#e2e_no_such_item'))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(JSON.stringify({ owner: 'admin|anonymous|', unknown: true, fragment: true }))
+  await page.evaluate(() => history.go(-2))
+  await on(index + 1)
+  await noNote(page, 'no note at a visit to the entry the retired return was going to')
+  await release('refuse')
+
+  // (8) A RETURN THAT NEVER SETTLES does not keep the page waiting. An edit is kept while the return is held
+  // (within the limit: two seconds, the app's seam here); once the return is overdue, whatever asks next ends
+  // it as refused, and the kept edit is the edit of a position that holds no entry, as before the stop: a new
+  // entry there, under a new numbering. Here A CLICK ON A HISTORY LINK asks (review 7 of scroll_history): it
+  // BEGAN on a position that holds no entry, so it is consumed, though the kept edit's entry is the browser's
+  // by the time the handler goes on (followed, its distance was from the old list: one back from the new entry)
+  await recorded()
+  await page.goForward()
+  await held('Forward again: the return held, for good')
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  expect([(await entry(index + 1)).at, await page.evaluate(() => (window as any)._history_update_pending)], 'the edit is kept').toEqual([CLEARED, true])
+  await expect(links).toHaveCount(2)
+  // (the press is dispatched on the link, the first one: not the current entry's. A click of the driver's
+  // scrolls its target into view first, and a scroll asks too: the overdue return then ends before the press)
+  const pressed = await page.evaluate(() => {
+    const w = window as any
+    w._stop_return_limit_ms = -1
+    w.__gone.length = 0
+    document.querySelector('.history-item')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    return [w.__gone.slice(), history.state?.index, history.state?.editorText]
+  })
+  expect(pressed, 'the kept edit is recorded, a new entry from the cleared position, and the press asked for no traversal').toEqual([[], 0, '#e2e_source'])
+  expect(await entries(page)).toEqual([1, 0])
+  await page.evaluate(() => void delete (window as any)._stop_return_limit_ms)
+  await noNote(page, 'no note')
+  await release('refuse')
+
+  // (9) BACK TWICE, THE SECOND ONTO A FRAGMENT'S OWN POSITION THAT IS ALREADY THERE (review 7). The positions,
+  // made by native fragments from here: one that names nothing (its marker), then three that name items, the
+  // first of them rewritten as older code wrote one; the page on the second, with the third ahead
+  const FRAGMENT = JSON.stringify({ owner: 'admin|anonymous|', unknown: true, fragment: true })
+  const shown = (text: string) => expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { message: `the browser is on the entry of ${text}`, timeout: 10_000 }).toEqual([0, text])
+  await page.evaluate(() => void (location.hash = '#e2e_no_such_item'))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(FRAGMENT)
+  for (const name of ['#e2e_source', '#e2e_target', '#e2e_target/sub']) {
+    await page.evaluate(name => void (location.hash = name), name)
+    await shown(name + ' ')
+    await recorded()
+    if (name == '#e2e_source') await asOlderCode(page)
+  }
+  await page.goBack()
+  await shown('#e2e_target ')
+  await recorded()
+  const keys = () => page.evaluate(() => (window as any).navigation.entries().map((position: { key: string }) => position.key) as string[])
+  const [positionsBefore, keyHeld] = [await keys(), (await browser())[0]]
+  // Back onto the entry of older code, the return held, and an edit kept; then Back AGAIN, onto the marker
+  await page.goBack()
+  await held('Back onto the entry of older code: the return held')
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await expect.poll(() => page.evaluate(() => (window as any)._history_update_pending), { message: 'the edit is kept' }).toBe(true)
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: "the fragment's own position, its marker" }).toBe(FRAGMENT)
+  await settled(page)
+  expect([await keys(), await page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_update_pending])], "nothing is written from the fragment's position: every position is still the browser's, the marker is intact, and the kept edit went with the retired return").toEqual([positionsBefore, [FRAGMENT, false]])
+  // ORDINARY FORWARD PRESSES from the marker (review 8 of scroll_history). The kept edit went with the retired
+  // return, but the box still SHOWS it: the page is no longer the held entry's view. So the first press, onto
+  // the cleared position, makes NO return to that entry (taken back there without a restore, the box held the
+  // dropped query over the entry's own, and the next re-ranking took the difference for an edit: a push from
+  // a final entry, and the entry ahead was gone). The browser stays on the cleared position, as before the
+  // stop, and the second press restores the held entry as any entry reached
+  const asked = await page.evaluate(() => (window as any).__returns.length)
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: 'Forward: the cleared position' }).toBe(CLEARED)
+  await settled(page)
+  expect(await page.evaluate(() => [JSON.stringify(history.state), (window as any).__returns.length]), 'no return is asked for from there: the page does not show the held entry').toEqual([CLEARED, asked])
+  await page.goForward()
+  await shown('#e2e_target ')
+  expect(
+    [(await browser())[0], await mindbox(page).inputValue(), await page.evaluate(() => [history.state.editorText, (window as any)._history[0].editorText])],
+    'Forward again: the held entry at its own position, and the box shows the query that both stored copies hold'
+  ).toEqual([keyHeld, '#e2e_target ', ['#e2e_target ', '#e2e_target ']])
+  await noNote(page, 'no note at an ordinary visit to the entry the retired return was going to')
+  // a re-ranking there that changes no order (the item ranked first, touched) is no edit: nothing is written,
+  // and the entry ahead is still the browser's
+  await recorded()
+  const ranking = () => page.evaluate(() => window.__items.map(item => item.id).join())
+  const rankingBefore = await ranking()
+  await page.evaluate(() => void (window._item(window.__items[0].id) as any).touch())
+  await settled(page)
+  expect([await ranking(), await keys(), await page.evaluate(() => [history.state.index, history.state.editorText])], 'a re-ranking that changes no order writes nothing: every position is still there').toEqual([rankingBefore, positionsBefore, [0, '#e2e_target ']])
+  await page.goForward()
+  await shown('#e2e_target/sub ')
+  expect(await keys(), 'the entry ahead, and every position').toEqual(positionsBefore)
+  await release('refuse')
+
+  // (10) AN UPDATE OF THE VIEW A KEPT EDIT SHOWS (review 7). The held entry is FINAL (a fragment's), so the
+  // edit kept during the return is a PUSH on arrival, rightly. In the same hold the new view is scrolled and
+  // its write comes due; then a timer armed BEFORE the edit, in the held view, comes due too. On arrival the
+  // entry the edit got holds the position of ITS view's write: not the position at the edit (the update was
+  // kept for the held entry's index, and dropped once the push had moved it), and not the older timer's
+  await page.goBack()
+  await shown('#e2e_target ')
+  await recorded()
+  await page.evaluate(() => {
+    const w = window as any
+    const real = window.setTimeout
+    w.__due = []
+    ;(window as any).setTimeout = (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => (ms === 250 ? (w.__due.push(() => cb(...args)), 0) : real(cb, ms, ...args))
+    w.__timers = () => void ((window as any).setTimeout = real)
+    w.__run = (due: (() => void)[]) => (due.splice(0).forEach(run => run()), document.body.scrollTop) // the timers run, and the position they read
+  })
+  const base = await scrollTop(page)
+  await page.evaluate(y => document.body.scrollTo(0, y), base + 40)
+  await expect.poll(() => page.evaluate(() => (window as any).__due.length > 0 && (window as any)._history_update_pending), { message: "a scroll in the held view: its write is armed" }).toBe(true)
+  await page.goBack()
+  await held('Back onto the cleared position: the return held')
+  const atEdit = await page.evaluate(() => {
+    const w = window as any
+    w.__old = w.__due.splice(0) // the timers armed in the held view
+    w.MindBox.set('#e2e_source')
+    return document.body.scrollTop
+  })
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await page.evaluate(y => document.body.scrollTo(0, y), base + 140)
+  await expect.poll(() => page.evaluate(() => (window as any).__due.length > 0), { message: "a scroll in the new view: its write is armed" }).toBe(true)
+  const atNew = await page.evaluate(() => (window as any).__run((window as any).__due))
+  const atOld = await page.evaluate(y => (document.body.scrollTo(0, y), (window as any).__run((window as any).__old)), base + 90)
+  expect(new Set([atEdit, atNew, atOld]).size, 'three positions: at the edit, at the write of the new view, at the older timer').toBe(3)
+  await release('go')
+  await arrived('nothing to go back to', 'the return arrives')
+  expect(await page.evaluate(() => [history.state.index, history.state.editorText, history.state.scrollPosition, (window as any)._history[1].scrollPosition]), "the kept edit pushed its entry, which holds the position of its own view's write").toEqual([1, '#e2e_source', atNew, atNew])
+  expect((await keys()).slice(0, -1), 'a push from the held entry: its position and those before it').toEqual(positionsBefore.slice(0, -1))
+  // a later timer of the new view, due after the arrival, writes that entry as well
+  await expect.poll(() => page.evaluate(() => (window as any).__due.length > 0), { message: "the new view's later scroll: its write is armed" }).toBe(true)
+  const atLast = await page.evaluate(() => (window as any).__run((window as any).__due))
+  expect(await page.evaluate(() => [history.state.index, history.state.scrollPosition]), 'due after the arrival: the same entry').toEqual([1, atLast])
+  expect(atLast).not.toBe(atNew)
+  await page.evaluate(() => (window as any).__timers())
   expect(warnings).toEqual([])
 })
 

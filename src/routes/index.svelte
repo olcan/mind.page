@@ -325,7 +325,7 @@
     Object.defineProperty(window, '_primary', { get: () => primary })
     Object.defineProperty(window, '_history', { get: () => sessionStateHistory.toArray() }) // sparse, by index
     Object.defineProperty(window, '_history_index', { get: () => sessionStateHistoryIndex })
-    Object.defineProperty(window, '_history_update_pending', { get: () => historyUpdatePending }) // the scroll listener's write (tests)
+    Object.defineProperty(window, '_history_update_pending', { get: () => historyUpdatePending || stopWork.length > 0 }) // the scroll listener's write, or any kept through a stop's return (tests)
     Object.defineProperty(window, '_editor_change_pending', { get: () => editorChangePending }) // the query's debounce (tests)
     Object.defineProperty(window, '_mindbox_history', { get: () => sessionHistory })
     Object.defineProperty(window, '_mindbox_history_index', { get: () => sessionHistoryIndex })
@@ -2840,8 +2840,24 @@
     // if (state.index == 1 && history.length > 2) history.go(-history.length + 2)
     if (occupy) history.replaceState(state, state.editorText || '(clear)', urlForState(state))
     else history.pushState(state, state.editorText || '(clear)', urlForState(state))
+    sessionEntryKey = historyKey() // the browser is on the session's entry (see onPopState, the stop)
     sessionStateHistory.set(state.index, _.cloneDeep(history.state))
     sessionStateHistory = sessionStateHistory // trigger svelte update
+  }
+
+  // an update of the entry of a VIEW (`view`: the view shown now, or the one a scroll's timer was armed in:
+  // see viewEntry), written over that entry's state as it is when the write is made (updatedEntry), and
+  // dropped when the session is on another entry by then. While a stop's return is on its way (onPopState)
+  // the write is KEPT and made in its turn (see stopWork): a scroll's write that came due during a return was
+  // dropped, and the return left the live position with the old one saved (review 6 of scroll_history); kept
+  // for the HELD entry's index, an update of a view shown since (a query changed during the return, then
+  // scrolled or shown more of) was dropped once that query's entry was pushed (review 7)
+  function updateState(update, view = viewEntry()) {
+    const write = () => {
+      if (sessionStateHistoryIndex === view.index && sessionRun === view.run) replaceState(updatedEntry(currentState(), update))
+    }
+    if (returning()) stopWork.push(write)
+    else write()
   }
 
   function replaceState(state, skip_reset = false) {
@@ -2856,6 +2872,7 @@
     // note we disabled this since it is not clear we can guarantee that the history is on same app/domain
     // if (state.index == 0 && history.length > 2 && !skip_reset) history.go(-history.length + 2)
     history.replaceState(state, state.editorText || '(clear)', urlForState(state))
+    sessionEntryKey = historyKey() // the browser is on the session's entry (see onPopState, the stop)
     sessionStateHistory.set(state.index, _.cloneDeep(history.state))
     sessionStateHistory = sessionStateHistory // trigger svelte update
   }
@@ -2903,6 +2920,68 @@
   let sessionRun = 0
   let positionUnknown = false
   const historyOffEntry = () => historyUnsettled() || positionUnknown
+  // THE STOP (onPopState): the position of the browser's that holds the entry the session is on, by the
+  // Navigation API's key (null without the API, and while the session holds no entry at a position it knows),
+  // noted whenever the browser is on that entry (the two writers, a traversal the page follows, a launch on
+  // its own kept entry); the position the page was created on; and the return of a stop that is on its way
+  // (`key`: where to, `forward`: the side of the held position the browser landed on, `since`: when asked)
+  const historyKey = (): string | null => window['navigation']?.currentEntry?.key ?? null
+  const launchKey = isClient ? historyKey() : null
+  let sessionEntryKey: string | null = null
+  let stopPending: { key: string; forward: boolean; since: number } | null = null
+  // the history writes asked for while a return is on its way, in order: the editor's push-or-replace
+  // decision (onEditorChange) and the updates of the held entry (updateState). They are the HELD ENTRY's:
+  // made from it when the return arrives (onPopState), under the rules of a position that holds no entry when
+  // the return is refused (refuseReturn), and dropped when another navigation takes over (retireReturn)
+  let stopWork: (() => void)[] = []
+  // THE ENTRY OF A VIEW, by its run and index: the session's entry, except while a return is on its way and
+  // an edit is kept. The view shown then is not the held entry's any more, and which entry it gets is decided
+  // only when the edit is recorded (a push, a replacement, nothing): `stopView` stands for it until then,
+  // one object per kept edit, filled in when that edit is recorded. An update asked for meanwhile, and a
+  // scroll's timer armed meanwhile, carry the object of the view they were asked in, so they reach the entry
+  // their edit produced and no other (a timer armed before a kept edit that turns out to be a push is
+  // dropped, as one is when the index moves)
+  type ViewEntry = { run: number | null; index: number | null }
+  let stopView: ViewEntry | null = null
+  const viewEntry = (): ViewEntry => (returning() && stopView) || { run: sessionRun, index: sessionStateHistoryIndex }
+  const sameView = (view: ViewEntry) => {
+    const shown = viewEntry()
+    return view === shown || (shown.index !== null && view.index === shown.index && view.run === shown.run)
+  }
+  // a return that ends without arriving. REFUSED: the browser rejects it, or it has neither arrived nor been
+  // rejected two seconds on when an edit, a write or a click asks (`returning`: no timer; a return is a
+  // same-document traversal of a few milliseconds, and one that never settled would otherwise keep every
+  // later edit waiting and the list above the header shown and inert; `_stop_return_limit_ms` is the rows'
+  // seam). The page is then on a position that holds no entry, as before the stop, and the writes kept are
+  // made under that position's rules: a new query is a new entry there, nothing else is written
+  function refuseReturn(attempt: typeof stopPending) {
+    if (!attempt || stopPending !== attempt) return
+    stopPending = null
+    stopView = null
+    for (const work of stopWork.splice(0)) work()
+  }
+  // SUPERSEDED: another navigation took over while the return was on its way (a traversal the page follows, a
+  // native fragment navigation, the page hidden: one restored from the back/forward cache keeps its
+  // variables). The attempt is retired and the writes kept, which belonged to the entry left, are dropped. Left
+  // set, a later ordinary visit to the position it was going back to was taken for its arrival, and showed
+  // the note over a real change of view (review 6 of scroll_history)
+  function retireReturn() {
+    // a kept edit is dropped here and stays SHOWN (its view was never an entry's: stopView still unfilled): the
+    // page is then not the held entry's view any more, so that entry's position is no return address until
+    // the browser is on an entry again. Kept, the next stop went back to it WITHOUT a restore (the page
+    // "shows" the entry it returns to): the box held the dropped query over the entry's own, the next
+    // re-ranking took the difference for an edit, and from a final entry that is a push, which dropped the
+    // entry ahead (review 8 of scroll_history). Without it the browser stays on the next position it cannot
+    // take, as before the stop, and a landing on the entry restores it as any entry reached
+    if (stopView?.index === null) sessionEntryKey = null
+    if (stopPending) stopPending = null
+    if (stopWork.length) stopWork = []
+    stopView = null // (a view left unfilled is no entry's: what still carries it is dropped)
+  }
+  const returning = () => {
+    if (stopPending && Date.now() - stopPending.since > (window['_stop_return_limit_ms'] ?? 2000)) refuseReturn(stopPending)
+    return !!stopPending
+  }
   // a native fragment navigation's own position, for as long as its handler reads the fragment: the query
   // the fragment names takes the position instead of adding one after it (onPopState, pushState)
   let fragmentPosition = false
@@ -3602,45 +3681,60 @@
     if (!ignoreStateOnEditorChange) {
       // update history, replace unless current state is final (from tag click)
       const orderHash = hash(items.map(item => item.id).join())
-      // the entry of the view shown: the browser's own, or the session's while the browser is on a position
-      // that holds none (there a new query is always a new entry, and nothing else is written)
-      const shown: { editorText?: string; orderHash?: string; final?: boolean } | null = positionUnknown
-        ? (sessionStateHistory.get(sessionStateHistoryIndex) ?? { editorText: '' }) // none held yet: the launch's first view
-        : ownState()
-      // (a native fragment's own position is written whatever the view shown: an alias of the item shown names
-      // the same query and order, and the position is its entry all the same, see onPopState)
-      if (editorText != shown?.editorText || orderHash != shown?.orderHash || fragmentPosition) {
-        // need to update history
-        const state = {
-          index: undefined, // set by pushState or replaceState
-          editorText,
-          unsavedTimes: items.filter(item => item.time != item.savedTime).map(item => _.pick(item, ['id', 'time'])),
-          orderHash,
-          hideIndex,
-          // no position before the page has taken its first-load position (the scroll to the header, see
-          // updateItemLayout): the entry that initialization writes comes before the header is on the page,
-          // and the 0 it recorded stayed for good whenever another entry was pushed before the scroll
-          // listener's write (250 ms after the first scroll) reached it: a remote change re-ranking the page
-          // as it launched, or the address's query; Back to the first view then scrolled to the page's very
-          // top, far above the MindBox (the owner, 2026-11-17). an entry without a position restores to the
-          // header (onPopState)
-          scrollPosition: headerScrolled ? document.body.scrollTop : undefined,
-          final: finalizeStateOnEditorChange,
-          intro,
-        }
-        // console.debug(history.state.final ? "push" : "replace", state);
-        const push = positionUnknown ? editorText != shown?.editorText : shown?.final
-        if (forceNewStateOnEditorChange || (push && !replaceStateOnEditorChange)) {
-          // console.debug({
-          //   forceNewStateOnEditorChange,
-          //   replaceStateOnEditorChange,
-          //   historyStateFinal: history.state.final,
-          // })
-          pushState(state)
-        } else {
-          replaceState(state)
+      // the view as it is now, and how it asks to be written (a tag click and the like force a new entry)
+      const text = editorText
+      const force = forceNewStateOnEditorChange
+      const replace = replaceStateOnEditorChange
+      const view = () => ({
+        index: undefined, // set by pushState or replaceState
+        editorText,
+        unsavedTimes: items.filter(item => item.time != item.savedTime).map(item => _.pick(item, ['id', 'time'])),
+        orderHash,
+        hideIndex,
+        // no position before the page has taken its first-load position (the scroll to the header, see
+        // updateItemLayout): the entry that initialization writes comes before the header is on the page,
+        // and the 0 it recorded stayed for good whenever another entry was pushed before the scroll
+        // listener's write (250 ms after the first scroll) reached it: a remote change re-ranking the page
+        // as it launched, or the address's query; Back to the first view then scrolled to the page's very
+        // top, far above the MindBox (the owner, 2026-11-17). an entry without a position restores to the
+        // header (onPopState)
+        scrollPosition: headerScrolled ? document.body.scrollTop : undefined,
+        final: finalizeStateOnEditorChange,
+        intro,
+      })
+      // THE DECISION IS MADE FROM THE ENTRY THE BROWSER IS ON WHEN THE WRITE IS MADE (`state`: the view kept
+      // from an earlier moment, else the view now)
+      const record = (state: ReturnType<typeof view> | null = null) => {
+        // the entry of the view shown: the browser's own, or the session's while the browser is on a position
+        // that holds none (there a new query is always a new entry, and nothing else is written)
+        const shown: { editorText?: string; orderHash?: string; final?: boolean } | null = positionUnknown
+          ? (sessionStateHistory.get(sessionStateHistoryIndex) ?? { editorText: '' }) // none held yet: the launch's first view
+          : ownState()
+        // (a native fragment's own position is written whatever the view shown: an alias of the item shown names
+        // the same query and order, and the position is its entry all the same, see onPopState)
+        if (text != shown?.editorText || orderHash != shown?.orderHash || fragmentPosition) {
+          // need to update history
+          // console.debug(history.state.final ? "push" : "replace", state);
+          const push = positionUnknown ? text != shown?.editorText : shown?.final
+          if (force || (push && !replace)) pushState(state ?? view())
+          else replaceState(state ?? view())
         }
       }
+      // while a stop's return is on its way (onPopState) the browser is on a position that holds no entry, for
+      // a few milliseconds: decided there, a typed update of a query was a PUSH (a new query on such a
+      // position is a new entry), which dropped the entry the reader was on and the entries ahead of it, and
+      // a re-ranking was not written at all (review 6 of scroll_history). The view is kept as it is now, and
+      // the decision is made when the browser is on the entry again (or under that position's own rules when
+      // the return is refused): see stopWork
+      if (returning()) {
+        const state = view()
+        const shown: ViewEntry = (stopView = { run: null, index: null }) // the entry this view gets: known when recorded
+        stopWork.push(() => {
+          record(state)
+          shown.run = sessionRun
+          shown.index = sessionStateHistoryIndex
+        })
+      } else record()
     }
     forceNewStateOnEditorChange = false // processed above
     finalizeStateOnEditorChange = false // processed above
@@ -3729,7 +3823,7 @@
   function toggleItems(index: number) {
     hideIndex = index
     checkIfRenderingVisibleItems()
-    replaceState(updatedEntry(currentState(), { hideIndex }))
+    updateState({ hideIndex })
   }
 
   // whether an element's top stands in the band of the viewport a target is left alone in: at or below the
@@ -3899,6 +3993,21 @@
     if (unique) update_dom().then(scrollToTarget)
   }
 
+  // the note of a stop (onPopState): why Back, or Forward, moved nothing. The app's own modal, without
+  // buttons: a click outside it, Enter or Escape dismisses it. None while a modal is shown, this note
+  // included (a queued one would show once that is closed, about a press long past), and none while one of
+  // the app's editors has the focus, the MindBox's included: a modal blurs the textarea, takes every key
+  // until it is dismissed (what is being typed is swallowed) and gives the focus back with a plain focus(),
+  // which scrolls a MindBox that is out of view back into it, a jump the scroll listener then saves (review 6
+  // of scroll_history). The stop itself happens all the same.
+  // The words follow the SIDE of the held entry the browser landed on (stopReturn): after moves in between
+  // (a jump by a long press, a second press before the first return landed) that can differ from the button
+  // pressed last
+  function noteStop(forward: boolean) {
+    if (_modal_visible() || document.activeElement instanceof HTMLTextAreaElement) return
+    _modal(forward ? 'nothing to go forward to' : 'nothing to go back to')
+  }
+
   let scrollToTopOnPopState = false
   let skipScrollForPopState = false
   function onPopState(e) {
@@ -3919,6 +4028,7 @@
     skipScrollForPopState = false
     if (!e?.state) {
       url_fragment = null // the launch's fragment, when still pending, is superseded (see below)
+      retireReturn() // and so is a stop's return on its way
       // empty state indicates a change in url fragment, which we use to navigate if it matches an item; this seems to be due to hash change triggering a change in state (to null), see step 12 in https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event#when_popstate_is_sent
       // the browser is then on a position of its own making: one more than the session's entries when the
       // fragment was just navigated to, an older one when it was traversed to, and which is not known. It is
@@ -3937,7 +4047,9 @@
         // browser was then on (review 4 of scroll_history)
         if (fragmentPosition) {
           fragmentPosition = false
-          history.replaceState({ owner: historyOwner, unknown: true }, '')
+          // (`fragment`: the browser made this position after one of the notebook's entries, which Back still
+          // reaches through it: no stop on it, below)
+          history.replaceState({ owner: historyOwner, unknown: true, fragment: true }, '')
         }
       }
       return
@@ -3963,15 +4075,72 @@
       // two positions of one index, and a link from the copy landed one entry short. Quiet for an entry
       // with an index (expected after a release and after a sign-out); nothing of the state is logged
       if (!ownEntry(e.state, historyOwner)) {
-        if (!(e.state.unknown === true && e.state.owner === historyOwner)) {
-          if (typeof e.state.index == 'undefined') console.warn('clearing onPopState w/ missing index')
+        const marker = e.state.unknown === true && e.state.owner === historyOwner
+        if (!marker) {
+          // (quiet either way: both are cleared as expected, and a stop leaves the console as it was; a state
+          // without an index was a warning until review 6 of scroll_history)
+          if (typeof e.state.index == 'undefined') console.debug('clearing onPopState w/ missing index')
           else console.debug('clearing onPopState of another notebook, or of older code')
           const shown = sessionStateHistory.get(sessionStateHistoryIndex)
           history.replaceState({ owner: historyOwner, unknown: true }, '', shown ? urlForState(shown) : undefined)
         }
         positionUnknown = true
         url_fragment = null // the launch's fragment, when still pending, is superseded (see below)
+        // THE STOP (the owner, 2026-11-18: Back past the first entry the page can take moved the browser while
+        // the page stayed, so Forward had to be pressed as often as Back had been). The browser has ALREADY
+        // moved when the route hears of it here (the Navigation API lets a page cancel some same-document
+        // traversals beforehand, under activation conditions: not used), so it goes back at once to
+        // the position of the entry the session is on (stopReturn, src/history_entries.ts: by the Navigation
+        // API's key, which also says which way the browser had moved), after what the position held is
+        // cleared, above, as before. Until the return arrives the browser IS on a position that holds no
+        // entry (positionUnknown: nothing is written there), and it stays one when no return can be said (no
+        // Navigation API, no entry at a known position) or the return fails: then the page is where it was
+        // left before the stop, with the list above the header hidden. The price, accepted by the owner: Back
+        // no longer walks out of the app THROUGH such a position (a long press on Back, or closing the tab,
+        // still leaves). Not at a native fragment's own position (`fragment`): that one lies between the
+        // notebook's own entries, and a stop there would keep Back from the entries before it
+        const landed = historyKey()
+        const stop = marker && e.state.fragment === true ? null : stopReturn(window['navigation']?.entries() ?? null, landed, sessionEntryKey)
+        if (landed === sessionEntryKey) sessionEntryKey = null // what that position held has been replaced
+        // a landing while an earlier return is still on its way: the new attempt takes its place (the writes
+        // kept are the held entry's all the same). Where none is made, ANOTHER NAVIGATION HAS TAKEN OVER, as at
+        // a fresh fragment: the earlier attempt is retired and its writes are dropped. Made from here instead
+        // (the refusal's way), a kept query was pushed from this position, a fragment's own behind the held
+        // entry, and the held entry and everything ahead of it were gone (review 7 of scroll_history)
+        if (!stop) retireReturn()
+        else {
+          stopView ??= { run: sessionRun, index: sessionStateHistoryIndex } // the held entry's view, until an edit is kept
+          const attempt = (stopPending = { ...stop, since: Date.now() })
+          const failed = () => refuseReturn(attempt)
+          try {
+            const { committed, finished } = window['navigation'].traverseTo(stop.key)
+            committed.catch(failed)
+            finished.catch(failed)
+          } catch {
+            failed()
+          }
+        }
         return
+      }
+      // the return of a stop has arrived (the position it went back to, by its key). The entry the session
+      // is on, which the page shows: the page stays EXACTLY as it is (no restore: its view is that entry's,
+      // and its position the reader's, which a scroll's write may not have recorded yet); the writes kept
+      // while the browser was away are made now, from this entry and in their order (stopWork); and the note
+      // says why nothing moved. While a page starts it shows no entry yet (initialize): the entry it was
+      // created on is restored below as any entry reached, and nothing kept is its own
+      const returned = stopPending && stopPending.key === historyKey() ? stopPending : null
+      if (returned) {
+        stopPending = null
+        if (e.state.run == sessionRun && e.state.index == sessionStateHistoryIndex && sessionStateHistory.get(e.state.index)) {
+          positionUnknown = false
+          stopView = null
+          for (const work of stopWork.splice(0)) work()
+          noteStop(returned.forward)
+          return
+        }
+        stopWork = []
+        stopView = null
+        noteStop(returned.forward)
       }
       // an entry of another run of the notebook's (numbered before a launch on a state that was not its own,
       // or before a navigation from a position that held none): the session moves to that run, and holds
@@ -4005,9 +4174,11 @@
     // handled after the welcome and the frames that follow initialization): handled later, it pushed the
     // departed entry's query over the entry reached and dropped the entries ahead (review 2 of scroll_history)
     url_fragment = null
+    retireReturn() // and a stop's return still on its way, to another entry than this one
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
     sessionStateHistoryIndex = state.index
+    sessionEntryKey = historyKey() // the browser is on the session's entry (the stop, above)
 
     // restore intro mode for narration
     intro = state.intro
@@ -8014,7 +8185,7 @@
 
   let lastScrollTime = 0
   let historyUpdatePending = false
-  let historyUpdateIndex = -1 // the session history index the pending write belongs to
+  let historyUpdateView: ViewEntry | null = null // the view the pending write was armed in (viewEntry)
   let historyUpdateTimer = null
   function onScroll() {
     if (!headerdiv) return
@@ -8049,16 +8220,15 @@
     // is pending: the page still shows the departed view under the destination's index
     const scrolledEntry = sessionStateHistory.get(sessionStateHistoryIndex)
     if (!popStateScrollPending && scrolledEntry?.scrolledToTop && !scrolledToTop())
-      replaceState(updatedEntry(currentState(), { scrolledToTop: false }))
-    if (!historyUpdatePending || historyUpdateIndex != sessionStateHistoryIndex) {
+      updateState({ scrolledToTop: false })
+    if (!historyUpdatePending || !sameView(historyUpdateView)) {
       clearTimeout(historyUpdateTimer)
       historyUpdatePending = true
-      historyUpdateIndex = sessionStateHistoryIndex
+      const armed = (historyUpdateView = viewEntry())
       historyUpdateTimer = setTimeout(() => {
         historyUpdatePending = false
-        if (sessionStateHistoryIndex != historyUpdateIndex) return // the view changed under the timer
         // console.debug("updating history.state.scrollPosition", document.body.scrollTop);
-        replaceState(updatedEntry(currentState(), { scrollPosition: document.body.scrollTop }))
+        updateState({ scrollPosition: document.body.scrollTop }, armed) // dropped when the view changed under the timer
       }, 250)
     }
   }
@@ -8435,7 +8605,7 @@
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
-  import { SessionEntries, decodedFragment, launchIdentity, ownEntry, startupPlace, updatedEntry } from '../history_entries'
+  import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry } from '../history_entries'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
@@ -9307,6 +9477,14 @@
     positionUnknown = false
     popStateDeferred = place.deferred
     if (place.held) sessionStateHistory.set(place.index, _.cloneDeep(place.held))
+    // where a stop goes back to (onPopState): the kept entry the session continues, which the browser is on;
+    // after a traversal while the page was starting, the entry the page was created on when its whole state
+    // was an entry of THIS notebook's (launchAnchor: the session holds none yet, so when the position reached
+    // is one the app cannot take, the browser returns to that entry, which is then restored as any entry
+    // reached). The owner alone admitted a cleared position, a fragment's and a damaged entry of the
+    // notebook's: a trip back to a position the app already knew it could not restore (review 6)
+    retireReturn()
+    sessionEntryKey = place.held ? historyKey() : place.deferred && launchAnchor(launchEntry, historyOwner) ? launchKey : null
     finalizeStateOnEditorChange = true // make initial empty state final
     regroupTimeRowsPending = regroupTimeRowsForced = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
     onEditorChange('') // initial sorting
@@ -10931,6 +11109,13 @@
   function onHistoryItemMouseDown(e, delta) {
     e.preventDefault() // prevent click & focus shift
     e.stopPropagation()
+    // a click that BEGINS on a position that holds no entry is consumed (a stop's return on its way: the list
+    // stays shown, and no distance holds until it lands), whatever ending an overdue return then changes: the
+    // kept edit it records there is a new entry under a new numbering, and the link's distance was from the
+    // old list (review 7 of scroll_history: history.go(-1) from the new entry, onto the rejected position)
+    const off = positionUnknown
+    returning() // (one long overdue ends here as refused, and the list goes)
+    if (off) return
     // if index is current state, history.go would reload so we just scroll to top
     if (delta == 0) {
       scrollTo(headerdiv.offsetTop)
@@ -12024,7 +12209,7 @@
   function onWebcamClick(e) {
     intro = !intro
     // replace state except for first (always intro)
-    if (sessionStateHistoryIndex > 0) replaceState(updatedEntry(currentState(), { intro }))
+    if (sessionStateHistoryIndex > 0) updateState({ intro })
     e.stopPropagation()
     ;(e.target as HTMLElement).classList.toggle('intro')
   }
@@ -12139,7 +12324,7 @@
             </div>
             <div class="history">
               <div class="history-container">
-                {#each sessionStateHistory.links(positionUnknown ? null : sessionStateHistoryIndex) as link}
+                {#each sessionStateHistory.links(positionUnknown && !stopPending ? null : sessionStateHistoryIndex) as link}
                   <div
                     class="history-item"
                     class:current={link.delta == 0}
@@ -12294,6 +12479,7 @@
   on:popstate={onPopState}
   on:beforeunload={onBeforeUnload}
   on:pageshow={onPageShow}
+  on:pagehide={retireReturn}
   on:online={onOnline}
   on:offline={onOffline}
 />

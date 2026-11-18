@@ -1509,6 +1509,8 @@ test("after a reload on a re-ranked first view, a todo row's click and Back retu
 // first
 test("after a sign-out in the same tab, Back onto the account's entries keeps its query out of the next notebook (the MindBox, the list above the header, the listeners' input) and leaves the page where it is, with no link offered and nothing written there; Forward again restores the visitor's entry, and its link lands on the entry it names; a query typed on such a position starts the numbering anew", async ({ page }) => {
   const QUERY = 'switch row private words'
+  const AHEAD = 'switch row words ahead'
+  const CLEARED = JSON.stringify({ owner: '|anonymous|', unknown: true }) // what a position that held another notebook's entry holds
   const warnings: string[] = []
   page.on('console', msg => void (msg.type() == 'warning' && msg.text().includes('onPopState') && warnings.push(msg.text())))
   await signIn(page, SWITCH_USER)
@@ -1530,6 +1532,16 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   await expect(mindbox(page)).toHaveValue('#e2e_switch_tag ', { timeout: 10_000 })
   expect(await entries(page), "the tag click's entry, after the query's").toEqual([queryIndex + 2, queryIndex + 1])
   expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index - 1].editorText)).toBe(QUERY)
+  // one entry more, a second free-text query, and Back from it: the sign-out happens with an entry of the
+  // account's AHEAD as well (the visitor's launch replaces the entry it happens on, which keeps what is ahead)
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true })) // in place: the box can hold the focus already
+  await expect(mindbox(page)).toBeFocused()
+  await mindbox(page).fill(AHEAD)
+  await expect.poll(() => page.evaluate(() => history.state?.editorText), { timeout: 10_000 }).toBe(AHEAD)
+  expect(await entries(page), "the second query's entry, after the tag click's").toEqual([queryIndex + 3, queryIndex + 2])
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_switch_tag ', { timeout: 10_000 })
 
   // the sign-out, by the header's own control: the same tab reloads as the anonymous notebook, a visitor's
   await page.locator('img.user').click()
@@ -1537,15 +1549,49 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   await waitForApp(page)
   expect(await entries(page), "the visitor's session starts its own numbering on the entry the account left").toEqual([1, 0])
   await expect(mindbox(page)).toHaveValue('')
+
+  // FORWARD ONTO THE ACCOUNT'S ENTRY AHEAD STOPS (the stop, the owner 2026-11-18: the browser has moved
+  // before the app hears of it, so the app goes back at once to the entry the page shows; see the stop's
+  // row in editor.spec.ts for Back). The `popstate` carried the account's second query; nothing of it
+  // reaches the notebook, the browser is on the visitor's entry again, and the note names the way it had
+  // moved. Every state a popstate brings is noted beside the app, from here on
+  await page.evaluate(() => void window.addEventListener('popstate', e => void ((window as any).__popped ??= []).push(e.state?.editorText), true))
+  await page.goForward()
+  await expect(page.locator('.background.visible .modal'), 'the note of a stop after Forward').toHaveText('nothing to go forward to')
+  expect(await page.evaluate(() => (window as any).__popped), "Forward reached the account's entry, and the browser came back to the visitor's").toEqual([AHEAD, ''])
+  expect(
+    await page.evaluate(query => {
+      const w = window as any
+      return [(document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value, history.state.index, w._history.length, w._history_index, JSON.stringify([history.state, w._history]).includes(query)]
+    }, AHEAD),
+    "the page stays on the visitor's first view, its entry the browser's again, the account's query nowhere"
+  ).toEqual(['', 0, 1, 0, false])
+  await page.mouse.click(5, 5)
+  await expect(page.locator('.background.visible'), 'a click outside dismisses the note').toHaveCount(0)
+  expect(warnings, 'the handler warned of nothing').toEqual([])
+  // THE REST OF THE ROW RUNS WITHOUT THE NAVIGATION API (hidden here, as in a browser that lacks it): no
+  // return can be said then, and the page stays on a position that holds no entry of the notebook's, as it
+  // did before the stop: what follows is that behaviour, unchanged. First, the position the stop left: what
+  // it held was cleared before the browser went back
+  await page.evaluate(() => void Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }))
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: "the account's entry ahead was cleared by the stop; without the Navigation API the browser stays on it" }).toBe(CLEARED)
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(0)
   // the visitor's first view, left 120 px below the header (the position it is restored at, further down)
   const left = (await header(page)) + 120
-  await page.evaluate(y => document.body.scrollTo(0, y), left)
+  // (set until it holds: the scroll of the entry just restored can land after the first)
+  await expect
+    .poll(async () => {
+      await page.evaluate(y => document.body.scrollTo(0, y), left)
+      await page.waitForTimeout(150)
+      return top(page)
+    })
+    .toBe(left)
   await recorded(page)
   expect(await top(page)).toBe(left)
-  // the visitor's own listener (a visitor's item is local) and the item its tag names; every state a
-  // popstate brings is noted beside the app
+  // the visitor's own listener (a visitor's item is local) and the item its tag names
   await page.evaluate(() => {
-    window.addEventListener('popstate', e => void ((window as any).__popped ??= []).push(e.state?.editorText), true)
     void window._create('#e2e_switch_other an item of the visitor')
     void window._create(
       '#e2e_switch_listener #_listen names #e2e_switch_other\n```js\nfunction _on_change(text) { (window.__heard ??= []).push(text) }\nfunction _on_search(text) { (window.__heard ??= []).push(text) }\n```'
@@ -1581,7 +1627,6 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   const links = page.locator('.history-item') // the list above the header
   // the browser's state and the session's place: the index, and the position its entry there recorded
   const place = () => page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_index, (window as any)._history[(window as any)._history_index].scrollPosition])
-  const CLEARED = JSON.stringify({ owner: '|anonymous|', unknown: true }) // what a position that held another notebook's entry holds
   // Back to the visitor's first view: where it was left, the typed query's link above the header
   await page.goBack()
   await expect(mindbox(page)).toHaveValue('#e2e_switch_listener')

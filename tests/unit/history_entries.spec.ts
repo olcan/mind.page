@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { SessionEntries, decodedFragment, launchIdentity, ownEntry, startupPlace, updatedEntry, type HistoryEntry } from '../../src/history_entries.js'
+import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, type HistoryEntry } from '../../src/history_entries.js'
 
 const OWNER = '|alice|'
 const entry = (index: number, editorText = '', more: Record<string, unknown> = {}): HistoryEntry => ({ index, owner: OWNER, run: 1, editorText, ...more })
@@ -195,4 +195,56 @@ test('a fragment is read as text, and a malformed one names nothing', () => {
     expect(() => decodeURIComponent(hash), hash).toThrow(URIError)
     expect(decodedFragment(hash), hash).toBe('')
   }
+})
+
+test('a stop goes back to the position of the entry the session is on, by its key, and says which way the browser had moved; no return where none can be said', () => {
+  // the browser's list as the Navigation API gives it: another account's two entries, the notebook's two, one of older code
+  const places = ['a1', 'a2', 'n1', 'n2', 'old'].map((key, index) => ({ key, index }))
+  // Back from the notebook's first entry onto the other account's: forward again to the entry the page shows
+  expect(stopReturn(places, 'a2', 'n1')).toEqual({ key: 'n1', forward: false })
+  // Forward from its last entry onto the one of older code: back again
+  expect(stopReturn(places, 'old', 'n2')).toEqual({ key: 'n2', forward: true })
+  // a jump (a long press on Back, a second Back before the first return has landed): the return is to the
+  // KEY, whatever the distance
+  expect(stopReturn(places, 'a1', 'n2')).toEqual({ key: 'n2', forward: false })
+  // the index is the position's place in the list NOW: the browser has dropped its first two positions
+  const shifted = places.slice(2).map(({ key }, index) => ({ key, index }))
+  expect(stopReturn(shifted, 'old', 'n1')).toEqual({ key: 'n1', forward: true })
+  // no return, and the page stays on the position as before the stop:
+  expect(stopReturn(null, 'a2', 'n1'), 'a browser without the Navigation API').toBeNull()
+  expect(stopReturn(places, null, 'n1'), 'no key for the position landed on').toBeNull()
+  expect(stopReturn(places, 'a2', null), 'the session holds no entry at a position it knows').toBeNull()
+  expect(stopReturn(shifted, 'old', 'a2'), "the held position is no longer in the browser's list").toBeNull()
+  expect(stopReturn(shifted, 'a1', 'n1'), 'the position landed on is not in the list').toBeNull()
+  expect(stopReturn(places, 'n1', 'n1'), 'the held position itself, its entry replaced by another writer').toBeNull()
+})
+
+test("the entry a page was created on is a stop's return address only when its whole state was an entry of this notebook's", () => {
+  const anchor = (state: unknown, owner: string | null = OWNER) => launchAnchor(launchIdentity(state), owner)
+  expect(anchor(entry(3, 'a query', { scrollPosition: 640, final: true }))).toBe(true)
+  expect(anchor(of(11, 1, "an older run's entry")), 'an entry of an older run is the notebook\'s too').toBe(true)
+  // states that NAME the notebook and are no entry the restore can consume: the owner alone admitted each
+  // (a reload on one, an early Back onto another rejected position, and the app asked for a trip back to it)
+  const named: [unknown, string][] = [
+    [MARKER, 'a cleared position'],
+    [{ ...MARKER, fragment: true }, "a fragment's own position"],
+    [{ ...entry(3, 'q'), index: -1 }, 'a numbered state whose index is no distance'],
+    [{ owner: OWNER, index: 3, editorText: 'q' }, 'one without a run'],
+    [{ ...entry(3, 'q'), editorText: 7 }, 'one whose query is no text'],
+    [{ ...entry(3, 'q'), scrollPosition: 'top' }, 'one whose position is no number'],
+  ]
+  for (const [state, why] of named) {
+    expect(launchIdentity(state).owner, why).toBe(OWNER)
+    expect(anchor(state), why).toBe(false)
+  }
+  // an entry of another notebook's, well formed under its own owner; one of older code; no state; no notebook yet
+  expect(launchIdentity({ ...entry(3, 'q'), owner: '|bob|' }).own).toBe(true)
+  expect(anchor({ ...entry(3, 'q'), owner: '|bob|' })).toBe(false)
+  expect(anchor({ index: 3, editorText: 'q' })).toBe(false)
+  expect(anchor(null)).toBe(false)
+  expect(anchor(entry(3, 'q'), null)).toBe(false)
+  expect(launchAnchor(null, OWNER)).toBe(false)
+  // the identity that startupPlace compares is the three fields, as before: a launch on a marker is a launch there
+  expect(startupPlace(OWNER, launchIdentity(MARKER), MARKER, false)).toEqual({ deferred: false, index: 0, run: null, held: null })
+  expect(startupPlace(OWNER, launchIdentity(entry(3, 'q')), entry(3, 'q'), true).deferred, 'the same entry again is no move').toBe(false)
 })
