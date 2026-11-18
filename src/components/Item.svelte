@@ -12,6 +12,14 @@
   // not be reused after the swap to the web font; spacers already inserted are not resized by
   // either, as before)
   const MENU_INDEX_DIGITS = 4
+  // the number's own left padding (.index, css below: 0 4px). where the number is the menu's first
+  // button the placeholder that keeps the item's text clear (afterUpdate, below) is narrower than
+  // the menu by this much: the padding is no room the text has to keep out of, and with it the text
+  // stood about 7px from a digit that sits mostly in the item's own padding (the owner, 2026-11-17:
+  // "it is not clear that extra space is needed since the item content has its own padding");
+  // about 3px remain, by the placeholder's margins. a menu that starts with another button (run)
+  // keeps its full width free
+  const MENU_INDEX_PAD = 4
   // the digit count of a number that gets the fixed width, 0 for a longer one
   function menuDigits(index: number) {
     const digits = String(index + 1).length
@@ -1479,7 +1487,8 @@
     // NOTE: empirically, svelte replaces _children_ of itemdiv, so any attributes must be stored on children
     //       (otherwise changes to children, e.g. rendered math, can disappear and not get replaced)
 
-    // insert right-floating div same size as .item-menu, which will also serve as first element of itemdiv
+    // insert right-floating div that keeps the item's text clear of .item-menu (the menu's height, and its
+    // width less MENU_INDEX_PAD where the number comes first), which will also serve as first element of itemdiv
     // NOTE: this is a workaround for a null-parent exception if .item-menu is placed inside .item by Svelte
     // the div follows the digit count of the item's number (_digits): the menu is as wide as the
     // digits, and a re-ranked item's number gains or loses a digit without its children being replaced
@@ -1496,7 +1505,8 @@
       // of a second of the initial render at desktop speed on a 1600-item corpus (init_perf, 2026-09-07)
       const zoom = (itemdiv.closest('.items') as HTMLElement | null)?.style.zoom ?? ''
       const size = menuSize(menu, zoom, digits)
-      div.style.width = size.width + 'px'
+      const pad = menu.firstElementChild?.classList.contains('index') ? MENU_INDEX_PAD : 0 // see MENU_INDEX_PAD
+      div.style.width = size.width - pad + 'px'
       div.style.height = size.height + 'px'
       div.setAttribute('_digits', digits.toString())
       if (!inserted) {

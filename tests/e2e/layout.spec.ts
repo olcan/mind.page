@@ -90,7 +90,8 @@ test('column layout follows viewport width, keeping items unique, ordered and co
 })
 
 // the floating menu placeholder (the spacer inserted by Item.svelte's afterUpdate) must match its
-// item's menu: the menu size is measured once per menu shape, digit count and zoom and reused
+// item's menu (its height, and its width less the number's own left padding where the number is the
+// menu's first button: MENU_INDEX_PAD, 2026-11-17): the menu size is measured once per menu shape, digit count and zoom and reused
 // (menuSize), and the item's number is the menu's only per-item content, so a number of at most
 // four digits gets a fixed width, one ch a digit (.index.reserved; 4ch at every count until
 // 2026-11-17), and sizes the menu by its digit count alone. pinned across the 9/10 and 99/100
@@ -107,9 +108,12 @@ const spacerAndMenu = (page: Page, position: number) =>
     const elem = item.elem ?? (await window._render_item(item))
     const menu = elem.querySelector('.item-menu') as HTMLElement
     const spacer = elem.querySelector('#menu-' + seeded.id) as HTMLElement
+    const first = menu.firstElementChild as HTMLElement
     return {
       number: position + 1,
       runnable: !!seeded.runnable,
+      // the number's left padding, where the number is the menu's first button: no room the text keeps free
+      pad: first.classList.contains('index') ? parseFloat(getComputedStyle(first).paddingLeft) : 0,
       menu: [menu.clientWidth, menu.clientHeight],
       spacer: [parseFloat(spacer.style.width), parseFloat(spacer.style.height)],
     }
@@ -167,7 +171,8 @@ test('menu placeholders match their menus across digit boundaries, menu kinds an
   expect(sizes.some(size => size.runnable) && sizes.some(size => !size.runnable)).toBe(true)
   for (const size of sizes) {
     expect(size.menu[0], `menu ${size.number} has a width`).toBeGreaterThan(0)
-    expect(size.spacer, `spacer of item ${size.number} (runnable ${size.runnable})`).toEqual(size.menu)
+    expect(size.pad, `the number's padding counts for item ${size.number} alone when no run button stands before it`).toBe(size.runnable ? 0 : 4)
+    expect(size.spacer, `spacer of item ${size.number} (runnable ${size.runnable})`).toEqual([size.menu[0] - size.pad, size.menu[1]])
   }
   // the one-digit and four-digit cases: a menu's width follows its number's digit COUNT and nothing
   // else of the number (what the cached size relies on), the box is one ch a digit and the digits
@@ -194,7 +199,8 @@ test('menu placeholders match their menus across digit boundaries, menu kinds an
 // first line of the item's text ended that much earlier, which a phone's window feels most). In a
 // phone's window (390 px, touch) the number's box is as wide as its digits at every digit count
 // the corpus has (one ch a digit, in the menu's own font), the digits fit it and the placeholder
-// is the menu's. The placeholder also FOLLOWS the number: an item whose number gains a digit with
+// keeps the menu's height and the width the text has to keep clear (the menu's, less the number's
+// own left padding on these plain items). The placeholder also FOLLOWS the number: an item whose number gains a digit with
 // nothing of its own changed (items ranked above it: its children are not replaced) keeps the
 // placeholder it has, resized. A touched item is ranked first below the pinned ones, so the first
 // one touched is counted up to 9 by the touches after it, shown by the session's toggle, and
@@ -216,6 +222,10 @@ const numberRoom = (page: Page, id: string, mark = false) =>
     const ch = probe.getBoundingClientRect().width
     probe.remove()
     const kept = spacer.kept === true // the placeholder element the marking call saw
+    const first = menu.firstElementChild as HTMLElement
+    const pad = first == index ? parseFloat(getComputedStyle(index).paddingLeft) : 0
+    const digits = document.createRange()
+    digits.selectNodeContents(index.firstChild!) // the number's text, without the probe
     if (mark) spacer.kept = true
     return {
       number: index.textContent!.trim(),
@@ -225,6 +235,8 @@ const numberRoom = (page: Page, id: string, mark = false) =>
       overflow: index.scrollWidth - index.clientWidth,
       menu: menu.clientWidth,
       spacer: parseFloat(spacer.style.width),
+      room: menu.clientWidth - pad, // the placeholder's width: the menu's, less the number's left padding
+      clear: digits.getBoundingClientRect().left - spacer.getBoundingClientRect().left, // from the text's limit to the digits
       kept,
     }
   }, { id, mark })
@@ -245,7 +257,9 @@ test("an item's number keeps free the room of its own digits, and its placeholde
     expect(room.ch, 'one ch of the number').toBeGreaterThan(0)
     expect(room.box, `the box of ${room.number} is as wide as its digits (${digits} ch)`).toBeCloseTo(digits * room.ch, 1)
     expect(room.overflow, `the digits of ${room.number} fit their box`).toBe(0)
-    expect(room.spacer, `the placeholder of ${room.number} is its menu's`).toBe(room.menu)
+    expect(room.spacer, `the placeholder of ${room.number} is its menu's, less the number's own padding`).toBe(room.room)
+    expect(room.spacer, `the placeholder of ${room.number} is narrower than its menu`).toBeLessThan(room.menu)
+    expect([room.clear > 2, room.clear < 5], `the text comes to about 3 px from the digits of ${room.number} (${room.clear})`).toEqual([true, true])
   }
 
   // the first item touched is ranked right below the pinned ones, and each touch after it counts it
@@ -272,11 +286,11 @@ test("an item's number keeps free the room of its own digits, and its placeholde
   await toggle.click()
   await expect.poll(() => numberOf(followed)).toBe(9)
   const nine = await numberRoom(page, followed, true) // marks the placeholder shown at number 9
-  expect([nine.number, nine.shown, nine.spacer], 'the item is shown as number 9, its placeholder its menu\'s').toEqual(['9', true, nine.menu])
+  expect([nine.number, nine.shown, nine.spacer], 'the item is shown as number 9, its placeholder its menu\'s less the padding').toEqual(['9', true, nine.room])
   await touch(others.shift()!)
   await expect.poll(() => numberOf(followed)).toBe(10)
   // identity and width in ONE read, and no read marks: a replacement of the right size is no pass
-  await expect.poll(async () => (room => room.kept && room.spacer == room.menu)(await numberRoom(page, followed)), { message: 'the marked placeholder follows the number to two digits', timeout: 5_000 }).toBe(true)
+  await expect.poll(async () => (room => room.kept && room.spacer == room.room)(await numberRoom(page, followed)), { message: 'the marked placeholder follows the number to two digits', timeout: 5_000 }).toBe(true)
   const ten = await numberRoom(page, followed)
   expect([ten.number, ten.shown, ten.kept], 'the same placeholder, in the item still shown: its children were not replaced').toEqual(['10', true, true])
   expect(ten.menu, 'a second digit widens the menu').toBeGreaterThan(nine.menu)
