@@ -1186,6 +1186,45 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.locator('.background.visible').click({ position: { x: 4, y: 4 } }) // no buttons: the background cancels the dialog
   await expect(snoozeDialog).toBeHidden({ timeout: 10_000 })
   await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(true)
+
+  // THE DONE BIN (the owner, 2026-11-17: "done" never deletes, it always converts the todo to
+  // #done, named or not, small or large): a NAMED todo that fits its row (the agent's answer is
+  // a token in the snippet), dropped on the done bin by a real drag, keeps its item: the todo
+  // tag and nothing else is rewritten, through the app's own tag replacer over its grammar view
+  // (the label, a longer tag, as written, so the item keeps its name; a second tag in another
+  // case converted too; the answer's bytes as written, its own #todo too), the row leaves the
+  // list, and no dialog comes on the way. Until then the todoer deleted such a todo, after the
+  // app's "Delete ...?" for a named item (dismissed here, so the todo would have stayed as it
+  // was, with the todoer's "could not complete" alert)
+  const DONE = '#todo-e2e'
+  const DONE_ANSWER = '<!--inert-->\nagent: closed; the #todo list is one shorter\n<!--/inert-->'
+  await page.evaluate(text => void window._create(text), `${DONE} #todo close me (#ToDo)\n${DONE_ANSWER}`)
+  await expect.poll(() => savedId(page, DONE), { timeout: 30_000 }).toBeTruthy()
+  const doneId = (await savedId(page, DONE))!
+  await expect.poll(() => serverText(doneId), { timeout: 30_000 }).toBe(`${DONE} #todo close me (#ToDo)\n${DONE_ANSWER}`)
+  await page.evaluate(() => {
+    ;(window as any).MindBox.set('')
+    document.body.scrollTop = 0
+  })
+  await mainList.locator('> .list-item-container', { hasText: 'close me' }).scrollIntoViewIfNeeded()
+  expect((await lists(page)).main.map(r => r[0]), 'the row: the label, then the snippet without the answer').toContain(`${DONE} #todo close me (#ToDo)`)
+  const asked = dialogs.length
+  await grab('close me')
+  {
+    const row = await rowBox('close me')
+    await dragTo(
+      { x: row.x + 52, y: row.y + row.height / 2 },
+      async () => {
+        const bin = (await page.locator('.todoer-widget').first().locator('.done.bin').boundingBox())!
+        return { x: bin.x + bin.width / 2, y: bin.y + bin.height / 2 }
+      },
+      { inject: false }
+    )
+  }
+  await expect.poll(() => serverText(doneId), { message: 'the done bin: the todo tags alone rewritten over the grammar view, the item kept', timeout: 30_000 }).toBe(`${DONE} #done close me (#done)\n${DONE_ANSWER}`)
+  await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('close me')), { timeout: 30_000 }).toBe(false)
+  expect(await page.evaluate(name => (window._item(name, true) as any)?.tags ?? null, DONE), 'the item stays under its name, no longer a todo').toEqual(['#todo-e2e', '#done'])
+  expect(dialogs.slice(asked), 'no question and no refusal on the way').toEqual([])
 })
 
 // THE FIRST VIEW'S POSITION IN HISTORY (the owner, 2026-11-17: after a launch, a todo row's click selected
