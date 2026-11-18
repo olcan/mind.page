@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { focusMindbox, mindbox } from './editor_helpers.js'
@@ -16,8 +16,9 @@ import { customToken, firestore, install, interceptMindItems, secretFor, signIn,
 // the item back on top of the main list; (d) a re-delegation carries the current epoch, and a
 // take-back overlays the main list immediately while a further delegate is refused; (e) a
 // body over the bridge's stored-size cap is refused before anything is written; (f) the drag
-// gesture to the agent bin is the same enqueue. The last row (the first view's position in
-// history after a launch) runs over an account of its own
+// gesture to the agent bin is the same enqueue. The last three rows (the first view's position in
+// history after a launch; Back after a reload and a todo row's click; Back after a sign-out) run over an
+// account of their own each
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 test.use({ hasTouch: true }) // phase (c4) sends real touch input (CDP); nothing else in the lane depends on touch
@@ -45,12 +46,17 @@ const FIXTURE = resolve('tests/e2e/fixtures/task_command.json')
 // and nothing else, so its launches re-rank and scroll for the row's reasons alone
 const LAUNCH_USER: TestUser = { uid: 'tasks_launch_e2e', displayName: 'Tasks Launch', email: 'tasks_launch@e2e.test' }
 const LAUNCH_SECRET = secretFor(LAUNCH_USER, PHRASE)
+// the reload row's own account (the row after it), of the same make
+const RELOAD_USER: TestUser = { uid: 'tasks_reload_e2e', displayName: 'Tasks Reload', email: 'tasks_reload@e2e.test' }
+const RELOAD_SECRET = secretFor(RELOAD_USER, PHRASE)
+// the sign-out row's account (the last row): no todoer, two items
+const SWITCH_USER: TestUser = { uid: 'tasks_switch_e2e', displayName: 'Tasks Switch', email: 'tasks_switch@e2e.test' }
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -1308,16 +1314,19 @@ test('a delegation enqueues one command document, marks the item, and moves it t
 // the timing. A launch with a query in the address leaves the
 // same first entry behind (the query's entry is pushed before the listener's write): its Back is the
 // row's last phase
-test("after a launch a todo row's click scrolls to its item, and Back returns to where the launch left the page, at the header; so does Back from a launch with a query in the address; a position recorded at the page's very top is restored as recorded", async ({ page, context }) => {
-  const TODO = '#e2e_launch_todo'
-  const ELSEWHERE = '#e2e_launch_elsewhere'
-  const loaded = async (page: Page) => {
-    await waitForApp(page)
-    await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
-  }
+// what the two launch rows below share: their account's making, a launch, and what they read off a page
+const loaded = async (page: Page) => {
+  await waitForApp(page)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+}
+// a new account with the todoer and its pinned widgets, a tall pinned item (the item a row names is ranked
+// below the pinned ones, out of view from the header), an item another device changes (`<prefix>_elsewhere`)
+// and, created last, one todo (`<prefix>_todo`: a rewrite of the other item then moves it above the todo, a
+// change of the order); the page is closed with everything saved, and the other item's id returned
+async function launchAccount(page: Page, user: TestUser, prefix: string) {
   expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
   await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
-  await signIn(page, LAUNCH_USER)
+  await signIn(page, user)
   await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
   await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
   await waitForApp(page)
@@ -1329,45 +1338,52 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await loaded(page)
   await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
   await expect.poll(() => page.locator('.todoer-widget').count(), { timeout: 30_000 }).toBe(2)
-  // the todo is created last: the rewrite below then moves the other item above it, a change of the order
-  const TALL = `#_pin/e2e_launch_tall\n${'a tall pinned item\n\n'.repeat(20)}`
-  for (const text of [TALL, `${ELSEWHERE} an item another device changes`, `${TODO}\n#todo reach the item below`]) await page.evaluate(text => void window._create(text), text)
-  await expect.poll(() => savedId(page, ELSEWHERE), { timeout: 30_000 }).toBeTruthy()
-  const elsewhereId = (await savedId(page, ELSEWHERE))!
+  const TALL = `#_pin/${prefix}_tall\n${'a tall pinned item\n\n'.repeat(20)}`
+  for (const text of [TALL, `#${prefix}_elsewhere an item another device changes`, `#${prefix}_todo\n#todo reach the item below`]) await page.evaluate(text => void window._create(text), text)
+  await expect.poll(() => savedId(page, `#${prefix}_elsewhere`), { timeout: 30_000 }).toBeTruthy()
+  const elsewhereId = (await savedId(page, `#${prefix}_elsewhere`))!
   await saved()
   await page.close()
-  await rewriteText(elsewhereId, text => text + ', changed elsewhere', LAUNCH_SECRET)
+  return elsewhereId
+}
+// a launch in a new tab of the profile
+async function launch(context: BrowserContext, url: string, stall = 0) {
+  const launched = await context.newPage()
+  expect(await interceptMindItems(launched)).toBe(true) // the installed items' /watch requests answered
+  if (stall) await launched.addInitScript(ms => void (window._initialize_stall_ms = ms), stall)
+  await launched.goto(url)
+  await loaded(launched)
+  return launched
+}
+const top = (page: Page) => page.evaluate(() => document.body.scrollTop)
+const header = (page: Page) => page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+// within 2 px (scrollTo lands a fractional scrollTop); a failure names both positions
+const at = (page: Page, y: () => Promise<number>, message: string) =>
+  expect
+    .poll(async () => ((now, want) => (Math.abs(now - want) <= 2 ? 'there' : `at ${now}, not ${want}`))(await top(page), await y()), { message, timeout: 10_000 })
+    .toBe('there')
+const entries = (page: Page) => page.evaluate(() => [(window as any)._history.length, (window as any)._history_index])
+// the current entry holds the position shown, the scroll listener's write done
+const recorded = (page: Page) =>
+  expect
+    .poll(() => page.evaluate(() => !(window as any)._history_update_pending && (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop), {
+      message: 'the position shown is recorded',
+      timeout: 10_000,
+    })
+    .toBe(true)
+const box = (page: Page) => page.evaluate(() => (window as any).MindBox.get())
+// the todo's row in the main list (a click at its right end, past its text, selects the item and scrolls to it)
+const todoRow = (page: Page) => page.locator('.todoer-widget').first().locator('.list > .list-item-container', { hasText: 'reach the item below' }).locator('.list-item')
 
-  // a launch in a new tab of the profile, and what the row reads off a launched page
-  const launch = async (url: string, stall = 0) => {
-    const launched = await context.newPage()
-    expect(await interceptMindItems(launched)).toBe(true) // the installed items' /watch requests answered
-    if (stall) await launched.addInitScript(ms => void (window._initialize_stall_ms = ms), stall)
-    await launched.goto(url)
-    await loaded(launched)
-    return launched
-  }
-  const top = (page: Page) => page.evaluate(() => document.body.scrollTop)
-  const header = (page: Page) => page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
-  // within 2 px (scrollTo lands a fractional scrollTop); a failure names both positions
-  const at = (page: Page, y: () => Promise<number>, message: string) =>
-    expect
-      .poll(async () => ((now, want) => (Math.abs(now - want) <= 2 ? 'there' : `at ${now}, not ${want}`))(await top(page), await y()), { message, timeout: 10_000 })
-      .toBe('there')
-  const entries = (page: Page) => page.evaluate(() => [(window as any)._history.length, (window as any)._history_index])
-  // the current entry holds the position shown, the scroll listener's write done
-  const recorded = (page: Page) =>
-    expect
-      .poll(() => page.evaluate(() => !(window as any)._history_update_pending && (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop), {
-        message: 'the position shown is recorded',
-        timeout: 10_000,
-      })
-      .toBe(true)
-  const box = (page: Page) => page.evaluate(() => (window as any).MindBox.get())
+test("after a launch a todo row's click scrolls to its item, and Back returns to where the launch left the page, at the header; so does Back from a launch with a query in the address; a position recorded at the page's very top is restored as recorded", async ({ page, context }) => {
+  const TODO = '#e2e_launch_todo'
+  const ELSEWHERE = '#e2e_launch_elsewhere'
+  const elsewhereId = await launchAccount(page, LAUNCH_USER, 'e2e_launch')
+  await rewriteText(elsewhereId, text => text + ', changed elsewhere', LAUNCH_SECRET)
 
   // (a) the launch: the change made elsewhere arrives with the server's revision and re-ranks the page
   // before the first view's position is recorded; the page shows the header
-  const launched = await launch('/', 2_500)
+  const launched = await launch(context, '/', 2_500)
   await expect.poll(() => launched.evaluate(name => window._item(name, true)?.text ?? null, ELSEWHERE), { timeout: 30_000 }).toContain('changed elsewhere')
   await at(launched, () => header(launched), 'the launch leaves the page at the header')
   await recorded(launched)
@@ -1380,7 +1396,7 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   expect(await launched.evaluate(() => (window as any)._history[0].scrollPosition ?? 0), 'entry 0 missed the scroll write: the re-ranking pushed before the first position was recorded').toBe(0)
   // (b) the row's click (at its right end, past its text) selects the item and scrolls to it, in the
   // re-ranking's entry; Back is the first view, at the header
-  const row = launched.locator('.todoer-widget').first().locator('.list > .list-item-container', { hasText: 'reach the item below' }).locator('.list-item')
+  const row = todoRow(launched)
   await expect(row).toBeVisible()
   const rowBox = (await row.boundingBox())!
   await row.click({ position: { x: rowBox.width - 8, y: rowBox.height / 2 } })
@@ -1415,7 +1431,7 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
 
   // (c) a launch with a query in the address: the query's entry is pushed over the first one, and the
   // page scrolls to the item it names; Back is the first view, which this launch never showed, at the header
-  const named = await launch('/' + TODO)
+  const named = await launch(context, '/' + TODO)
   await expect.poll(() => box(named), { timeout: 10_000 }).toBe(TODO + ' ')
   await expect.poll(async () => (await top(named)) - (await header(named)), { message: 'the launch scrolled to the named item', timeout: 10_000 }).toBeGreaterThan(300)
   await recorded(named)
@@ -1423,4 +1439,221 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await named.goBack()
   await expect.poll(() => box(named), { timeout: 10_000 }).toBe('')
   await at(named, () => header(named), "Back from the address's query shows the first view at the header")
+})
+
+// BACK AFTER A RELOAD AND A TODO ROW'S CLICK (the owner, 2026-11-17, on the fix the row above came with:
+// after a reload, a todo row's click and Back logged "ignoring onPopState for current index", and the
+// page stayed on the item). A page that a change made elsewhere has re-ranked sits on a second entry of the
+// empty query, which is not final: a reload keeps that entry in the browser, with its state and its index
+// 1, and the row's click replaces it. A session that numbered its entries from 0 again made that entry its
+// entry 0, so Back onto the first view's kept entry, index 0 too, read as the current one: the handler
+// replaced it with the item's state ("inconsistent state"), ignored it, and the page stayed. The session
+// continues at the kept entry's index instead, and takes an entry it does not know as the browser holds it.
+// The first view is left 120 px below the header before the change arrives, so Back shows that the entry's
+// own position is restored, not the header's
+test("after a reload on a re-ranked first view, a todo row's click and Back return to the first view where it was left, Forward to the item, and the history handler warns of nothing", async ({ page, context }) => {
+  const TODO = '#e2e_reload_todo'
+  const elsewhereId = await launchAccount(page, RELOAD_USER, 'e2e_reload')
+  const tab = await launch(context, '/')
+  const warnings: string[] = []
+  tab.on('console', msg => void (msg.type() == 'warning' && msg.text().includes('onPopState') && warnings.push(msg.text())))
+  // what the page shows with what the handler logged, so that a failure names both
+  const shows = (text: string, message: string) => expect.poll(async () => ({ box: await box(tab), warnings }), { message, timeout: 10_000 }).toEqual({ box: text, warnings: [] })
+  await at(tab, () => header(tab), 'the launch leaves the page at the header')
+  await recorded(tab)
+  expect(await entries(tab), 'a quiet launch: one entry').toEqual([1, 0])
+  const left = (await header(tab)) + 120
+  await tab.evaluate(y => document.body.scrollTo(0, y), left)
+  await recorded(tab)
+  expect(await top(tab), 'the first view, left below the header').toBe(left)
+  // the change made elsewhere re-ranks the first view: a second entry of the empty query, not final
+  await rewriteText(elsewhereId, text => text + ', changed elsewhere', RELOAD_SECRET)
+  await expect.poll(() => tab.evaluate(name => window._item(name, true)?.text ?? null, '#e2e_reload_elsewhere'), { timeout: 30_000 }).toContain('changed elsewhere')
+  expect(await entries(tab), "the re-ranking's entry").toEqual([2, 1])
+  await recorded(tab)
+  // the reload: the page starts on the entry the browser kept, at the header
+  await tab.reload()
+  await loaded(tab)
+  await at(tab, () => header(tab), 'the reloaded page is at the header')
+  await recorded(tab)
+  expect(await tab.evaluate(() => [history.state.index, history.state.editorText, history.state.final]), 'the kept entry: the second one, of the empty query, not final').toEqual([1, '', false])
+  // the row's click replaces that entry (it is not final); Back is the first view's kept entry
+  const row = todoRow(tab)
+  await expect(row).toBeVisible()
+  const rowBox = (await row.boundingBox())!
+  await row.click({ position: { x: rowBox.width - 8, y: rowBox.height / 2 } })
+  await expect.poll(() => box(tab), { timeout: 10_000 }).toBe(TODO)
+  await expect.poll(async () => (await top(tab)) - (await header(tab)), { message: 'the click scrolled to the item, out of view from the header', timeout: 10_000 }).toBeGreaterThan(300)
+  await recorded(tab)
+  const itemTop = await top(tab)
+  await tab.goBack()
+  await shows('', 'Back shows the first view')
+  await at(tab, async () => left, 'Back returns to where the first view was left')
+  expect(await entries(tab), 'the session continued at the kept index: the first view is its entry 0, the item its entry 1').toEqual([2, 0])
+  await recorded(tab)
+  await tab.goForward()
+  await shows(TODO, 'Forward shows the item')
+  await at(tab, async () => itemTop, 'Forward returns to the item')
+  expect(await entries(tab)).toEqual([2, 1])
+})
+
+// BACK AFTER A SIGN-OUT (review 1 of scroll_history, 2026-11-17). A free-text query stays out of the address,
+// but its whole text is in its history entry, and the browser keeps that entry when the account signs out
+// in the same tab: the page reloads as the anonymous notebook, and Back reaches it. A handler that took any
+// state with an integer index put the account's query into the next notebook's MindBox and its list above
+// the header, and handed it to that notebook's `_on_change` and `_on_search` listeners. Every entry the app
+// writes names the account and the notebook it belongs to, and a state that does not name this one is
+// replaced with the current state unread: the page stays as it is. The account's query is the entry before
+// the one the sign-out happens on (a tag click's), so the first Back out of the visitor's own entries lands
+// on it; the visitor's notebook gets a listener of its own (a visitor's item is local), heard to be live
+// first
+test("after a sign-out in the same tab, Back onto the account's entries keeps its query out of the next notebook (the MindBox, the list above the header, the listeners' input) and leaves the page where it is, with no link offered and nothing written there; Forward again restores the visitor's entry, and its link lands on the entry it names; a query typed on such a position starts the numbering anew", async ({ page }) => {
+  const QUERY = 'switch row private words'
+  const warnings: string[] = []
+  page.on('console', msg => void (msg.type() == 'warning' && msg.text().includes('onPopState') && warnings.push(msg.text())))
+  await signIn(page, SWITCH_USER)
+  await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+  await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+  await waitForApp(page)
+  // the account: a note the query finds, with a tag to click, and the tag's item; then the query, typed
+  for (const text of ['#e2e_switch_tag the item of the tag', `#e2e_switch_note ${QUERY}, with #e2e_switch_tag`]) await page.evaluate(text => void window._create(text), text)
+  await expect.poll(() => savedId(page, '#e2e_switch_note'), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { timeout: 60_000 }).toBe(true)
+  await focusMindbox(page)
+  await mindbox(page).fill(QUERY)
+  await expect.poll(() => page.evaluate(() => (window as any)._history[(window as any)._history_index].editorText), { timeout: 10_000 }).toBe(QUERY)
+  expect(await page.evaluate(() => location.hash), 'a free-text query stays out of the address').toBe('')
+  const [, queryIndex] = await entries(page)
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_switch_note')!.elem)).toBe(true)
+  const noteId = await page.evaluate(() => window._item('#e2e_switch_note')!.id)
+  await page.locator(`#item-${noteId} mark[title="#e2e_switch_tag"]`).click()
+  await expect(mindbox(page)).toHaveValue('#e2e_switch_tag ', { timeout: 10_000 })
+  expect(await entries(page), "the tag click's entry, after the query's").toEqual([queryIndex + 2, queryIndex + 1])
+  expect(await page.evaluate(() => (window as any)._history[(window as any)._history_index - 1].editorText)).toBe(QUERY)
+
+  // the sign-out, by the header's own control: the same tab reloads as the anonymous notebook, a visitor's
+  await page.locator('img.user').click()
+  await expect.poll(() => page.evaluate(() => window._init_time > 0 && window._readonly === true && window._user.uid == 'anonymous').catch(() => false), { timeout: 90_000 }).toBe(true)
+  await waitForApp(page)
+  expect(await entries(page), "the visitor's session starts its own numbering on the entry the account left").toEqual([1, 0])
+  await expect(mindbox(page)).toHaveValue('')
+  // the visitor's first view, left 120 px below the header (the position it is restored at, further down)
+  const left = (await header(page)) + 120
+  await page.evaluate(y => document.body.scrollTo(0, y), left)
+  await recorded(page)
+  expect(await top(page)).toBe(left)
+  // the visitor's own listener (a visitor's item is local) and the item its tag names; every state a
+  // popstate brings is noted beside the app
+  await page.evaluate(() => {
+    window.addEventListener('popstate', e => void ((window as any).__popped ??= []).push(e.state?.editorText), true)
+    void window._create('#e2e_switch_other an item of the visitor')
+    void window._create(
+      '#e2e_switch_listener #_listen names #e2e_switch_other\n```js\nfunction _on_change(text) { (window.__heard ??= []).push(text) }\nfunction _on_search(text) { (window.__heard ??= []).push(text) }\n```'
+    )
+  })
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_switch_listener') && window._exists('#e2e_switch_other'))).toBe(true)
+  // two entries after the first view's: the listener's label, typed (the listener hears it: it is live),
+  // and a tag click from the listener's item
+  await focusMindbox(page)
+  await mindbox(page).fill('#e2e_switch_listener')
+  await expect.poll(() => page.evaluate(() => ((window as any).__heard ?? []).filter((text: string) => text == '#e2e_switch_listener').length), { message: 'the listener hears a change and a search', timeout: 10_000 }).toBeGreaterThanOrEqual(2)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_switch_listener')!.elem)).toBe(true)
+  const listenerId = await page.evaluate(() => window._item('#e2e_switch_listener')!.id)
+  await page.locator(`#item-${listenerId} mark[title="#e2e_switch_other"]`).click()
+  await expect(mindbox(page)).toHaveValue('#e2e_switch_other ', { timeout: 10_000 })
+  expect(await entries(page), "the visitor's three entries").toEqual([3, 2])
+
+  // what the visitor's notebook holds of the account's query, anywhere
+  const held = () =>
+    page.evaluate(query => {
+      const w = window as any
+      return {
+        box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value.includes(query),
+        list: [...document.querySelectorAll('.history-item')].some(e => (e.textContent ?? '').includes(query)),
+        session: w._history.some((state: any) => String(state?.editorText).includes(query)),
+        heard: (w.__heard ?? []).some((text: string) => String(text).includes(query)),
+        entry: JSON.stringify(history.state).includes(query),
+      }
+    }, QUERY)
+  const none = { box: false, list: false, session: false, heard: false, entry: false }
+  const settled = () => page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300))) // the listeners run from a timer
+  const links = page.locator('.history-item') // the list above the header
+  // the browser's state and the session's place: the index, and the position its entry there recorded
+  const place = () => page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_index, (window as any)._history[(window as any)._history_index].scrollPosition])
+  const CLEARED = JSON.stringify({ owner: '|anonymous|', unknown: true }) // what a position that held another notebook's entry holds
+  // Back to the visitor's first view: where it was left, the typed query's link above the header
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_switch_listener')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await at(page, async () => left, "Back to the visitor's first view, where it was left")
+  await recorded(page)
+  await expect(links).toHaveText(['#e2e_switch_listener'])
+  expect(await page.evaluate(() => (window as any).__popped ?? []), "no entry of the account's yet").not.toContain(QUERY)
+
+  // Back onto the entry of the account's query: nothing of it reaches the notebook, the page stays, the
+  // position is cleared and holds no entry of the visitor's, and no link is offered from it
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => (window as any).__popped.at(-1)), { message: "Back reached the entry of the account's query", timeout: 10_000 }).toBe(QUERY)
+  await settled()
+  expect(await held(), "the account's query is nowhere in the visitor's notebook, nor left in the browser's entry").toEqual(none)
+  await expect(mindbox(page), 'the page stayed as it was').toHaveValue('')
+  await at(page, async () => left, 'the page stayed where it was')
+  expect(await place(), "cleared, and not stamped with the visitor's entry").toEqual([CLEARED, 0, left])
+  await expect(links, 'no link from a position whose distance to the entries is unknown').toHaveCount(0)
+  // a scroll there writes nothing: neither the position nor the session's entry takes the scrolled position
+  await page.evaluate(y => document.body.scrollTo(0, y), left + 200)
+  await settled()
+  await expect.poll(() => page.evaluate(() => (window as any)._history_update_pending), { message: "the scroll listener's write has run" }).toBe(false)
+  expect(await place(), 'a suppressed write leaves the position and the session\'s copy as they were').toEqual([CLEARED, 0, left])
+  // once more, onto the account's entry before that one, and Forward again onto the cleared position
+  await page.goBack()
+  await settled()
+  expect(await held()).toEqual(none)
+  expect(await place()).toEqual([CLEARED, 0, left])
+  await page.goForward()
+  await settled()
+  expect(await place(), 'the cleared position again').toEqual([CLEARED, 0, left])
+  await expect(links).toHaveCount(0)
+
+  // Forward onto the visitor's first view: an entry the session holds, restored where it was left (not where
+  // the page was scrolled meanwhile), its link back above the header and one entry ahead
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(0)
+  await expect(mindbox(page)).toHaveValue('')
+  await at(page, async () => left, "Forward onto the visitor's first view restores it where it was left")
+  expect(await entries(page)).toEqual([3, 0])
+  await expect(links).toHaveText(['#e2e_switch_listener'])
+  await links.first().click()
+  await expect(mindbox(page), 'the link lands on the entry it names').toHaveValue('#e2e_switch_listener')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history_index])).toEqual([1, 1])
+
+  // a query typed ON the cleared position is a new entry there and starts the numbering anew: how far the
+  // position is from the visitor's earlier entries is not known, and the browser drops what lay ahead of it
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await page.goBack()
+  await settled()
+  expect((await place())[0]).toBe(CLEARED)
+  const run = await page.evaluate(() => (window as any)._history[0].run)
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true })) // in place: the box can hold the focus already
+  await expect(mindbox(page)).toBeFocused()
+  await mindbox(page).fill('typed on the cleared position')
+  await expect.poll(() => page.evaluate(() => history.state?.editorText), { timeout: 10_000 }).toBe('typed on the cleared position')
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  expect(await entries(page), 'one entry held, numbered from 0 again').toEqual([1, 0])
+  expect(await page.evaluate(() => [history.state.index, typeof history.state.run]), 'the first entry of a new run').toEqual([0, 'number'])
+  expect(await page.evaluate(() => history.state.run), 'a new run').not.toBe(run)
+  await page.goBack()
+  await settled()
+  expect((await place())[0], 'Back from it: the cleared position').toBe(CLEARED)
+  await expect(mindbox(page), 'the page stays').toHaveValue('typed on the cleared position')
+  await expect(links).toHaveCount(0)
+  await page.goForward()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(0)
+  await expect(mindbox(page)).toHaveValue('typed on the cleared position')
+  expect(await entries(page)).toEqual([1, 0])
+  expect(await held()).toEqual(none)
+  expect(warnings, 'the handler warned of nothing').toEqual([])
 })

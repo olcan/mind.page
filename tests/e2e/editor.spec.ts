@@ -2591,6 +2591,367 @@ test('down with two modifiers, when Back does not apply, scrolls to the item the
   await expect(mindbox(page)).toHaveValue('#e2e_named/p')
 })
 
+// what the reload rows read off the page: the history handler's warnings, collected from the first call on,
+// and the readers below
+const historyReads = (page: Page) => {
+  const warnings: string[] = []
+  page.on('console', msg => void (msg.type() == 'warning' && msg.text().includes('onPopState') && warnings.push(msg.text())))
+  // the current entry holds the position shown, the scroll listener's write done
+  const recorded = () =>
+    expect
+      .poll(() => page.evaluate(() => !(window as any)._history_update_pending && (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop), {
+        message: 'the position shown is recorded',
+        timeout: 10_000,
+      })
+      .toBe(true)
+  // a position of the entry's own: set until it holds (a navigation's own scroll can land after the first), then recorded
+  const place = async (below: number) => {
+    const y = (await headerTop(page)) + below
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(y => document.body.scrollTo(0, y), y)
+          await page.waitForTimeout(150)
+          return scrollTop(page)
+        },
+        { message: `the page holds ${below} px below the header` }
+      )
+      .toBe(y)
+    await recorded()
+    return y
+  }
+  // what the page shows (the MindBox's text, the position within 2 px) with what the handler logged, so that a failure names all three
+  const shows = (text: string, y: number, message: string) =>
+    expect
+      .poll(
+        async () => {
+          const [box, now] = await page.evaluate(() => [(document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value, document.body.scrollTop] as const)
+          return { box, at: Math.abs(now - y) <= 2 ? y : now, warnings }
+        },
+        { message, timeout: 10_000 }
+      )
+      .toEqual({ box: text, at: y, warnings: [] })
+  return { warnings, recorded, place, shows }
+}
+
+// BACK AND FORWARD ACROSS A RELOAD (the owner, 2026-11-17: after a reload, Back and Forward onto the entries
+// from before it logged the history handler's warnings, and the page did not follow). The browser keeps
+// those entries across a reload, each with its state object and its index, while the page starts a new
+// session: one that numbered its entries from 0 again read the kept ones as its own by their old indexes,
+// warned (an out-of-bounds index, an inconsistent state, the current index), stayed where it was and
+// overwrote each entry it landed on with a copy of one of its own. The session continues at the kept entry's
+// index instead, and takes an entry it does not know as the browser holds it. Two reloads: on the first view
+// with two entries ahead of it (a reload there writes nothing, so Forward still has them), then on an
+// item's view (the reloaded page pushes its own first view and the address's query after the kept entry).
+// Every entry reached shows its own query and its own scroll position, each position set by hand so that no
+// two entries share one. The items are the navigation row's
+test('Back and Forward across a reload reach the entries from before it, each with its query and its scroll position, and the history handler warns of nothing', async ({ page }) => {
+  const { recorded, place, shows } = historyReads(page)
+
+  await loadAdmin(page)
+  const top = await headerTop(page)
+  await nearTop(page, 'the page loads at the header')
+  // two entries after the first view's, a query and a position each: a typed query, then a tag click from its item
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_source')
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_source')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
+  await blur(page)
+  await place(40)
+  const [, index] = await entries(page) // the typed query's entry; the first view's is the one before it
+  // the tag is brought into view before its click (a click's own scroll would move the page under the
+  // entry being left, whose position is whatever was recorded last)
+  const sourceId = await page.evaluate(() => window._item('#e2e_source')!.id)
+  const tag = page.locator(`#item-${sourceId} mark[title="#e2e_target"]`)
+  await tag.scrollIntoViewIfNeeded()
+  await recorded()
+  const atSource = await scrollTop(page)
+  await tag.click()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  const atTarget = await place(80)
+  expect(await entries(page), 'the tag click pushed its entry').toEqual([index + 2, index + 1])
+  expect(Math.min(atSource - top, Math.abs(atSource - atTarget)), 'three positions, none near another').toBeGreaterThan(30)
+  await page.goBack()
+  await shows('#e2e_source', atSource, 'Back within the session')
+  await page.goBack()
+  await shows('', top, 'Back to the first view')
+  await recorded()
+
+  // (1) a reload on the first view: the page starts on the entry the browser kept and writes nothing (the
+  // same query and order), so the two entries ahead are still there
+  await page.reload()
+  await waitForApp(page)
+  await shows('', top, 'the reloaded page is at the header')
+  expect(await page.evaluate(() => history.state.index), 'the reloaded page is on the kept entry').toBe(index - 1)
+  await page.goForward()
+  await shows('#e2e_source', atSource, 'Forward onto an entry from before the reload')
+  expect(await page.evaluate(() => location.hash)).toBe('#e2e_source')
+  expect(await entries(page), 'the session continued at the kept index').toEqual([index + 1, index])
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward onto the next one')
+  await page.goBack()
+  await shows('#e2e_source', atSource, 'Back in the reloaded session')
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward again')
+  await recorded()
+
+  // (2) a reload on an item's view: the reloaded page pushes its own first view and the address's query
+  // after the kept entry; Back passes both and reaches the entries from before the two reloads
+  await page.reload()
+  await waitForApp(page)
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await recorded()
+  expect(await entries(page), 'the session continued at the kept index: its own two entries follow it').toEqual([index + 4, index + 3])
+  await page.goBack()
+  await shows('', top, "Back to the reloaded page's own first view, at the header")
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, 'Back onto the entry the page was reloaded on')
+  await page.goBack()
+  await shows('#e2e_source', atSource, 'Back onto the entry before it')
+  await page.goBack()
+  await shows('', top, 'Back to the first view')
+  expect(await entries(page), 'every entry in its place').toEqual([index + 4, index - 1])
+})
+
+// the entries of the two startup rows below, over the navigation row's items: the first view, a typed query,
+// a tag click's entry left 400 px below the header, and a second typed query (it names an item and is not
+// final); `index` is the first query's entry
+const threeQueries = async (page: Page, { recorded, place }: ReturnType<typeof historyReads>) => {
+  await loadAdmin(page)
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_source')
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_source')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
+  await blur(page)
+  const [, index] = await entries(page) // the first query's entry
+  const sourceId = await page.evaluate(() => window._item('#e2e_source')!.id)
+  const tag = page.locator(`#item-${sourceId} mark[title="#e2e_target"]`)
+  await tag.scrollIntoViewIfNeeded()
+  await recorded()
+  await tag.click()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  const atTarget = await place(400) // far enough from the header to tell the entry's position from a return there
+  // the last query is set as a todo's row sets one, from a blurred box: it applies at once (a typed query
+  // waits out its debounce with the box focused, the page scrolls to it meanwhile and the scroll listener
+  // records that position on the entry being left: 640 for an entry left at 672, the reading of review 1)
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_target/sub')
+  await recorded()
+  const atSub = await scrollTop(page)
+  expect(await entries(page), "the second query's entry, pushed after the tag click's").toEqual([index + 3, index + 2])
+  expect(await page.evaluate(i => [(window as any)._history[i].scrollPosition, (window as any)._history[i + 1].final], index + 1), "the tag click's entry keeps the position it was left at; the last entry is not final").toEqual([atTarget, false])
+  return { index, atTarget, atSub }
+}
+
+// BACK WHILE A RELOADED PAGE IS STILL STARTING (review 1 of scroll_history, 2026-11-17). The browser moves at
+// once; the page can apply nothing yet. The session took its index when the page was created and the
+// handler returned before initialization, so the startup wrote the first view over the entry REACHED under
+// the index of the entry LEFT, dropped the entries ahead, and pushed the departed entry's fragment: from
+// then on a history link's distance was off. The session takes its place from the entry the browser is on
+// when the corpus is ready, writes nothing over an entry reached this way, and applies its view once
+// initialized. Four entries (the first view, a typed query, a tag click's, a typed query again), a reload
+// on the last one with the index build stalled (the app's seam, `_initialize_stall_ms`), Back during the
+// stall; then the entries ahead and behind, and the list above the header: its link to the first query is
+// a jump of two entries
+test('Back while a reloaded page is still starting shows the entry it reaches once the page is ready, keeps the entries ahead, and a history link lands on the entry it names', async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings, shows } = reads
+  const { index, atTarget, atSub } = await threeQueries(page, reads)
+
+  // the reload on the last entry, its index build stalled; Back while the page is still starting
+  // every position the page is asked to scroll to is noted beside the app, from the reloaded page's start
+  await page.addInitScript(() => {
+    window._initialize_stall_ms = 3_000
+    const asked: number[] = ((window as any).__asked = [])
+    const scrollTo = Element.prototype.scrollTo as (...args: any[]) => void
+    Element.prototype.scrollTo = function (this: Element, ...args: any[]) {
+      if (this === document.body) asked.push(typeof args[0] == 'object' ? args[0].top : args[1])
+      return scrollTo.apply(this, args)
+    }
+  })
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => window._init_time > 0)).toBe(true)
+  await page.goBack()
+  await expect(page.locator('#sapper > .loading'), 'Back arrived before the page was initialized').toHaveClass(/visible/)
+  await waitForApp(page)
+  // where the entry was left, 400 px below the header: the page was ASKED for that position (the saved value
+  // came through the wait: a scroll write built on the live state object, then not written, changes what
+  // the replay reads to the starting page's own position, review 2) and stands there, not at the header and
+  // not at the item the query names, where every layout of a starting page scrolls
+  await shows('#e2e_target ', atTarget, 'the entry Back reached, shown once the page was ready, where it was left')
+  expect(await page.evaluate(() => (window as any).__asked.map(Math.round)), 'the page was asked for the position the entry was left at').toContain(atTarget)
+  expect(await page.evaluate(() => [history.state.index, location.hash]), "the browser's entry is the one reached, as it was").toEqual([index + 1, '#e2e_target'])
+  expect(await entries(page), 'the session is on that entry').toEqual([index + 2, index + 1])
+  // the entries ahead and behind are where they were
+  await page.goForward()
+  await shows('#e2e_target/sub', atSub, 'Forward: the entry the page was reloaded on, kept')
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, 'Back')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward')
+  await page.goForward()
+  await shows('#e2e_target/sub', atSub, 'Forward again')
+  // the list above the header names the two earlier queries; the link to the first one is two entries back
+  const links = page.locator('.history-item')
+  await expect(links).toHaveText(['#e2e_source', '#e2e_target'])
+  await links.first().click()
+  await expect(mindbox(page), 'the link lands on the entry it names').toHaveValue('#e2e_source')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history_index])).toEqual([index, index])
+  await page.goForward()
+  await expect(mindbox(page), 'one entry ahead of it').toHaveValue('#e2e_target ')
+  expect(warnings).toEqual([])
+})
+
+// BACK BETWEEN A RELOADED PAGE'S INITIALIZATION AND ITS LAUNCH FRAGMENT (review 2 of scroll_history,
+// 2026-11-17). The launch's fragment is handled after the page is initialized, once the welcome is over and
+// the frames after it have passed. A reload on a query that names an item, its entry not final, replaces
+// that entry with the first view and keeps the address's fragment for that later step; Back in between was
+// restored by the ordinary handler, and the step then pushed the departed entry's query over the entry
+// reached and dropped the entry ahead. A traversal that the page follows now drops the pending fragment.
+// The step and the welcome work after it wait for the row's release (the app's seam,
+// `_launch_fragment_gate`; `_launch_fragment_done` marks the step). The entry reached stays WHERE IT WAS LEFT
+// through the layouts that applying its query causes (review 3: restored at 1012 px, the page stood at the
+// item the query names, 418 px on, a few seconds later, and the scroll listener recorded that over the
+// entry's position).
+// Then A NATIVE FRAGMENT NAVIGATION (review 3), as `location.hash` makes one: the browser adds a position of
+// its own, and the handler added a second one after it for the query the fragment names (a link then landed
+// on the position between); for a fragment that names nothing the old links stayed and the next scroll write
+// copied the entry onto the position. The named query now takes the browser's position, as the first entry
+// of a new run; an unnamed fragment's position holds no entry, like a rejected one
+test("Back after a reloaded page is initialized and before its launch fragment is handled shows the entry reached, keeps it where it was left and keeps the entry ahead; a native fragment navigation takes the browser's own position under a new numbering, and one that names nothing is no entry's", async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings, shows, recorded } = reads
+  const errors: string[] = [] // a fragment's decoding error, should one reach the page
+  page.on('pageerror', error => void (/URI/.test(String(error)) && errors.push(String(error))))
+  const { index, atTarget } = await threeQueries(page, reads)
+  const top = await headerTop(page)
+  const length = await page.evaluate(() => history.length)
+  const links = page.locator('.history-item') // the list above the header
+  // no layout for a second: the layouts that applying a query causes (its items rendering) have run
+  const quiet = async () => {
+    let last = -1
+    await expect
+      .poll(
+        async () => {
+          const now = await page.evaluate(() => (window as any).__layoutCount as number)
+          const still = now === last
+          last = now
+          return still
+        },
+        { message: 'the layouts have run', intervals: [1_000], timeout: 30_000 }
+      )
+      .toBe(true)
+  }
+  await page.addInitScript(() => void ((window as any)._launch_fragment_gate = new Promise<void>(resolve => void ((window as any)._release_launch_fragment = resolve))))
+  await page.reload()
+  await waitForApp(page)
+  const step = () => page.evaluate(() => (window as any)._launch_fragment_done === true)
+  await shows('', top, 'the reloaded page: its first view, the fragment of its address not handled yet')
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, 'the entry Back reached, where it was left')
+  expect(await step(), "the launch's fragment had not been handled").toBe(false)
+  await page.evaluate(() => (window as any)._release_launch_fragment())
+  await expect.poll(step, { message: "the launch's fragment step has run" }).toBe(true)
+  // settled: the layouts of the restored query have run and the scroll listener has written
+  await quiet()
+  await recorded()
+  await shows('#e2e_target ', atTarget, "still the entry reached, where it was left: the departed entry's fragment was dropped, and no layout of its query moved the page")
+  expect(
+    await page.evaluate(i => [history.state.index, history.state.editorText, history.state.scrollPosition, (window as any)._history[i].scrollPosition, history.length], index + 1),
+    'no entry was pushed, and the entry holds the position it was left at'
+  ).toEqual([index + 1, '#e2e_target ', atTarget, atTarget, length])
+  // the entry ahead is the one the page was reloaded on, as its launch left it: the first view
+  await page.goForward()
+  await shows('', top, 'Forward: the entry ahead, kept')
+  expect(await page.evaluate(() => [history.state.index, history.length])).toEqual([index + 2, length])
+
+  // a native fragment that names an item: ONE position more, the named query on it as entry 0 of a new run,
+  // and no link back (how far the earlier entries are from it is not known)
+  const run = await page.evaluate(() => history.state.run)
+  await page.evaluate(() => void (location.hash = '#e2e_source'))
+  await expect(mindbox(page)).toHaveValue('#e2e_source ')
+  expect(await page.evaluate(() => [history.state.index, history.state.editorText, history.length]), "the browser's own position holds the entry").toEqual([0, '#e2e_source ', length + 1])
+  expect(await page.evaluate(() => history.state.run), 'a new run').not.toBe(run)
+  expect(await entries(page)).toEqual([1, 0])
+  await expect(links).toHaveCount(0)
+  // Back is the entry before it, of the earlier run; Forward from there is the fragment's entry again
+  await page.goBack()
+  await shows('', top, 'Back: the entry the fragment was navigated from')
+  expect(await page.evaluate(() => [history.state.index, history.state.run])).toEqual([index + 2, run])
+  await page.goForward()
+  await expect(mindbox(page), "Forward: the fragment's entry").toHaveValue('#e2e_source ')
+  expect(await page.evaluate(() => [history.state.index, history.length])).toEqual([0, length + 1])
+  // the same item by its ALIAS, its id: the query and the order are the ones shown, and the browser's new
+  // position is the query's entry all the same, the first of another run (left to the writer's test for a
+  // change, it became a cleared position under the named item's view, and a return to it later left
+  // whatever view was shown then: review 4)
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
+  const sourceId = await page.evaluate(() => window._item('#e2e_source')!.id)
+  const aliased = await page.evaluate(() => history.state.run)
+  await page.evaluate(id => void (location.hash = '#' + id), sourceId)
+  await expect.poll(() => page.evaluate(() => [history.length, history.state?.index, history.state?.editorText, location.hash]), { message: "the alias's position holds the entry" }).toEqual([length + 2, 0, '#e2e_source ', '#e2e_source'])
+  expect(await page.evaluate(() => history.state.run), 'another run').not.toBe(aliased)
+  await expect(mindbox(page)).toHaveValue('#e2e_source ')
+  expect(await entries(page)).toEqual([1, 0])
+  // two more entries of that run, and a real link among them: one entry ahead
+  await page.locator(`#item-${sourceId} mark[title="#e2e_target"]`).click()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_target/sub')
+  expect(await entries(page)).toEqual([3, 2])
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source ')
+  await expect(links).toHaveText(['#e2e_source', '#e2e_target'])
+  await links.nth(1).click()
+  await expect(mindbox(page), 'the link lands on the entry it names').toHaveValue('#e2e_target ')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history_index])).toEqual([1, 1])
+
+  // a native fragment that names nothing: its position holds no entry (cleared, no link from it, nothing
+  // written by a scroll there), the page stays, and Back is the entry it was navigated from
+  await recorded()
+  const before = await page.evaluate(() => [(window as any)._history_index, (window as any)._history[1].scrollPosition, history.length])
+  await page.evaluate(() => void (location.hash = '#e2e_no_such_item'))
+  const CLEARED = JSON.stringify({ owner: 'admin|anonymous|', unknown: true })
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
+  await expect(mindbox(page), 'the page stays').toHaveValue('#e2e_target ')
+  await expect(links).toHaveCount(0)
+  await page.evaluate(() => document.body.scrollTo(0, document.body.scrollTop + 150))
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300))) // the scroll listener's write comes 250 ms after a scroll
+  await expect.poll(() => page.evaluate(() => (window as any)._history_update_pending)).toBe(false)
+  expect(await page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_index, (window as any)._history[1].scrollPosition, history.length]), 'nothing written on it').toEqual([CLEARED, ...before])
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(1)
+  await shows('#e2e_target ', before[1], 'Back: the entry it was navigated from, where it was left')
+  await expect(links).toHaveText(['#e2e_source', '#e2e_target'])
+
+  // a MALFORMED fragment (a `%` that is no escape: decoding it throws) names nothing either, and the leave to
+  // take a fragment's position ends with its handler: Back, a new query, and Back from that is the original
+  // query (the handler threw with the leave still set, and the new query's entry then replaced the entry it
+  // was made from: review 4)
+  await page.evaluate(() => void (location.hash = '#100%'))
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#100%')
+  await page.goBack()
+  await expect.poll(() => page.evaluate(() => [history.state?.index, location.hash]), { timeout: 10_000 }).toEqual([1, '#e2e_target'])
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { timeout: 10_000 }).toEqual([2, '#e2e_source'])
+  await page.goBack()
+  await expect(mindbox(page), 'Back from the new query: the original query, its entry intact').toHaveValue('#e2e_target ')
+  expect(await page.evaluate(() => [history.state.index, history.state.editorText])).toEqual([1, '#e2e_target '])
+  // its position is cleared like any fragment's that names nothing, and a page LAUNCHED on such an address
+  // starts: its first view
+  await page.evaluate(() => void (location.hash = '#100%'))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
+  await page.reload()
+  await waitForApp(page)
+  await expect(mindbox(page)).toHaveValue('')
+  expect(errors, 'no decoding error reached the page').toEqual([])
+  expect(warnings).toEqual([])
+})
+
 test('a change of the document width scrolls the item the query names back into view: at the layout at the new width and at the one its re-measured heights trigger; a scroll by hand or an Up after the first correction supersedes it; the window expires', async ({ page }) => {
   // the owner (2026-10-11): going full-screen and back lost the position, the reflow moving the items under
   // a scroll position that stays. A layout at a new document width opens a 2 s window in which every layout
@@ -2727,9 +3088,9 @@ test('a change of the document width scrolls the item the query names back into 
                   let pushed: boolean | null = null
                   if (action == 'hand') document.body.scrollTo(0, header)
                   if (action == 'up') {
-                    const length = w._history.length as number
+                    const index = w._history_index as number // the Up's entry is the next index (the entry the row's Back left ahead goes)
                     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', metaKey: true, ctrlKey: true, bubbles: true, cancelable: true }))
-                    pushed = w._history.length == length + 1 && w._history[w._history_index].scrolledToTop === true
+                    pushed = w._history_index == index + 1 && w._history[w._history_index].scrolledToTop === true
                   }
                   // the hold of reflowTo ends a frame later, the action's scroll event dispatched: the wrappers
                   // removed, the held timers run (tryLayout's among them, which re-arms itself past the scroll)
@@ -2791,6 +3152,18 @@ test('a change of the document width scrolls the item the query names back into 
   await quiet()
   expect(await inBand(), "the query's own scroll put the leaf in view").toBe(true)
   await blur(page)
+  // the leaf is then REACHED THROUGH BACK (review 4 of scroll_history): its view left for the first one (a
+  // new entry: the query is cleared with a target selected) and restored. A restore holds its entry's
+  // position through the layouts it causes and no longer, so every correction below is of a restored view
+  // (marked as an explicit scroll, which lasts until the query changes, the restore suppressed them all)
+  await page.evaluate(() => void (window as any).MindBox.clear())
+  await expect(mindbox(page)).toHaveValue('')
+  await quiet()
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_reflow/mid/leaf')
+  await targeted(id)
+  await quiet()
+  expect(await inBand(), 'Back restored the leaf in view').toBe(true)
   // 1. the owner's case, one column: the leaf lies far below the position left (the premise) and the layout
   // at the new width scrolls to its upper middle; the re-measured root moves nothing in one column
   const left1 = await scrollTop(page)
