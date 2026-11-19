@@ -349,3 +349,305 @@ test("an item's number keeps free the room of its own digits, and its placeholde
   expect(ten.menu, 'a second digit widens the menu').toBeGreaterThan(nine.menu)
   await context.close()
 })
+
+// THE RUNNING MARK (the owner's todo of 2026-11-18: "replace running border style with a circle
+// indicator next to the item number"; and of the dimming, "should also go"). An item that runs is
+// marked by a small ring in the blue its border had, left of its number, and by nothing else: its
+// border keeps the colour it had and no overlay dims it. The ring takes no room of the menu, whose
+// size the app measures once for all items of a shape: it is drawn in 18 px left of the digits,
+// which the text's placeholder keeps free with a padding while the item runs and a run button
+// leaves by moving aside. The status line, which the overlay carried, is one line at the bottom
+// of the running item's box: cut when too long, with its progress as a bar under it, and no room
+// taken when it is empty or the item does not run. (The ring in the editor, the two marks side by
+// side and the overlay of an item that is being saved are the watched mark's row,
+// tests/e2e/sparkle.spec.ts, on an account that can edit and save.)
+const BLUE = 'rgb(68, 170, 255)' // #4af
+// marks as measured against their boxes' own edges: as many, and every edge within two pixels (a
+// pixel for the whole pixels the hit test reads, and one more that a box at a fractional place
+// read: the cloned five-digit menu's mark, 1.28 px wide of its edge)
+const marksAre = (marks: number[][], boxes: number[][]) =>
+  marks.length == boxes.length && marks.every((mark, at) => mark.every((edge, side) => Math.abs(edge - boxes[at][side]) < 2))
+// the boxes drawn left of a number's own box, found by a hit test along the number's middle line
+// (a pseudo-element answers as its element): each as [from, to], px left of the digits, the
+// nearest first, read off whole pixels (so each edge can read up to a pixel wide of the box's
+// own: `marksAre` compares within that). The ring is measured standing still: a hit test reads a
+// turning box up to 2 px wide of it. Given to the page once (`window.__marksLeftOf`), for the
+// row's readers
+function marksLeftOf(index: HTMLElement): number[][] {
+  const digits = document.createRange()
+  digits.selectNodeContents(index.firstChild!)
+  const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
+  const still = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.item-menu > .index::after { animation: none !important }' }))
+  const marks: number[][] = [] // pixel by pixel leftwards from the number's own box: [left edge of the first pixel hit, right edge of the last]
+  for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 70; k++, pixel--) {
+    if (document.elementFromPoint(pixel + 0.5, (own.top + own.bottom) / 2) !== index) continue
+    const last = marks[marks.length - 1]
+    if (last && last[0] == number.left - pixel - 1) last[0] = number.left - pixel
+    else marks.push([number.left - pixel, number.left - pixel - 1])
+  }
+  still.remove()
+  return marks
+}
+type Scanning = { __marksLeftOf: typeof marksLeftOf }
+// what an item's box shows of running, read off the item in the SHOWN column (an element can be
+// mounted in the offscreen render column alone) and found again after the frames it waits. `text` is how far left of the digits the nearest
+// line of the item's text ends, of the lines that stand beside the number; `run` the same for a
+// run button's two edges
+const runningLook = (page: Page, id: string) =>
+  page.evaluate(async id => {
+    const shown = () => document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+    shown().scrollIntoView({ block: 'center' })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const box = shown()
+    const [menu, index, spacer, loading, status] = ['.item-menu', '.item-menu > .index', '.item > [id^="menu-"]', ':scope > .loading', ':scope > .run-status'].map(part => box.querySelector(part) as HTMLElement) // (the box's own: an item's html can hold these classes)
+    const digits = document.createRange()
+    digits.selectNodeContents(index.firstChild!)
+    const [number, own, whole] = [digits.getBoundingClientRect(), index.getBoundingClientRect(), box.getBoundingClientRect()]
+    const turning = getComputedStyle(index, '::after').animationName != 'none' // read before the measure stops it
+    const marks = (window as unknown as Scanning).__marksLeftOf(index)
+    let text = Infinity
+    const walker = document.createTreeWalker(box.querySelector('.item')!, NodeFilter.SHOW_TEXT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!node.textContent!.trim()) continue
+      const range = document.createRange()
+      range.selectNodeContents(node)
+      for (const line of range.getClientRects()) if (line.width && line.bottom > own.top + 2 && line.top < own.bottom - 2) text = Math.min(text, number.left - line.right)
+    }
+    const run = menu.querySelector('.run')?.getBoundingClientRect()
+    const [ring, placed, said] = [getComputedStyle(index, '::after'), getComputedStyle(spacer), getComputedStyle(status)]
+    const line = status.getBoundingClientRect()
+    const middle = document.elementFromPoint((whole.left + whole.right) / 2 - 40, (whole.top + whole.bottom) / 2)
+    return {
+      running: box.classList.contains('running'),
+      bordered: box.classList.contains('bordered'),
+      border: getComputedStyle(box).borderTopColor,
+      overlay: getComputedStyle(loading).visibility,
+      covered: !!middle?.closest('.loading'), // something of the overlay lies over the item's middle
+      // (the stroke's style and width too: without them a transparent box still turns, hit-tests and reports the colour)
+      ring: ring.content == 'none' ? null : [ring.width, ring.borderTopStyle, ring.borderTopWidth, ring.borderTopColor, ring.borderRadius, turning],
+      marks,
+      room: [placed.marginLeft, placed.paddingLeft],
+      placeholder: [parseFloat(spacer.style.width), menu.clientWidth],
+      text,
+      run: run ? [Math.round(number.left - run.right), Math.round(number.left - run.left)] : null, // a run button's right and left edge
+      height: whole.height,
+      // the height the layout holds for the item (index.svelte, onItemResized) against the box's own
+      stored: [(window.__items.find(item => item.id == id) as unknown as { height: number }).height, box.offsetHeight],
+      html: status.innerHTML, // the status as written, shown or not
+      status: said.display == 'none' ? null : {
+        text: status.textContent,
+        tall: line.height, // one line: 16 px and the bar's 3
+        rows: new Set([...status.children].map(child => Math.round(child.getBoundingClientRect().top))).size, // of its child elements
+        inside: line.left >= whole.left && line.right <= whole.right && line.top >= whole.top && line.bottom <= whole.bottom,
+        below: line.top >= box.querySelector('.item')!.getBoundingClientRect().bottom, // under the text's box
+        lines: line.height / parseFloat(said.lineHeight), // a second line would double it
+        cut: [status.scrollWidth > status.clientWidth, said.textOverflow],
+        bar: [said.backgroundImage.startsWith('linear-gradient'), status.style.getPropertyValue('--progress')],
+      },
+    }
+  }, id)
+
+test('a running item is marked by a circle left of its number and by nothing else, with its status line at its bottom', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+  await loadAnonymous(page)
+  await page.addScriptTag({ content: `window.__marksLeftOf = ${marksLeftOf.toString()}` })
+  // an item whose first line runs up to its number, and a runnable one: of each kind, the one of
+  // the corpus's first 120 whose text comes nearest to its menu
+  const gaps = await textToMenu(page, [...Array(120).keys()])
+  const at = (runnable: boolean) => gaps.reduce((best, gap, at) => (gap.runnable == runnable && gap.nearest < (gaps[best]?.nearest ?? Infinity) ? at : best), -1)
+  expect([at(false) >= 0, at(true) >= 0], 'a plain and a runnable item with text beside the menu').toEqual([true, true])
+  const [plain, runnable] = await page.evaluate(positions => positions.map(position => window.__items[position].id), [at(false), at(true)])
+  const run = (id: string, running: boolean) => page.evaluate(([id, running]) => void ((window._item(id) as unknown as { running: boolean }).running = running), [id, running] as const)
+  const shown = (id: string, running: boolean) =>
+    expect
+      .poll(() => page.evaluate(([id, running]) => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]${running ? '.running' : ':not(.running)'}`), [id, running] as const), { timeout: 30_000 })
+      .toBe(true)
+
+  // (an item is shown, wherever it ranks, as the one the address names: its place in the page is
+  // then the same whether it runs or not)
+  const open = async (id: string) => {
+    await page.evaluate(id => void (location.hash = id), id)
+    await shown(id, false)
+  }
+
+  // not running: no ring, no room, and the text within 14 px of the digits
+  await open(plain)
+  const idle = await runningLook(page, plain)
+  expect([idle.ring, idle.marks, idle.room, idle.overlay, idle.status], 'an item that does not run').toEqual([null, [], ['0px', '0px'], 'hidden', null])
+  expect([idle.text > 1, idle.text < 14], `its first line runs up to its number (${idle.text})`).toEqual([true, true])
+
+  // running: the ring, 15 px wide and 3 px from the digits, in room the placeholder's padding
+  // keeps free; the menu and the placeholder's own width as they were; the border as it was, and
+  // no overlay
+  await run(plain, true)
+  await shown(plain, true)
+  const ran = await runningLook(page, plain)
+  expect(ran.ring, 'the ring: 15 px, a solid stroke of 2 px in the blue of the border that went, round, turning').toEqual(['15px', 'solid', '2px', BLUE, '50%', true])
+  expect(marksAre(ran.marks, [[18, 4]]), `one mark, in the 18 px left of the digits (its last pixel is inside the number's own box, which begins 4 px before them): ${JSON.stringify(ran.marks)}`).toBe(true)
+  expect([ran.room, ran.placeholder], 'its room is the placeholder\'s padding, and the menu is not resized').toEqual([['0px', '18px'], idle.placeholder])
+  expect(ran.text, 'the text, which reached into those 18 px, keeps out of them').toBeGreaterThanOrEqual(18 + 1)
+  expect([ran.border, ran.bordered, ran.overlay, ran.covered], 'the border is not blue (it is as it was), and nothing dims the item').toEqual([idle.border, idle.bordered, 'hidden', false])
+  expect(ran.border).not.toBe(BLUE)
+
+  // the status line: at the bottom of the box, one line, cut when too long, with its progress;
+  // none when empty or when the item does not run. It is one line of HEIGHT whatever html the
+  // status holds (two blocks, a native progress), and the height the layout holds for the item
+  // (item.height, by which the columns are filled) follows the line as it shows and goes, though
+  // no component updates then: this item is settled and has no log
+  const say = (status: string, progress: number, id = plain) =>
+    page.evaluate(([id, status, progress]) => {
+      const item = window._item(id) as unknown as { status: string; progress: number }
+      item.status = status
+      item.progress = progress
+    }, [id, status, progress] as const)
+  const said = (text: string | null, id = plain) => expect.poll(async () => (await runningLook(page, id)).status?.text ?? null, { timeout: 15_000 }).toBe(text)
+  await expect.poll(async () => (await runningLook(page, plain)).stored, 'the premise: the stored height is the running box\'s').toEqual([ran.stored[1], ran.stored[1]])
+  await say('waiting for the lanes …', 0)
+  await said('waiting for the lanes …')
+  const short = await runningLook(page, plain)
+  expect(short.status, 'a short status: inside the box, under the text, one line, nothing cut, no bar').toMatchObject({ tall: 19, inside: true, below: true, lines: expect.closeTo(1.2, 1), cut: [false, 'ellipsis'], bar: [false, '0.000%'] })
+  expect(short.stored, 'the line takes 33 px (its 16, the bar\'s 3, and 14 that keep it clear of the summaries), and the stored height has them').toEqual([ran.stored[1] + 33, ran.stored[1] + 33])
+  const LONG = 'a status that is much longer than the item is wide '.repeat(6).trim()
+  await say(LONG, 0.6)
+  await said(LONG)
+  const long = await runningLook(page, plain)
+  expect(long.status, 'a long status with a progress: still one line, cut, with the bar at 60%').toMatchObject({ tall: 19, inside: true, below: true, lines: short.status!.lines, cut: [true, 'ellipsis'], bar: [true, '60.000%'] })
+  expect(long.height, 'a long status is no taller').toBe(short.height)
+  // (two blocks are laid out side by side, on the line; two elements that insist on being blocks
+  // are held to the line's height all the same; a native progress stands in the line)
+  const BLOCKS = '<span style="display: block">first</span><span style="display: block">second</span>'
+  for (const [html, text, rows] of [['<div>first part</div><div>second part</div>', 'first partsecond part', 1], [BLOCKS, 'firstsecond', 2], ['<progress value="0.4"></progress> working', ' working', 1]] as const) {
+    await say(html, 0)
+    await said(text)
+    const held = await runningLook(page, plain)
+    expect([held.status!.tall, held.status!.rows, held.height], `one line of height for ${html}`).toEqual([19, rows, short.height])
+  }
+  await run(plain, false)
+  await shown(plain, false)
+  expect([(await runningLook(page, plain)).status, (await runningLook(page, plain)).height], 'the item no longer runs: no line and no room, whatever the status').toEqual([null, idle.height])
+  await run(plain, true)
+  await shown(plain, true)
+  await said(' working')
+  await expect.poll(async () => (await runningLook(page, plain)).stored, 'running again with its status: the stored height is the box\'s (the component updated)').toEqual(short.stored)
+  await say('', 0)
+  await said(null)
+  const cleared = await runningLook(page, plain)
+  expect([cleared.height, cleared.stored], 'an empty status takes no room, and the stored height gives it back').toEqual([ran.height, [ran.stored[1], ran.stored[1]]])
+  // whether the line shows is the stylesheet's question, and the setter asks it the same way
+  // (review 1): a status that is a COMMENT alone is `:empty` and shows no line, though its html is
+  // no empty string. From the comment to a status and back the line shows and goes, and the stored
+  // height with it. The status in between is markup of the log's own class: it is no log of the
+  // item's (the layout leaves an item's log out of its height, and this item has none), so
+  // nothing of it is taken off
+  const written = async (html: string) => {
+    await say(html, 0)
+    await expect.poll(async () => (await runningLook(page, plain)).html, { timeout: 15_000 }).toBe(html)
+    return (await runningLook(page, plain)).stored
+  }
+  expect(await written('<!--pending-->'), 'a comment alone: no line, the height as it was').toEqual([ran.stored[1], ran.stored[1]])
+  expect(await written('<code class="_log">working</code>'), 'from the comment to a status, of the log\'s class: the line shows, and all of its height is stored').toEqual(short.stored)
+  expect(await written('<!--pending-->'), 'and back to the comment: the line goes, and the stored height with it').toEqual([ran.stored[1], ran.stored[1]])
+  await written('')
+  await run(plain, false)
+  await shown(plain, false)
+  expect({ ...(await runningLook(page, plain)), stored: idle.stored }, 'no longer running: everything as before').toEqual(idle)
+
+  // the line is the item's OWN, and clear of the summaries along the item's lower edge. A local
+  // item whose html holds a box with the line's very classes, and a log line (so a log summary):
+  // a status and a progress reach the item's line and are read back from it, the widget keeps its
+  // text and gets no progress; and a hit on the line's last pixel row is the line's, where the
+  // log summary's 22 px target used to lie over it, a hit on the summary the summary's
+  const made = await page.evaluate(async () => {
+    const text = '#e2e_status_widget an item whose html holds a status box of its own, with a log line\n<div class="container"><div class="run-status">job output</div></div>\n' + '```_log\n12:00:00 a line of its log\n```'
+    return ((await window._create(text)) as unknown as { id: string }).id
+  })
+  await open(made)
+  await run(made, true)
+  await shown(made, true)
+  await say('working …', 0.6, made)
+  await said('working …', made)
+  expect(
+    await page.evaluate(id => {
+      const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+      const [line, widget, summary] = [':scope > .run-status', '.item .container > .run-status', '.item > .log-summary'].map(part => box.querySelector(part) as HTMLElement)
+      const item = window._item(id) as unknown as { status: string; progress: number }
+      const [lined, summed] = [line.getBoundingClientRect(), summary.getBoundingClientRect()]
+      const hit = (x: number, y: number) => (at => (at === line ? 'line' : at?.closest('.log-summary') ? 'summary' : (at?.className ?? null)))(document.elementFromPoint(x, y))
+      return {
+        line: [line.textContent, line.getAttribute('data-progress'), line.style.getPropertyValue('--progress')],
+        widget: [widget.textContent, widget.getAttribute('data-progress'), widget.style.getPropertyValue('--progress')],
+        read: [item.status, item.progress],
+        hits: [hit(box.getBoundingClientRect().left + 20, lined.bottom - 1), hit(summed.left + 10, summed.top + 2)],
+        clear: summed.top >= lined.bottom,
+      }
+    }, made),
+    'the status and the progress are the item\'s line\'s, the widget is untouched, and the line and the log summary each take their own hits',
+  ).toEqual({ line: ['working …', '0.6', '60.000%'], widget: ['job output', null, ''], read: ['working …', 0.6], hits: ['line', 'summary'], clear: true })
+  await say('', 0, made)
+  await said(null, made)
+  await run(made, false)
+  await shown(made, false)
+
+  // beside a run button: the button moves aside by the ring's room without the menu resizing, and
+  // neither it nor the text reaches the ring
+  await open(runnable)
+  const still = await runningLook(page, runnable)
+  expect([still.marks, still.run![0]], 'a run button stands right before the number\'s box').toEqual([[], 4])
+  expect(still.text, 'its text ends left of the button (how near is the plain item\'s to say: this one\'s wraps earlier)').toBeGreaterThanOrEqual(still.run![1] + 1)
+  await run(runnable, true)
+  await shown(runnable, true)
+  const moved = await runningLook(page, runnable)
+  expect([marksAre(moved.marks, [[18, 4]]), moved.run, moved.room, moved.placeholder], `running: the ring between the run button and the digits (${JSON.stringify(moved.marks)}), the button 18 px further left, the menu not resized`).toEqual([true, still.run!.map(edge => edge + 18), ['0px', '18px'], still.placeholder])
+  expect(moved.text, 'and the text keeps out of where the button now stands').toBeGreaterThanOrEqual(moved.run![1] + 1)
+  await run(runnable, false)
+  await shown(runnable, false)
+
+  // beside a mark of item code (the #vault item's watched sparkle is one, and its row has the two
+  // together: tests/e2e/sparkle.spec.ts). Such a mark is the number's `::before`, takes no room of
+  // the number's line (a negative margin) and says its room on the item's box: the app keeps that
+  // room free, and while the item runs the two rooms add up and the ring stands left of the mark,
+  // 3 px from it, without either rule naming the other's size. This mark is 19 px in a room of 22,
+  // not the sparkle's 15 in 18: an offset written for the sparkle's size would show here.
+  // A number BEYOND FOUR DIGITS has no reserved width: its box, and the menu with it, is as wide
+  // as its content, so no mark may take room in its line. The item's menu, cloned beside itself
+  // with 12345 and without the reserved class (as the app renders such a number), keeps the width
+  // it has with no mark at all, idle, marked and running, and the marks stand as they do beside a
+  // short number (before the fix the menu grew by the mark's room when the run began)
+  const fiveDigits = () =>
+    page.evaluate(id => {
+      const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu`) as HTMLElement
+      const clone = menu.cloneNode(true) as HTMLElement
+      const index = clone.querySelector('.index') as HTMLElement
+      index.firstChild!.textContent = '12345'
+      index.classList.remove('reserved')
+      index.style.removeProperty('--index-digits')
+      menu.parentElement!.append(clone) // over the menu itself: the same place, and on top
+      const digits = document.createRange()
+      digits.selectNodeContents(index.firstChild!)
+      const found = {
+        reserved: getComputedStyle(index).justifyContent, // (the reserved width's rule packs the digits at the end)
+        menu: clone.clientWidth,
+        marks: (window as unknown as Scanning).__marksLeftOf(index),
+        run: Math.round(digits.getBoundingClientRect().left - clone.querySelector('.run')!.getBoundingClientRect().right),
+      }
+      clone.remove()
+      return found
+    }, runnable)
+  const natural = await fiveDigits()
+  expect([natural.reserved, natural.menu > still.placeholder[1], natural.marks, natural.run], 'a five-digit number: no reserved width, a wider menu, no mark').toEqual(['normal', true, [], 4])
+  const box = `.container[data-item-id="${runnable}"]`
+  await page.addStyleTag({ content: `${box} { --item-mark-room: 22px }\n${box} .item-menu > .button.index::before { content: ''; flex: none; width: 19px; height: 15px; margin: 0 3px 0 -22px; background: #f5e389 }` })
+  const marked = await runningLook(page, runnable)
+  expect([marksAre(marked.marks, [[22, 4]]), marked.run, marked.room, marked.placeholder], `a mark of item code (${JSON.stringify(marked.marks)}): its 22 px kept free by the app`).toEqual([true, still.run!.map(edge => edge + 22), ['22px', '0px'], still.placeholder])
+  const five = await fiveDigits()
+  expect([five.menu, marksAre(five.marks, [[22, 4]]), five.run], `five digits, marked (${JSON.stringify(five.marks)}): the menu's natural width`).toEqual([natural.menu, true, 4 + 22])
+  await run(runnable, true)
+  await shown(runnable, true)
+  const both = await runningLook(page, runnable)
+  expect([marksAre(both.marks, [[22, 4], [40, 25]]), both.run, both.room, both.placeholder], `and running: the mark where it was and the ring left of it (${JSON.stringify(both.marks)}), the run button left of both, the room their sum`).toEqual([true, still.run!.map(edge => edge + 40), ['22px', '18px'], still.placeholder])
+  expect(both.text, 'and the text keeps out of it all').toBeGreaterThanOrEqual(both.run![1] + 1)
+  const fiveBoth = await fiveDigits()
+  expect([fiveBoth.menu, marksAre(fiveBoth.marks, [[22, 4], [40, 25]]), fiveBoth.run], `five digits, marked and running (${JSON.stringify(fiveBoth.marks)}): still the natural width, the ring left of the mark, the run button left of both`).toEqual([natural.menu, true, 4 + 40])
+  await run(runnable, false)
+  await shown(runnable, false)
+})

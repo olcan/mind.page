@@ -1444,14 +1444,16 @@
       itemHideLogs(this.id)
     }
 
+    // the status line is the item's OWN (:scope: the item's html comes before it in the element,
+    // and may hold a .container with a .run-status of its own)
     get status(): string {
-      const statusdiv = this.elem?.querySelector('.container > .loading > .status')
+      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
       return statusdiv?.innerHTML ?? null
     }
 
     set status(status: string) {
       this.dispatch_task('set_status', () => {
-        const statusdiv = this.elem?.querySelector('.container > .loading > .status')
+        const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
         if (!statusdiv) return 250 // retry in 250ms
         // retry later if there is a selection
         if (
@@ -1459,22 +1461,31 @@
           (statusdiv.contains(getSelection().anchorNode) || statusdiv.contains(getSelection().focusNode))
         )
           return 1000 // retry in 1s
+        const hidden = statusdiv.matches(':empty')
         statusdiv.innerHTML = status
+        // the line shows or goes on a running item: its box changes height with no update of its
+        // component, so the height the layout holds for it is recorded here, on that change alone
+        // (a text or a progress within a line that stays shown changes no height: no size is read).
+        // whether it shows is the stylesheet's own question (:empty, Item.svelte: a status that is
+        // a comment alone shows no line), not whether the html is an empty string
+        const container = statusdiv.parentElement
+        if (statusdiv.matches(':empty') != hidden && container.classList.contains('running'))
+          onItemResized(this.id, container, 'status')
       })
     }
 
     get progress(): number {
-      const statusdiv = this.elem?.querySelector('.container > .loading > .status')
+      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
       const progress = statusdiv?.getAttribute('data-progress')
       return !progress ? null : parseFloat(progress)
     }
 
     set progress(progress: number) {
       if (progress < 0 || progress > 1) throw new Error('invalid progress ' + progress)
-      const statusdiv = this.elem?.querySelector('.container > .loading > .status') as HTMLDivElement
+      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status') as HTMLDivElement
       if (!statusdiv) return
-      const percentage = (progress * 100).toFixed(3) + '%'
-      statusdiv.style.background = `linear-gradient(90deg, #136 ${percentage}, #013 ${percentage})`
+      // how the progress is drawn is Item.svelte's (.run-status): it gets the fraction, as --progress
+      statusdiv.style.setProperty('--progress', (progress * 100).toFixed(3) + '%')
       statusdiv.setAttribute('data-progress', progress.toString())
     }
 
@@ -1484,7 +1495,7 @@
     }
 
     clear_status() {
-      this.status = '' // triggers hide due to style on .status:empty in Item.svelte
+      this.status = '' // triggers hide due to style on .run-status:empty in Item.svelte
       this.progress = 0
     }
 
@@ -7288,9 +7299,11 @@
     const index = indexFromId.get(id)
     if (index == undefined) return // item was deleted
     let item = items[index]
-    // exclude any ._log elements since they are usually collapsed
+    // exclude any ._log elements since they are usually collapsed (those of the item's rendered
+    // content alone: markup of that class elsewhere in the box, in a status line say, is no log,
+    // and took its height off an item that had none)
     let logHeight = 0
-    container.querySelectorAll('._log').forEach(log => (logHeight += log.offsetHeight))
+    container.querySelectorAll(':scope > .item > .content ._log').forEach(log => (logHeight += log.offsetHeight))
     const height = container.offsetHeight - logHeight
     const prevHeight = item.height
     if (prevHeight == 0) {

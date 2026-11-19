@@ -66,7 +66,7 @@
     hash as _hash, prepareBlocks, removeSections, removeRemovedBlocks, blockExclusions } from '../util.js'
   import { wikiLinkExtension, wikiLinkRegExp } from '../wiki_links'
 
-  import { Circle, Circle2 } from 'svelte-loading-spinners'
+  import { Circle } from 'svelte-loading-spinners'
   import {
     editInertText,
     scanInert,
@@ -90,16 +90,12 @@
   export let editing = false
   export let focused = false
   export let saving = false
+  // a RUNNING item is marked by a small spinning circle left of its number, and left of the edit
+  // menu's buttons while it is edited (the running mark, css below), and by nothing else: until
+  // 2026-11-18 its border turned blue and an overlay dimmed it under a large spinner (a task
+  // item, whose store carries the bridge's `_agent.state`, had the border alone). its status
+  // line, which that overlay carried, is `.run-status` at the item's bottom
   export let running = false
-  // a TASK item (a delegated todo: its store carries the bridge's `_agent.state`, vault design
-  // mind_task_agents 9.6) shows no running overlay: the blue border and the todo line's marker
-  // are its indicator, and the dimming layer with the spinner stays the chat's
-  // re-evaluated on `version` too: the store's arrival invalidates the render (a projection
-  // delivered during a running mark takes effect on the mounted item)
-  $: task = isTaskItem(running, id, version)
-  function isTaskItem(running: boolean, id: string, _version: number): boolean {
-    return !!running && !!(window as any)._item?.('id:' + id, true)?._global_store?._agent?.state
-  }
   export let admin = false
   export let fixed = false
   // hide the item label on shared pages: always for contiguous reading pages, and for the item at
@@ -207,8 +203,8 @@
   function onClick(e) {
     // reject click without mousedown within 250ms (can happen due to tags shifting during click)
     if (Date.now() - mouseDownTime > 250) return
-    // ignore clicks on loading div
-    if ((e.target as HTMLElement).closest('.loading')) return
+    // ignore clicks on loading div, and on the status line (its text can be selected)
+    if ((e.target as HTMLElement).closest('.loading') || statusdiv?.contains(e.target)) return
     // ignore clicks on inputs or buttons
     if (e.target.closest('input, button')) return
     // ignore clicks inside an inert frame (a canonical reply's dead frame, src/inert.ts): its
@@ -1262,6 +1258,7 @@
   import { afterUpdate, onDestroy } from 'svelte'
   let container: HTMLDivElement
   let itemdiv: HTMLDivElement
+  let statusdiv: HTMLDivElement
   // decoded vault-result values by marker (undefined for a malformed candidate): a canonical
   // body is rendered into its dead frame as inert markdown, a malformed one shows the fixed
   // placeholder as a text node (bridge design §2.2a, amended 2026-09-05)
@@ -1585,8 +1582,9 @@
     // NOTE: this is a workaround for a null-parent exception if .item-menu is placed inside .item by Svelte
     // the div follows the digit count of the item's number (_digits): the menu is as wide as the
     // digits, and a re-ranked item's number gains or loses a digit without its children being replaced
-    // (the #vault item's watched mark finds this div as `.item > [id^="menu-"]:first-child` and gives
-    // it a left margin, the room of its sparkle beside the number: mind.items vault.md, vault_watched_css)
+    // (the room of the marks left of the number is this div's too, by css alone: its left margin is
+    // the room of a mark of item code and its left padding that of the running mark, see THE MARKS
+    // LEFT OF AN ITEM'S NUMBER in the style block. nothing of that is measured or set here)
     const digits = menuDigits(index)
     let div = itemdiv.firstElementChild as HTMLElement | null
     const inserted = div?.id == 'menu-' + id
@@ -2340,10 +2338,9 @@
     class:target
     class:target_context
     class:running
-    class:task
     class:admin
     class:showLogs
-    class:bordered={error || failedTests || warning || running || target || pushable || previewable}
+    class:bordered={error || failedTests || warning || target || pushable || previewable}
     class:editable
     class:pushable
     class:previewable
@@ -2440,13 +2437,13 @@
         )}
       </div>
     {/if}
+    <!-- the status line of a running item (its text and progress are set through _Item's status and
+         progress, index.svelte, which find it as `.container > .run-status`) -->
+    <div class="run-status" bind:this={statusdiv}></div>
     <div class="loading">
-      {#if running}
-        <Circle2 size="40" unit="px" />
-      {:else if saving}
+      {#if saving}
         <Circle size="25" unit="px" />
       {/if}
-      <div class="status"></div>
     </div>
   </div>
 </div>
@@ -2653,6 +2650,88 @@
     border-bottom-right-radius: 5px;
   }
 
+  /* THE MARKS LEFT OF AN ITEM'S NUMBER, and the one place that says how much room each takes: a
+     custom property per mark on the item's box.
+       --running-mark-room   the app's running mark (the circle, below): 18px while the item runs
+       --item-mark-room      a mark that item code draws (the #vault item's watched sparkle, mind.items
+                             vault.md, vault_watched_css): the item's stylesheet sets it on the boxes
+                             it marks; unset, no room
+     the room left free is their sum: the item's text keeps out of it (the placeholder for the menu,
+     the first child of the text: afterUpdate) and a run button steps aside by it. no mark takes
+     room of the menu itself, whose size is measured once for all items of a shape (menuSize): a
+     mark is drawn outside the number's box, and a run button is moved without the menu resizing.
+     the sum is applied as two terms, each through a property of its own (the placeholder's margin
+     and padding, the run button's offset and translation), so that an older #vault item, whose
+     stylesheet sets that margin and that offset itself (18px, until 2026-11-18) and so replaces
+     the item's term, still adds up with the running mark's.
+     the order: a mark of item code is the `::before` of the number and stands nearest it, the
+     running mark is the `::after` moved to the front of the number's line (order), left of it. a
+     mark of item code takes no room in that line by a negative margin of its own. where the
+     number's box has a fixed width (.reserved: up to four digits) the mark is given its real room
+     in the line while the item runs, which is what puts the circle left of it without the app
+     knowing its size, also for an older #vault item that says no room (!important: the item's
+     own rule is as specific as this one). a longer number's box is as wide as its content, and
+     the menu with it: there no mark may take room in the line (the menu grew by the mark's 18px
+     when the run began, and the run button moved twice as far as the text's placeholder), so
+     both keep their negative margins and the circle steps left by the room the item's mark SAYS
+     (--item-mark-room; an older item says none, and on such a number its sparkle and the circle
+     share their place) */
+  .container {
+    --running-mark-room: 0px;
+  }
+  .container.running {
+    --running-mark-room: 18px;
+  }
+  .item > :global([id^='menu-']:first-child) {
+    margin-left: var(--item-mark-room, 0px);
+    padding-left: var(--running-mark-room);
+  }
+  .item-menu > .run {
+    position: relative;
+    right: var(--item-mark-room, 0px);
+    translate: calc(-1 * var(--running-mark-room)) 0;
+  }
+  .container.running .item-menu > .index.reserved::before {
+    margin-left: 0 !important;
+  }
+  .container.running .item-menu > .index:not(.reserved)::after {
+    translate: calc(-1 * var(--item-mark-room, 0px)) 0;
+  }
+
+  /* THE RUNNING MARK: a small ring in the blue that the running border had, a quarter of it bright
+     and turning. by the number it is as large as the watched sparkle (15px, and 3px to the digits
+     or to the mark before them: its 18px) and centred on the number's box; in the editor, where no
+     number shows, it is the first thing in the edit menu, left of a mark of item code and of the
+     buttons, a little less than the buttons' height (23px, as the sparkle there) */
+  .container.running .item-menu > .index::after,
+  .container.running .edit-menu::after {
+    content: '';
+    order: -1;
+    flex: none;
+    box-sizing: border-box;
+    border: 2px solid rgba(68, 170, 255, 0.3);
+    border-top-color: #4af;
+    border-radius: 50%;
+    animation: running-mark 1s linear infinite;
+  }
+  .container.running .item-menu > .index::after {
+    width: calc(var(--running-mark-room) - 3px);
+    height: calc(var(--running-mark-room) - 3px);
+    margin: 0 3px 0 calc(-1 * var(--running-mark-room));
+  }
+  .container.running .edit-menu::after {
+    align-self: center;
+    width: 23px;
+    height: 23px;
+    margin-right: 6px;
+    border-width: 3px;
+  }
+  @keyframes running-mark {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .time {
     height: 20px; /* fixed height (=24 including margin-bottom) */
     color: #444;
@@ -2713,10 +2792,6 @@
   .error {
     border-color: #633;
   }
-  .running {
-    /* border-color: #246; */
-    border-color: #4af; /* dimmed by .loading */
-  }
   .pushable {
     border-color: #a52;
   }
@@ -2747,56 +2822,79 @@
     background: rgba(0, 0, 0, 0.5);
     pointer-events: none; /* passthrough */
   }
-  .loading > :global(div:not(.status)) {
+  .loading > :global(div) {
     opacity: 0.75;
-    min-height: var(--size); /* prevent distortion when indicator + status exceed item height */
+    min-height: var(--size); /* prevent distortion when the indicator exceeds item height */
   }
-  .running .loading,
+  /* the overlay is the SAVING item's alone: a running item is not dimmed (see the running mark) */
   .saving .loading {
     visibility: visible;
   }
-  .container.task.running:not(.saving) .loading {
-    visibility: hidden; /* a task item: the border and the marker indicate, nothing dims */
+
+  /* THE STATUS LINE of a running item (the text and the progress it shows while it runs: _Item's
+     status and progress, index.svelte): one small dim line at the item's bottom, inside its box,
+     cut with an ellipsis; the progress is a thin bar under the text, filled from the left as far
+     as --progress says (set with data-progress by the progress setter; none at 0). ITS PLACE IS
+     THIS ONE RULE: the element is a child of the item's box of its own, after the text or the
+     editor, so another place is another margin or position here. its bottom margin keeps it clear
+     of the log, dependencies and dependents summaries, whose click targets (22px, at bottom -8px)
+     cover the last 14px inside the item's box: with less, a click on the line's lower part opened
+     the log. it is ONE LINE of height whatever the status holds (the status is html: the height
+     is fixed, and the common block elements, a div or a p among them, are laid out inline on the
+     line; another element that stacks, two sections say, is cut by the fixed height), so the item
+     is 33px taller while a status shows, and it shows only while the item runs: an empty one
+     takes no room (:empty, which the status setter asks too: a comment alone is empty) */
+  .container > .run-status {
+    margin: 0 10px 14px;
+    height: 16px;
+    padding-bottom: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 16px;
+    color: #789;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  /* remove .status div when empty */
-  .loading .status:empty {
+  .container:not(.running) > .run-status,
+  .container > .run-status:empty {
     display: none;
   }
-  .loading .status {
-    padding: 5px 10px;
-    margin-top: 5px;
-    font-size: 14px;
-    line-height: 24px;
-    font-family: 'JetBrains Mono', monospace;
-    background: #124; /* progress gradient uses #136 and #013 */
-    border-radius: 5px;
-    max-width: 90%; /* avoid touching edges of item */
-    text-align: center; /* for multi-line status */
-    pointer-events: all;
+  .container > :global(.run-status[data-progress]:not([data-progress='0'])) {
+    background: linear-gradient(90deg, #4af var(--progress), #234 var(--progress)) left bottom / 100% 2px no-repeat;
   }
-  /* style progress bars for consistency across platforms */
+  /* a status of several lines (an item's own <br>, or block elements) stays on the one line */
+  .container > .run-status :global(br) {
+    display: none;
+  }
+  .container > .run-status :global(:is(div, p, pre, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6)) {
+    display: inline;
+    margin: 0 1ch 0 0;
+    padding: 0;
+  }
+  /* style progress bars (a <progress> element in a status) for consistency across platforms */
   /* see https://stackoverflow.com/a/32186894 */
   /* background */
-  .container .loading :global(progress) {
+  .container > .run-status :global(progress) {
     background-color: #171717;
     border-radius: 4px;
     width: 100px;
     height: 10px;
   }
-  .container .loading :global(progress::-webkit-progress-bar) {
+  .container > .run-status :global(progress::-webkit-progress-bar) {
     background-color: #171717;
     border-radius: 4px;
   }
   /* value/foreground */
-  .container .loading :global(progress::-webkit-progress-value) {
+  .container > .run-status :global(progress::-webkit-progress-value) {
     background-color: #4af;
     border-radius: 4px;
   }
-  .container .loading :global(progress::-moz-progress-bar) {
+  .container > .run-status :global(progress::-moz-progress-bar) {
     background-color: #4af;
     border-radius: 4px;
   }
-  .container .loading :global(progress) {
+  .container > .run-status :global(progress) {
     color: #4af;
     border-radius: 4px;
   }

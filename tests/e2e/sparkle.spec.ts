@@ -565,7 +565,13 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
 // follows as dense as the bridge publishes is taller than a phone's window: the menu stays
 // inside the window and scrolls, its entries where a pointer and the keyboard reach them; (f) a
 // look that takes long, the app's listing of the items held up for it, is said in one more line
-// of the menu and warned of in the console, once, and a look that is quick again removes the line
+// of the menu and warned of in the console, once, and a look that is quick again removes the line;
+// (g) beside the app's running mark (the ring left of a running item's number, 2026-11-18,
+// tests/e2e/layout.spec.ts): on an item that is watched and runs both show, the sparkle nearest
+// the number and the ring left of it, by the number and in the edit menu, and neither reaches the
+// digits, the item's text or its run button; the room is the sum of what each says; an older
+// item's stylesheet, which says none and sets the margin itself, adds up the same; and an item
+// that is being saved is dimmed as it always was, running or not
 test('the watched mark is on the items an agent follows, and the menu says what is followed', async ({ page }) => {
   const dialogs: string[] = []
   page.on('dialog', dialog => {
@@ -651,6 +657,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       return {
         digits: index.textContent!.trim().length,
         menu: menu.clientWidth,
+        said: getComputedStyle(box).getPropertyValue('--item-mark-room').trim(), // the room as the item says it to the app
         placeholder: [spacer === spacer.parentElement!.firstElementChild, getComputedStyle(spacer).marginLeft],
         mark: mark.content == 'none' ? null : [mark.marginLeft, mark.marginRight],
       }
@@ -658,10 +665,10 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await shows(TAG)
   expect(await look(TAG, NUMBER)).toEqual([SPARKLE, '15px', 'none'])
   const marked = await room(TAG)
-  expect([marked.digits, marked.menu > 0, marked.placeholder, marked.mark], 'the sparkle takes no room of the box, and the text keeps out of its 18px').toEqual([1, true, [true, '18px'], ['-18px', '3px']])
+  expect([marked.digits, marked.menu > 0, marked.said, marked.placeholder, marked.mark], 'the sparkle takes no room of the box, its 18px are said to the app, and the text keeps out of them').toEqual([1, true, '18px', [true, '18px'], ['-18px', '3px']])
   await shows('#e2e_mark_p')
   expect((await look('#e2e_mark_p', NUMBER))![0]).toBe('none')
-  expect(await room('#e2e_mark_p'), 'an item nobody follows: a menu as wide, a placeholder with no margin').toEqual({ digits: 1, menu: marked.menu, placeholder: [true, '0px'], mark: null })
+  expect(await room('#e2e_mark_p'), 'an item nobody follows: a menu as wide, a placeholder with no margin').toEqual({ digits: 1, menu: marked.menu, said: '', placeholder: [true, '0px'], mark: null })
 
   // (b) the tag saved in the editor: the mark shows on the item, and in its edit menu while it is edited
   const id = await page.evaluate(() => window._item('#e2e_mark_p', true)!.id)
@@ -787,6 +794,232 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await looked(2)
   expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (4 items)`])
   expect(warnings.length, 'no second warning').toBe(1)
+
+  // (g) the two marks together. A runnable item that carries the tag, in a narrow window, where
+  // its first line runs up to its menu
+  await page.setViewportSize({ width: 600, height: 800 })
+  const RUN = '#e2e_mark_run'
+  const RUN_TEXT = `${RUN} carries ${TAG} and can run: its first line is long enough to reach the room that the two marks keep free beside its number.\n` + '```js_input\n1\n```'
+  await page.evaluate(text => void window._create(text), RUN_TEXT)
+  await expect.poll(() => savedId(page, RUN), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(marks, { timeout: 30_000 }).toContain(RUN)
+  await shows(RUN)
+  const runId = await page.evaluate(label => window._item(label, true)!.id, RUN)
+  const BLUE = 'rgb(68, 170, 255)' // #4af, the ring's
+  const runs = (running: boolean) => page.evaluate(([id, running]) => void ((window._item(id, true) as any).running = running), [runId, running] as const)
+  const boxed = (running: boolean) => expect.poll(() => page.evaluate(([id, running]) => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]${running ? '.running' : ':not(.running)'} .item-menu`), [runId, running] as const), { timeout: 15_000 }).toBe(true)
+  // the boxes left of the number's own, by a hit test along its middle line (a pseudo-element
+  // answers as its element), each as [from, to] in px left of the digits, the nearest first, read off whole pixels
+  // (an edge can read up to a pixel wide of the box's own: `marksAre`); how far left of the
+  // digits the nearest line of the text beside them ends, and the run button's two edges; the
+  // placeholder's margin and padding, and the room the item says. `without` hides one of the
+  // number's two pseudo-elements for the measure (which mark is which), and `older` gives the
+  // page, for the measure, the stylesheet as the item wrote it before 2026-11-18: no room said,
+  // the margin and the run button's offset set by its own rules (the same sheet otherwise)
+  // The measure is of the item in the SHOWN column (an element can be mounted in the offscreen
+  // render column alone, where nothing is hit), found again after the frames it waits (a resize
+  // can schedule a later scroll to the target, and a layout can replace the element); null when
+  // it is not there. `beside` polls the WHOLE assertion on a measure and returns the measure
+  // that passed, so nothing is asserted on a second, unguarded one
+  type Options = { without?: string; older?: boolean }
+  const measured = (options: Options = {}) =>
+    page.evaluate(async ([id, without, older]) => {
+      const shown = () => document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement | null
+      const sheet = document.querySelector('[data-vault-sparkle="watched"]')!
+      const written = sheet.textContent!
+      if (older) sheet.textContent = written.split('\n').filter(rule => !rule.includes('{ --item-mark-room')).join('\n').replaceAll('var(--item-mark-room)', '18px')
+      // (the ring is measured standing still: a hit test reads a turning box up to 2 px wide of it)
+      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.item-menu > .index::after { animation: none !important }' + (without ? ` .item-menu > .index::${without} { display: none !important }` : '') }))
+      shown()?.scrollIntoView({ block: 'center' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const box = shown()
+      const [index, spacer, run] = ['.item-menu > .index', '.item > [id^="menu-"]', '.item-menu > .run'].map(part => box?.querySelector(part) as HTMLElement | null)
+      if (!box || !index?.firstChild || !spacer || !run) {
+        hide.remove()
+        if (older) sheet.textContent = written
+        return null
+      }
+      const digits = document.createRange()
+      digits.selectNodeContents(index.firstChild!)
+      const [number, own, button] = [digits.getBoundingClientRect(), index.getBoundingClientRect(), run.getBoundingClientRect()]
+      const y = (own.top + own.bottom) / 2
+      const found: number[][] = [] // pixel by pixel leftwards from the number's own box: [left edge of the first pixel hit, right edge of the last]
+      for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 60; k++, pixel--) {
+        if (document.elementFromPoint(pixel + 0.5, y) !== index) continue
+        const last = found[found.length - 1]
+        if (last && last[0] == number.left - pixel - 1) last[0] = number.left - pixel
+        else found.push([number.left - pixel, number.left - pixel - 1])
+      }
+      let text = Infinity
+      const walker = document.createTreeWalker(box.querySelector('.item')!, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent!.trim()) continue
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        for (const line of range.getClientRects()) if (line.width && line.bottom > own.top + 2 && line.top < own.bottom - 2) text = Math.min(text, number.left - line.right)
+      }
+      const placed = getComputedStyle(spacer)
+      const result = {
+        marks: found,
+        run: [Math.round(number.left - button.right), Math.round(number.left - button.left)],
+        text,
+        room: [placed.marginLeft, placed.paddingLeft],
+        said: getComputedStyle(box).getPropertyValue('--item-mark-room').trim(),
+        at: [Math.round(own.left), Math.round(y), innerWidth, innerHeight], // where the measure was made, for a failure's message
+      }
+      hide.remove()
+      if (older) sheet.textContent = written
+      return result
+    }, [runId, options.without ?? '', !!options.older] as const)
+  type Beside = NonNullable<Awaited<ReturnType<typeof measured>>>
+  const beside = async (message: string, facts: (measure: Beside) => unknown[], expected: unknown[], options: Options = {}) => {
+    let passed: Beside | null = null
+    await expect.poll(async () => ((passed = await measured(options)), passed && facts(passed)), { message, timeout: 15_000 }).toEqual(expected)
+    return passed!
+  }
+  // watched, not running: the sparkle alone, in its 18 px (the last of them inside the number's
+  // own box, which begins 4 px before the digits), a run button left of them, the text left of it
+  const marksAre = (marks: number[][], boxes: number[][]) => marks.length == boxes.length && marks.every((mark, at) => mark.every((edge, side) => Math.abs(edge - boxes[at][side]) <= 1))
+  const alone = await beside('watched: the sparkle in its 18px, which the item says and the app keeps free', m => [marksAre(m.marks, [[18, 4]]), m.run[0], m.room, m.said], [true, 4 + 18, ['18px', '0px'], '18px'])
+  expect([alone.text >= alone.run[1] + 1, alone.text < alone.run[1] + 40], `the text runs up to the run button (${alone.text}, ${alone.run})`).toEqual([true, true])
+  // and running: the ring left of the sparkle, 3 px between them, the run button and the text
+  // left of both; the room is the sum of the two, each by a property of its own
+  await runs(true)
+  await boxed(true)
+  const both = await beside(
+    'watched and running: the sparkle where it was and a second mark left of it, and the run button 18px further left',
+    m => [marksAre(m.marks, [[18, 4], [36, 21]]), m.run, m.room, m.said],
+    [true, alone.run.map(edge => edge + 18), ['18px', '18px'], '18px'],
+  )
+  expect(both.text, 'the text keeps out of where the run button now stands').toBeGreaterThanOrEqual(both.run[1] + 1)
+  await beside('without the ring, the mark nearest the number remains: the sparkle', m => [marksAre(m.marks, [[18, 4]])], [true], { without: 'after' })
+  expect(await look(RUN, NUMBER), 'the sparkle is drawn as on any watched item').toEqual([SPARKLE, '15px', 'none'])
+  expect(
+    await page.evaluate(([id, part]) => (ring => [ring.content, ring.width, ring.borderTopStyle, ring.borderTopWidth, ring.borderTopColor, ring.order])(getComputedStyle(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] ${part}`)!, '::after')), [runId, NUMBER]),
+    'the ring is the app\'s: a solid stroke of 2px',
+  ).toEqual(['""', '15px', 'solid', '2px', BLUE, '-1'])
+  // an older #vault item's stylesheet on this app: no room said, and the same picture
+  const older = await beside('the older stylesheet says no room, and the marks, the run button and the room are the same', m => [marksAre(m.marks, [[18, 4], [36, 21]]), m.run, m.room, m.said], [true, both.run, both.room, ''], { older: true })
+  expect(older.text).toBeGreaterThanOrEqual(older.run[1] + 1)
+  // in the editor: the ring, then the sparkle, then the buttons, each 23px and 6px before the next,
+  // in ONE row that ends at the item's right edge, out of flow, where the edit menu always stood
+  // (a menu that wrapped into further rows was built, and the owner declined it, 2026-11-18: "just
+  // let it extend all the way to the left or even get clipped on left side if needed"). What is
+  // read: the room of the marks before the first button; the two marks' styles; the buttons and
+  // the rows they stand in; where the row ends against the item's right edge, and whether it
+  // begins left of the item's left edge; by how much it lies over the editor's top (5px); and the
+  // height the layout holds for the item against the box's own
+  const menu = () =>
+    page.evaluate(id => {
+      const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+      const menu = box.querySelector('.edit-menu') as HTMLElement
+      const [ring, mark] = ['::after', '::before'].map(part => getComputedStyle(menu, part))
+      const [own, item, editor] = [menu, box, box.querySelector('.editor')!].map(part => part.getBoundingClientRect())
+      const buttons = [...menu.querySelectorAll('.button')].map(button => button.getBoundingClientRect())
+      const stored = (window.__items.find(item => item.id == id) as unknown as { height: number }).height
+      return {
+        before: Math.round(buttons[0].left - own.left), // the marks' room: the menu is as wide as its row
+        ring: ring.content == 'none' ? null : [ring.order, ring.width, ring.marginRight, ring.borderTopColor],
+        mark: mark.content == 'none' ? null : [mark.order, mark.width, mark.marginRight, mark.backgroundImage.slice(0, 26)],
+        buttons: buttons.length,
+        rows: new Set(buttons.map(button => Math.round(button.top))).size,
+        right: Math.round(own.right - item.right),
+        past: own.left < item.left,
+        over: Math.round(Math.max(...buttons.map(button => button.bottom)) - editor.top),
+        heights: [stored, box.offsetHeight],
+        agree: stored == box.offsetHeight,
+      }
+    }, runId)
+  await edit(runId)
+  expect(await menu(), 'edited while running and watched').toMatchObject({ before: 2 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], rows: 1, right: 0, past: false, over: 5 })
+  await runs(false)
+  await expect.poll(menu, 'no longer running: the sparkle alone').toMatchObject({ before: 23 + 6, ring: null, mark: ['0', '23px', '6px', SPARKLE], rows: 1, right: 0, past: false, over: 5 })
+  // a FULL menu in a phone's window: the item given every button (pushable, and from a source:
+  // set on the page's own record of it, since this account has no pusher and the item was not
+  // installed), watched and running, at 375px. Its row is wider than the item: still one row,
+  // ending at the item's right edge, it begins left of the item's left edge (the marks first,
+  // where the list cuts them off), and adds nothing to the item's height
+  const sourced = (source: string | null) =>
+    page.evaluate(([id, source]) => {
+      const record = window.__items.find(item => item.id == id) as unknown as { attr: Record<string, unknown> | null }
+      record.attr = source ? { ...(record.attr ?? {}), source } : Object.fromEntries(Object.entries(record.attr ?? {}).filter(([name]) => name != 'source'))
+      ;(window._item(id, true) as unknown as { pushable: boolean }).pushable = !!source
+    }, [runId, source] as const)
+  await sourced('https://github.com/olcan/mind.items/blob/master/e2e_mark_run.md')
+  await runs(true)
+  await page.setViewportSize({ width: 375, height: 667 })
+  await expect
+    .poll(menu, { message: 'a full menu at 375px: one row of the ring, the sparkle and all eight buttons, ending at the item\'s right edge and beginning left of its left edge, 5px over the editor; the stored height the box\'s', timeout: 15_000 })
+    .toMatchObject({ before: 2 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], buttons: 8, rows: 1, right: 0, past: true, over: 5, agree: true })
+  // watched or not changes no height. The item no longer runs, and the window is made as wide as
+  // the row of the eight buttons and half a sparkle more: watched, the sparkle takes the row past
+  // the item's left edge, not watched the row fits in the item; one row either way, and the
+  // item's height, as the layout holds it and as the box has it, stays what it was. The watch is
+  // changed as the watcher changes it, by its published rule: the #vault item rewrites its
+  // stylesheet, and no property of this item's component changes. Each time the heights are read
+  // once, two frames after the row changed
+  await runs(false)
+  const fit = await page.evaluate(id => {
+    const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+    const row = [...box.querySelectorAll('.edit-menu > .button')].reduce((sum, button) => sum + button.getBoundingClientRect().width, 0)
+    return { row, beside: innerWidth - box.getBoundingClientRect().width } // the buttons' row, and what of the window is not the item's
+  }, runId)
+  await page.setViewportSize({ width: Math.ceil(fit.row + 14 + fit.beside), height: 667 })
+  const changed = async (past: boolean, message: string) => {
+    await expect.poll(async () => (found => [found.rows, found.past])(await menu()), { message, timeout: 30_000 }).toEqual([1, past])
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    return (await menu()).heights
+  }
+  await expect
+    .poll(async () => (found => [found.rows, found.past, found.agree])(await menu()), { message: 'the premise: watched at this width the one row begins left of the item\'s left edge, and the resized window\'s heights are settled', timeout: 30_000 })
+    .toEqual([1, true, true])
+  const height = (await menu()).heights
+  await follows([{ ...RULE, tags: [KID] }]) // the watch no longer names the item's tag
+  expect(await changed(false, 'not watched: the row fits in the item'), 'not watched: the same height, stored and actual').toEqual(height)
+  await follows([{ ...RULE, tags: [TAG, KID] }])
+  expect(await changed(true, 'watched again: the row begins left of the item\'s left edge'), 'watched again: the same height').toEqual(height)
+  await runs(true)
+  await sourced(null)
+  // an item that is being SAVED is dimmed as before, whether it runs or not: the save's write is
+  // held at the network, and until it is let go the overlay covers the item's box, half black,
+  // with the saving spinner of 25px, also while the run ends and begins again under the same
+  // write (until 2026-11-18 a run at the same time put its own 40px spinner there instead); a
+  // running item that is not being saved has no overlay (the item still runs, from the step above)
+  let release = () => {}
+  const held = new Promise<void>(resolve => (release = resolve))
+  const WRITES = /Firestore\/Write\/channel/
+  await page.route(WRITES, async route => {
+    if (route.request().method() == 'POST') await held
+    await route.continue()
+  })
+  const dimmed = () =>
+    page.evaluate(id => {
+      const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+      const loading = box.querySelector('.loading') as HTMLElement
+      const [style, outer, inner] = [getComputedStyle(loading), box.getBoundingClientRect(), loading.getBoundingClientRect()]
+      return {
+        saving: box.classList.contains('saving'),
+        running: box.classList.contains('running'),
+        overlay: style.visibility,
+        shade: style.backgroundColor,
+        covers: inner.left <= outer.left && inner.top <= outer.top && inner.right >= outer.right && inner.bottom >= outer.bottom,
+        spinner: [loading.childElementCount, loading.firstElementChild ? getComputedStyle(loading.firstElementChild).getPropertyValue('--size').trim() : null], // how many, and of which size (the spinner's own property: its box turns)
+      }
+    }, runId)
+  await page.locator(`#textarea-${runId}`).fill(RUN_TEXT.replace('can run', 'can run and is saved'))
+  await page.keyboard.press('Shift+Enter') // save
+  await expect(page.locator(`#textarea-${runId}`)).toBeHidden()
+  const SAVING = { saving: true, overlay: 'visible', shade: 'rgba(0, 0, 0, 0.5)', covers: true, spinner: [1, '25px'] }
+  await expect.poll(dimmed, 'saving while running: the overlay, with the saving spinner').toEqual({ ...SAVING, running: true })
+  await runs(false)
+  await expect.poll(dimmed, 'the run ends under the same write: the same overlay').toEqual({ ...SAVING, running: false })
+  await runs(true)
+  await expect.poll(dimmed, 'and begins again: the same overlay').toEqual({ ...SAVING, running: true })
+  release()
+  await expect.poll(dimmed, { message: 'saved, still running: no overlay', timeout: 30_000 }).toEqual({ saving: false, running: true, overlay: 'hidden', shade: 'rgba(0, 0, 0, 0.5)', covers: true, spinner: [0, null] })
+  await page.unroute(WRITES)
+  await runs(false)
+  await boxed(false)
   expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
 })
 
