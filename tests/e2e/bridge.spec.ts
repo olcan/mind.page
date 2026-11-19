@@ -1113,7 +1113,13 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
           // setting, its href the configured handler's query, no target or rel
           if (el.hasAttribute('data-wiki-link')) {
             const config = (window as any)._wiki_links
-            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+            // its href is the app's own under the setting: the url with `{link}` replaced by
+            // base64url text and nothing after it, else `url?path=`
+            const href = el.getAttribute('href') ?? ''
+            const [head, tail] = String(config?.url).split('{link}')
+            const packed = href.startsWith(head) && href.endsWith(tail ?? '') && /^[A-Za-z0-9_-]+$/.test(href.slice(head.length, href.length - (tail ?? '').length))
+            const built = tail === undefined ? href.startsWith(head + '?path=') : packed
+            return !config || !built || el.hasAttribute('target') || el.hasAttribute('rel')
           }
           return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
         }).length,
@@ -1251,7 +1257,13 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
           // setting, its href the configured handler's query, no target or rel
           if (el.hasAttribute('data-wiki-link')) {
             const config = (window as any)._wiki_links
-            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+            // its href is the app's own under the setting: the url with `{link}` replaced by
+            // base64url text and nothing after it, else `url?path=`
+            const href = el.getAttribute('href') ?? ''
+            const [head, tail] = String(config?.url).split('{link}')
+            const packed = href.startsWith(head) && href.endsWith(tail ?? '') && /^[A-Za-z0-9_-]+$/.test(href.slice(head.length, href.length - (tail ?? '').length))
+            const built = tail === undefined ? href.startsWith(head + '?path=') : packed
+            return !config || !built || el.hasAttribute('target') || el.hasAttribute('rel')
           }
           return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
         }).length,
@@ -1770,16 +1782,26 @@ test('/run copies only the real input, not a candidate-nested one', async ({ pag
 // text and a reply's inert frame under the account's setting, set and cleared in the page without
 // an edit (the setter re-renders every item, a hidden one's cache included), the anchor's shape and
 // its click path (the click stops at the anchor and keeps its default, verified with a synthetic
-// cancelable click whose default the test itself cancels, so no external application launches)
+// cancelable click whose default the test itself cancels, so no external application launches);
+// a `#diff` reference in each, under BOTH forms of the setting's url. The first ON is the query
+// form (`url?path=…&root=…`), which carries no view: the reference is a plain file link, tooltip
+// included. The second ON is a url with the `{link}` placeholder, the vault's own: a link's path,
+// root and view are packed into ONE base64url text in the placeholder's place, with no query, and
+// the diff view exists there alone. The frame audit admits an app-built anchor under either
+// (`built` above); no other rule of the audit changes
 test('wiki links: the owner text and the inert frame link under the setting, on, off, on', async ({ page }) => {
   await loadAdmin(page)
   const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' }
   const href = (path: string) => `${config.url}?path=${encodeURIComponent(path)}&root=${encodeURIComponent(config.root)}`
+  // the packed form: node's own encoder over the values' JSON, in the placeholder's place
+  const packed = { url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' }
+  const link = (path: string, view?: string) =>
+    packed.url.replace('{link}', Buffer.from(JSON.stringify({ v: 1, path, root: packed.root, ...(view ? { view } : {}) })).toString('base64url'))
   await page.evaluate(() => {
     window._create('#e2e_wiki_hidden the hidden one [[docs/z]]')
-    window._create('#e2e_wiki_owner see [[docs/x]] and [[notes/A&B|see #topic]] and `[[docs/code]]` and [[../etc/passwd]] and [[/abs]]')
+    window._create('#e2e_wiki_owner see [[docs/x]] and [[notes/A&B|see #topic]] and `[[docs/code]]` and [[../etc/passwd]] and [[/abs]] and [[worktrees/t/AGENTS#diff]]')
     window._create(
-      "#e2e_wiki_reply reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nsee [[docs/y|guide]] and [[../x]] and [x](https://h/)\n<!--/inert-->"
+      "#e2e_wiki_reply reply\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nsee [[docs/y|guide]] and [[../x]] and [x](https://h/) and [[worktrees/t#diff|the proposal]]\n<!--/inert-->"
     )
   })
   const shown = async (name: string) => {
@@ -1810,7 +1832,13 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
           if (el.tagName != 'A') return false
           if (el.hasAttribute('data-wiki-link')) {
             const config = (window as any)._wiki_links
-            return !config || !(el.getAttribute('href') ?? '').startsWith(config.url + '?path=') || el.hasAttribute('target') || el.hasAttribute('rel')
+            // its href is the app's own under the setting: the url with `{link}` replaced by
+            // base64url text and nothing after it, else `url?path=`
+            const href = el.getAttribute('href') ?? ''
+            const [head, tail] = String(config?.url).split('{link}')
+            const packed = href.startsWith(head) && href.endsWith(tail ?? '') && /^[A-Za-z0-9_-]+$/.test(href.slice(head.length, href.length - (tail ?? '').length))
+            const built = tail === undefined ? href.startsWith(head + '?path=') : packed
+            return !config || !built || el.hasAttribute('target') || el.hasAttribute('rel')
           }
           return !/^(?:https?|mailto):/i.test(el.getAttribute('href') ?? '')
         }).length,
@@ -1824,11 +1852,14 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
   expect(off.text).toContain('[[../etc/passwd]]')
   // ON: the setter, no edit
   expect(await page.evaluate(config => (window as any)._set_wiki_links(config), config)).toEqual(config)
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(3)
   const on = await state('#e2e_wiki_owner')
   expect(on.anchors).toEqual([
     { href: href('docs/x'), title: 'docs/x', text: 'docs/x', html: 'docs/x', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
     { href: href('notes/A&B'), title: 'notes/A&B', text: 'see #topic', html: 'see #topic', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
+    // a `#diff` reference under the query form: a plain file link, the target shown as written
+    // (its `#diff` is no tag: the count of marks below)
+    { href: href('worktrees/t/AGENTS'), title: 'worktrees/t/AGENTS', text: 'worktrees/t/AGENTS#diff', html: 'worktrees/t/AGENTS#diff', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
   ])
   expect(on.marks, 'no tag mark inside an anchor').toBe(0)
   expect(on.code, 'the code span keeps its brackets').toContain('[[docs/code]]')
@@ -1869,7 +1900,10 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
   await shown('#e2e_wiki_reply')
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelector('.vault-result a[data-wiki-link]') != null), { timeout: 15_000 }).toBe(true)
   const reply = await state('#e2e_wiki_reply')
-  expect(reply.anchors).toEqual([{ href: href('docs/y'), title: 'docs/y', text: 'guide', html: 'guide', attributes: ['data-wiki-link', 'href', 'title'], wired: true }])
+  expect(reply.anchors).toEqual([
+    { href: href('docs/y'), title: 'docs/y', text: 'guide', html: 'guide', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
+    { href: href('worktrees/t'), title: 'worktrees/t', text: 'the proposal', html: 'the proposal', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
+  ])
   expect(reply.text).toContain('and [[../x]] and')
   expect(reply.frameViolations, 'the frame holds only the policy html, the wiki anchor included').toBe(0)
   expect(
@@ -1894,13 +1928,26 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
   await shown('#e2e_wiki_reply') // the already-rendered reply: its frame re-rendered without the anchor
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
   expect((await state('#e2e_wiki_reply')).text).toContain('see [[docs/y|guide]] and')
+  expect((await state('#e2e_wiki_reply')).text).toContain('and [[worktrees/t#diff|the proposal]]')
   expect(await page.evaluate(() => (window as any)._wiki_links_epoch)).toBe(2)
-  // ON again: both back, without an edit
-  expect(await page.evaluate(config => (window as any)._set_wiki_links(config), config)).toEqual(config)
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
-  expect((await state('#e2e_wiki_reply')).anchors[0].href).toBe(href('docs/y'))
+  // ON again, without an edit, under the url with the placeholder: both back, each href the
+  // setting's url with ONE base64url text in the placeholder's place and no query, and the diff
+  // references now the diff view, named in the tooltip; the frame audit admits them
+  expect(await page.evaluate(config => (window as any)._set_wiki_links(config), packed)).toEqual(packed)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
+  const again = await state('#e2e_wiki_reply')
+  expect(again.anchors.map(a => [a.href, a.title, a.text])).toEqual([
+    [link('docs/y'), 'docs/y', 'guide'],
+    [link('worktrees/t', 'diff'), 'diff of worktrees/t', 'the proposal'],
+  ])
+  expect(again.frameViolations, 'the frame holds only the policy html, the packed wiki anchors included').toBe(0)
   await shown('#e2e_wiki_owner')
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(3)
+  expect((await state('#e2e_wiki_owner')).anchors.map(a => [a.href, a.title, a.text])).toEqual([
+    [link('docs/x'), 'docs/x', 'docs/x'],
+    [link('notes/A&B'), 'notes/A&B', 'see #topic'],
+    [link('worktrees/t/AGENTS', 'diff'), 'diff of worktrees/t/AGENTS', 'worktrees/t/AGENTS#diff'],
+  ])
   expect(await page.evaluate(() => (window as any)._wiki_links_epoch)).toBe(3)
 })
 
@@ -1951,8 +1998,8 @@ test('wiki links: the settings item, its command, the store, and the first rende
   expect(await command('/wiki_links')).toContain('wiki links: off')
   expect(await command('/wiki_links h/f /r')).toContain('refused h/f /r') // nothing applied, nothing saved
   expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
-  expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/file under /Users/o c/v')
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+  expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
   // the command TYPED into the mindbox, as the owner runs it: the editor augments the long url
   // with zero-width spaces (src/zwsp.ts; the precondition is asserted, or the row proves nothing),
   // and the command's arguments must not carry them (2026-09-26: the stored url held three, and
@@ -1970,15 +2017,15 @@ test('wiki links: the settings item, its command, the store, and the first rende
   }
   // a REFUSED url (a query) echoes the argument the handler received: clean only when the command
   // boundary stripped the augmentation (the parser's own normalization never sees a refusal's echo)
-  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file?q=1 /Users/o c/v')).toBe(
-    '/wiki_links: refused vscode-insiders://olcan.auto-open-obsidian/file?q=1 /Users/o c/v (a url is <scheme>://<host>/<path> without a query)'
+  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v')).toBe(
+    '/wiki_links: refused vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v (a url is <scheme>://<host>/<path> without a query)'
   )
   expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
-  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/file /Users/o c/v')).toBe('wiki links: vscode-insiders://olcan.auto-open-obsidian/file under /Users/o c/v')
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toBe('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
+  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
   // the store carries the accepted config (saved through the item's store)
   await expect.poll(() => page.evaluate(() => JSON.stringify((window._item('#wiki_links') as any)._global_store.wiki_links)), { timeout: 15_000 }).toBe(
-    JSON.stringify({ url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' })
+    JSON.stringify({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
   )
   await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
@@ -2006,7 +2053,7 @@ test('wiki links: the settings item, its command, the store, and the first rende
   await page.reload()
   await waitForApp(page)
   // the first render sees the setting: the init hook applied it (epoch 1) before any render
-  const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/file', root: '/Users/o c/v' }
+  const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' }
   expect(await page.evaluate(() => [(window as any)._wiki_links_epoch, (window as any)._wiki_links])).toEqual([1, config])
   expect(await page.evaluate(() => (window as any).__wikiSetterCalls[0]), 'the init hook applied the store before the first render').toEqual({ rendered: false, value: config })
   await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))

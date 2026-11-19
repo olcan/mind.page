@@ -156,6 +156,30 @@ test('wiki links: the app-built anchor under the setting, text without it or for
     expect(out).toContain('<a href="x&#58;&#47;&#47;h&#47;f&#63;path&#61;docs&#37;2Fx&#38;root&#61;&#37;2Fr" title="docs&#47;x" data-wiki-link>the guide</a>')
     expect(out).toContain('and &#91;&#91;&#46;&#46;&#47;x&#93;&#93; and <code>&#91;&#91;code&#93;&#93;</code>') // refused: text; code: code
     expect(out).not.toMatch(/target=|rel=|\son\w+=/)
+    // a `#diff` reference under this setting (the query form, which carries no view): the same
+    // app-built anchor as a plain file link; a refused target stays text with the fragment, and
+    // a model's own `vscode:` destination is no anchor, as before
+    const source = 'see [[worktrees/t#diff|the proposal]] and [[worktrees/t/AGENTS#diff]] and [[../x#diff]] and [d](vscode://h/f?path=x&view=diff)'
+    const plain = html(source)
+    expect(plain).toContain(
+      '<a href="x&#58;&#47;&#47;h&#47;f&#63;path&#61;worktrees&#37;2Ft&#38;root&#61;&#37;2Fr" title="worktrees&#47;t" data-wiki-link>the proposal</a>'
+    )
+    expect(plain).toContain('and &#91;&#91;&#46;&#46;&#47;x&#35;diff&#93;&#93; and')
+    expect(plain.match(/<a /g)).toHaveLength(2)
+    // under a url with the placeholder: the diff view, packed with the path and the root into
+    // the one text that stands in the placeholder's place, and named in the tooltip
+    g.window = { _wiki_links: { url: 'x://h/link/{link}', root: '/r' } }
+    const refs = (link: object) => Buffer.from(JSON.stringify(link)).toString('base64url').replace(/-/g, '&#45;').replace(/_/g, '&#95;')
+    const diff = html(source)
+    expect(diff).toContain(
+      `<a href="x&#58;&#47;&#47;h&#47;link&#47;${refs({ v: 1, path: 'worktrees/t', root: '/r', view: 'diff' })}" title="diff of worktrees&#47;t" data-wiki-link>the proposal</a>`
+    )
+    expect(diff).toContain(
+      `<a href="x&#58;&#47;&#47;h&#47;link&#47;${refs({ v: 1, path: 'worktrees/t/AGENTS', root: '/r', view: 'diff' })}" title="diff of worktrees&#47;t&#47;AGENTS" data-wiki-link>worktrees&#47;t&#47;AGENTS&#35;diff</a>`
+    )
+    expect(diff).toContain('and &#91;&#91;&#46;&#46;&#47;x&#35;diff&#93;&#93; and')
+    expect(diff.match(/<a /g)).toHaveLength(2)
+    expect(diff).not.toMatch(/target=|rel=|\son\w+=/)
   } finally {
     delete g.window
   }
