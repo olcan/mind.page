@@ -74,6 +74,15 @@ test('the markdown corpus renders as before', async ({ page }, testInfo) => {
         .sort(),
     )
     expect(ids).toEqual(FIXTURES.map(slug => `md-${slug}`).sort()) // seeded ids are md-<file slug>
+    // a click on an item's number does nothing on a shared page, whose views are the sharer's: no
+    // lone-item view, no query in the address, no history entry, and no time set on the item (what a
+    // plain click did there before, with the other three as they were); elsewhere a plain number selects
+    // its item: the number row of editor.spec.ts
+    const views = () => page.evaluate(() => [history.length, location.hash, window.__hideIndex, (window as any).__items.find((item: any) => item.id == 'md-markdown-headings').time])
+    const unclicked = await views()
+    await page.locator('.container[data-item-id="md-markdown-headings"] .item-menu > .index').click()
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve)))))
+    expect(await views(), 'a click on a number changes nothing on a shared page').toEqual(unclicked)
     // focusing an item (e.g. clicking its label) shows it alone; navigating to the root item is the
     // main page again, not a lone-item view (there is no mindbox on shared pages, so navigate by hash)
     await page.evaluate(() => void (location.hash = '#markdown/extended'))

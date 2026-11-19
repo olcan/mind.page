@@ -874,6 +874,20 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await clickRow('write the release note')
   await expect.poll(boxText, { timeout: 10_000 }).toBe(OTHER) // the unique label
   await expect.poll(selectedRow, { timeout: 10_000 }).toBe(await page.evaluate(name => window._item(name, true)!.id, OTHER))
+  // the todo's line is marked in the selected item for the edit that may follow (the row's class above comes
+  // from the query alone and says nothing of the mark): the target is the item, the range its own line's
+  await expect
+    .poll(
+      () =>
+        page.evaluate(name => {
+          const item = window._item(name, true)!
+          const line = item.text.split('\n').find(line => line.includes('write the release note'))!
+          const target = document.querySelector('.container.target')
+          return target?.getAttribute('data-item-id') == item.id && target.getAttribute('data-selection') == `${item.text.indexOf(line)},${item.text.indexOf(line) + line.length}`
+        }, OTHER),
+      { message: "the todo's line is marked in the selected item", timeout: 10_000 },
+    )
+    .toBe(true)
   // two todos sharing the label #todo have no unique label: the id reference
   for (const text of ['#todo twin one', '#todo twin two']) await page.evaluate(text => void window._create(text), text)
   await expect(mainRow('twin one')).toHaveCount(1)
@@ -881,9 +895,56 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // unnamed, their rows start with the snippet itself (the labeled rows above start with the label)
   expect((await lists(page)).main.map(r => r[0]).filter(t => t.includes('twin')).sort()).toEqual(['#todo twin one', '#todo twin two'])
   const twinId = (await mainRow('twin one').getAttribute('data-id'))!
+  // selected by the SAVED id, the one an address resolves after a reload (the row's own id is the tab's)
+  await expect.poll(() => page.evaluate(id => (window._item(id, true)!.saved_id as unknown as string | null) ?? null, twinId), { timeout: 30_000 }).toBeTruthy()
+  const twinSaved = await page.evaluate(id => window._item(id, true)!.saved_id as unknown as string, twinId)
+  expect(twinSaved, "the tab's own id of an item created in it is not its saved id").not.toBe(twinId)
   await clickRow('twin one')
-  await expect.poll(boxText, { timeout: 10_000 }).toBe('id:' + twinId)
+  await expect.poll(boxText, { timeout: 10_000 }).toBe('id:' + twinSaved)
   await expect.poll(selectedRow, { timeout: 10_000 }).toBe(twinId)
+  // the row of the todo already selected edits it where it is, its line selected, and leaves the box as it
+  // is (set to the item's name, the box held the tab's own id again)
+  await clickRow('twin one')
+  const editing = () =>
+    page.evaluate(() => {
+      const box = document.activeElement as HTMLTextAreaElement
+      return box?.tagName == 'TEXTAREA' && box.id != 'textarea-mindbox' ? { value: box.value, start: box.selectionStart, end: box.selectionEnd } : null
+    })
+  await expect.poll(editing, { message: "the todo's editor opens with its line selected", timeout: 10_000 }).toEqual({ value: '#todo twin one', start: 0, end: '#todo twin one'.length })
+  expect(await boxText(), 'the box still holds the saved id').toBe('id:' + twinSaved)
+  await page.keyboard.press('Escape')
+  await expect.poll(() => page.evaluate(id => (window._item(id, true) as any).editing as boolean, twinId), { message: 'the edit is closed again', timeout: 10_000 }).toBe(false)
+  expect(await boxText()).toBe('id:' + twinSaved)
+  // the same row clicked while ANOTHER name sits typed in the box and not yet applied (inside the box's
+  // debounce): the page still shows this todo as its target, so the row edits it, and the pending name must
+  // not take the target over while the edit waits for the page (the editor opened was the other item's, or
+  // the box went over to it afterwards). The typed input and the row's click come in one call, the click
+  // after the page has rendered the typed text, as a real click after a real key always does (delivered
+  // before that DOM update, the click's select can leave the textarea showing the typed name), and well
+  // inside the debounce
+  const shownEntry = await page.evaluate(() => history.state.index as number)
+  const turn = await page.evaluate(
+    async ([id, other]) => {
+      const w = window as any
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.focus({ preventScroll: true })
+      box.value = other
+      box.dispatchEvent(new Event('input'))
+      const typed = w._editor_change_pending as boolean
+      await new Promise(resolve => setTimeout(resolve))
+      const pending = w._editor_change_pending as boolean
+      ;(document.querySelector(`.todoer-widget .list > .list-item-container[data-id="${id}"] .list-item`) as HTMLElement).click()
+      return { typed, pending, still: w._editor_change_pending as boolean }
+    },
+    [twinId, OTHER],
+  )
+  expect(turn, "the other name was still pending at the click, and the row's click superseded it for its own todo").toEqual({ typed: true, pending: true, still: false })
+  await expect.poll(editing, { message: "the editor opened is the clicked todo's", timeout: 10_000 }).toEqual({ value: '#todo twin one', start: 0, end: '#todo twin one'.length })
+  // past the debounce's time, the pending name has had its turn: nothing took the target over
+  await page.waitForTimeout(700)
+  expect([await boxText(), await editing(), await page.evaluate(() => history.state.index as number)], 'the box, the editor and the entry stay with the clicked todo').toEqual(['id:' + twinSaved, { value: '#todo twin one', start: 0, end: '#todo twin one'.length }, shownEntry])
+  await page.keyboard.press('Escape')
+  await expect.poll(() => page.evaluate(id => (window._item(id, true) as any).editing as boolean, twinId), { timeout: 10_000 }).toBe(false)
 
   // (l) the child-customization hook (the vault's notes/design/mind_task_chat.md, section 3):
   // the todoer's _init (an #_init item, run at load) defines window._customize_child, and the
@@ -1303,8 +1364,9 @@ test('a delegation enqueues one command document, marks the item, and moves it t
 // listener's write, 250 ms after the launch's scroll to the header, corrected it, on whichever entry was
 // current by then. What a real account's launch does and a quiet lane's does not: the cache answers
 // first, and the server's first revision brings a change made elsewhere, whose re-ranking pushes a second
-// entry of the same empty query in between; a row's click then replaces that entry, so the first one,
-// its 0 intact, was one Back away. The row's own account holds the pinned widgets, a tall pinned item
+// entry of the same empty query in between; a row's click then replaced that entry, so the first one,
+// its 0 intact, was one Back away (a row's click is now the app's select, in an entry of its
+// own: Back from the item is the re-ranking's entry). The row's own account holds the pinned widgets, a tall pinned item
 // (the item a row names is ranked below the pinned ones, out of view from the header), one todo and one
 // item rewritten behind the app while the page is closed. The launch is a returning device's (a new tab
 // of the same profile), its index build stalled through the app's seam (`_initialize_stall_ms`, as the
@@ -1394,8 +1456,10 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   // was missed, and Back below would pass on either build
   expect(await header(launched), 'the header is below the top of the page').toBeGreaterThan(2)
   expect(await launched.evaluate(() => (window as any)._history[0].scrollPosition ?? 0), 'entry 0 missed the scroll write: the re-ranking pushed before the first position was recorded').toBe(0)
-  // (b) the row's click (at its right end, past its text) selects the item and scrolls to it, in the
-  // re-ranking's entry; Back is the first view, at the header
+  // (b) the row's click (at its right end, past its text) selects the item and scrolls to it, in an entry
+  // of its own (the app's select, as a click on an item's number; the widget used to set the box,
+  // which replaced the re-ranking's entry: it is not final); Back is the first view, at the header. The
+  // entry that recorded no position and restores to the header is the one of phase (c)
   const row = todoRow(launched)
   await expect(row).toBeVisible()
   const rowBox = (await row.boundingBox())!
@@ -1404,11 +1468,11 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await expect.poll(async () => (await top(launched)) - (await header(launched)), { message: 'the click scrolled to the item, out of view from the header', timeout: 10_000 }).toBeGreaterThan(300)
   await recorded(launched)
   const itemTop = await top(launched)
-  expect(await entries(launched), 'the click replaced the entry: the first view is one Back away').toEqual([2, 1])
+  expect(await entries(launched), "the click's own entry: the first view is one Back away").toEqual([3, 2])
   await launched.goBack()
   await expect.poll(() => box(launched), { timeout: 10_000 }).toBe('')
   await at(launched, () => header(launched), 'Back returns to where the launch left the page')
-  expect(await entries(launched)).toEqual([2, 0])
+  expect(await entries(launched)).toEqual([3, 1])
   // Forward and Back again, the first view's position recorded by now (the restore's own scroll)
   await recorded(launched)
   await launched.goForward()
@@ -1427,6 +1491,14 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await recorded(launched)
   await launched.goBack()
   await at(launched, async () => 0, 'Back returns to the recorded top')
+  // one more Back is the first view's own entry, which the launch wrote before the header was on the page
+  // and which this tab has not been on since: it holds NO position (not a zero), and restores to the header,
+  // away from the top the page is at
+  await recorded(launched)
+  expect(await launched.evaluate(() => [(window as any)._history[0].editorText, (window as any)._history[0].scrollPosition]), 'entry 0 recorded no position').toEqual(['', undefined])
+  await launched.goBack()
+  await at(launched, () => header(launched), 'Back again reaches the first entry, at the header')
+  expect(await entries(launched)).toEqual([3, 0])
   await launched.close()
 
   // (c) a launch with a query in the address: the query's entry is pushed over the first one, and the
@@ -1445,7 +1517,8 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
 // after a reload, a todo row's click and Back logged "ignoring onPopState for current index", and the
 // page stayed on the item). A page that a change made elsewhere has re-ranked sits on a second entry of the
 // empty query, which is not final: a reload keeps that entry in the browser, with its state and its index
-// 1, and the row's click replaces it. A session that numbered its entries from 0 again made that entry its
+// 1, and the row's click replaced it (the click is now the app's select, in an entry of its
+// own after the kept one, and the first view's kept entry is two Backs away). A session that numbered its entries from 0 again made that entry its
 // entry 0, so Back onto the first view's kept entry, index 0 too, read as the current one: the handler
 // replaced it with the item's state ("inconsistent state"), ignored it, and the page stayed. The session
 // continues at the kept entry's index instead, and takes an entry it does not know as the browser holds it.
@@ -1477,7 +1550,9 @@ test("after a reload on a re-ranked first view, a todo row's click and Back retu
   await at(tab, () => header(tab), 'the reloaded page is at the header')
   await recorded(tab)
   expect(await tab.evaluate(() => [history.state.index, history.state.editorText, history.state.final]), 'the kept entry: the second one, of the empty query, not final').toEqual([1, '', false])
-  // the row's click replaces that entry (it is not final); Back is the first view's kept entry
+  // the row's click selects the item in an entry of its own (the app's select; it used to replace
+  // the kept entry, which is not final). Back is the entry the page was reloaded on, at the header; Back
+  // again is the first view's kept entry, where it was left
   const row = todoRow(tab)
   await expect(row).toBeVisible()
   const rowBox = (await row.boundingBox())!
@@ -1488,13 +1563,21 @@ test("after a reload on a re-ranked first view, a todo row's click and Back retu
   const itemTop = await top(tab)
   await tab.goBack()
   await shows('', 'Back shows the first view')
-  await at(tab, async () => left, 'Back returns to where the first view was left')
-  expect(await entries(tab), 'the session continued at the kept index: the first view is its entry 0, the item its entry 1').toEqual([2, 0])
+  await at(tab, () => header(tab), 'Back returns to the entry the page was reloaded on, at the header')
+  expect(await entries(tab), 'the session continued at the kept index: the item is its entry 2').toEqual([3, 1])
+  await recorded(tab)
+  await tab.goBack()
+  await shows('', 'Back again shows the first view')
+  await at(tab, async () => left, 'Back again returns to where the first view was left')
+  expect(await entries(tab), "the first view's kept entry is the session's entry 0").toEqual([3, 0])
   await recorded(tab)
   await tab.goForward()
-  await shows(TODO, 'Forward shows the item')
+  await expect.poll(() => entries(tab), { timeout: 10_000 }).toEqual([3, 1])
+  await recorded(tab)
+  await tab.goForward()
+  await shows(TODO, 'Forward twice shows the item')
   await at(tab, async () => itemTop, 'Forward returns to the item')
-  expect(await entries(tab)).toEqual([2, 1])
+  expect(await entries(tab)).toEqual([3, 2])
 })
 
 // BACK AFTER A SIGN-OUT (review 1 of scroll_history, 2026-11-17). A free-text query stays out of the address,

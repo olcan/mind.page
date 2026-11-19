@@ -493,6 +493,359 @@ test('clicking a tag navigates to it, and the browser back button returns', asyn
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('#e2e_source')
 })
 
+// A CLICK ON AN ITEM'S NUMBER (the owner, 2026-11-18; the decisions' own table is tests/unit/number_click.spec.ts).
+// The number is green while its item matches the query, and that state says what a plain click does: on a
+// green number it moves the item (its time set to now and saved), as every plain click did before; on a
+// plain one it SELECTS the item, which an unnamed item had no good way to be: the query becomes the item's
+// label when that is unique, else its id reference by its SAVED id (the one an address resolves after a
+// reload or in another tab), in a history entry of its own, final like a tag's click, with the place the
+// page is left at, and no save is asked for. Shift+click selects whatever the number shows; Option and Cmd
+// move as before, under both views; a #log item's question comes before a move and before no select. The
+// fixtures are deleted at the end
+test("a click on an item's number selects the item while the number is plain and moves it up while it is green; shift+click always selects, option and cmd move as before, and a log item asks only before a move", async ({ page, browser }) => {
+  await loadAdmin(page)
+  const QUESTION = 'confirm: Modify time for #log item?\ncreation time/ordering will be lost'
+  const dialogs: string[] = []
+  page.on('dialog', dialog => {
+    dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+    void dialog.dismiss() // the question declined: nothing moves
+  })
+  const TAG = '#e2e_number_tag'
+  const NAMED = '#e2e_number_named'
+  // two items that share a label, as the owner's todos share `#todo`: neither is named by it, and under the
+  // label's view both match and rank by their times alone
+  const texts = [
+    'e2e_number_plain an unnamed item',
+    `${NAMED} a named item`,
+    `${TAG} e2e_number_shared one of two items that share a label`,
+    `${TAG} e2e_number_shared the other of the two`,
+    '#log e2e_number_log an entry',
+  ]
+  for (const text of texts) await page.evaluate(text => void window._create(text), text)
+  const fixtures = () => page.evaluate(() => (window as any).__items.filter((item: any) => item.text.includes('e2e_number_')).map((item: any) => !!item.savedId && !item.saving))
+  await expect.poll(fixtures, { message: 'the five fixtures are saved', timeout: 30_000 }).toEqual([true, true, true, true, true])
+  const idOf = (start: string) => page.evaluate(start => window._items().find(item => item.text.startsWith(start))!.id, start)
+  const [plain, named, taggedA, taggedB, log] = [await idOf(texts[0]), await idOf(texts[1]), await idOf(texts[2]), await idOf(texts[3]), await idOf(texts[4])]
+  // the id an address can name is the document's: an item created in this tab has one of its own beside it
+  const savedOf = (id: string) => page.evaluate(id => (window as any).__items.find((item: any) => item.id == id).savedId as string, id)
+  const [savedPlain, savedNamed, savedLog] = [await savedOf(plain), await savedOf(named), await savedOf(log)]
+  expect(savedPlain, "the tab's own id of an item created in it is not its saved id").not.toBe(plain)
+  // an item as the row reads it: its rank, its times, the saves asked of it so far, and what the query makes of it
+  const read = (id: string) =>
+    page.evaluate(id => {
+      const item = (window as any).__items.find((item: any) => item.id == id)
+      return { index: item.index as number, time: item.time as number, savedTime: item.savedTime as number, saves: (item.saveSeq ?? 0) as number, saving: !!item.saving, target: !!item.target, matching: !!item.matching }
+    }, id)
+  const timeAt = (index: number) => page.evaluate(index => (window as any).__items[index].time as number, index)
+  const number = (id: string) => page.locator(`.container[data-item-id="${id}"] .item-menu > .index`)
+  // the first view shows the items above its fold and offers the session's own under its first toggle,
+  // which is opened where a fixture's number is not on the page
+  const reveal = async (id: string) => {
+    if (!(await number(id).count())) await page.locator('.toggle.show').first().click()
+    await expect(number(id)).toBeVisible()
+  }
+  const entry = () => page.evaluate(() => [history.state.index, history.state.editorText, history.state.final])
+  const recorded = () =>
+    expect
+      .poll(() => page.evaluate(() => !(window as any)._history_update_pending && (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop), { message: "the entry holds the page's position" })
+      .toBe(true)
+  // a move, once its save is done: the item's time, saved by one more save
+  const moved = (id: string, before: { saves: number }) =>
+    expect.poll(async () => (({ time, savedTime, saves, saving }) => (savedTime == time && !saving && saves == before.saves + 1 ? time : 'not saved'))(await read(id)), { timeout: 30_000 })
+
+  await test.step('the first view: a plain number selects its item, by its saved id, which another tab resolves; Back returns to the view at its place, also when the page was scrolled right before the select', async () => {
+    await expect(mindbox(page)).toHaveValue('')
+    // the view left below the header with the number in sight, its place recorded on the entry
+    await reveal(plain)
+    await number(plain).scrollIntoViewIfNeeded()
+    // where the mouse will press the number, once the page is still around it (the items the toggle
+    // revealed render in steps): the same place twice, 250 ms apart, with nothing over it
+    const point = async () => (box => (box ? [box.x + box.width / 2, box.y + box.height / 2] : null))(await number(plain).boundingBox())
+    let last = ''
+    await expect
+      .poll(
+        async () => {
+          const at = await point()
+          const hit = !!at && (await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('.item-menu > .index'), at))
+          const now = JSON.stringify([at, await scrollTop(page)])
+          const still = hit && now == last
+          last = now
+          return still
+        },
+        { message: 'the number is in sight, with nothing over it, and the page is still', intervals: [250] },
+      )
+      .toBe(true)
+    await recorded()
+    const left = await scrollTop(page)
+    expect(left, 'the first view is left below the header').toBeGreaterThan(await headerTop(page))
+    await expect(number(plain), 'no query: the number is plain').not.toHaveClass(/matching/)
+    const before = await read(plain)
+    const [index] = await entry()
+    // the press is the mouse's, where the number is: the driver's own click() scrolls its target first when
+    // it finds it covered or moving, and that scroll is recorded on the entry the click is about to leave
+    const [x, y] = (await point())!
+    await page.mouse.click(x, y)
+    await expect(mindbox(page), 'the box holds the id reference of an unnamed item, by its saved id').toHaveValue(`id:${savedPlain}`)
+    expect(await read(plain), 'the item is the target, and no save was asked of it').toMatchObject({ target: true, savedTime: before.savedTime, saves: before.saves, saving: false })
+    expect(await entry(), "an entry of its own, final like a tag's click").toEqual([index + 1, `id:${savedPlain}`, true])
+    await expect(number(plain), 'the selected item matches the query: its number is green').toHaveClass(/matching/)
+    // the address names the item for another tab of another profile, as for a reload: both read the documents' ids
+    expect(await page.evaluate(() => location.hash)).toBe('#' + savedPlain)
+    const other = await (await browser.newContext()).newPage()
+    await loadAdmin(other)
+    await other.goto(page.url())
+    await other.reload()
+    await waitForApp(other)
+    await expect.poll(() => other.evaluate(() => (window as any).__items.find((item: any) => item.target)?.text ?? null), { message: 'the address resolves to the item', timeout: 30_000 }).toBe(texts[0])
+    await other.context().close()
+    await recorded()
+    await page.goBack()
+    await expect(mindbox(page), 'Back returns to the first view').toHaveValue('')
+    await expect.poll(async () => Math.abs((await scrollTop(page)) - left) <= 2, { message: 'at the place it was left' }).toBe(true)
+    expect([(await entry())[0], (await read(plain)).time], "the entry before, and the select's soft touch undone").toEqual([index, before.time])
+    // scrolled and selected in one turn of the page, inside the 250 ms the scroll listener waits before it
+    // writes: the entry being left holds the place from before the scroll, and the select writes the live one
+    await recorded()
+    const scrolled = await page.evaluate(
+      ([id, left]) => {
+        const max = document.body.scrollHeight - innerHeight
+        document.body.scrollTo(0, left + 48 <= max ? left + 48 : left - 48)
+        const top = document.body.scrollTop
+        ;(window._item(id as string) as any).select()
+        return top
+      },
+      [plain, left] as const,
+    )
+    expect(Math.abs(scrolled - left), 'the page was scrolled away from the place recorded').toBeGreaterThan(40)
+    await expect(mindbox(page)).toHaveValue(`id:${savedPlain}`)
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue('')
+    await expect.poll(async () => Math.abs((await scrollTop(page)) - scrolled) <= 2, { message: 'Back returns to the place the page was scrolled to right before the select' }).toBe(true)
+    expect(dialogs).toEqual([])
+  })
+
+  await test.step('a named item is selected by its label', async () => {
+    await reveal(named)
+    const before = await read(named)
+    await number(named).click()
+    await expect(mindbox(page), 'the box holds the unique label').toHaveValue(NAMED)
+    expect(await read(named)).toMatchObject({ target: true, savedTime: before.savedTime, saves: before.saves })
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue('')
+  })
+
+  await test.step("a name typed into the box and its item selected before the query applies (item code's select, as a todo's row makes it): the select applies at once, in an entry of its own, and the box gives up the focus", async () => {
+    // A: the plain item's view as a typed query's entry, which is not final (a typed update of the query replaces it)
+    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${savedPlain}`)
+    await expect.poll(async () => (await read(plain)).target).toBe(true)
+    const [index, , final] = await entry()
+    expect(final, "A's entry is a typed query's: not final").toBe(false)
+    await focusMindboxInPlace(page)
+    await expect(mindbox(page)).toBeFocused()
+    // B's exact name typed (the input event a key or a paste makes) and B selected, in one turn of the page
+    const turn = await page.evaluate(
+      ([id, name]) => {
+        const w = window as any
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        box.value = name
+        box.dispatchEvent(new Event('input'))
+        const pending = w._editor_change_pending as boolean
+        const selected = w._item(id).select() as boolean
+        const target = !!w.__items.find((item: any) => item.id == id).target
+        return { pending, selected, target, still: w._editor_change_pending as boolean, focused: document.activeElement == box, entry: [history.state.index, history.state.editorText, history.state.final] }
+      },
+      [named, NAMED],
+    )
+    expect(turn, 'the typed name was pending; the select applied at once: B the target, the debounce disarmed, the box blurred, an entry of its own').toEqual({ pending: true, selected: true, target: true, still: false, focused: false, entry: [index + 1, NAMED, true] })
+    await page.goBack()
+    await expect(mindbox(page), 'Back reaches A').toHaveValue(`id:${savedPlain}`)
+    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await expect(mindbox(page)).toHaveValue('')
+  })
+
+  await test.step("a tag's view: a green number moves its item up and keeps the query; shift+click selects, in an entry of its own", async () => {
+    await page.evaluate(tag => void (window as any).MindBox.set(tag), TAG)
+    await expect(number(taggedA), 'the items under the label match the query: green').toHaveClass(/matching/)
+    await expect(number(taggedB)).toHaveClass(/matching/)
+    const [tagIndex, , final] = await entry()
+    expect(final, "the tag's view is a typed query's entry here: not final, so a select that was not forced would replace it").toBe(false)
+    // the lower of the two is moved up
+    const [upper, lower] = (await read(taggedA)).index < (await read(taggedB)).index ? [taggedA, taggedB] : [taggedB, taggedA]
+    const before = await read(lower)
+    await number(lower).click()
+    await moved(lower, before).toBeGreaterThan(before.time)
+    expect((await read(lower)).index, 'the item moved above the other').toBeLessThan((await read(upper)).index)
+    expect([await mindbox(page).inputValue(), (await entry())[0]], 'the query is unchanged, in the same entry').toEqual([TAG, tagIndex])
+    // shift+click on the other green number
+    const other = await read(upper)
+    const name = `id:${await savedOf(upper)}`
+    await number(upper).click({ modifiers: ['Shift'] })
+    await expect(mindbox(page), 'shift+click selects under a green number').toHaveValue(name)
+    expect(await read(upper), 'the item is the target, and nothing of it was saved').toMatchObject({ target: true, savedTime: other.savedTime, saves: other.saves })
+    expect(await entry(), "in an entry of its own: the tag's view is kept behind it").toEqual([tagIndex + 1, name, true])
+    expect(await page.evaluate(() => getSelection()!.toString()), 'shift+click selected no text on the page').toBe('')
+    await page.goBack()
+    await expect(mindbox(page), "Back returns to the tag's view").toHaveValue(TAG)
+    await expect(number(lower)).toHaveClass(/matching/)
+
+    // Option: one place down (the time just under the next item's); Cmd: one place up again
+    const top = await read(lower)
+    const next = await timeAt(top.index + 1)
+    await number(lower).click({ modifiers: ['Alt'] })
+    await moved(lower, top).toBe(next - 1)
+    const down = await read(lower)
+    expect(down.index, 'option+click moved the green item one place down').toBe(top.index + 1)
+    const previous = await timeAt(down.index - 1)
+    await number(lower).click({ modifiers: ['Meta'] })
+    await moved(lower, down).toBe(previous + 1)
+    expect([(await read(lower)).index, await mindbox(page).inputValue()], 'cmd+click moved it one place up; the query is unchanged').toEqual([top.index, TAG])
+  })
+
+  await test.step('an item the query names already: shift+click adds no entry', async () => {
+    // a tag's click leaves a space after the name it sets
+    await page.evaluate(name => void (window as any).MindBox.set(name + ' '), NAMED)
+    await expect(number(named)).toHaveClass(/matching/)
+    const [index] = await entry()
+    await number(named).click({ modifiers: ['Shift'] })
+    await settled(page)
+    expect([await mindbox(page).inputValue(), (await entry())[0]], 'the box and the entry as they were').toEqual([NAMED + ' ', index])
+    // an id reference in the tab's own spelling is the same selection as the saved one: no entry either
+    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${plain}`)
+    await expect(number(plain)).toHaveClass(/matching/)
+    const [tabIndex] = await entry()
+    await number(plain).click({ modifiers: ['Shift'] })
+    await settled(page)
+    expect([await mindbox(page).inputValue(), (await entry())[0]], "the tab's own spelling of the id is left as it is").toEqual([`id:${plain}`, tabIndex])
+    // a labeled item's id reference is another view (no children under it): a select gives the label's, in a new entry
+    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${savedNamed}`)
+    await expect(number(named)).toHaveClass(/matching/)
+    const [idIndex] = await entry()
+    await number(named).click({ modifiers: ['Shift'] })
+    await expect(mindbox(page), "a labeled item's id view is not its selection").toHaveValue(NAMED)
+    expect(await entry()).toEqual([idIndex + 1, NAMED, true])
+  })
+
+  await test.step('the first view again: option and cmd move a plain number as before, and select nothing', async () => {
+    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await reveal(plain)
+    await expect(number(plain)).not.toHaveClass(/matching/)
+    const top = await read(plain)
+    const next = await timeAt(top.index + 1)
+    await number(plain).click({ modifiers: ['Alt'] })
+    await moved(plain, top).toBe(next - 1)
+    const down = await read(plain)
+    expect([down.index, down.target], 'option+click moved the plain item one place down, and selected nothing').toEqual([top.index + 1, false])
+    const previous = await timeAt(down.index - 1)
+    await reveal(plain)
+    await number(plain).click({ modifiers: ['Meta'] })
+    await moved(plain, down).toBe(previous + 1)
+    expect([(await read(plain)).index, await mindbox(page).inputValue()], 'cmd+click moved it one place up; no query').toEqual([top.index, ''])
+  })
+
+  await test.step('a log item: no question on a select, the question on a move', async () => {
+    await reveal(log)
+    const before = await read(log)
+    await expect(number(log)).not.toHaveClass(/matching/)
+    await number(log).click()
+    await expect(mindbox(page), 'a plain number selects the log item, by its id reference').toHaveValue(`id:${savedLog}`)
+    expect(dialogs, 'a select asks nothing').toEqual([])
+    expect(await read(log), "the target, its time as it was (a log item's is never touched)").toMatchObject({ target: true, time: before.time, saves: before.saves })
+    // selected, its number is green: a plain click is the move, which asks first; the row declines
+    await expect(number(log)).toHaveClass(/matching/)
+    const [index] = await entry()
+    await number(log).click()
+    await expect.poll(() => dialogs, { message: 'a move asks first' }).toEqual([QUESTION])
+    // shift+click on the green number is a select again: no second question, and no entry for the item already selected
+    await number(log).click({ modifiers: ['Shift'] })
+    await settled(page)
+    expect([dialogs, (await entry())[0]], 'a select of the item already selected asks nothing and adds no entry').toEqual([[QUESTION], index])
+    expect(await read(log), 'declined: nothing moved, nothing saved').toMatchObject({ time: before.time, savedTime: before.savedTime, saves: before.saves })
+  })
+
+  await test.step('the query follows a selected item: a label added in its editor, removed again, then the item deleted', async () => {
+    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await reveal(plain)
+    await number(plain).click()
+    await expect(mindbox(page)).toHaveValue(`id:${savedPlain}`)
+    const [index] = await entry()
+    const textarea = page.locator(`#textarea-${plain}`)
+    // an edit through the item's own editor: a click mid-paragraph opens it, shift+enter saves and closes it
+    const edit = async (text: string) => {
+      const paragraph = page.locator(`#item-${plain} p`).first()
+      const box = (await paragraph.boundingBox())!
+      await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+      await expect(textarea).toBeVisible()
+      await textarea.fill(text)
+      await page.keyboard.press('Shift+Enter')
+      await expect(textarea).toBeHidden()
+      await expect.poll(async () => (await read(plain)).saving, { timeout: 30_000 }).toBe(false)
+    }
+    const RENAMED = '#e2e_number_renamed'
+    await edit(`${RENAMED} ${texts[0]}`)
+    await expect(mindbox(page), 'a unique label added to the selected item: the query is the label').toHaveValue(RENAMED)
+    expect((await entry()).slice(0, 2), 'in the same entry').toEqual([index, RENAMED])
+    // the same view under another spelling of the label, which a query accepts (its case, a trailing space, as
+    // a tag's click leaves one): the next rename is followed from the query as it is written
+    const SPELLED = RENAMED.toUpperCase() + ' '
+    await page.evaluate(name => void (window as any).MindBox.set(name), SPELLED)
+    await expect(mindbox(page)).toHaveValue(SPELLED)
+    expect([(await read(plain)).target, (await entry()).slice(0, 2)], 'the item is still the target, in the same entry').toEqual([true, [index, SPELLED]])
+    await edit(texts[0])
+    await expect(mindbox(page), "the label removed again: the query is the item's saved id, not the id of its tab").toHaveValue(`id:${savedPlain}`)
+    expect((await entry()).slice(0, 2)).toEqual([index, `id:${savedPlain}`])
+    await page.evaluate(id => void window._item(id)!.delete(false), plain)
+    await expect(mindbox(page), 'the selected item deleted: no dead id is left in the box').toHaveValue('')
+    expect([(await entry()).slice(0, 2), await page.evaluate(() => location.hash)], 'nor in the entry and the address').toEqual([[index, ''], ''])
+  })
+
+  await test.step("a select made by a run's own code is kept: a selected item renamed in its editor and run as the edit is finished (cmd/ctrl+enter), with code that selects another item, leaves that item selected", async () => {
+    // A: a runnable item, selected by its label; its code selects B, the named fixture
+    const [RUN, RERUN] = ['#e2e_number_run', '#e2e_number_rerun']
+    const code = ['```js_input', `_item('${NAMED}').select()`, '```'].join('\n')
+    await page.evaluate(text => void window._create(text), `${RUN} a runnable item\n${code}`)
+    await expect.poll(() => page.evaluate(start => window._items().find(item => item.text.startsWith(start))?.id ?? null, RUN)).toBeTruthy()
+    const run = await idOf(RUN)
+    await expect.poll(async () => !!(await savedOf(run)) && !(await read(run)).saving, { message: 'the runnable item is saved', timeout: 30_000 }).toBe(true)
+    await reveal(run)
+    await number(run).click()
+    await expect(mindbox(page), 'A is selected, by its label').toHaveValue(RUN)
+    const [index] = await entry()
+    // its label changed in its editor, and the edit finished with a run. At the key's release the handler
+    // reads whether the query selects the item, applies the rename, executes the item's code, which selects
+    // B in an entry of its own, and only then follows the rename. (Option+Enter, the run that keeps the
+    // editor open, is no witness: there the handler throws on the edited item's changed rank before it
+    // gets to the follow)
+    const textarea = page.locator(`#textarea-${run}`)
+    const paragraph = page.locator(`#item-${run} p`).first()
+    const box = (await paragraph.boundingBox())!
+    await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+    await expect(textarea).toBeVisible()
+    await textarea.fill(`${RERUN} a runnable item\n${code}`)
+    await page.keyboard.press('ControlOrMeta+Enter')
+    await expect.poll(async () => (await entry())[0], { message: "the run's code navigated: an entry was added" }).toBe(index + 1)
+    await expect
+      .poll(() => page.evaluate(id => (item => !item.editing && !item.saving)((window as any).__items.find((item: any) => item.id == id)), run), { message: 'the editor is closed and the item saved', timeout: 30_000 })
+      .toBe(true)
+    await settled(page)
+    // the rename took (the query that selected A would follow it to its new name), and the query is B's all
+    // the same: followed on what the handler had read before the code ran, the box held A's new name and B's
+    // entry was replaced with it
+    const after = {
+      label: await page.evaluate(id => (window as any).__items.find((item: any) => item.id == id).labelText as string, run),
+      box: await mindbox(page).inputValue(),
+      entry: await entry(),
+      target: (await read(named)).target,
+    }
+    expect(after, "A is renamed, and the select its code made stays: the box and the entry that select wrote name B").toEqual({ label: RERUN, box: NAMED, entry: [index + 1, NAMED, true], target: true })
+    await page.evaluate(id => void window._item(id)!.delete(false), run)
+  })
+
+  // the fixtures go: the rows after this one find the account's items as before
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await page.evaluate(ids => ids.forEach(id => void window._item(id)!.delete(false)), [named, taggedA, taggedB, log])
+  await expect.poll(() => page.evaluate(() => window._items().filter(item => item.text.includes('e2e_number_')).length), { timeout: 30_000 }).toBe(0)
+})
+
 test('an item is edited in place with shift+enter, and escape discards an edit', async ({ page }) => {
   await loadAdmin(page)
   await focusMindbox(page)

@@ -1498,6 +1498,15 @@
       if (save) saveItem(this.id)
     }
 
+    // selects item: the view of this item, as a click on its number gives while the number is not green
+    // (see selectItem: the query becomes the item's unique label, else its id reference by its saved id,
+    // in a history entry of its own; the page scrolls to the item and the MindBox gives up the focus; no
+    // save is asked for)
+    // returns true, or false where nothing is selected (a shared page; an item deleted meanwhile)
+    select() {
+      return selectItem(this.id)
+    }
+
     // triggers a save to persistent store, even if item is not modified
     save() {
       return saveItem(this.id)
@@ -7579,7 +7588,9 @@
     if (confirm_delete && !confirm(confirm_msg || `Delete ${item.name}?`)) return false
     // savedId is read BEFORE the removal and is never the session-temporary id: it names the
     // document deleted below and the hidden store deleted with it (see cascadeStoreDelete)
-    const { name, contextLabel, savedId } = item
+    const { contextLabel, savedId } = item
+    // whether the query selects this item, read before the removal clears its label (see followSelection)
+    const selectedBefore = selectsAlready(editorText, item)
     // a deleted item has no expansion: itemTextChanged merges item.expanded.item's tags into the
     // tag counts (tagsExpandedWithMacros), so a stale expansion kept the deleted label counted
     // and no tagger turned `missing` (the owner's report, 2026-10-01: the bridge's children carry
@@ -7593,7 +7604,7 @@
     items.forEach((item, index) => indexFromId.set(item.id, (item.index = index)))
     // deletion can affect ordering (e.g. due to missingTags), so we need onEditorChange
     // we also clear (or back up to contextLabel) query if deleted item was being targeted
-    if (editorText.trim().toLowerCase() == name.toLowerCase()) {
+    if (selectedBefore) {
       replaceStateOnEditorChange = true // do not create new entry
       editorText = contextLabel // can be ''
     }
@@ -7778,7 +7789,7 @@
         focusedItem = -1
         item.focused = false
       }
-      const prev_name = item.name
+      const selection = selectionOf(item) // read before the text changes the item's name
       itemTextChanged(index, item.text)
       // clear _output and execute javascript unless cancelled
       if (run && !cancelled && item.runnable /* just updated */) {
@@ -7797,11 +7808,9 @@
       )
         saveItem(item.id)
 
-      // if item was renamed while being targeted (navigated), update query to new name
-      if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
-        replaceStateOnEditorChange = true // do not create new entry
-        editorText = item.name
-      }
+      // a query that selected the item follows it to its new name, unless a run's code has navigated since
+      // (followSelection)
+      followSelection(item, selection)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(editorText) // item time and/or text may have changed
 
@@ -7966,16 +7975,14 @@
       if (item.editing) item.text = item.editorText.replace(/\u200B/g, '')
       item.text = clearRunArtifacts(item.text)
       if (item.editing) textArea(index).value = item.editorText = item.text
-      const prev_name = item.name // to detect renaming below
+      const selection = selectionOf(item) // read before the text changes the item's name
       itemTextChanged(index, item.text) // updates tags, label, deps, etc before JS eval
       const jsout = appendJSOutput(index) // can return promise
       item.time = Date.now()
       if (item.editing) textArea(index).value = item.editorText = item.text
-      // if item was renamed while being targeted (navigated), update query to new name
-      if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
-        replaceStateOnEditorChange = true // do not create new entry
-        editorText = item.name
-      }
+      // a query that selected the item follows it to its new name, unless the run's code has navigated since
+      // (followSelection)
+      followSelection(item, selection)
       lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
       onEditorChange(editorText) // item time/text has changed
       return jsout // can be promise
@@ -7998,33 +8005,44 @@
 
     // note we want to trigger itemTextChanged, which e.g. will trigger _on_item_change based on deephash change, NOT based on change from savedText, which can be somewhat arbitrary when saves get delayed/chained and cause user edits (to item.text) to get bundled into the delayed save without triggering itemTextChanged/_on_item_change; note coupling itemTextChanged/_on_item_change with user-triggered save is pretty intuitive even though technically it is not necessary (e.g. triggering could always get delayed until close of editing as a rule)
     // if (item.text != item.savedText) itemTextChanged(index, item.text)
-    const prev_name = item.name // to detect renaming below
+    const selection = selectionOf(item) // read before the text changes the item's name
     itemTextChanged(index, item.text) // updates item.time on deephash change
     saveItem(item.id, false /* silent */) // save and indicate saving
 
-    // if item was renamed while being targeted (navigated), update query to new name
-    if (item.name != prev_name && editorText.trim().toLowerCase() == prev_name.toLowerCase()) {
-      replaceStateOnEditorChange = true // do not create new entry
-      editorText = item.name
-    }
+    // a query that selected the item follows it to its new name (followSelection)
+    followSelection(item, selection)
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     onEditorChange(editorText)
   }
 
+  // a click on an item's number (Item.svelte's onIndexClick), and a run's touch (onItemRun, without an
+  // event). What the click asks for is decided in src/number_click.ts, from the modifiers held and from the
+  // number's own state, green when the item matches the query (`matching`, the value the button's class is
+  // rendered from): a plain click MOVES a matching item, as every plain click did before (its time set to
+  // now and saved: the item goes up as far as its time takes it, since the ranking reads its other criteria
+  // first), and SELECTS any other (the owner, 2026-11-18: an unnamed item, as most todos are, had no good
+  // way to be selected, and an item whose label is being navigated counts as selected already); Shift+click
+  // always selects; Option, Cmd and Option+Cmd move as before. A select asks for no save, so it comes
+  // before the #log question, which only a click that moves the item asks
   function onItemTouch(index: number, e: MouseEvent = null) {
+    const action = numberClick(e, items[index].matching)
+    if (action == 'select') {
+      selectItem(items[index].id)
+      return
+    }
     if (items[index].log && !confirm(`Modify time for #log item?\ncreation time/ordering will be lost`)) return
     // if (items[index].time > newestTime) console.warn('invalid item time')
     if (items[index].time > newestTime) newestTime = items[index].time
-    if (e?.altKey && e?.metaKey) {
+    if (action == 'back') {
       // move item time back 1 day, or 30 days if shift is also held
       items[index].time = items[index].time - (e.shiftKey ? 30 : 1) * 24 * 3600 * 1000
-    } else if (e?.altKey) {
+    } else if (action == 'down') {
       if (index == items.length - 1 || items[index].time < items[index + 1].time) {
         _modal('can not move item down')
         return
       }
       items[index].time = items[index + 1].time - 1
-    } else if (e?.metaKey) {
+    } else if (action == 'up') {
       if (index == 0 || items[index].time > items[index - 1].time) {
         _modal('can not move item up')
         return
@@ -8038,6 +8056,100 @@
     lastEditorChangeTime = 0 // force immediate update (editor should not be focused but just in case)
     onEditorChange(editorText) // item time has changed
     // onEditorChange(""); // item time has changed, and editor cleared
+  }
+
+  // SELECTING AN ITEM (the owner, 2026-11-18): the view of that item, as a click on a tag that names it
+  // gives. ONE path for every select that is not a tag's or a link's own click: a click on the item's number
+  // (onItemTouch) and item code (_Item.select: a todo's row in the #todoer widget and its notifications,
+  // which set the MindBox themselves before, a typed query's entry that the next row's click replaced).
+  // - The query becomes the item's SELECT NAME (selectName, src/number_click.ts): its label when that is
+  //   unique (under its label the app lists the item's children and its keyboard navigation works), else
+  //   its id reference in the form that outlives the tab, `id:<saved id>`, as soon as the item's creation is
+  //   acknowledged (`savedId`, as the copy shortcut names an item). THE TAB-ONLY WINDOW: an item created in
+  //   this tab and selected BEFORE that acknowledgement is selected by the tab's own id; that view works in
+  //   this tab, and its address and its history entry name nothing after a reload or in another tab (a
+  //   reload reads the documents' ids). The window lasts as long as the write does: a slow or an offline one
+  //   keeps it open for the whole outage. What writes such an entry meanwhile is a FRESH selection of the
+  //   item by its id (from a number, a todo's row or item code): an item with a unique label is selected by
+  //   the label, which works throughout, and a select of a selection already shown and settled adds no
+  //   entry. The acknowledgement leaves such an entry as written (so does a select of the same view
+  //   afterwards; one from another view uses the saved id). A LIMIT LEFT AS IT IS, not a necessity: the
+  //   creation already reserves its document's id before the write (onEditorDone maps it to the tab's id
+  //   and issues setDoc on it) and publishes it as `savedId` at the acknowledgement; naming an item by the
+  //   reserved id earlier would be a navigation decision of its own, which this change does not take. What
+  //   outlives the tab is therefore the selection of a PERSISTED item, on a writable notebook.
+  //   Without the space a tag's click appends for the text typed after it: the box is not left focused.
+  // - In a history entry of its own, final like a tag's click and forced, whatever the entry shown is: Back
+  //   returns to the view the select was made in, and a reload or a query typed afterwards keeps the entry.
+  //   AT ITS PLACE: the live position is written on the entry being left first, through the writer the
+  //   scroll listener uses (updateState: for the view shown, kept through a stop's return, never on a
+  //   position that is not the entry's), under two conditions that are this select's own: nothing before the
+  //   page has taken its first-load position, and nothing while a traversal's restore is pending (the page
+  //   then still shows the departed view under the destination's index). The listener's write comes 250 ms
+  //   after a scroll and is dropped once the entry is left, so a reader who scrolled and clicked within that
+  //   time came back to the position from before the scroll.
+  // - NO ENTRY when the view shown is this selection already (selectsAlready: the query is the select name
+  //   or the item's other id spelling, trimmed and without case; `#name ` after a tag's click): there is no
+  //   other view to return to, and the page only scrolls. The view SHOWN, not the box's text: a name typed
+  //   or pasted into the box is `editorText` at once and is applied when its debounce ends, and until then
+  //   the list is the previous query's (a change is pending, and the item is not the target). A select made
+  //   then applies at once like any other, which disarms that debounce (onEditorChange); skipped, it left
+  //   the previous target shown and scrolled to, and the debounce then recorded the name as a typed query,
+  //   which replaces an entry that is not final.
+  // - The page scrolls to the item where it is out of view, as after a tag's click (scrollToTarget).
+  // - No save is asked for. The query's ranking touches times as it does for every query: the target's (a
+  //   soft touch, which Back undoes; never a #log item's, so no #log question is asked) and those of items
+  //   being edited or run. A save asked for on other grounds reads the item when its turn comes, and stores
+  //   a soft-touched time if the item holds one then.
+  // - The MindBox gives up the focus, as it did when the widget set it: the page scrolls away from it (a
+  //   phone would keep its keyboard over the item). An item's editor is left as it is: a click on a number
+  //   has taken the focus from it already, as every click outside an editor does.
+  // Whatever the item is doing (being edited, saving, running), and on a visitor's page, where nothing is
+  // saved: a select changes the view alone.
+  // A SHARED (fixed) page selects nothing: it shows no MindBox, its matching is off (no number is ever green
+  // there) and a query that names an item shows that item alone only for some names (onEditorChange looks
+  // the lowercased query up among the names as written), so a select would add a history entry that changes
+  // nothing on the page for the others. (A plain click on a number there used to set the item's time, which
+  // moves nothing on a page in the sharer's order, and to save it when the visitor was the sharer.)
+  // Returns whether the item was selected: false on a shared page and for an item deleted meanwhile
+  function selectItem(id: string): boolean {
+    const index = indexFromId.get(id)
+    if (index === undefined || fixed) return false
+    const item = items[index]
+    textArea(-1)?.blur()
+    if (!(selectsAlready(editorText, item) && item.target && !editorChangePending)) {
+      if (headerScrolled && !popStateScrollPending) updateState({ scrollPosition: document.body.scrollTop })
+      forceNewStateOnEditorChange = true // a new entry, like a tag's click
+      finalizeStateOnEditorChange = true // kept by a reload and by a query typed afterwards
+      tick().then(() => editor.setSelection(editorText.length, editorText.length))
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange(selectName(item))
+    }
+    if (!narrating) update_dom().then(scrollToTarget)
+    return true
+  }
+
+  // THE QUERY FOLLOWS ITS ITEM through a change of the item's name (a label added, changed or removed by an
+  // edit, a run or a save) and through its deletion (deleteItem). Whether the query is the item's selection
+  // is asked BEFORE the change, of the item as it is then (selectsAlready: its unique label, or either
+  // spelling of an unnamed item's id), and kept as that query, to the letter, with the name a select gave
+  // the item then (null: the query is not its selection). The item's `name` is no test for that: for an
+  // unnamed item created in this tab it is the tab's own id, while a select writes the saved one, so a
+  // selected todo that was given a label kept its id's view, and one deleted left its dead id in the box
+  // and the address. After the change the query becomes the name a select gives the item NOW (never `name`:
+  // with its label removed, the tab's id was back in the address), in the same history entry, on two
+  // conditions: that name has changed, and the query is STILL the one captured, as it was written (its id
+  // spelling, its case and its trailing space are whatever was accepted at the capture, so an untouched
+  // query always passes). A run executes the item's own code between the capture and the follow
+  // (appendJSOutput, synchronously): a navigation that code makes, a select of another item with its own
+  // history entry, is the query by then, and it stays. Followed on the capture alone, the query went back
+  // to the renamed item and the replacement was asked of the entry that navigation had just written
+  const selectionOf = (item): { query: string; name: string } | null =>
+    selectsAlready(editorText, item) ? { query: editorText, name: selectName(item) } : null
+  function followSelection(item, selection: { query: string; name: string } | null) {
+    if (!selection || editorText !== selection.query || selectName(item) == selection.name) return
+    replaceStateOnEditorChange = true // do not create new entry
+    editorText = selectName(item)
   }
 
   function onItemUpdate(index: number) {
@@ -8604,6 +8716,7 @@
   import { Lineage, levelsMatch } from '../lineage'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
+  import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry } from '../history_entries'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
