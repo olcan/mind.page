@@ -3292,7 +3292,7 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   await page.goForward()
   await expect.poll(() => page.evaluate(() => JSON.stringify(history.state))).toBe(CLEARED)
   await settled(page)
-  expect(await page.evaluate(() => [JSON.stringify(history.state), document.querySelectorAll('.background.visible').length, (window as any).__returnsAsked]), "no return from a fragment's own position, and no note").toEqual([CLEARED, 0, 0])
+  expect(await page.evaluate(() => [JSON.stringify(history.state), document.querySelectorAll('.stop-note.visible').length, (window as any).__returnsAsked]), "no return from a fragment's own position, and no note").toEqual([CLEARED, 0, 0])
   await expect(mindbox(page)).toHaveValue('#e2e_target ')
   await page.goBack()
   await expect.poll(() => page.evaluate(() => history.state?.index), { timeout: 10_000 }).toBe(1)
@@ -3355,16 +3355,39 @@ const olderEntryBehind = async (page: Page, reads: ReturnType<typeof historyRead
   await reads.recorded()
   return { index, atTarget, atSub }
 }
-const note = (page: Page) => page.locator('.background.visible .modal')
-// (a modal is shown from a promise's callback, and a restore scrolls from a later frame: two frames and the
+// the note of a stop: passive since 2026-11-19 (noteStop in index.svelte), no longer the app's modal
+const note = (page: Page) => page.locator('.stop-note.visible')
+// (a restore scrolls from a later frame, and a modal is shown from a promise's callback: two frames and the
 // timers due, no fixed wait)
 const settled = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve)))))
+// read ONCE, never polled: the note goes by itself, so a poll would pass on a note that should not have shown
+// or should have gone at a key
 const noNote = async (page: Page, message: string) => {
   await settled(page)
-  await expect(page.locator('.background.visible'), message).toHaveCount(0)
+  expect(await note(page).count(), message).toBe(0)
 }
+// the note goes at the next key: Shift, which the page does nothing with (where a row only needs the note
+// gone; a press would act on whatever is under the pointer, since the note passes it through)
+const passNote = async (page: Page) => {
+  await page.keyboard.press('Shift')
+  await noNote(page, 'the note goes at the next key')
+}
+// the page hidden and shown again by its own visibility events, raised as tests/e2e/lifecycle.spec.ts raises
+// them (the driver's Chromium never hides a page): the notes shown before, and a task after the hiding
+const hiddenAndShown = (page: Page) =>
+  page.evaluate(async () => {
+    const notes = () => document.querySelectorAll('.stop-note.visible').length
+    const before = notes()
+    Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    await new Promise(resolve => setTimeout(resolve))
+    const after = notes()
+    delete (document as any).visibilityState // the prototype's own reading again
+    document.dispatchEvent(new Event('visibilitychange'))
+    return [before, after]
+  })
 
-test('Back onto an entry of older code stops: the browser returns at once to the entry the page shows, the page stays as it is and a note says so, dismissed by a click outside; Forward still reaches the entry ahead; a jump onto a state without an index stops as quietly; a second Back stops again; no note while an editor or the MindBox has the focus, typing goes on across the stop, and none behind another dialog; without the Navigation API the page stays on the position as before', async ({ page }) => {
+test('Back onto an entry of older code stops: the browser returns at once to the entry the page shows, the page stays as it is and a note says so; Forward still reaches the entry ahead; a jump onto a state without an index stops as quietly; a second Back stops again; the note, passive, also while the MindBox or an editor has the focus, which keeps it: nothing scrolls, a key or a press goes to the page as it would, typing goes on across the stop, and the note goes by itself, at that key or press, at the next traversal and when the page is hidden; it is drawn where a reader sees it, over another dialog and the narration camera too; without the Navigation API the page stays on the position as before', async ({ page }) => {
   const reads = historyReads(page)
   const { warnings, recorded, shows } = reads
   const { index, atTarget, atSub } = await olderEntryBehind(page, reads)
@@ -3418,12 +3441,11 @@ test('Back onto an entry of older code stops: the browser returns at once to the
   await page.goBack()
   await expect.poll(() => page.evaluate(() => (window as any).__moves), { message: 'a stop while the note shows' }).toEqual(['cleared', `own ${index + 1}`])
   await moves()
-  // a click outside the note dismisses it (it has no button), and no second note was waiting behind it
+  // it has no button, and it goes at the next key, which reaches the page (Shift: nothing else happens)
   await expect(note(page).locator('.button')).toHaveCount(0)
-  await page.mouse.click(5, 5)
-  await noNote(page, 'a click outside dismisses the note, and it was the only one')
+  await passNote(page)
   await recorded()
-  expect(await still(), 'after the dismissal: the viewport and the saved position are where they were').toEqual(before)
+  expect(await still(), 'after the note: the viewport and the saved position are where they were').toEqual(before)
   expect({ noise, warnings }, 'nothing warned in the console').toEqual({ noise: [], warnings: [] })
   // a JUMP of two positions, onto a state that is no entry at all (another script's: no index): the same stop,
   // back to the entry by its key, and the console as quiet (such a state was cleared with a warning)
@@ -3432,52 +3454,118 @@ test('Back onto an entry of older code stops: the browser returns at once to the
   await settled(page)
   expect(await moves(), 'the state without an index, then the entry the page shows again').toEqual(['custom', `own ${index + 1}`])
   expect(await still()).toEqual(before)
-  await page.mouse.click(5, 5)
-  await noNote(page, 'dismissed')
   expect({ noise, warnings }, 'nothing warned in the console, for a state without an index either').toEqual({ noise: [], warnings: [] })
 
-  // (2) Forward still reaches the entry ahead. Back from it, and Back again THE MOMENT THAT ONE HAS LANDED
+  // (2) Forward still reaches the entry ahead, pressed WHILE THE NOTE OF THE JUMP SHOWS: the browser's own
+  // Forward is no key and no press of the page's, and the note goes as the entry lands (until review 0 of
+  // back_note it stayed for the rest of its three seconds, and the entry ahead said "nothing to go back
+  // to"). It is read a task after the landing's popstate, before the entry's layouts and its scroll are
+  // waited for. Then Back from the entry ahead, and Back again THE MOMENT THAT ONE HAS LANDED
   // (from a listener of the row's, which runs after the app's: before any write on the entry reached): the
   // second one stops, and returns to the entry the first one reached, the position noted when it landed
   // (the entry ahead is given a position of its own first: its write notes ITS position, the last one noted
   // before the two Backs)
+  const showing = await page.evaluate(() => {
+    const w = window as any
+    w.__noteAtLanding = undefined
+    window.addEventListener('popstate', () => void setTimeout(() => (w.__noteAtLanding = document.querySelector('.stop-note.visible')?.textContent ?? null)), { once: true })
+    return document.querySelectorAll('.stop-note.visible').length
+  })
+  expect(showing, 'the premise: the note still shows as Forward is pressed').toBe(1)
   await page.goForward()
+  await expect.poll(() => page.evaluate(() => (window as any).__noteAtLanding), { message: 'no note once the entry ahead has landed' }).toBe(null)
   await shows('#e2e_target/sub', atSub, 'Forward: the entry ahead, kept')
   expect(await reads.place(200), 'the entry ahead, at a position of its own').not.toBe(atTarget)
   await moves()
   await page.evaluate(() => void window.addEventListener('popstate', () => history.back(), { once: true }))
   await page.goBack()
   await expect(note(page), 'Back from the entry ahead, and at once Back again: a stop').toHaveText('nothing to go back to')
+  // the note goes when the page is hidden (a hidden page's timers can be held, and it would come back with the old note)
+  expect(await hiddenAndShown(page), 'the note shown, and gone once the page is hidden').toEqual([1, 0])
   await shows('#e2e_target ', atTarget, 'the entry the first Back reached, restored where it was left')
   expect((await moves()).filter(move => /^(own|cleared|older)/.test(move)), 'the entry reached, the cleared position, the entry reached again').toEqual([`own ${index + 1}`, 'cleared', `own ${index + 1}`])
   await recorded()
   expect(await still()).toMatchObject(HERE)
-  await page.mouse.click(5, 5)
-  await noNote(page, 'dismissed')
+  await noNote(page, 'no note came back with the page shown again')
 
   // (3) Back once more, onto the cleared position, stops the same way. The MindBox holds the focus this
-  // time, out of view above the window: no note (a modal would blur it, take every key, and give the focus
-  // back with a scroll to it, which the scroll listener would save), and the page is where it was
+  // time, out of view above the window: the note shows all the same and takes nothing (a modal blurred the
+  // box and gave the focus back with a scroll to it, which the scroll listener saved; until 2026-11-19 no
+  // note was shown here): the box keeps the focus, no position is asked for and nothing scrolls, the box
+  // stays above the window. Then the note goes by itself, and nothing moves then either
+  const boxAbove = () => page.evaluate(() => document.getElementById('textarea-mindbox')!.getBoundingClientRect().bottom < 0)
   await focusMindboxInPlace(page)
   await expect(mindbox(page)).toBeFocused()
-  expect(await page.evaluate(() => document.getElementById('textarea-mindbox')!.getBoundingClientRect().bottom < 0), 'the MindBox is above the window').toBe(true)
+  expect(await boxAbove(), 'the MindBox is above the window').toBe(true)
   await recorded()
   await moves()
   await page.goBack()
   await expect.poll(traversed, { message: 'a second Back stops again, with the MindBox focused' }).toEqual(['cleared', `own ${index + 1}`])
-  await noNote(page, 'no note while the MindBox has the focus')
-  await recorded()
+  await expect(note(page), 'the note, with the MindBox focused').toHaveText('nothing to go back to')
+  // (what a reader sees, not the class and the words alone: the element is rendered, inside the window)
+  await expect(note(page), 'the note is rendered visible').toBeVisible()
+  await expect(note(page), 'inside the window').toBeInViewport()
+  await settled(page)
+  await expect(mindbox(page), 'the MindBox keeps the focus while the note shows').toBeFocused()
+  expect(await moves(), 'the two traversals alone: no position asked for, no scroll').toEqual(['cleared', `own ${index + 1}`])
   expect(await still(), 'the viewport and the saved position are where they were').toMatchObject(HERE)
-  await expect(mindbox(page), 'the MindBox keeps the focus').toBeFocused()
+  expect(await boxAbove(), 'the MindBox is still above the window').toBe(true)
+  await expect(note(page), 'the note goes by itself').toHaveCount(0, { timeout: 10_000 })
+  await settled(page)
+  await recorded()
+  expect(await moves(), 'nothing moved as it went').toEqual([])
+  expect(await still(), 'the viewport and the saved position, once the note has gone').toMatchObject(HERE)
+  await expect(mindbox(page), 'the MindBox still has the focus').toBeFocused()
+  expect(await boxAbove(), 'and is still above the window').toBe(true)
   await blur(page)
 
-  // (4) an item's editor holds the focus, with typed text not saved: the stop shows no note there (a modal
-  // takes the focus and every key until it is dismissed), and the typing goes on where it was
+  // (4) a press while the note shows goes to the page, AT THE NOTE'S OWN PLACE: the item's text is brought
+  // under the middle of the window, where the note stands, and a stop is made with nothing focused. The hit
+  // test at the note's centre answers with the paragraph under it, and a press there (by the mouse, which no
+  // driver check holds back) opens the item's editor, the note gone at that press. Before the press, the
+  // NARRATION CAMERA is stood in for (Webcam.svelte: the camera at z-index 1000 and its title at 1001; in
+  // intro mode the camera covers the middle of the window; no camera is asked for here): two opaque boxes
+  // of those layers over the note, beside it in the document as the camera's are. The pointer then goes to
+  // the camera, through the note, and with the note made hittable for the reading it is the note that lies
+  // on top of both (at 101 it lay under the camera). Then the editor holds the focus, with typed text not
+  // saved: the stop shows the note there too (none until 2026-11-19: a modal takes the focus and every key
+  // until it is dismissed), the editor keeps the focus, and the typing goes on where it was, the first key
+  // typed included, at which the note goes
   const paragraph = page.locator(`#item-${targetId} p`).first()
-  const area = (await paragraph.boundingBox())!
-  await paragraph.click({ position: { x: area.width / 2, y: area.height / 2 } })
+  await paragraph.evaluate(p => {
+    const r = p.getBoundingClientRect()
+    document.body.scrollBy(0, Math.round(r.top + r.height / 2 - innerHeight / 2))
+  })
+  await recorded()
+  await moves()
+  await page.goBack()
+  await expect.poll(traversed, { message: 'the stop, nothing focused' }).toEqual(['cleared', `own ${index + 1}`])
+  await expect(note(page), 'the note, nothing focused').toHaveText('nothing to go back to')
+  const place = await page.evaluate(id => {
+    const shown = document.querySelector('.stop-note.visible') as HTMLElement
+    const r = shown.getBoundingClientRect()
+    const [x, y] = [r.left + r.width / 2, r.top + r.height / 2]
+    const hit = () => document.elementFromPoint(x, y)
+    const under = hit()
+    const [camera, title] = [1000, 1001].map(layer => {
+      const box = document.createElement('div')
+      box.style.cssText = `position: fixed; z-index: ${layer}; width: 68.75vw; height: 50vw; right: 15.625vw; bottom: 0; background: #246`
+      return shown.parentElement!.appendChild(box)
+    })
+    const through = hit()
+    shown.style.pointerEvents = 'auto'
+    const top = hit()
+    shown.style.pointerEvents = ''
+    camera.remove()
+    title.remove()
+    const name = (e: Element | null) => (e === shown ? 'the note' : e === title ? "the camera's title" : e === camera ? 'the camera' : e === document.querySelector(`#item-${id} p`) ? 'the paragraph' : (e?.tagName ?? null))
+    return { x, y, under: name(under), through: name(through), top: name(top) }
+  }, targetId)
+  expect(place, "at the note's centre the pointer goes to what is under the note, and the note lies on top of the camera's layers").toMatchObject({ under: 'the paragraph', through: "the camera's title", top: 'the note' })
+  await page.mouse.click(place.x, place.y)
   const textarea = page.locator(`#textarea-${targetId}`)
-  await expect(textarea).toBeFocused()
+  await expect(textarea, "the press at the note's centre went to the page: the editor is open").toBeFocused()
+  await noNote(page, 'the note goes at the press')
   const saved = await textarea.inputValue()
   await page.keyboard.press('Meta+ArrowDown')
   await page.keyboard.type(' typed')
@@ -3486,36 +3574,52 @@ test('Back onto an entry of older code stops: the browser returns at once to the
   await moves()
   await page.goBack()
   await expect.poll(traversed, { message: 'the stop, with an editor focused' }).toEqual(['cleared', `own ${index + 1}`])
-  await noNote(page, "no note while an item's editor has the focus")
-  await expect(textarea).toBeFocused()
+  await expect(note(page), "the note, with an item's editor focused").toHaveText('nothing to go back to')
+  await expect(textarea, 'the editor keeps the focus while the note shows').toBeFocused()
   await page.keyboard.type(' on')
-  await expect(textarea, 'the typing goes on in the editor').toHaveValue(saved + ' typed on')
+  await expect(textarea, 'the typing goes on in the editor, the first key included').toHaveValue(saved + ' typed on')
+  await noNote(page, 'the note goes at the first key typed')
   await textarea.fill(saved)
   await page.keyboard.press('Escape')
   await expect(textarea).toBeHidden()
 
-  // (5) another dialog is open: the stop shows no note behind it, nor one once it is closed
+  // (5) another dialog is open: the note shows over it (until 2026-11-19 none was shown while a dialog was
+  // open: the guard returned at once), the dialog stays as it is, the pointer at the note's centre goes to
+  // the dialog under it, and a press on the dialog's button reaches the button
+  const dialog = page.locator('.background.visible .modal')
   await page.evaluate(() => void (window as any)._modal('a dialog of the page', { confirm: 'OK' }))
-  await expect(note(page)).toContainText('a dialog of the page')
+  await expect(dialog).toContainText('a dialog of the page')
   await moves()
   await page.goBack()
   await expect.poll(traversed, { message: 'the stop, with a dialog open' }).toEqual(['cleared', `own ${index + 1}`])
-  await expect(note(page)).toContainText('a dialog of the page')
-  await note(page).locator('.button.confirm').click()
-  await noNote(page, 'no note was waiting behind the dialog')
+  await expect(note(page), 'the note, over the dialog').toHaveText('nothing to go back to')
+  await expect(dialog, 'the dialog stays').toContainText('a dialog of the page')
+  expect(
+    await page.evaluate(() => {
+      const shown = document.querySelector('.stop-note.visible')!
+      const r = shown.getBoundingClientRect()
+      const under = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+      return [shown.contains(under), !!under?.closest('.background.visible')]
+    }),
+    "at the note's centre the pointer goes to the dialog, not to the note"
+  ).toEqual([false, true])
+  await dialog.locator('.button.confirm').click()
+  await expect(dialog, 'the press confirmed the dialog').toHaveCount(0)
+  await noNote(page, 'and the note went at it')
 
-  // (5b) typing in the MindBox ACROSS a stop: a character before it and one after it are both in the box,
-  // which keeps the focus, and no note comes up. The typed query then applies as any edit of a final entry
-  // does (a new entry), and Back from it is the entry again
+  // (5b) typing in the MindBox ACROSS a stop: the note shows, a character typed before it and one typed
+  // while it shows are both in the box, which keeps the focus, and the note goes at that key. The typed
+  // query then applies as any edit of a final entry does (a new entry), and Back from it is the entry again
   await focusMindboxInPlace(page, '#e2e_target '.length)
   await page.keyboard.type('x')
   await moves()
   await page.goBack()
   await expect.poll(traversed, { message: 'the stop, between two typed characters' }).toEqual(['cleared', `own ${index + 1}`])
+  await expect(note(page), 'the note, between two typed characters').toHaveText('nothing to go back to')
   await page.keyboard.type('y')
   await expect(mindbox(page), 'both characters are in the box').toHaveValue('#e2e_target xy')
   await expect(mindbox(page)).toBeFocused()
-  await noNote(page, 'no note over the typing')
+  await noNote(page, 'the note goes at the key typed')
   await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { message: 'the typed query, applied as an edit of the entry', timeout: 10_000 }).toEqual([index + 2, '#e2e_target xy'])
   await blur(page)
   await page.goBack()
@@ -3562,14 +3666,14 @@ test('Back while a reloaded page is still starting, onto an entry of older code,
   await page.goBack()
   await expect(page.locator('#sapper > .loading'), 'Back arrived before the page was initialized').toHaveClass(/visible/)
   expect(await page.evaluate(() => (window as any).__moves), 'the browser is on the entry of older code while the page starts').toEqual(['older'])
-  await waitForApp(page)
-  await expect(note(page), 'the note of the stop, once the page is ready').toHaveText('nothing to go back to')
+  // (the note is looked for while the page gets ready: it goes by itself, possibly before the page has
+  // rendered all it renders at a load; the two start together, and a failure of either ends the wait)
+  await Promise.all([expect(note(page), 'the note of the stop, once the page is ready').toHaveText('nothing to go back to', { timeout: 90_000 }), waitForApp(page)])
   await shows('#e2e_target ', atTarget, 'the entry the page was reloaded on, shown where it was left')
   expect(await page.evaluate(() => [(window as any).__moves, (window as any).__returnsAsked]), 'one return, to that entry').toEqual([['older', `own ${index + 1}`], 1])
   expect(await page.evaluate(() => [history.state.index, history.state.editorText, history.state.scrollPosition, location.hash]), "the browser's entry is that one, as it was").toEqual([index + 1, '#e2e_target ', atTarget, '#e2e_target'])
   expect(await entries(page), 'the session is on it').toEqual([index + 2, index + 1])
-  await page.mouse.click(5, 5)
-  await expect(page.locator('.background.visible')).toHaveCount(0)
+  await passNote(page)
   // nothing was lost: the entry ahead, and the entry itself on the way back
   await page.goForward()
   await shows('#e2e_target/sub', atSub, 'Forward: the entry ahead, kept')
@@ -3659,8 +3763,7 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   const release = (mode: 'go' | 'refuse') => page.evaluate(mode => (window as any).__returns.shift()(mode), mode)
   const arrived = async (words: string, message: string) => {
     await expect(note(page), message).toHaveText(words)
-    await page.mouse.click(5, 5)
-    await noNote(page, 'dismissed')
+    await passNote(page)
   }
 
   // (1) A QUERY UPDATE while the return is held: nothing is decided on the cleared position (no push there:
@@ -3759,7 +3862,7 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   await expect(links).toHaveCount(2)
   await links.first().click()
   expect(await page.evaluate(() => (window as any).__gone), 'no traversal by a distance while the return is on its way').toEqual([])
-  // (a click in the header leaves the focus in the MindBox, where a stop shows no note: blurred, for the note)
+  // (a click in the header leaves the focus in the MindBox; blurred, as when a stop showed no note there)
   expect(await page.evaluate(() => document.activeElement?.id)).toBe('textarea-mindbox')
   await blur(page)
   await release('go')

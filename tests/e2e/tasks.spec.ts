@@ -1648,7 +1648,7 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   // moved. Every state a popstate brings is noted beside the app, from here on
   await page.evaluate(() => void window.addEventListener('popstate', e => void ((window as any).__popped ??= []).push(e.state?.editorText), true))
   await page.goForward()
-  await expect(page.locator('.background.visible .modal'), 'the note of a stop after Forward').toHaveText('nothing to go forward to')
+  await expect(page.locator('.stop-note.visible'), 'the note of a stop after Forward').toHaveText('nothing to go forward to')
   expect(await page.evaluate(() => (window as any).__popped), "Forward reached the account's entry, and the browser came back to the visitor's").toEqual([AHEAD, ''])
   expect(
     await page.evaluate(query => {
@@ -1657,8 +1657,10 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
     }, AHEAD),
     "the page stays on the visitor's first view, its entry the browser's again, the account's query nowhere"
   ).toEqual(['', 0, 1, 0, false])
-  await page.mouse.click(5, 5)
-  await expect(page.locator('.background.visible'), 'a click outside dismisses the note').toHaveCount(0)
+  // the note is passive (no modal since 2026-11-19): it goes at the next key, which reaches the page (Shift)
+  await page.keyboard.press('Shift')
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve)))))
+  expect(await page.locator('.stop-note.visible').count(), 'the note goes at the next key').toBe(0)
   expect(warnings, 'the handler warned of nothing').toEqual([])
   // THE REST OF THE ROW RUNS WITHOUT THE NAVIGATION API (hidden here, as in a browser that lacks it): no
   // return can be said then, and the page stays on a position that holds no entry of the notebook's, as it

@@ -4069,24 +4069,49 @@
     if (unique) update_dom().then(scrollToTarget)
   }
 
-  // the note of a stop (onPopState): why Back, or Forward, moved nothing. The app's own modal, without
-  // buttons: a click outside it, Enter or Escape dismisses it. None while a modal is shown, this note
-  // included (a queued one would show once that is closed, about a press long past), and none while one of
-  // the app's editors has the focus, the MindBox's included: a modal blurs the textarea, takes every key
-  // until it is dismissed (what is being typed is swallowed) and gives the focus back with a plain focus(),
-  // which scrolls a MindBox that is out of view back into it, a jump the scroll listener then saves (review 6
-  // of scroll_history). The stop itself happens all the same.
+  // the note of a stop (onPopState): why Back, or Forward, moved nothing. A PASSIVE note (.stop-note), shown
+  // at every stop whatever has the focus, which takes nothing: no focus (the element is not focusable and
+  // nothing is blurred, so what is being typed goes on), no key and no press (they are not stopped, and the
+  // pointer passes through it to the page), no scroll (fixed in the window). It goes by itself after
+  // stopNoteMs, and at the next key or press, which then does what it does; a second stop shows it again.
+  // It also goes at the next TRAVERSAL (onPopState's entry: the browser's own Back and Forward are pressed
+  // outside the document, where no listener of the page hears them, and the entry a traversal then reached
+  // still said that there was nothing to go to; a stop's own return shows its words afresh), when the page
+  // is hidden or left (a hidden page's timers can be held, and it would come back with the old note), and
+  // with the component. What a screen reader says of it (role="status") is NOT verified: idle, the element
+  // is `visibility: hidden` and so out of the accessibility tree, and a second stop of the same side sets
+  // the same words.
+  // Until 2026-11-19 it was the app's modal (the owner's ask of 2026-11-18: "a minimal modal (click outside
+  // should dismiss ...)"), shown only while no modal was and no textarea had the focus: a modal blurs the
+  // textarea, takes every key until it is dismissed and gives the focus back with a plain focus(), which
+  // scrolls a MindBox out of view back into it (review 6 of scroll_history). But the MindBox keeps the focus
+  // once it has been typed in or reached by a key from the window (Escape; by the code also Up, Tab,
+  // Backspace), through tag clicks, Back and Forward, a window switch (restored 250 ms after the window's
+  // focus) and a scroll that takes it out of view, so those stops were silent (a probe for the owner's report
+  // of 2026-11-19, a stop at the start without its note, which was not reproduced as such).
   // The words follow the SIDE of the held entry the browser landed on (stopReturn): after moves in between
   // (a jump by a long press, a second press before the first return landed) that can differ from the button
   // pressed last
+  const stopNoteMs = 3000
+  let stopNote = '' // the words shown, '' while no note is
+  let stopNoteTimer = null
   function noteStop(forward: boolean) {
-    if (_modal_visible() || document.activeElement instanceof HTMLTextAreaElement) return
-    _modal(forward ? 'nothing to go forward to' : 'nothing to go back to')
+    stopNote = forward ? 'nothing to go forward to' : 'nothing to go back to'
+    clearTimeout(stopNoteTimer)
+    stopNoteTimer = setTimeout(endStopNote, stopNoteMs)
   }
+  function endStopNote() {
+    if (!stopNote) return
+    stopNote = ''
+    clearTimeout(stopNoteTimer)
+    stopNoteTimer = null
+  }
+  onDestroy(endStopNote)
 
   let scrollToTopOnPopState = false
   let skipScrollForPopState = false
   function onPopState(e) {
+    endStopNote() // the note of an earlier stop is not this traversal's (see noteStop)
     scrollBackPending = false // a navigation landed (see scrollBackWithHistory)
     clearTimeout(scrollBackTimer)
     readonly = (anonymous && !admin) || (fixed && sharer != user?.uid)
@@ -4406,6 +4431,7 @@
   // the facts ride the instance record (see updateInstance) for the #status item
   const resumeSchedule = new ResumeSchedule() // what is due (src/page_lifecycle.ts, review 1 R4)
   function onVisibilityChange() {
+    if (document.visibilityState == 'hidden') endStopNote() // its timer can be held while hidden (see noteStop)
     if (!instance) return
     if (document.visibilityState == 'hidden') {
       instance.hidden_time = Date.now()
@@ -8817,7 +8843,7 @@
     console.debug(`previewed ${item.name} from ${repo}/${path}`)
   }
 
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import {
     canonicalizeHost,
     getHostDir,
@@ -12752,7 +12778,12 @@
 
 <Modal bind:this={modal} {onPastedImage} />
 
+<!-- the note of a stop (noteStop) -->
+<div class="stop-note" class:visible={!!stopNote} role="status">{stopNote}</div>
+
 <svelte:window
+  on:keydown|capture={endStopNote}
+  on:pointerdown|capture={endStopNote}
   on:keydown={onKeyDown}
   on:keyup={onKeyUp}
   on:focus={onFocus}
@@ -12766,6 +12797,7 @@
   on:beforeunload={onBeforeUnload}
   on:pageshow={onPageShow}
   on:pagehide={retireReturn}
+  on:pagehide={endStopNote}
   on:online={onOnline}
   on:offline={onOffline}
 />
@@ -13100,6 +13132,34 @@
   }
   .loading > :global(div) {
     opacity: 0.75;
+  }
+  /* the note of a stop (noteStop): in the middle of the window, where the app's modal stood, over the page,
+     over a modal's background (Modal.svelte, z-index 100) and over the narration camera and its title
+     (Webcam.svelte, 1000 and 1001: in intro mode the camera covers the middle of the window, and at 101 the
+     note was painted under it), passing every pointer through */
+  .stop-note {
+    position: fixed;
+    z-index: 1002;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: max-content;
+    max-width: calc(100% - 40px);
+    box-sizing: border-box;
+    padding: 12px 20px;
+    border-radius: 5px;
+    background: #eee;
+    color: black;
+    font-size: 17px;
+    line-height: 24px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    -webkit-user-select: none;
+    user-select: none;
+    visibility: hidden;
+  }
+  .stop-note.visible {
+    visibility: visible;
   }
   /* the top edge on iOS (the owner's iPhone, iOS 27.2.1, the app run from the Home Screen, 2026-11-17):
      the system blurs the top of the page there, the tops of the header's buttons and picture with it.
