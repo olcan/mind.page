@@ -1231,6 +1231,291 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
 })
 
+// A PHONE (2026-11-19; the owner's todo, of an iPhone): where the browser reports that its
+// primary pointer does not hover, no tooltip comes up for a tap, so there the menu itself says
+// what the tooltips say. The row is the first row's account on a phone, as far as a desktop
+// lane can play one (as tests/e2e/key_buttons.spec.ts: a narrow touch window of Chromium's
+// emulation, whose primary pointer is coarse and does not hover). (a) a tap on the sparkle
+// opens the menu, and below its entries, which are the desktop's, in their order, it says the
+// sparkle's own words, then each watched line with its details under it, in the lines' own
+// small type: inside the window, the details wrapped, each row where a finger reaches it; (b) a
+// tap on any of these rows is a click that nothing answers; nothing of the sparkle, the menu,
+// its entries or its layer can be selected there (their computed style), and a finger held on
+// the menu's own edge under the rows, or on an entry's label, selects nothing and starts no
+// selection (before the change the first selected a word of the entry above, the second a word
+// of the label), where the same press on an item's text selects its word: the lane's proof
+// that it can show a selection; (c) three watches, in the window too, and the words follow what
+// the sparkle shows while the menu is open; (d) an entry's tap does what it did: Stop Watching
+// sends the one stop. The hovering menu is the row above's, a desktop's, which holds the lines
+// alone (a picture of it is taken here where pictures are asked for). iOS Safari is in no
+// lane: what a long press selects on a real phone is not shown here
+const PHONE = { viewport: { width: 375, height: 667 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
+// pictures of the row's states, written only where SPARKLE_SHOTS names a directory for them
+const SHOTS = process.env.SPARKLE_SHOTS
+type Clip = { x: number; y: number; width: number; height: number }
+const shot = async (page: Page, name: string, clip?: Clip) => {
+  if (!SHOTS) return
+  mkdirSync(SHOTS, { recursive: true })
+  await page.screenshot({ path: resolve(SHOTS, `${name}.png`), ...(clip ? { clip } : {}) })
+}
+// the menu as it is drawn, a row for each of its children in order: what it is (an entry by its
+// key, a tooltip's words said in the menu by whose they are, any other row a line), its text
+// and its tooltip
+const menuRows = (page: Page) =>
+  page.evaluate(() =>
+    [...(document.querySelector('[data-vault-sparkle="menu"]')?.children ?? [])].map(child => {
+      const row = child as HTMLElement
+      return [row.dataset.vaultEntry ?? (row.dataset.vaultTip ? `says:${row.dataset.vaultTip}` : 'line'), row.textContent, row.title]
+    }),
+  )
+// where the menu and its rows are: whether the menu is inside the window, off its edges; each
+// row's place, its type, how far its text is set in and how many lines it takes, and whether a
+// finger at its middle reaches it
+const menuLook = (page: Page) =>
+  page.evaluate(() => {
+    const menu = document.querySelector('[data-vault-sparkle="menu"]') as HTMLElement
+    const rows = [...menu.children].map(child => {
+      const box = child.getBoundingClientRect()
+      const style = getComputedStyle(child)
+      const [x, y] = [box.left + box.width / 2, box.top + box.height / 2]
+      const lines = Math.round((box.height - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / parseFloat(style.lineHeight))
+      return { left: box.left, top: box.top, bottom: box.bottom, x, y, type: `${style.fontSize} ${style.fontFamily}`, inset: parseFloat(style.paddingLeft), lines, reached: document.elementFromPoint(x, y) === child }
+    })
+    const box = menu.getBoundingClientRect()
+    return { rows, left: box.left, right: box.right, top: box.top, bottom: box.bottom, inside: box.left > 0 && box.top > 0 && box.right < window.innerWidth && box.bottom < window.innerHeight }
+  })
+// what of the sparkle and its open menu can be selected, by the style the browser computes:
+// the sparkle, the layer, the menu and each of its children, by name
+const selectable = (page: Page) =>
+  page.evaluate(() =>
+    ([...document.querySelectorAll('[data-vault-sparkle="node"], [data-vault-sparkle="backdrop"], [data-vault-sparkle="menu"], [data-vault-sparkle="menu"] > *')] as HTMLElement[])
+      .filter(part => getComputedStyle(part).userSelect != 'none')
+      .map(part => part.dataset.vaultSparkle ?? part.dataset.vaultEntry ?? part.textContent),
+  )
+const selection = (page: Page) => page.evaluate(() => getSelection()?.toString() ?? '')
+// the next event of a kind on the page, by what it is sent to (an entry by its key, the sparkle,
+// the layer or the menu's own box by its name, a row of the menu by its text, anything else as
+// the page's): asked for before the input that causes it, and waited for after it, instead of
+// a time
+const next = (page: Page, type: string) =>
+  page.evaluate(type => {
+    ;(window as any).__next = new Promise<string>(done =>
+      document.addEventListener(
+        type,
+        event => {
+          const target = event.target as HTMLElement
+          const part = target.closest<HTMLElement>('[data-vault-entry], [data-vault-sparkle]')
+          const row = part?.dataset.vaultSparkle == 'menu' && part !== target
+          done(!part ? 'the page' : row ? target.textContent ?? '' : part.dataset.vaultEntry ?? part.dataset.vaultSparkle!)
+        },
+        { capture: true, once: true },
+      ),
+    )
+  }, type)
+const came = (page: Page) => page.evaluate(() => (window as any).__next as Promise<string>)
+// a finger's tap, by its outcome: the click the browser makes of it, and what that lands on
+const tap = async (page: Page, x: number, y: number) => {
+  await next(page, 'click')
+  await page.touchscreen.tap(x, y)
+  return came(page)
+}
+// a finger held down, long enough for the browser's own long press: a tap gesture of one second,
+// which the browser synthesizes itself (CDP's Input.synthesizeTapGesture). Chromium then sends
+// `contextmenu` and selects the word under the finger, where one can be selected. Touch input
+// that a driver injects point by point (Input.dispatchTouchEvent) is never a long press:
+// Chromium gives it no long press timer, and its release is a tap, however late it comes. The
+// press is known by its outcome, the `contextmenu`: what that was sent to, and what is selected
+const hold = async (page: Page, x: number, y: number) => {
+  await next(page, 'contextmenu')
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Input.synthesizeTapGesture', { x, y, duration: 1000, tapCount: 1, gestureSourceType: 'touch' })
+  await cdp.detach()
+  return [await came(page), await selection(page)]
+}
+
+test('on a phone the menu says what the tooltips say, and a held finger selects nothing of it', async ({ browser }) => {
+  const dialogs: string[] = []
+  // a returning device: the account's secret is there, so no phrase is asked for
+  const returning = async (page: Page) => {
+    page.on('dialog', dialog => {
+      dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+      void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss())
+    })
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(secret => {
+      localStorage.setItem('mindpage_github_token', 'e2e-local')
+      localStorage.setItem('mindpage_secret', secret)
+      localStorage.setItem('mindpage_kdf', 'off')
+    }, SECRET)
+    await loadUser(page, USER)
+    await waitForApp(page)
+    await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+    await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
+  }
+  const context = await browser.newContext(PHONE)
+  const phone = await context.newPage()
+  await returning(phone)
+  expect(
+    await phone.evaluate(() => [innerWidth, matchMedia('(hover: none)').matches, matchMedia('(hover: hover)').matches, 'ontouchstart' in window]),
+    "a phone's window: 375 px, a primary pointer that does not hover, touch",
+  ).toEqual([375, true, false, true])
+
+  // the watched items are this row's own: a tag's item and one that carries the tag
+  const TAG = '#e2e_phone'
+  const ONE = '#e2e_phone_a'
+  const WORD = 'selectable'
+  for (const text of [`${TAG} is this item's own label`, `${ONE} a ${WORD} item that carries ${TAG}`]) {
+    await phone.evaluate(text => void window._create(text), text)
+    await expect.poll(() => savedId(phone, text.split(' ')[0]), { timeout: 30_000 }).toBeTruthy()
+  }
+  const SINCE = '2026-11-18T09:01:02.000Z'
+  const since = await phone.evaluate(since => new Date(since).toLocaleString(), SINCE)
+  const RULE = { watch: 'phone', name: AGENT, since: SINCE }
+  const OTHER = 'gpt-6-astra-ultra'
+  const follows = (rules: Record<string, any>[], more: Record<string, any> = {}) => watched(phone, { name: AGENT, took: TOOK, state: 'watching', tab: true, follows: rules, ...more })
+  const WATCHING = `${AGENT} is watching`
+  const LINE = `watched: ${TAG} (2 items)`
+  const DETAILS = `${AGENT} follows ${TAG} since ${since}`
+  const ENTRIES = [['stop', 'Stop Watching', ''], ['close', 'Close Agent Session', '']]
+  await fresh(phone)
+  await follows([{ ...RULE, tags: [TAG] }])
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+
+  // (a) the sparkle is the desktop's, tooltip and all; a tap opens the menu, which says the
+  // tooltips' words below its entries
+  const tapSparkle = async () => {
+    const box = (await phone.locator(NODE).boundingBox())!
+    expect(await tap(phone, box.x + box.width / 2, box.y + box.height / 2), "the tap's click is the sparkle's").toBe('node')
+    await expect.poll(async () => (await sparkle(phone)).menus).toBe(1)
+  }
+  await tapSparkle()
+  const ONE_WATCH = [...ENTRIES, ['says:sparkle', WATCHING, ''], ['line', LINE, ''], ['says:line', DETAILS, '']]
+  expect(await menuRows(phone), "the entries, then the sparkle's words, the watched line and its details under it; nothing is left to a tooltip").toEqual(ONE_WATCH)
+  const one = await menuLook(phone)
+  const [words, line, details] = one.rows.slice(2)
+  expect(line.type, "the lines' type is the menu's small one").toMatch(/^12px /)
+  expect(
+    { inside: one.inside, reached: one.rows.map(row => row.reached), types: [words.type, details.type], under: details.top == line.bottom, inset: [words.inset == line.inset, details.inset > line.inset], wrapped: [line.lines, details.lines > 1] },
+    "the menu is inside the window, off its edges, and a finger reaches every row; the words and the details are in the lines' type, the details directly under their line, set in from it and wrapped",
+  ).toEqual({ inside: true, reached: one.rows.map(() => true), types: [line.type, line.type], under: true, inset: [true, true], wrapped: [1, true] })
+  await shot(phone, 'phone_375_one_watch')
+
+  // (b) a tap on the words, the line or its details is a click on that row, which nothing
+  // answers: the menu stays as it is, and nothing is sent
+  const clicked: string[] = []
+  for (const row of [words, line, details]) clicked.push(await tap(phone, row.x, row.y))
+  expect([clicked, await menuRows(phone), (await commands()).length, await selection(phone)], 'taps on the rows below the entries').toEqual([[WATCHING, LINE, DETAILS], ONE_WATCH, 0, ''])
+  // nothing of the sparkle, the layer, the menu, its entries and its rows can be selected, by
+  // their style; and a finger held on the menu's own edge under the rows, and on an entry's
+  // label, where the nearest text that could be selected was the entries': the long press
+  // comes (its `contextmenu`, at the menu and at the entry), nothing is selected and no
+  // selection starts; the menu is as it was, and nothing is sent
+  const unguarded = await selectable(phone)
+  await phone.evaluate(() => {
+    const started: string[] = ((window as any).__started = [])
+    document.addEventListener('selectstart', event => started.push((event.target as Node).nodeName), true)
+  })
+  const edge = await hold(phone, details.x, one.bottom - 3)
+  const label = await hold(phone, one.rows[1].left + 30, one.rows[1].y)
+  expect(
+    { selectable: unguarded, edge, label, started: await phone.evaluate(() => (window as any).__started), rows: await menuRows(phone), sent: (await commands()).length },
+    "nothing of the sparkle and its open menu can be selected, and a finger held on the menu's lower edge and on an entry's label selects nothing",
+  ).toEqual({ selectable: [], edge: ['menu', ''], label: ['close', ''], started: [], rows: ONE_WATCH, sent: 0 })
+  // the lane's proof that it can show a selection: the same press on an item's own text
+  await phone.keyboard.press('Escape')
+  await expect.poll(async () => (await sparkle(phone)).menus).toBe(0)
+  await phone.evaluate(label => (window as any).MindBox.set(label), ONE)
+  await expect.poll(() => phone.evaluate(label => !!window._item(label, true)?.elem?.querySelector('.item'), ONE), { timeout: 30_000 }).toBe(true)
+  const word = await phone.evaluate(
+    ([label, word]) => {
+      const walker = document.createTreeWalker(window._item(label, true)!.elem!.querySelector('.item')!, NodeFilter.SHOW_TEXT)
+      for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+        const at = text.textContent!.indexOf(word)
+        if (at < 0) continue
+        const range = document.createRange()
+        range.setStart(text, at)
+        range.setEnd(text, at + word.length)
+        const box = range.getBoundingClientRect()
+        return [box.left + box.width / 2, box.top + box.height / 2]
+      }
+      return null
+    },
+    [ONE, WORD],
+  )
+  expect(word, "the item's word is on the page").toBeTruthy()
+  expect([await hold(phone, word![0], word![1]), await phone.evaluate(() => (window as any).__started.length > 0)], "a finger held on an item's word selects it").toEqual([['the page', WORD], true])
+  await phone.evaluate(() => getSelection()?.removeAllRanges())
+  if (SHOTS) {
+    // pictures alone: the watched item while it runs, the app's ring left of its sparkle; and
+    // the same watch's menu on a desktop, whose pointer hovers
+    const running = (on: boolean) => phone.evaluate(([label, on]) => void ((window._item(label as string, true) as any).running = on), [ONE, on] as const)
+    await running(true)
+    const clip = await phone.evaluate(async label => {
+      const id = window._item(label, true)!.id
+      for (let n = 0; n < 100 && !document.querySelector(`.container[data-item-id="${id}"].running .item-menu`); n++) await new Promise(done => setTimeout(done, 100))
+      const box = document.querySelector(`.container[data-item-id="${id}"]`)!.getBoundingClientRect()
+      return { x: 0, y: Math.max(0, box.top - 30), width: innerWidth, height: Math.min(box.height + 60, 220) }
+    }, ONE)
+    await shot(phone, 'phone_375_watched_mark_beside_running_ring', clip)
+    await running(false)
+    const desk = await browser.newContext()
+    const desktop = await desk.newPage()
+    await returning(desktop)
+    await expect.poll(async () => (await sparkle(desktop)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+    await desktop.locator(NODE).click()
+    await expect.poll(async () => (await sparkle(desktop)).menus).toBe(1)
+    const menu = await menuLook(desktop)
+    await shot(desktop, 'desktop_hover_one_watch', { x: menu.left - 60, y: menu.top - 40, width: menu.right - menu.left + 74, height: menu.bottom - menu.top + 82 })
+    await desk.close()
+  }
+
+  // (c) three watches: every watch has its details under its line, and all of it is in the window
+  const oneId = await savedId(phone, ONE)
+  const THREE = [{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'phones', labels: [`${TAG}*`] }, { watch: 'one', name: OTHER, since: SINCE, ids: [oneId] }]
+  await follows(THREE)
+  const LINES = [LINE, `watched: ${TAG}* (2 items)`, `watched: ${ONE}`]
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\nwatched: ${LINES.map(line => line.slice('watched: '.length)).join(' · ')}`)
+  await tapSparkle()
+  const THREE_WATCHES = [
+    ...ENTRIES,
+    ['says:sparkle', WATCHING, ''],
+    ['line', LINES[0], ''],
+    ['says:line', DETAILS, ''],
+    ['line', LINES[1], ''],
+    ['says:line', `${AGENT} follows ${TAG}* since ${since}`, ''],
+    ['line', LINES[2], ''],
+    ['says:line', `${OTHER} follows ${ONE} since ${since}`, ''],
+  ]
+  expect(await menuRows(phone)).toEqual(THREE_WATCHES)
+  const three = await menuLook(phone)
+  expect([three.inside, three.rows.map(row => row.reached)], 'three watches: the whole menu is inside the window, and a finger reaches every row').toEqual([true, three.rows.map(() => true)])
+  await shot(phone, 'phone_375_three_watches')
+  // the words are the sparkle's as it is now: an answer by another agent, with the menu open
+  // (the same watch and the same rules, so the menu stays), and other watches close it, as
+  // they always did
+  await follows(THREE, { state: 'answering', by: OTHER })
+  await expect.poll(async () => (await sparkle(phone)).answering, { timeout: 30_000 }).toBe(true)
+  expect(await menuRows(phone), 'the open menu says who answers').toEqual(THREE_WATCHES.map(row => (row[0] == 'says:sparkle' ? ['says:sparkle', `${OTHER} is answering`, ''] : row)))
+  await follows([{ ...RULE, tags: [TAG] }])
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+  expect((await sparkle(phone)).menus, 'other watches: the menu that showed the three closed').toBe(0)
+
+  // (d) an entry's tap: Stop Watching sends the one stop, naming the watch shown
+  await tapSparkle()
+  expect(await menuRows(phone)).toEqual(ONE_WATCH)
+  const stop = (await menuLook(phone)).rows[0]
+  expect(await tap(phone, stop.x, stop.y), "the tap's click is the entry's").toBe('stop')
+  expect((await sent('stop')).wrapper.item).toMatchObject({ kind: 'stop', took: TOOK })
+  await expect
+    .poll(async () => {
+      const said = await sparkle(phone)
+      return [said.menus, said.title]
+    }, { timeout: 30_000 })
+    .toEqual([0, `Stopping ${AGENT}'s watch\n${LINE}`])
+  expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
+  await context.close()
+})
+
 // ONE READING, the ground of the watched mark: the `#vault` item marks by the app's label index
 // and `tags_raw`, and the vault's item watcher selects by its own port of the app's reading (the
 // vault's lib/mindpage_reading.py). The corpus is what both run over. The watcher's row is the
