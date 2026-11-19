@@ -93,9 +93,16 @@
   // a RUNNING item is marked by a small spinning circle left of its number, and left of the edit
   // menu's buttons while it is edited (the running mark, css below), and by nothing else: until
   // 2026-11-18 its border turned blue and an overlay dimmed it under a large spinner (a task
-  // item, whose store carries the bridge's `_agent.state`, had the border alone). its status
-  // line, which that overlay carried, is `.run-status` at the item's bottom
+  // item, whose store carries the bridge's `_agent.state`, had the border alone). the mark is the
+  // ONE thing a running item shows: its status (html, set through _Item's status, index.svelte)
+  // is the mark's tooltip, and a progress fills the mark clockwise (until 2026-11-19 a line at the
+  // item's bottom and a bar under it). `status` and `progress` are what the item's record holds
+  // when the route's list is evaluated: for a component made anew, and after any other change of
+  // the list. a change of either comes through this item's hook (itemHooks.running_mark, below),
+  // not through these: the route writes them on the record without invalidating its list
   export let running = false
+  export let status = ''
+  export let progress: number = null
   export let admin = false
   export let fixed = false
   // hide the item label on shared pages: always for contiguous reading pages, and for the item at
@@ -197,14 +204,21 @@
     onEditing(index, (editing = false), cancelled, run, e)
   }
   let mouseDownTime = 0
-  function onMouseDown() {
+  function onMouseDown(e: MouseEvent) {
     mouseDownTime = Date.now()
+    // a press on the running mark by the number, or on its note (the mark's own ::after), takes
+    // no focus: the default would blur whatever has it, another item's editor or the MindBox (on a
+    // phone that should close the keyboard: not yet seen on the owner's), before the click that
+    // shows or takes away the note is even made.
+    // (the edit menu's mark prevents it itself; here the mark has no listener of its own, see
+    // onIndexClick, and this is the press's first listener above it)
+    if ((e.target as HTMLElement).closest?.('.item-menu .running-mark')) e.preventDefault()
   }
   function onClick(e) {
     // reject click without mousedown within 250ms (can happen due to tags shifting during click)
     if (Date.now() - mouseDownTime > 250) return
-    // ignore clicks on loading div, and on the status line (its text can be selected)
-    if ((e.target as HTMLElement).closest('.loading') || statusdiv?.contains(e.target)) return
+    // ignore clicks on loading div
+    if ((e.target as HTMLElement).closest('.loading')) return
     // ignore clicks on inputs or buttons
     if (e.target.closest('input, button')) return
     // ignore clicks inside an inert frame (a canonical reply's dead frame, src/inert.ts): its
@@ -240,7 +254,79 @@
   function onIndexClick(e) {
     e.stopPropagation()
     e.preventDefault()
+    // a click on the running mark, the number's child, is the mark's (below). the mark has NO
+    // listener of its own here: with one, a touch browser gave it every tap on the digits that a
+    // finger's area reached it from (Chromium's touch adjustment prefers a clickable child to its
+    // clickable parent), and the number of a running item could not be tapped on a phone
+    if ((e.target as HTMLElement).closest('.running-mark')) return onRunningMarkClick(e)
     onTouch(index, e)
+  }
+
+  // THE RUNNING MARK'S TOOLTIP is the item's status as plain text, or `running` alone: the status
+  // is html (item code wrote it into a line of the item until 2026-11-19), read here in the inert
+  // document of a template, where nothing of it loads or runs; a <br> and the end of a block are
+  // line breaks, which a tooltip shows
+  function statusText(html: string) {
+    const template = document.createElement('template')
+    template.innerHTML = html.replace(/<br\s*\/?>|<\/(?:div|p|li|pre|h[1-6]|blockquote)>/gi, '$&\n')
+    return template.content.textContent
+      .split('\n')
+      .map(line => line.replace(/\s+/g, ' ').trim())
+      .filter(line => line)
+      .join('\n')
+  }
+  // THE MARK'S TITLE AND ITS FILL ARE WRITTEN ON THE MARK ITSELF, by the action below when a mark
+  // is made (a run begins, the editor opens: each has its own element) and by this item's hook
+  // when the status or the progress changes. the component KEEPS them, in a plain object outside
+  // Svelte's state (`ring`: the last status and progress, and the marks mounted), so a write
+  // invalidates nothing: a writer can report at every step of its work (the sampler does), and
+  // neither an update of this component nor one of the route's list comes of it, so no item's
+  // height is read for a title or a fraction (as the status line's setter wrote its line). what a
+  // write does cost is this local work on the item's own marks: the title is made again from the
+  // status, also when only the fraction changed. `filled` is a class of this code's, not a class
+  // directive, so the stylesheet names it :global.
+  // a progress of 0 is none: the mark turns
+  const ring = { status, progress, marks: new Set<HTMLElement>() }
+  function writeRunningMark(mark: HTMLElement) {
+    mark.title = (ring.status && statusText(ring.status)) || 'running'
+    const fill = ring.progress > 0 ? (Math.min(ring.progress, 1) * 100).toFixed(3) + '%' : null
+    mark.classList.toggle('filled', !!fill)
+    if (fill) mark.style.setProperty('--running-mark-fill', fill)
+    else mark.style.removeProperty('--running-mark-fill')
+  }
+  function showOnRunningMark(status: string, progress: number) {
+    if (status === ring.status && progress === ring.progress) return
+    Object.assign(ring, { status, progress })
+    ring.marks.forEach(writeRunningMark)
+  }
+  function runningMark(mark: HTMLElement) {
+    ring.marks.add(mark)
+    writeRunningMark(mark)
+    return { destroy: () => void ring.marks.delete(mark) }
+  }
+  $: showOnRunningMark(status, progress) // (the record's values again, whenever the route's list is evaluated)
+  // where no pointer hovers (a phone) a tooltip never shows: there a tap on the mark shows the
+  // same text in a small note under the menu (css: the mark's ::after, which reads the title, so
+  // it follows the status), and the next tap anywhere takes it away, that tap doing whatever else
+  // it does. a click on the mark is the mark's alone on every device: it is no click on the
+  // number (a select or a move of the item) and none on the item (its editor). by the number it
+  // arrives through the number's handler (onIndexClick), in the editor by the mark's own
+  let runningNote = false
+  let noteDismissal: Event = null
+  $: if (!running) runningNote = false
+  function onRunningMarkClick(e: MouseEvent) {
+    e.stopPropagation()
+    e.preventDefault()
+    if (e == noteDismissal || !matchMedia('(hover: none)').matches) return
+    runningNote = true
+    // (the window's capture listeners have already run for this click: the next one is the first
+    // it hears. a note that went with its run's end is nothing to dismiss: that click is not taken)
+    const dismiss = (e: Event) => {
+      if (!runningNote) return
+      runningNote = false
+      noteDismissal = e
+    }
+    window.addEventListener('click', dismiss, { capture: true, once: true })
   }
 
   function onSaveClick(e) {
@@ -1258,7 +1344,6 @@
   import { afterUpdate, onDestroy } from 'svelte'
   let container: HTMLDivElement
   let itemdiv: HTMLDivElement
-  let statusdiv: HTMLDivElement
   // decoded vault-result values by marker (undefined for a malformed candidate): a canonical
   // body is rendered into its dead frame as inert markdown, a malformed one shows the fixed
   // placeholder as a text node (bridge design §2.2a, amended 2026-09-05)
@@ -2221,6 +2306,7 @@
   const itemHooks = {
     resize: (trigger: string) => onResized(id, container, trigger),
     render_images: (elems: NodeListOf<Element>) => renderImages(id, elems),
+    running_mark: showOnRunningMark, // the item's status and its run's progress have changed (index.svelte, itemShowStatus)
   }
   ;((window['_item_hooks'] ??= {}) as any)[id] = itemHooks
   window['_render_images'] ??= item =>
@@ -2385,6 +2471,10 @@
         {#if !fixed}
           <div class="button delete" on:click={onDeleteClick}>delete</div>
         {/if}
+        {#if running}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="running-mark" class:noted={runningNote} use:runningMark on:mousedown|preventDefault on:click={onRunningMarkClick}></div>
+        {/if}
       </div>
 
       <Editor
@@ -2414,8 +2504,9 @@
         {#if runnable}
           <div class="button run" on:click={onRunClick}>run</div>
         {/if}
+        <!-- (the running mark comes after the digits, which stay the number's first child, and is shown before them by its order; its clicks are told from the number's in onIndexClick) -->
         <div class="button index" class:leader class:matching class:reserved={menuDigits(index) > 0} style:--index-digits={menuDigits(index)} on:click={onIndexClick}>
-          {index + 1}
+          {index + 1}{#if running}<span class="running-mark" class:noted={runningNote} use:runningMark></span>{/if}
         </div>
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
@@ -2437,9 +2528,6 @@
         )}
       </div>
     {/if}
-    <!-- the status line of a running item (its text and progress are set through _Item's status and
-         progress, index.svelte, which find it as `.container > .run-status`) -->
-    <div class="run-status" bind:this={statusdiv}></div>
     <div class="loading">
       {#if saving}
         <Circle size="25" unit="px" />
@@ -2665,7 +2753,8 @@
      stylesheet sets that margin and that offset itself (18px, until 2026-11-18) and so replaces
      the item's term, still adds up with the running mark's.
      the order: a mark of item code is the `::before` of the number and stands nearest it, the
-     running mark is the `::after` moved to the front of the number's line (order), left of it. a
+     running mark is an element after the digits, moved to the front of the number's line (order),
+     left of it. a
      mark of item code takes no room in that line by a negative margin of its own. where the
      number's box has a fixed width (.reserved: up to four digits) the mark is given its real room
      in the line while the item runs, which is what puts the circle left of it without the app
@@ -2694,37 +2783,109 @@
   .container.running .item-menu > .index.reserved::before {
     margin-left: 0 !important;
   }
-  .container.running .item-menu > .index:not(.reserved)::after {
+  .item-menu > .index:not(.reserved) > .running-mark {
     translate: calc(-1 * var(--item-mark-room, 0px)) 0;
   }
 
   /* THE RUNNING MARK: a small ring in the blue that the running border had, a quarter of it bright
-     and turning. by the number it is as large as the watched sparkle (15px, and 3px to the digits
-     or to the mark before them: its 18px) and centred on the number's box; in the editor, where no
+     and turning; the one thing a running item shows. it is an element of its own while the item
+     runs (.running-mark: it has a tooltip, the item's status, and takes a tap, see
+     onRunningMarkClick), and the ring is that element's ::before. by the number it is as large as
+     the watched sparkle (15px, and 3px to the digits or to the mark before them: its 18px) and
+     stands WHERE THE SPARKLE STANDS: the element is a line of the number's own font, centred in
+     the number's box as the digits' line is, and the ring an inline box on that line's baseline,
+     lowered by whole pixels (2px, as the sparkle's image: mind.items vault.md, vault_watched_css).
+     the browser rounds a text's baseline and a box's edge to the pixel grid separately: a ring
+     centred in the number's box, as it was until 2026-11-19, stood a pixel above the digits and
+     the sparkle on an item at a whole-pixel position and in line with them only on an item in
+     the lower half of a pixel (by pixels, in Open Sans at 1x and 2x). in the editor, where no
      number shows, it is the first thing in the edit menu, left of a mark of item code and of the
-     buttons, a little less than the buttons' height (23px, as the sparkle there) */
-  .container.running .item-menu > .index::after,
-  .container.running .edit-menu::after {
-    content: '';
+     buttons (the menu's LAST child, shown first by its order), centred on the buttons and a
+     little less than their height (23px, as the sparkle there) */
+  .running-mark {
     order: -1;
     flex: none;
+    cursor: default;
+  }
+  .running-mark::before {
+    content: '';
     box-sizing: border-box;
-    border: 2px solid rgba(68, 170, 255, 0.3);
+    border: var(--running-mark-stroke) solid rgba(68, 170, 255, 0.3);
     border-top-color: #4af;
     border-radius: 50%;
     animation: running-mark 1s linear infinite;
   }
-  .container.running .item-menu > .index::after {
-    width: calc(var(--running-mark-room) - 3px);
-    height: calc(var(--running-mark-room) - 3px);
+  .item-menu > .index > .running-mark {
+    --running-mark-stroke: 2px;
     margin: 0 3px 0 calc(-1 * var(--running-mark-room));
   }
-  .container.running .edit-menu::after {
+  .item-menu > .index > .running-mark::before {
+    display: inline-block;
+    position: relative;
+    top: 2px;
+    width: calc(var(--running-mark-room) - 3px);
+    height: calc(var(--running-mark-room) - 3px);
+  }
+  .edit-menu > .running-mark {
+    --running-mark-stroke: 3px;
     align-self: center;
     width: 23px;
     height: 23px;
     margin-right: 6px;
-    border-width: 3px;
+  }
+  .edit-menu > .running-mark::before {
+    display: block;
+    height: 100%;
+  }
+  /* (the edit menu's last button keeps its corners: the mark after it takes :last-child from it) */
+  .edit-menu > .button:has(+ .running-mark) {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+  }
+  /* A PROGRESS FILLS THE RING (_Item's progress, index.svelte: above 0 and up to 1): it stands
+     still and is bright from the top clockwise as far as the progress says (--running-mark-fill,
+     set with .filled by writeRunningMark), a full ring at 1. the stroke is the ring's own: the
+     gradient under a border that keeps its width, cut to it by the mask. without a progress, or
+     at 0, it turns */
+  .running-mark:global(.filled)::before {
+    border-color: transparent;
+    background: conic-gradient(#4af var(--running-mark-fill), rgba(68, 170, 255, 0.3) 0) border-box;
+    --running-mark-hole: calc(100% - var(--running-mark-stroke));
+    -webkit-mask: radial-gradient(closest-side, transparent calc(var(--running-mark-hole) - 0.25px), #000 calc(var(--running-mark-hole) + 0.25px));
+    mask: radial-gradient(closest-side, transparent calc(var(--running-mark-hole) - 0.25px), #000 calc(var(--running-mark-hole) + 0.25px));
+    animation: none;
+  }
+  /* THE NOTE of a tap on the mark where no pointer hovers (.noted, onRunningMarkClick): the
+     mark's tooltip, read off its title, in a small box under the menu (neither the mark nor the
+     number is positioned: the box is placed in the menu), at the item's right edge by the number
+     and under the mark in the editor, where the menu is as wide as the note may get. (on a number
+     beyond four digits the mark carries a translate, above, and that makes the mark itself the
+     box's containing block, also at an offset of zero: there the note's right edge is the ring's) */
+  .running-mark.noted::after {
+    content: attr(title);
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 3;
+    box-sizing: border-box;
+    width: max-content;
+    max-width: 240px;
+    padding: 4px 8px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: #222;
+    color: #ccc;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.3;
+    text-align: left;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+  }
+  .edit-menu > .running-mark.noted::after {
+    right: auto;
+    left: 0;
+    max-width: 100%;
   }
   @keyframes running-mark {
     to {
@@ -2829,74 +2990,6 @@
   /* the overlay is the SAVING item's alone: a running item is not dimmed (see the running mark) */
   .saving .loading {
     visibility: visible;
-  }
-
-  /* THE STATUS LINE of a running item (the text and the progress it shows while it runs: _Item's
-     status and progress, index.svelte): one small dim line at the item's bottom, inside its box,
-     cut with an ellipsis; the progress is a thin bar under the text, filled from the left as far
-     as --progress says (set with data-progress by the progress setter; none at 0). ITS PLACE IS
-     THIS ONE RULE: the element is a child of the item's box of its own, after the text or the
-     editor, so another place is another margin or position here. its bottom margin keeps it clear
-     of the log, dependencies and dependents summaries, whose click targets (22px, at bottom -8px)
-     cover the last 14px inside the item's box: with less, a click on the line's lower part opened
-     the log. it is ONE LINE of height whatever the status holds (the status is html: the height
-     is fixed, and the common block elements, a div or a p among them, are laid out inline on the
-     line; another element that stacks, two sections say, is cut by the fixed height), so the item
-     is 33px taller while a status shows, and it shows only while the item runs: an empty one
-     takes no room (:empty, which the status setter asks too: a comment alone is empty) */
-  .container > .run-status {
-    margin: 0 10px 14px;
-    height: 16px;
-    padding-bottom: 3px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    line-height: 16px;
-    color: #789;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .container:not(.running) > .run-status,
-  .container > .run-status:empty {
-    display: none;
-  }
-  .container > :global(.run-status[data-progress]:not([data-progress='0'])) {
-    background: linear-gradient(90deg, #4af var(--progress), #234 var(--progress)) left bottom / 100% 2px no-repeat;
-  }
-  /* a status of several lines (an item's own <br>, or block elements) stays on the one line */
-  .container > .run-status :global(br) {
-    display: none;
-  }
-  .container > .run-status :global(:is(div, p, pre, ul, ol, li, blockquote, h1, h2, h3, h4, h5, h6)) {
-    display: inline;
-    margin: 0 1ch 0 0;
-    padding: 0;
-  }
-  /* style progress bars (a <progress> element in a status) for consistency across platforms */
-  /* see https://stackoverflow.com/a/32186894 */
-  /* background */
-  .container > .run-status :global(progress) {
-    background-color: #171717;
-    border-radius: 4px;
-    width: 100px;
-    height: 10px;
-  }
-  .container > .run-status :global(progress::-webkit-progress-bar) {
-    background-color: #171717;
-    border-radius: 4px;
-  }
-  /* value/foreground */
-  .container > .run-status :global(progress::-webkit-progress-value) {
-    background-color: #4af;
-    border-radius: 4px;
-  }
-  .container > .run-status :global(progress::-moz-progress-bar) {
-    background-color: #4af;
-    border-radius: 4px;
-  }
-  .container > .run-status :global(progress) {
-    color: #4af;
-    border-radius: 4px;
   }
 
   /* :global prevents unused css errors and allows matches to elements from other components (see https://svelte.dev/docs#style) */

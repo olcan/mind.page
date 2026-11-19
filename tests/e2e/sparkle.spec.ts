@@ -813,7 +813,8 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   // (an edge can read up to a pixel wide of the box's own: `marksAre`); how far left of the
   // digits the nearest line of the text beside them ends, and the run button's two edges; the
   // placeholder's margin and padding, and the room the item says. `without` hides one of the
-  // number's two pseudo-elements for the measure (which mark is which), and `older` gives the
+  // number's two marks for the measure (which mark is which: the ring is the number's child
+  // `.running-mark`, the sparkle its `::before`), and `older` gives the
   // page, for the measure, the stylesheet as the item wrote it before 2026-11-18: no room said,
   // the margin and the run button's offset set by its own rules (the same sheet otherwise)
   // The measure is of the item in the SHOWN column (an element can be mounted in the offscreen
@@ -829,7 +830,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const written = sheet.textContent!
       if (older) sheet.textContent = written.split('\n').filter(rule => !rule.includes('{ --item-mark-room')).join('\n').replaceAll('var(--item-mark-room)', '18px')
       // (the ring is measured standing still: a hit test reads a turning box up to 2 px wide of it)
-      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.item-menu > .index::after { animation: none !important }' + (without ? ` .item-menu > .index::${without} { display: none !important }` : '') }))
+      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.running-mark::before { animation: none !important }' + (without ? ` .item-menu > .index${without} { display: none !important }` : '') }))
       shown()?.scrollIntoView({ block: 'center' })
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const box = shown()
@@ -845,7 +846,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const y = (own.top + own.bottom) / 2
       const found: number[][] = [] // pixel by pixel leftwards from the number's own box: [left edge of the first pixel hit, right edge of the last]
       for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 60; k++, pixel--) {
-        if (document.elementFromPoint(pixel + 0.5, y) !== index) continue
+        if (!index.contains(document.elementFromPoint(pixel + 0.5, y))) continue
         const last = found[found.length - 1]
         if (last && last[0] == number.left - pixel - 1) last[0] = number.left - pixel
         else found.push([number.left - pixel, number.left - pixel - 1])
@@ -892,12 +893,80 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     [true, alone.run.map(edge => edge + 18), ['18px', '18px'], '18px'],
   )
   expect(both.text, 'the text keeps out of where the run button now stands').toBeGreaterThanOrEqual(both.run[1] + 1)
-  await beside('without the ring, the mark nearest the number remains: the sparkle', m => [marksAre(m.marks, [[18, 4]])], [true], { without: 'after' })
+  await beside('without the ring, the mark nearest the number remains: the sparkle', m => [marksAre(m.marks, [[18, 4]])], [true], { without: ' > .running-mark' })
   expect(await look(RUN, NUMBER), 'the sparkle is drawn as on any watched item').toEqual([SPARKLE, '15px', 'none'])
   expect(
-    await page.evaluate(([id, part]) => (ring => [ring.content, ring.width, ring.borderTopStyle, ring.borderTopWidth, ring.borderTopColor, ring.order])(getComputedStyle(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] ${part}`)!, '::after')), [runId, NUMBER]),
-    'the ring is the app\'s: a solid stroke of 2px',
-  ).toEqual(['""', '15px', 'solid', '2px', BLUE, '-1'])
+    await page.evaluate(([id, part]) => (mark => (ring => [ring.content, ring.width, ring.borderTopStyle, ring.borderTopWidth, ring.borderTopColor, getComputedStyle(mark).order, mark.title])(getComputedStyle(mark, '::before')))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] ${part} > .running-mark`) as HTMLElement), [runId, NUMBER]),
+    'the ring is the app\'s: a solid stroke of 2px, on an element of its own before the sparkle, whose tooltip says that the item runs',
+  ).toEqual(['""', '15px', 'solid', '2px', BLUE, '-1', 'running'])
+  // THE TWO MARKS AT THE SAME HEIGHT, by pixels (the owner, 2026-11-19: the circle "seems off, a
+  // bit too high; can you match it to the sparkle's alignment?"). The ring stands as the sparkle
+  // does, an inline box on the number's baseline lowered 2px, so the two are rounded to the pixel
+  // grid together: the rows the ring inks (blue) and the rows the sparkle inks (yellow) have the
+  // same middle, where the item sits and with the item half a pixel lower. Read off a screenshot
+  // of the 40px left of the digits, with the ring standing still
+  const inked = async () => {
+    const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
+    const clip = await page.evaluate(async id => {
+      const index = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index`) as HTMLElement
+      index.scrollIntoView({ block: 'center' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const digits = document.createRange()
+      digits.selectNodeContents(index.firstChild!)
+      const own = index.getBoundingClientRect()
+      return { x: Math.floor(digits.getBoundingClientRect().left) - 40, y: Math.floor(own.top) - 2, width: 40, height: Math.ceil(own.height) + 4 }
+    }, runId)
+    const png = (await page.screenshot({ clip })).toString('base64')
+    await still.evaluate(style => (style as Element).remove())
+    return page.evaluate(async png => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + png
+      await image.decode()
+      const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height })
+      const context = canvas.getContext('2d')!
+      context.drawImage(image, 0, 0)
+      const { data, width, height } = context.getImageData(0, 0, image.width, image.height)
+      const rows: Record<string, number[]> = { ring: [], sparkle: [] }
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++) {
+          const [r, b] = [data[4 * (y * width + x)], data[4 * (y * width + x) + 2]]
+          if (b - r > 25) rows.ring.push(y)
+          else if (r - b > 50) rows.sparkle.push(y)
+        }
+      return Object.fromEntries(Object.entries(rows).map(([mark, inked]) => [mark, [Math.min(...inked), Math.max(...inked) + 1]]))
+    }, png)
+  }
+  for (const lower of [false, true]) {
+    const nudge = lower ? await page.addStyleTag({ content: `.container[data-item-id="${runId}"] { top: 0.5px }` }) : null
+    const ink = await inked()
+    expect([ink.ring[1] - ink.ring[0], ink.ring[0] + ink.ring[1] - ink.sparkle[0] - ink.sparkle[1]], `the ring inks 15 rows, with the sparkle's middle${lower ? ', the item half a pixel lower' : ''} (${JSON.stringify(ink)})`).toEqual([15, 0])
+    await nudge?.evaluate(style => (style as Element).remove())
+  }
+  // THE #vault ITEM'S OWN STATUS AND PROGRESS reach the ring (vault_show_status: a listed run's
+  // status, escaped by the item, and the supervisor's progress for it): the bridge lists a run on
+  // this item, with a status the supervisor posted, and the ring's tooltip is that text as
+  // written, the ring filled to the progress and still, the item running on two references, the
+  // row's and the #vault item's. DELISTED, the #vault item releases its reference and DEFERS its
+  // clearing, since the item still runs on the row's: the status and the progress stay on the
+  // ring (and the ring keeps the fill: a running reference is still held). The last step is the
+  // row's own clear_status(), and proves an explicit clearing, not the item's
+  const tip = () => page.evaluate(([id, part]) => (mark => (mark ? [mark.title, mark.classList.contains('filled'), getComputedStyle(mark, '::before').animationName == 'none', mark.style.getPropertyValue('--running-mark-fill')] : null))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] ${part} > .running-mark`) as HTMLElement | null), [runId, NUMBER])
+  const references = () => page.evaluate(id => (window.__items.find(item => item.id == id) as unknown as { running: number }).running, runId) // the item's running references
+  const runSaved = await savedId(page, RUN)
+  const POSTED = ["Searching the web for 'a <b> & c'", true, true, '50.000%']
+  await publish(page, '#vault', store => {
+    store._bridge.runs = { r1: { item: runSaved, status: 'Reading file docs/x.md', started: 1 } }
+    store._supervisor = { runs: { r1: { status: "Searching the web for 'a <b> & c'", progress: 0.5 } } }
+  })
+  await expect.poll(async () => [await tip(), await references()], { message: 'the listed run\'s status is the ring\'s tooltip, its progress the ring\'s fill, on a second running reference', timeout: 30_000 }).toEqual([POSTED, 2])
+  await publish(page, '#vault', store => {
+    store._bridge.runs = {}
+    delete store._supervisor
+  })
+  await expect.poll(references, { message: 'delisted: the #vault item has released its reference', timeout: 30_000 }).toBe(1)
+  expect(await tip(), 'and has deferred its clearing while the item runs on the row\'s reference: the status and the fill are still on the ring').toEqual(POSTED)
+  await page.evaluate(id => (window._item(id, true) as unknown as { clear_status: () => void }).clear_status(), runId)
+  await expect.poll(tip, { message: 'cleared by the row: the ring turns, and says that the item runs', timeout: 30_000 }).toEqual(['running', false, false, ''])
   // an older #vault item's stylesheet on this app: no room said, and the same picture
   const older = await beside('the older stylesheet says no room, and the marks, the run button and the room are the same', m => [marksAre(m.marks, [[18, 4], [36, 21]]), m.run, m.room, m.said], [true, both.run, both.room, ''], { older: true })
   expect(older.text).toBeGreaterThanOrEqual(older.run[1] + 1)
@@ -913,13 +982,14 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     page.evaluate(id => {
       const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
       const menu = box.querySelector('.edit-menu') as HTMLElement
-      const [ring, mark] = ['::after', '::before'].map(part => getComputedStyle(menu, part))
+      const running = menu.querySelector(':scope > .running-mark') as HTMLElement | null // the ring's element: the menu's last child, shown first
+      const [ring, mark] = [running && getComputedStyle(running), getComputedStyle(menu, '::before')]
       const [own, item, editor] = [menu, box, box.querySelector('.editor')!].map(part => part.getBoundingClientRect())
       const buttons = [...menu.querySelectorAll('.button')].map(button => button.getBoundingClientRect())
       const stored = (window.__items.find(item => item.id == id) as unknown as { height: number }).height
       return {
         before: Math.round(buttons[0].left - own.left), // the marks' room: the menu is as wide as its row
-        ring: ring.content == 'none' ? null : [ring.order, ring.width, ring.marginRight, ring.borderTopColor],
+        ring: ring ? [ring.order, ring.width, ring.marginRight, getComputedStyle(running!, '::before').borderTopColor] : null,
         mark: mark.content == 'none' ? null : [mark.order, mark.width, mark.marginRight, mark.backgroundImage.slice(0, 26)],
         buttons: buttons.length,
         rows: new Set(buttons.map(button => Math.round(button.top))).size,
@@ -932,6 +1002,24 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     }, runId)
   await edit(runId)
   expect(await menu(), 'edited while running and watched').toMatchObject({ before: 2 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], rows: 1, right: 0, past: false, over: 5 })
+  // the editor's ring has the same tooltip and the same fill, and the menu's last button keeps
+  // its right corners (the ring's element is the menu's last child, and takes :last-child from it)
+  const edited = () =>
+    page.evaluate(id => {
+      const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .edit-menu`) as HTMLElement
+      const [mark, last] = [menu.querySelector(':scope > .running-mark') as HTMLElement, [...menu.querySelectorAll(':scope > .button')].pop()!]
+      const ring = getComputedStyle(mark, '::before')
+      return { tip: mark.title, ring: [ring.width, ring.height, ring.borderTopWidth, ring.animationName == 'none', ring.backgroundImage.match(/^conic-gradient\(rgb\(68, 170, 255\) ([\d.]+)%/)?.[1] ?? null], corners: [getComputedStyle(last).borderTopRightRadius, getComputedStyle(last).borderBottomRightRadius] }
+    }, runId)
+  expect(await edited(), 'the editor\'s ring: 23px with a stroke of 3, turning, its tooltip that the item runs').toEqual({ tip: 'running', ring: ['23px', '23px', '3px', false, null], corners: ['5px', '5px'] })
+  await page.evaluate(id => {
+    const item = window._item(id, true) as unknown as { status: string; progress: number }
+    item.status = 'waiting for the lanes …'
+    item.progress = 0.75
+  }, runId)
+  await expect.poll(edited, { message: 'a status and a progress, in the editor: the tooltip and the fill', timeout: 15_000 }).toEqual({ tip: 'waiting for the lanes …', ring: ['23px', '23px', '3px', true, '75'], corners: ['5px', '5px'] })
+  await page.evaluate(id => (window._item(id, true) as unknown as { clear_status: () => void }).clear_status(), runId)
+  await expect.poll(edited, { timeout: 15_000 }).toMatchObject({ tip: 'running', ring: ['23px', '23px', '3px', false, null] })
   await runs(false)
   await expect.poll(menu, 'no longer running: the sparkle alone').toMatchObject({ before: 23 + 6, ring: null, mark: ['0', '23px', '6px', SPARKLE], rows: 1, right: 0, past: false, over: 5 })
   // a FULL menu in a phone's window: the item given every button (pushable, and from a source:

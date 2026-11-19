@@ -2,7 +2,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { focusMindbox, mindbox } from './editor_helpers.js'
-import { customToken, firestore, install, interceptMindItems, secretFor, signIn, waitForApp, type TestUser } from './helpers.js'
+import { customToken, firestore, install, interceptMindItems, loadAnonymous, secretFor, signIn, waitForApp, type TestUser } from './helpers.js'
 
 // the task-agents todoer (vault design notes/design/mind_task_agents.md, 2.2-2.4, 6; slice 3):
 // one self-contained personal account with #todoer installed from the local mind.items checkout
@@ -16,9 +16,11 @@ import { customToken, firestore, install, interceptMindItems, secretFor, signIn,
 // the item back on top of the main list; (d) a re-delegation carries the current epoch, and a
 // take-back overlays the main list immediately while a further delegate is refused; (e) a
 // body over the bridge's stored-size cap is refused before anything is written; (f) the drag
-// gesture to the agent bin is the same enqueue. The last three rows (the first view's position in
+// gesture to the agent bin is the same enqueue. The next three rows (the first view's position in
 // history after a launch; Back after a reload and a todo row's click; Back after a sign-out) run over an
-// account of their own each
+// account of their own each. The last row is the running mark's (its other rows are in
+// tests/e2e/layout.spec.ts), here because it writes behind the app: an Option-run releases the record
+// that received its hold, on the anonymous notebook
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
 test.use({ hasTouch: true }) // phase (c4) sends real touch input (CDP); nothing else in the lane depends on touch
@@ -782,10 +784,10 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     page.evaluate(([name, blue]) => {
       const elem = window._item(name, true)!.elem!
       const container = elem.querySelector('.container') as HTMLElement
-      const circle = getComputedStyle(elem.querySelector('.item-menu > .index')!, '::after')
+      const mark = elem.querySelector('.item-menu > .index > .running-mark') // the circle's element, there while the item runs
       return {
         running: container.classList.contains('running'),
-        circle: circle.content != 'none' && circle.borderTopColor == blue,
+        circle: !!mark && getComputedStyle(mark, '::before').borderTopColor == blue,
         overlay: getComputedStyle(elem.querySelector('.loading')!).visibility,
         border: getComputedStyle(container).borderTopColor == blue,
       }
@@ -1806,4 +1808,98 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   expect(await entries(page)).toEqual([1, 0])
   expect(await held()).toEqual(none)
   expect(warnings, 'the handler warned of nothing').toEqual([])
+})
+
+// AN OPTION-RUN RELEASES THE RECORD THAT RECEIVED ITS HOLD (review 2 of the running ring's
+// follow-ups, 2026-11-19). An Option-click on a parent's Run button runs the parent's runnable
+// dependencies first; the Option-run takes one counted running reference of each at its start and
+// releases it when that dependency's run ends, or when the loop ends before it. A dependency can
+// leave the page and come back under the same id while the loop waits (on a shared page, its key
+// removed and restored from another tab: the removal takes the record out of the page, the
+// addition makes a new one). The record then at that id is not the one the run holds, and another
+// run can hold it: released by its id, the run's cleanup took THAT run's reference (the new record
+// held at a count of 1 and half a ring ended at 0 and clear, and the other run's own release then
+// logged `attempted running=false when already false`). A record that left the page is now a
+// missing dependency, whose lookup has always stopped the loop: the new record is not run, and
+// neither is the parent. The anonymous notebook, as a visitor: the parent and its first dependency
+// are local items of the row's, the first one's run held open by the row (its input returns a
+// promise of the row's, which the Option-run awaits: no `#_async`, which names a docs item of the
+// corpus by its alias and would be a dependency of its own), and the queued dependency is a
+// document of the anonymous account that the row writes, deletes and writes again behind the app,
+// so that the page holds it under the document's id (a local item keeps the tab's own id). The queued
+// dependency is the parent's root (its label `#e2e_optrun2`, the parent's `#e2e_optrun2/parent`), so
+// the query that names the parent shows it as context, the new record too (a dependency alone is
+// not shown). Every run records its item
+test('an Option-run releases the record that received its hold, and not a new record under the same id', async ({ page }) => {
+  const QUEUED = 'e2e-optrun2-queued' // the document's id, which the page's record of it takes
+  const QUEUED_DOC = { user: 'anonymous', time: Date.now(), attr: null, text: '#e2e_optrun2 the dependency that leaves the page and comes back\n```js_input\n;(window.__optrun2 ??= []).push(_this.id)\n```' }
+  const released: string[] = []
+  page.on('console', message => void (message.type() == 'error' && message.text().includes('attempted running=false') && released.push(message.text())))
+  // the raw record under an id (undefined without one), whether an item is on the page, and what its ring shows
+  const raw = (id: string) =>
+    page.evaluate(
+      id => (found => found && { running: found.running, saving: !!found.saving, runnable: !!found.runnable, deps: [...found.deps], original: !!found.__e2e_original })((window as any).__items.find((item: any) => item.id == id)),
+      id,
+    )
+  const shown = (id: string) => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${id}"]`), id)
+  const ring = (id: string) =>
+    page.evaluate(
+      id => (mark => (mark ? [mark.title, mark.classList.contains('filled'), mark.style.getPropertyValue('--running-mark-fill'), getComputedStyle(mark, '::before').animationName != 'none'] : null))(document.getElementById('super-container-' + id)?.querySelector('.item-menu .running-mark') as HTMLElement | null),
+      id,
+    )
+  const ran = () => page.evaluate(() => (window as any).__optrun2 ?? [])
+  try {
+    await loadAnonymous(page)
+    await firestore().collection('items').doc(QUEUED).set(QUEUED_DOC)
+    await expect.poll(async () => !!(await raw(QUEUED)), { message: 'the page holds the document under its id', timeout: 30_000 }).toBe(true)
+    const [parent, first] = await page.evaluate(async () => {
+      const made = async (text: string) => ((await (window as any)._create(text)) as { id: string }).id
+      const first = await made('#e2e_optrun2_first the first dependency of an Option-run, whose run waits for the row\n```js_input\n;(window.__optrun2 ??= []).push(_this.id)\nreturn window.__optrun2_hold\n```')
+      const parent = await made('#e2e_optrun2/parent #_e2e_optrun2_first #_e2e_optrun2 their parent\n```js_input\n;(window.__optrun2 ??= []).push(_this.id)\n```')
+      location.hash = '#e2e_optrun2/parent'
+      return [parent, first]
+    })
+    await expect
+      .poll(
+        async () => {
+          const [up, held, queued] = [await raw(parent), await raw(first), await raw(QUEUED)]
+          return [up?.deps, up?.runnable, held?.runnable, queued?.runnable, [up, held, queued].map(found => found?.running), [up, held, queued].some(found => found?.saving), await shown(parent), await shown(QUEUED)]
+        },
+        { message: 'the premise: the parent depends on the first and then the queued one, all are runnable, none runs or is being saved, the parent and the queued one are on the page', timeout: 30_000 },
+      )
+      .toEqual([[first, QUEUED], true, true, true, [0, 0, 0], false, true, true])
+    // the Option-run, its first dependency held open by the row
+    await page.evaluate(() => {
+      const w = window as any
+      w.__optrun2 = []
+      w.__optrun2_hold = new Promise(resolve => (w.__optrun2_release = resolve))
+    })
+    await page.locator(`.column:not(.hidden) .container[data-item-id="${parent}"] .item-menu > .run`).click({ modifiers: ['Alt'] })
+    await expect.poll(async () => [await ran(), (await raw(QUEUED))?.running], { message: 'the first dependency\'s run has begun and waits; the queued one is held by the Option-run', timeout: 15_000 }).toEqual([[first], 1])
+    // while it waits, the queued dependency leaves the page and comes back under its id: a NEW record, which the row holds at 50%
+    await page.evaluate(id => void ((window as any).__items.find((item: any) => item.id == id).__e2e_original = true), QUEUED)
+    await firestore().collection('items').doc(QUEUED).delete()
+    await expect.poll(() => raw(QUEUED), { message: 'deleted: the page holds no record under the id', timeout: 30_000 }).toBeUndefined()
+    await firestore().collection('items').doc(QUEUED).set(QUEUED_DOC)
+    await expect.poll(async () => [...(found => (found ? [found.running, found.original] : []))(await raw(QUEUED)), await shown(QUEUED)], { message: 'written again: a new record under the same id, which no run holds, on the page', timeout: 30_000 }).toEqual([0, false, true])
+    await page.evaluate(id => {
+      const item = (window as any)._item(id)
+      item.running = true
+      item.status = 'held by another run'
+      item.progress = 0.5
+    }, QUEUED)
+    const HELD = ['held by another run', true, '50.000%', false]
+    await expect.poll(async () => [(await raw(QUEUED))?.running, await ring(QUEUED)], { message: 'the new record, held by the row: half a ring', timeout: 30_000 }).toEqual([1, HELD])
+    // the first dependency's run ends, and the Option-run with it: the new record keeps the row's reference and its half ring
+    await page.evaluate(() => (window as any).__optrun2_release())
+    await expect.poll(async () => (await raw(parent))?.running, { message: 'the Option-run is over: the parent\'s own reference is released', timeout: 15_000 }).toBe(0)
+    await expect.poll(async () => [(await raw(QUEUED))?.running, await ring(QUEUED)], { message: 'the Option-run released the record it held, and not the new one: the row\'s reference and its half ring are kept', timeout: 15_000 }).toEqual([1, HELD])
+    expect([await ran(), (await raw(first))?.running], 'the queued dependency had left the page, as a missing one: neither it nor the parent ran, and the first one\'s reference is released').toEqual([[first], 0])
+    // the row releases its own reference of the new record: no count, no ring, and no release of a reference that was not held
+    await page.evaluate(id => void ((window as any)._item(id).running = false), QUEUED)
+    await expect.poll(async () => [(await raw(QUEUED))?.running, await ring(QUEUED)], { message: 'the row\'s own release: no count, no ring', timeout: 15_000 }).toEqual([0, null])
+    expect(released, 'no release of a reference that was not held').toEqual([])
+  } finally {
+    await firestore().collection('items').doc(QUEUED).delete()
+  }
 })

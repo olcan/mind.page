@@ -735,11 +735,7 @@
     set running(running) {
       const _item = item(this.id)
       const change = _item.running != running // change handled below
-      _item.running += running ? 1 : -1 // update running count
-      if (_item.running < 0) {
-        console.error('attempted running=false when already false', this.name)
-        _item.running = 0
-      }
+      countRunning(_item, running) // update running count (and at 0, the end of what the mark showed of the run)
       if (change) {
         lastEditorChangeTime = 0 // disable debounce even if editor focused
         onEditorChange(editorText) // trigger re-ranking since running can affect it
@@ -1444,49 +1440,46 @@
       itemHideLogs(this.id)
     }
 
-    // the status line is the item's OWN (:scope: the item's html comes before it in the element,
-    // and may hold a .container with a .run-status of its own)
+    // THE STATUS AND THE PROGRESS of a running item, kept on the item's record and shown by its
+    // running mark (Item.svelte): the status, html as item code has always written it, is the
+    // mark's tooltip (its text), and a progress above 0 fills the mark clockwise, for the run it
+    // was reported in (itemShowStatus); a progress of 0 is none, as it was for the bar (it is
+    // what clear_status writes, and the #vault item for a run without a progress; not every
+    // writer clears). until 2026-11-19 they were a line at the item's bottom and a bar under it,
+    // and these accessors read and wrote that line in the item's element.
+    // THEY READ AS THE LINE DID (the released accessors, measured state by state, are the table
+    // of the accessors' row in tests/e2e/layout.spec.ts): null, both, for an item that has no
+    // element on the page, whatever was set (an item's text can read them while it first renders,
+    // before its element is there: the docs item that prints its own properties shows null for
+    // both, and '' for the status when it is rendered again where it stands); with an element,
+    // the status as the line held it (statusHtml: '' when none or cleared) and the progress as
+    // the number that its text on the line gave (null when never set, 0 when cleared).
+    // what is SET is kept whether the item is on the page or not, and outlives its element: the
+    // line's setters retried a status every 250 ms until the item had its line, dropped a
+    // progress for an item that had none, and lost both with the element
     get status(): string {
-      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
-      return statusdiv?.innerHTML ?? null
+      if (!this.elem?.querySelector(':scope > .container')) return null
+      return items[indexFromId.get(this.id)]?.status ?? ''
     }
 
     set status(status: string) {
-      this.dispatch_task('set_status', () => {
-        const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
-        if (!statusdiv) return 250 // retry in 250ms
-        // retry later if there is a selection
-        if (
-          getSelection().type == 'Range' &&
-          (statusdiv.contains(getSelection().anchorNode) || statusdiv.contains(getSelection().focusNode))
-        )
-          return 1000 // retry in 1s
-        const hidden = statusdiv.matches(':empty')
-        statusdiv.innerHTML = status
-        // the line shows or goes on a running item: its box changes height with no update of its
-        // component, so the height the layout holds for it is recorded here, on that change alone
-        // (a text or a progress within a line that stays shown changes no height: no size is read).
-        // whether it shows is the stylesheet's own question (:empty, Item.svelte: a status that is
-        // a comment alone shows no line), not whether the html is an empty string
-        const container = statusdiv.parentElement
-        if (statusdiv.matches(':empty') != hidden && container.classList.contains('running'))
-          onItemResized(this.id, container, 'status')
-      })
+      itemShowStatus(this.id, { status: statusHtml(status) })
     }
 
     get progress(): number {
-      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status')
-      const progress = statusdiv?.getAttribute('data-progress')
-      return !progress ? null : parseFloat(progress)
+      if (!this.elem?.querySelector(':scope > .container')) return null
+      return items[indexFromId.get(this.id)]?.progress ?? null
     }
 
+    // (the line's setter wrote the value's text as an attribute, and the getter parsed it: a
+    // numeric string reads as its number, '' as null and NaN as NaN; a value beyond 0 to 1
+    // throws, and so does one that has no text, null or undefined, on the page, where the line
+    // was: off the page that setter returned before it got there, and this one does too)
     set progress(progress: number) {
       if (progress < 0 || progress > 1) throw new Error('invalid progress ' + progress)
-      const statusdiv = this.elem?.querySelector(':scope > .container > .run-status') as HTMLDivElement
-      if (!statusdiv) return
-      // how the progress is drawn is Item.svelte's (.run-status): it gets the fraction, as --progress
-      statusdiv.style.setProperty('--progress', (progress * 100).toFixed(3) + '%')
-      statusdiv.setAttribute('data-progress', progress.toString())
+      if (progress == null && !this.elem?.querySelector(':scope > .container')) return
+      const text = progress.toString()
+      itemShowStatus(this.id, { progress: !text ? null : parseFloat(text) })
     }
 
     show_status(status, progress) {
@@ -1495,7 +1488,7 @@
     }
 
     clear_status() {
-      this.status = '' // triggers hide due to style on .run-status:empty in Item.svelte
+      this.status = ''
       this.progress = 0
     }
 
@@ -7363,8 +7356,7 @@
     if (index == undefined) return // item was deleted
     let item = items[index]
     // exclude any ._log elements since they are usually collapsed (those of the item's rendered
-    // content alone: markup of that class elsewhere in the box, in a status line say, is no log,
-    // and took its height off an item that had none)
+    // content alone: markup of that class elsewhere in the box is no log)
     let logHeight = 0
     container.querySelectorAll(':scope > .item > .content ._log').forEach(log => (logHeight += log.offsetHeight))
     const height = container.offsetHeight - logHeight
@@ -7473,6 +7465,67 @@
     if (index == undefined) return
     items[index].showLogs = false
   }
+
+  // an item's status or progress, for its running mark (see _Item's status). THEY ARE WRITTEN ON
+  // THE RECORD THROUGH A LOCAL REFERENCE, and the item's one mounted component hears of them
+  // through its own hook (Item.svelte, itemHooks.running_mark), which writes them on its mark.
+  // an assignment to `items[index].status` invalidates the route's whole keyed list instead: every
+  // mounted item is then updated, and each update schedules a check of that item's height (its
+  // logs scanned, its offsetHeight read). measured on the first version of this function: one
+  // changed fraction, a check for every one of the mounted items, and a writer can report at
+  // every step of its work. an item that has no component takes the values from its record when
+  // it gets one (the props status and progress).
+  // WHAT THE MARK SHOWS OF A PROGRESS IS ITS RUN'S (shownProgress): the progress itself stays on
+  // the record, since the getter reads it as the line gave it, also after the run; but a mark
+  // that kept showing it began the item's NEXT run filled as far as the last one got, a full
+  // ring where the item has only just started (a writer need not clear what it reports: the
+  // sampler's show_status(html, r) skips an r of 0, and a run that writes a status alone writes
+  // no progress at all). so the shown progress goes when the item's last running reference is
+  // released (itemRunEnded), and the next run's mark turns until that run reports a progress.
+  // the one exception: a positive progress written while the item does NOT run is the shown one
+  // from then on, and the next run's mark begins filled with it (nothing ends a run that has not
+  // begun)
+  function itemShowStatus(id: string, shown: { status?: string; progress?: number }) {
+    const record = items[indexFromId.get(id)]
+    if (!record) return
+    if ('status' in shown) record.status = shown.status
+    if ('progress' in shown) record.progress = record.shownProgress = shown.progress
+    window['_item_hooks']?.[id]?.running_mark(record.status, record.shownProgress)
+  }
+  function itemRunEnded(id: string) {
+    const record = items[indexFromId.get(id)]
+    if (!record || record.shownProgress == null) return
+    record.shownProgress = null
+    window['_item_hooks']?.[id]?.running_mark(record.status, record.shownProgress)
+  }
+  // ONE RUNNING REFERENCE of an item, taken (true) or released (false) on its record: `running` is
+  // a COUNT, since runs nest and overlap (a run's own, a chat call's, the #vault item's on a chat
+  // it holds, an Option-run's on each dependency of the parent it runs), and when it returns to 0
+  // what the item's mark showed of the run goes (itemRunEnded). _Item's `running` setter counts
+  // here and then re-ranks the items; an Option-run counts its own here (onItemRun). nothing else
+  // changes the count of a record once it is made
+  function countRunning(record, running: boolean) {
+    record.running += running ? 1 : -1
+    if (record.running < 0) {
+      console.error('attempted running=false when already false', record.name)
+      record.running = 0
+    }
+    if (!record.running) itemRunEnded(record.id)
+  }
+
+  // a status as the status line held it, which is what the status getter gave back until
+  // 2026-11-19: the html of a div that was given the status as its html (`it&#39;s` reads `it's`
+  // and a bare `&` reads `&amp;`, an open tag reads closed, null reads '' and a number or
+  // undefined as its text). the div is of the inert document of a template, where nothing of a
+  // status loads or runs
+  const statusHtml = (() => {
+    let line: HTMLDivElement
+    return (status): string => {
+      line ??= document.createElement('template').content.ownerDocument.createElement('div')
+      line.innerHTML = status
+      return line.innerHTML
+    }
+  })()
 
   function removeBlock(text: string, type: string) {
     return text.replace(blockRegExp(type), '')
@@ -7929,21 +7982,62 @@
 
     // if alt-modified, run all runnable dependencies (sequentially) before running this item
     if (e?.altKey) {
+      // THE RECORDS THIS RUN TAKES, not their ids: an item can leave the page and come back under its
+      // id while the run waits (on a shared page, its key removed and restored from another tab: the
+      // removal takes its record out of the page, the addition makes a new one), and the record then
+      // at that id is not the one this run marked or holds, and another run can hold it. so at each of
+      // the Option-run's own steps (the dispatch of a run, a release, the parent's status and its
+      // clearing) the record is asked whether it is still the one on the page (`current`). a run once
+      // dispatched is the ordinary Run's, which can wait again and looks its item up by id, as on the
+      // released base (the vault's issue "Ordinary Run Looks Records Up By Id After An Await")
+      const current = record => items[indexFromId.get(record.id)] === record
       _item(item.id).running = true
       return (async () => {
         const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
-        for (let dep of runnable_deps) __item(dep).running = true
-        for (let dep of runnable_deps) {
-          _item(item.id).status = `running ${__item(dep).name} …`
-          try {
-            await onItemRun(__item(dep).index, null /* no alt-runs */, touch_first)
-          } finally {
-            __item(dep).running = false
-          }
+        // each dependency is marked running until its run ends by ONE counted reference of this
+        // run's, taken here on its record (as the `running` setter takes one, but without its
+        // re-ranking, as the marking had none: each dependency's run re-ranks the items) and
+        // released, that one alone, when the dependency's run ends, or when the loop ends before
+        // it does. so a dependency that another run holds keeps that run's reference, and what its
+        // mark shows of that run. (until 2026-11-19 the marking wrote `true` and then `false` over
+        // the count: the other run's reference was gone, its mark with it, and its own release
+        // then logged that the item was not running.) a dependency whose record is no longer on
+        // the page when its turn comes (gone, or back as a new record) is a MISSING one: as the
+        // lookup of a missing dependency always has, it stops the loop, the holds that remain are
+        // released, and neither the dependencies after it nor the parent run. its record's hold is
+        // no one's to release, and a new record under its id keeps its own count and fill. a PARENT
+        // that has left the page stops the loop the same way, asked at the top of each dependency's
+        // turn, before any more of its work is started (an input can write items or start other
+        // work, which balanced counts do not undo)
+        const records = new Map<string, any>(runnable_deps.map(dep => [dep, __item(dep)]))
+        const held = new Set<string>(runnable_deps)
+        const release = (dep: string) => {
+          if (!held.delete(dep)) return // released already
+          const record = records.get(dep)
+          if (current(record)) countRunning(record, false) // (asked first: countRunning's end of the display looks the item up by its id)
         }
+        for (const dep of held) countRunning(records.get(dep), true)
+        try {
+          for (let dep of runnable_deps) {
+            if (!current(item)) throw new Error(`item ${item.id} deleted`) // the parent left the page: no more of its work
+            const record = records.get(dep)
+            if (!current(record)) throw new Error(`item ${dep} deleted`) // a missing dependency
+            _item(item.id).status = `running ${record.name} …`
+            try {
+              await onItemRun(record.index, null /* no alt-runs */, touch_first)
+            } finally {
+              release(dep)
+            }
+          }
+        } finally {
+          for (const dep of [...held]) release(dep) // the loop ended early: the dependencies it did not reach
+        }
+        // (the parent's cached index is another item's once its record has left the page)
+        if (!current(item)) throw new Error(`item ${item.id} deleted`)
         _item(item.id).status = 'running …'
         return onItemRun(item.index, null /* no alt-run */, touch_first)
       })().finally(() => {
+        if (!current(item)) return // its record left the page: a new one under its id holds nothing of this run's
         _item(item.id).status = ''
         _item(item.id).running = false
       })
@@ -12589,6 +12683,8 @@
                 previewable={item.previewable}
                 saving={item.saving}
                 running={item.running}
+                status={item.status}
+                progress={item.shownProgress}
                 admin={item.admin}
                 {fixed}
                 hideLabel={fixed && (item.shared?.labels !== true || item.shared?.indices?.[shared_key] == 0)}
