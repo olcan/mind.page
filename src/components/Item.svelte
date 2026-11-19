@@ -403,10 +403,14 @@
 
     // NOTE: we exclude text (arg 0) from cache key since it should be captured in deephash
     const cache_key = 'html-' + _hash(Array.from(arguments).slice(1).toString())
+    // (an entry holds the two fragments of the item's markup, see the wrapper below: `html` is
+    // returned to the template, `footer` is left in footerHTML for afterUpdate to insert)
     window['_html_cache'][id] ??= new Map()
     if (window['_html_cache'][id].has(cache_key)) {
       // console.debug("toHTML skipped");
-      return window['_html_cache'][id].get(cache_key)
+      const cached = window['_html_cache'][id].get(cache_key)
+      footerHTML = cached.footer
+      return cached.html
     }
     // console.debug("toHTML", name, deephash, version)
 
@@ -510,10 +514,19 @@
         .join(' ')
     }
 
+    // the footer travels through the passes below as the LAST LINE of the text, as it always has
+    // (its tags are rendered by the same line pass as the item's own). its opening tag carries a
+    // mark, by which the passes after Markdown find where THIS footer starts (see the hooks before
+    // marked.parse, which settle the mark at Marked's input, and the wrapper): by the footer's
+    // class alone the wrapper took the first such div, which an item's own markup can hold (an
+    // `_html` block), for the generated one
+    const FOOTER = '<div class="deps-and-dependents">'
+    const FOOTER_MARKED = '<div class="deps-and-dependents" _footer="0">'
     let depsTitle = ''
     let dependentsTitle = ''
-    if (depsString || dependentsString) {
-      text += `\n<div class="deps-and-dependents">`
+    const footerAppended = !!(depsString || dependentsString)
+    if (footerAppended) {
+      text += '\n' + FOOTER_MARKED
       if (depsString) {
         depsTitle = `${depsString.split(' ').length} dependencies`
         text += `<span class="deps"><span class="deps-title" onclick="_handleDepsSummaryClick('${id}',event)">${depsTitle}</span> ${depsStringToHtml(
@@ -954,7 +967,13 @@
         ],
       })
     }
-    marked.use(markedExtendedTables())
+    // the table extension keeps a table's cells in its token's `header` and `rows`, which Marked
+    // walks only where they are registered as the token's children: registered here, so that the
+    // walk of the hook below reaches each cell's own inline tokens (a footer line that a line
+    // continuation joins onto a table's last cell is inline html of that cell)
+    const tables = markedExtendedTables()
+    for (const extension of tables.extensions) extension.childTokens = ['header', 'rows']
+    marked.use(tables)
     marked.use(
       markedHighlight({
         langPrefix: '',
@@ -987,13 +1006,62 @@
       })
     )
 
+    // WHERE THE GENERATED FOOTER'S LINE WENT is Marked's to say, not a prediction of ours.
+    // - the mark is the appended opening's ALONE, at the input Marked receives (preprocess): the
+    //   line is the last of the text, so the LAST opening of its spelling there is the appended
+    //   one, and where the text before it holds the same spelling (an item's own copy, typed or
+    //   put together by a line continuation) the appended one gets a number that this input does
+    //   not hold. chosen any earlier, the mark could come into being elsewhere afterwards.
+    // - a token whose `raw` holds that mark whole therefore holds the appended opening, and the
+    //   innermost such token is what the line became (the walk visits a token's children after
+    //   it: the cells of a table too, see the table extension above). an opening that Marked
+    //   split, the `<` behind an escaping backslash, is whole in no inline token: its paragraph
+    //   or its table is then the innermost.
+    // - that token is html, or the code of an `_html` block (unwrapped into markup below): the
+    //   opening is markup in what Marked returns, and the wrapper cuts the footer off at it.
+    // - it is anything else (the code of a fence or of an indented block that the text left open,
+    //   a paragraph or a table whose text holds the escaped opening): the line is no markup and
+    //   there is no footer to cut off (the summaries are generated all the same). the text is
+    //   lexed again WITHOUT the mark, so it is rendered exactly as it always was.
+    // the tokens are read after the lexer and before marked-highlight walks them (processAllTokens).
+    // until 2026-11-19 the line pass above guessed at this from the lines' own look, and guessed
+    // wrong where a line of three backticks was not a fence to Marked (inside a `<pre>` or a
+    // textarea, in an indented block) or a fence was of tildes
+    const markedOptions = { breaks: true } // adding <br> on a each single line break, see https://marked.js.org/using_advanced#options
+    let footerMark = FOOTER_MARKED // the appended opening, as Marked's input holds it
+    let footerIsMarkup = false
+    if (footerAppended) {
+      let around: [string, string] | null = null // Marked's input before and after the appended opening
+      marked.use({
+        hooks: {
+          preprocess(src) {
+            const at = src.lastIndexOf(FOOTER_MARKED)
+            if (at < 0) return src
+            around = [src.slice(0, at), src.slice(at + FOOTER_MARKED.length)]
+            for (let n = 1; around.some(part => part.includes(footerMark)); n++) footerMark = `<div class="deps-and-dependents" _footer="${n}">`
+            return around[0] + footerMark + around[1]
+          },
+          processAllTokens(tokens) {
+            if (!around) return tokens
+            let holder = null
+            const holds = token => !!token.raw?.includes(footerMark)
+            for (let i = tokens.length - 1; i >= 0 && !holder; i--)
+              if (holds(tokens[i])) marked.walkTokens([tokens[i]], token => void (holds(token) && (holder = token)))
+            footerIsMarkup = holder?.type == 'html' || (holder?.type == 'code' && !!(holder.lang ?? '').match(/\S*/)[0].match(/^_html(_|$)/))
+            if (footerIsMarkup) return tokens
+            return marked.lexer(around[0] + FOOTER + around[1], { ...marked.defaults, ...markedOptions })
+          },
+        },
+      })
+    }
+
     // assign indices to checkboxes to be moved into _checkbox_index attribute below
     // adding text after checkbox also allows checkbox items that start w/ tag (<mark>) or other html
     let checkboxIndex = 0
     text = text.replace(/(?:^|\n)\s*(?:\d+\.|[-*+]) \[[xX ]\] /g, m => m + '%%' + checkboxIndex++ + '%%')
 
-    // parse markdown, adding <br> on a each single line break, see https://marked.js.org/using_advanced#options
-    text = marked.parse(text, { breaks: true })
+    // parse markdown
+    text = marked.parse(text, markedOptions)
 
     // BACKSTOP (review 182 §1.2): any contiguous marker Marked left as literal text
     // outside a highlighted code block and outside a dead-frame span (e.g. a marker at
@@ -1043,33 +1111,50 @@
     text = text.replace(/(<code>.*?)\\\|(.*?<\/code>)/g, '$1|$2') // \$`
 
     // wrap item content in .content div, adding .menu class for #menu items
-    // note this wrapper div excludes deps-and-dependents, deps-summary, and menu-<id> divs (created in afterUpdate)
     // also perform _static_ (vs dynamic in afterUpdate) removal of tail whitespace
-    text =
-      `<div class="content${isMenu ? ' menu' : ''}">` +
-      text.replace(/^(.*?)($|<div class="deps-and-dependents">)/s, (m, content, sfx) => {
-        const keep = []
-        let length = 0
-        do {
-          length = content.length
-          content = content
-            .replace(/(?:\s|<br>)*$/, '')
-            .replace(
-              /(?:<br>|&nbsp;|\s|<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>)*((?:<\/p>)?)$/,
-              (m, sfx) => {
-                keep.push(...(m.match(/<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>/g) ?? []))
-                return sfx
-              }
-            )
-            .replace(/<p>(?:<\/p>)?$/, '') // drop empty <p> tag, allowing unclosed <p> as well
-            // (a hidden tag's mark may carry other classes, e.g. `missing hidden`)
-            // note <> should be escaped in code blocks, so we can use that to avoid matching across blocks
-            // (the block's lines may carry level spans, see util.js)
-            .replace(/<pre><code class="_log">(?:(?!<\/pre>).)*<\/code><\/pre>$/s, m => (keep.push(m), ''))
-        } while (content.length < length) // keep trying until content length is unchanged
-        if (keep.length) content += '\n' + keep.join(' ') + '\n'
-        return content + '</div>' + sfx
-      })
+    // THE ITEM'S MARKUP IS TWO FRAGMENTS (2026-11-18): `text` from here on is the item's own body,
+    // the wrapper's opening tag and the content, with NO closing tag; `footer` is what is generated
+    // after it (.deps-and-dependents, then below the log, deps and dependents summaries). the
+    // template gives the body to the browser alone, which closes whatever it leaves open at the end
+    // of its input, and afterUpdate inserts the footer after it, parsed on its own: the footer and
+    // the summaries are children of .item whatever the content holds, which their styles need.
+    // until then the two were one string, closed in between by one `</div>`: a div left open in the
+    // content (the owner's `columns()` macro leaves one, on purpose) took that tag, .content stayed
+    // open and held the footer and the summaries, out of reach of their layout and toggle rules and
+    // so always shown (since 2022-11-10, when those became child rules); an unclosed `<b>` or `<a>`
+    // was opened again by the parser inside the footer; an open table cell, textarea or template
+    // took the footer in. the wrapper
+    // is parsed WITH the content, as before: a stray `</div>` in the content still closes it early
+    // and what follows is the item's child. the boundary is the generated footer's own opening tag:
+    // the one that carries the mark in what Marked returned, where its tokens said that the
+    // footer's line is markup (footerIsMarkup and footerMark, above); the mark is left behind.
+    // without a generated footer, or where its line is no markup, the body is the whole text
+    const footerAt = footerIsMarkup ? text.lastIndexOf(footerMark) : -1
+    let footer = footerAt < 0 ? '' : FOOTER + text.slice(footerAt + footerMark.length)
+    {
+      let content = footerAt < 0 ? text : text.slice(0, footerAt)
+      const keep = []
+      let length = 0
+      do {
+        length = content.length
+        content = content
+          .replace(/(?:\s|<br>)*$/, '')
+          .replace(
+            /(?:<br>|&nbsp;|\s|<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>)*((?:<\/p>)?)$/,
+            (m, sfx) => {
+              keep.push(...(m.match(/<mark class="(?:[^"]*\s)?hidden(?:\s[^"]*)?"(?:"[^"]*"|[^>"])*>\S*?<\/mark>/g) ?? []))
+              return sfx
+            }
+          )
+          .replace(/<p>(?:<\/p>)?$/, '') // drop empty <p> tag, allowing unclosed <p> as well
+          // (a hidden tag's mark may carry other classes, e.g. `missing hidden`)
+          // note <> should be escaped in code blocks, so we can use that to avoid matching across blocks
+          // (the block's lines may carry level spans, see util.js)
+          .replace(/<pre><code class="_log">(?:(?!<\/pre>).)*<\/code><\/pre>$/s, m => (keep.push(m), ''))
+      } while (content.length < length) // keep trying until content length is unchanged
+      if (keep.length) content += '\n' + keep.join(' ') + '\n'
+      text = `<div class="content${isMenu ? ' menu' : ''}">` + content
+    }
 
     // wrap list items in span to control spacing from bullets
     text = text.replace(/<li>/gs, '<li><span class="list-item">').replace(/<\/li>/gs, '</span></li>')
@@ -1134,7 +1219,7 @@
                 : 'log'
         summary += `<span class="log-dot console-${type}">⸱</span>`
       })
-      text += `\n<div class="log-summary" onclick="_handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`
+      footer += `\n<div class="log-summary" onclick="_handleLogSummaryClick('${id}',event)" title="${lines.length} log lines">${summary}</div>`
     }
 
     // append dependencies ("deps") summary
@@ -1145,7 +1230,7 @@
           .split(' ')
           .map(dep => `<span class="deps-dot${dep.endsWith('(async)') ? ' async' : ''}">⸱</span>`)
           .join('')
-      text += `\n<div class="deps-summary" onclick="_handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`
+      footer += `\n<div class="deps-summary" onclick="_handleDepsSummaryClick('${id}',event)" title="${depsTitle}">${summary}</div>`
     }
     // append dependents ("deps") summary
     if (dependentsString) {
@@ -1155,16 +1240,20 @@
           .split(' ')
           .map(dep => `<span class="dependents-dot${dep.endsWith('(visible)') ? ' visible' : ''}">⸱</span>`)
           .join('')
-      text += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`
+      footer += `\n<div class="dependents-summary" onclick="_handleDependentsSummaryClick('${id}',event)" title="${dependentsTitle}">${summary}</div>`
     }
 
 
     // include html cache key in content to include in svelte content cache key and force svelte update whenever html is re-generated even if generated html is identical since arguments (in particular deephash and version) may capture changes not reflected in generated html
-    text += `<!-- html_cache_key=${cache_key} -->`
+    // (the key goes BEFORE the body: nothing may follow a content that can leave an element open,
+    // and a change of the footer alone changes the key, so the body is replaced with it and
+    // afterUpdate inserts the new footer: one string still drives the replacement of all children)
+    text = `<!-- html_cache_key=${cache_key} -->` + text
+    footerHTML = footer
 
     // do not cache with macro errors
     if (expanded.error) return text
-    window['_html_cache'][id].set(cache_key, text)
+    window['_html_cache'][id].set(cache_key, { html: text, footer })
     limit_cache_size(window['_html_cache'][id], _html_cache_limit_per_item)
     return text
   }
@@ -1178,6 +1267,10 @@
   // placeholder as a text node (bridge design §2.2a, amended 2026-09-05)
   let vaultValues = new Map<string, string | undefined>() // marker -> decoded value / undefined
   let childTagMarkers = new Set<string>() // the frames that render child-tag marks (src/inert.ts)
+  // the generated footer of the markup toHTML returned last (.deps-and-dependents and the
+  // summaries; empty for an item without dependencies, dependents or log lines): afterUpdate
+  // inserts it after the body, as a fragment of its own (see the wrapper in toHTML)
+  let footerHTML = ''
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1516,6 +1609,12 @@
         // div.style.background = "red";
         div.id = 'menu-' + id
         itemdiv.insertBefore(div, itemdiv.firstElementChild)
+        // no placeholder: the item's children are new (the template replaces them all whenever
+        // toHTML returns another string, and every such string carries its own cache key), so the
+        // generated footer of that markup is not there yet. it goes in after the body as a
+        // fragment of its own: the body's parse has ended and closed whatever it left open, so
+        // the footer and the summaries are children of the item whatever the content holds
+        if (footerHTML) itemdiv.insertAdjacentHTML('beforeend', footerHTML)
       }
     }
 
