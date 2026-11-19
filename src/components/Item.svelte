@@ -1668,8 +1668,8 @@
     // the div follows the digit count of the item's number (_digits): the menu is as wide as the
     // digits, and a re-ranked item's number gains or loses a digit without its children being replaced
     // (the room of the marks left of the number is this div's too, by css alone: its left margin is
-    // the room of a mark of item code and its left padding that of the running mark, see THE MARKS
-    // LEFT OF AN ITEM'S NUMBER in the style block. nothing of that is measured or set here)
+    // the room of a mark of item code and its left padding that of the app's own marks, see THE
+    // MARKS LEFT OF AN ITEM'S NUMBER in the style block. nothing of that is measured or set here)
     const digits = menuDigits(index)
     let div = itemdiv.firstElementChild as HTMLElement | null
     const inserted = div?.id == 'menu-' + id
@@ -2426,7 +2426,7 @@
     class:running
     class:admin
     class:showLogs
-    class:bordered={error || failedTests || warning || target || pushable || previewable}
+    class:bordered={error || failedTests || warning || target}
     class:editable
     class:pushable
     class:previewable
@@ -2740,10 +2740,16 @@
 
   /* THE MARKS LEFT OF AN ITEM'S NUMBER, and the one place that says how much room each takes: a
      custom property per mark on the item's box.
-       --running-mark-room   the app's running mark (the circle, below): 18px while the item runs
-       --item-mark-room      a mark that item code draws (the #vault item's watched sparkle, mind.items
-                             vault.md, vault_watched_css): the item's stylesheet sets it on the boxes
-                             it marks; unset, no room
+       --running-mark-room       the app's running mark (the ring, below): 18px while the item runs
+       --pushable-mark-room      the app's circle of an item that can be pushed (THE STATE CIRCLES,
+                                 below): --state-mark-room while it can
+       --previewable-mark-room   the same for an item that can be previewed
+       --item-mark-room          a mark that item code draws (the #vault item's watched sparkle,
+                                 mind.items vault.md, vault_watched_css): the item's stylesheet
+                                 sets it on the boxes it marks; unset, no room
+     --state-mark-room is the room of one state circle where it is drawn: 18px by the number, as
+     the ring's there (15px and 3px to what follows), and 29px in the edit menu, as the ring's 23px
+     and 6px there.
      the room left free is their sum: the item's text keeps out of it (the placeholder for the menu,
      the first child of the text: afterUpdate) and a run button steps aside by it. no mark takes
      room of the menu itself, whose size is measured once for all items of a shape (menuSize): a
@@ -2751,34 +2757,57 @@
      the sum is applied as two terms, each through a property of its own (the placeholder's margin
      and padding, the run button's offset and translation), so that an older #vault item, whose
      stylesheet sets that margin and that offset itself (18px, until 2026-11-18) and so replaces
-     the item's term, still adds up with the running mark's.
-     the order: a mark of item code is the `::before` of the number and stands nearest it, the
+     the item's term, still adds up with the app's marks.
+     THE ORDER, from the left: the ring, the circle of an item that can be previewed, the circle of
+     one that can be pushed, a mark of item code, the number. the longer a mark stays, the nearer
+     the number it stands: the sparkles of watched items keep their column beside the digits
+     whatever comes and goes, and a run begins and ends at the outer end. a mark that comes moves
+     what stands left of it: a circle that appears during a run moves the still-running ring left
+     by its room, and a run button steps left by the room of every mark.
+     the means: a mark of item code is the `::before` of the number and stands nearest it, the
      running mark is an element after the digits, moved to the front of the number's line (order),
-     left of it. a
-     mark of item code takes no room in that line by a negative margin of its own. where the
-     number's box has a fixed width (.reserved: up to four digits) the mark is given its real room
-     in the line while the item runs, which is what puts the circle left of it without the app
+     left of it, and the state circles are one box, the `::before` of the MENU, in the menu's line
+     right before the number's box (THE STATE CIRCLES, below): it steps left by the room the item's
+     mark SAYS (--item-mark-room), and the ring steps left of it by the circles' rooms, by its
+     margins (a translate would make the ring the containing block of its note).
+     a mark of item code takes no room in the number's line by a negative margin of its own. where
+     the number's box has a fixed width (.reserved: up to four digits) the mark is given its real
+     room in the line while the item runs, which is what puts the ring left of it without the app
      knowing its size, also for an older #vault item that says no room (!important: the item's
      own rule is as specific as this one). a longer number's box is as wide as its content, and
      the menu with it: there no mark may take room in the line (the menu grew by the mark's 18px
      when the run began, and the run button moved twice as far as the text's placeholder), so
-     both keep their negative margins and the circle steps left by the room the item's mark SAYS
-     (--item-mark-room; an older item says none, and on such a number its sparkle and the circle
-     share their place) */
+     both keep their negative margins and the ring steps left by the room the item's mark SAYS
+     (--item-mark-room; an older item says none, and on such a number its sparkle and the ring
+     share their place). the state circles are in the menu's line, not the number's, so they have
+     the said room alone on every number: beside an older item's sparkle a circle shares the
+     sparkle's place */
   .container {
+    --state-mark-room: 18px;
     --running-mark-room: 0px;
+    --pushable-mark-room: 0px;
+    --previewable-mark-room: 0px;
+  }
+  .container.editing {
+    --state-mark-room: 29px;
   }
   .container.running {
     --running-mark-room: 18px;
   }
+  .container.pushable {
+    --pushable-mark-room: var(--state-mark-room);
+  }
+  .container.previewable {
+    --previewable-mark-room: var(--state-mark-room);
+  }
   .item > :global([id^='menu-']:first-child) {
     margin-left: var(--item-mark-room, 0px);
-    padding-left: var(--running-mark-room);
+    padding-left: calc(var(--running-mark-room) + var(--pushable-mark-room) + var(--previewable-mark-room));
   }
   .item-menu > .run {
     position: relative;
     right: var(--item-mark-room, 0px);
-    translate: calc(-1 * var(--running-mark-room)) 0;
+    translate: calc(-1 * (var(--running-mark-room) + var(--pushable-mark-room) + var(--previewable-mark-room))) 0;
   }
   .container.running .item-menu > .index.reserved::before {
     margin-left: 0 !important;
@@ -2893,6 +2922,67 @@
     }
   }
 
+  /* THE STATE CIRCLES: an item that can be pushed, and one that can be previewed, each a ring of
+     the running mark's size and stroke in the colour its border had (#a52, #c7c; the border goes),
+     standing still: a state, where the ring that turns is an activity. no tooltip, no note, no
+     listener: a press on a circle is the item's (its default is not prevented, as the ring's is),
+     and its click the item's (it previews an item that can be previewed and edits any other).
+     measured with the MindBox focused, beside a plain item whose text stood at that point: a
+     click there opens the editor, which takes the focus, as a click at that point of the text did,
+     and a tap in a phone's window is the number's, as it was (tests/e2e/layout.spec.ts). it is not
+     what a press at that point did where a control stood there: the run button and the ring move
+     left by the circles' room, so a click where the run button ended (4px before the digits) now
+     reaches the item, and on a running item without a sparkle the pushable circle stands where
+     the ring stood. an item can be in both states (a preview's file changed again before its push): the
+     previewable circle stands left of the pushable one. each is an image of 18px by 15px whose
+     circle is its right 15px (3px to the left of it), --pushable-mark and --previewable-mark */
+  .container.pushable {
+    --pushable-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='15' viewBox='-3 0 18 15'%3E%3Ccircle cx='7.5' cy='7.5' r='6.5' fill='none' stroke='%23a52' stroke-width='2'/%3E%3C/svg%3E");
+  }
+  .container.previewable {
+    --previewable-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='15' viewBox='-3 0 18 15'%3E%3Ccircle cx='7.5' cy='7.5' r='6.5' fill='none' stroke='%23c7c' stroke-width='2'/%3E%3C/svg%3E");
+  }
+  /* by the number they stand WHERE THE RING AND THE SPARKLE STAND: one box, the menu's ::before (the
+     number's own ::before is a mark of item code's, and a click on the number's box would be the
+     number's), a line of the number's own font (the menu's, which the number inherits) centred in
+     the menu's line, which is the number's box (25px from the menu's top), and the circles images
+     on that line's baseline, lowered by whole pixels (2px), as the sparkle's image and the ring's
+     inline box are. it stands in the menu's line between a run button and the number's box and
+     takes no room there (its margins): it ends 1px inside the number's box, where the digits'
+     padding leaves 3px to them (MENU_INDEX_PAD) */
+  .container:is(.pushable, .previewable) .item-menu > .run {
+    order: -1;
+  }
+  .container:is(.pushable, .previewable) .item-menu::before {
+    content: var(--previewable-mark, '') var(--pushable-mark, '');
+    flex: none;
+    align-self: center;
+    position: relative;
+    top: 2px;
+    margin: 0 -1px 0 calc(1px - var(--pushable-mark-room) - var(--previewable-mark-room));
+    translate: calc(-1 * var(--item-mark-room, 0px)) 0;
+  }
+  /* and the ring left of them, by its margins (the same room in the number's line, moved) */
+  .container:is(.pushable, .previewable) .item-menu > .index > .running-mark {
+    margin-left: calc(-1 * (var(--running-mark-room) + var(--pushable-mark-room) + var(--previewable-mark-room)));
+    margin-right: calc(3px + var(--pushable-mark-room) + var(--previewable-mark-room));
+  }
+  /* in the editor, where no number shows: the edit menu's ::after (its ::before is a mark of item
+     code's, and the ring an element), shown after the ring and before the rest by its order,
+     centred on the buttons as the ring and the sparkle are, each circle 23px and 6px before the next */
+  .container:is(.pushable, .previewable) .edit-menu::after {
+    content: '';
+    order: -1;
+    flex: none;
+    align-self: center;
+    width: calc(var(--pushable-mark-room) + var(--previewable-mark-room) - 6px);
+    height: 23px;
+    margin-right: 6px;
+    background:
+      var(--pushable-mark, none) right center / auto 23px no-repeat,
+      var(--previewable-mark, none) right var(--pushable-mark-room) center / auto 23px no-repeat;
+  }
+
   .time {
     height: 20px; /* fixed height (=24 including margin-bottom) */
     color: #444;
@@ -2952,12 +3042,6 @@
   }
   .error {
     border-color: #633;
-  }
-  .pushable {
-    border-color: #a52;
-  }
-  .previewable {
-    border-color: #c7c;
   }
   .editing {
     border-color: transparent; /* border is visible but NOT updated while editing, so we hide for now */

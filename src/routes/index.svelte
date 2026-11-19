@@ -13351,7 +13351,11 @@
   .items:not(.focused) :global(.super-container.target_context) {
     opacity: 0.85;
   }
-  .items:not(.focused) :global(.super-container:is(.target, .editing, .pushable, .previewable)) {
+  /* (an item that can be pushed or previewed dims as any other item of its kind: to 0.75, to 0.85
+     as context of the target, and only a target or an edited item stays at 0.95, its menu at the
+     0.5 above as every item's. its border, which this kept readable, is a circle by its number
+     since 2026-11-19, and a brighter item read as an odd one) */
+  .items:not(.focused) :global(.super-container:is(.target, .editing)) {
     opacity: 0.95;
   }
 

@@ -570,7 +570,9 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
 // tests/e2e/layout.spec.ts): on an item that is watched and runs both show, the sparkle nearest
 // the number and the ring left of it, by the number and in the edit menu, and neither reaches the
 // digits, the item's text or its run button; the room is the sum of what each says; an older
-// item's stylesheet, which says none and sets the margin itself, adds up the same; and an item
+// item's stylesheet, which says none and sets the margin itself, adds up the same; the still
+// circles of an item that can be pushed or previewed (2026-11-19) stand between the two, by the
+// number and in the edit menu, at their height, and a click on one opens the item; and an item
 // that is being saved is dimmed as it always was, running or not
 test('the watched mark is on the items an agent follows, and the menu says what is followed', async ({ page }) => {
   const dialogs: string[] = []
@@ -830,11 +832,12 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const written = sheet.textContent!
       if (older) sheet.textContent = written.split('\n').filter(rule => !rule.includes('{ --item-mark-room')).join('\n').replaceAll('var(--item-mark-room)', '18px')
       // (the ring is measured standing still: a hit test reads a turning box up to 2 px wide of it)
-      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.running-mark::before { animation: none !important }' + (without ? ` .item-menu > .index${without} { display: none !important }` : '') }))
+      // (and the menu's own box takes no hit, so that a hit on the menu is one on its `::before`, the state circles: tests/e2e/layout.spec.ts)
+      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.running-mark::before { animation: none !important } .item-menu { pointer-events: none !important } .item-menu > *, .item-menu::before { pointer-events: auto !important }' + (without ? ` .item-menu > .index${without} { display: none !important }` : '') }))
       shown()?.scrollIntoView({ block: 'center' })
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const box = shown()
-      const [index, spacer, run] = ['.item-menu > .index', '.item > [id^="menu-"]', '.item-menu > .run'].map(part => box?.querySelector(part) as HTMLElement | null)
+      const [index, spacer, run, menu] = ['.item-menu > .index', '.item > [id^="menu-"]', '.item-menu > .run', '.item-menu'].map(part => box?.querySelector(part) as HTMLElement | null)
       if (!box || !index?.firstChild || !spacer || !run) {
         hide.remove()
         if (older) sheet.textContent = written
@@ -845,8 +848,11 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const [number, own, button] = [digits.getBoundingClientRect(), index.getBoundingClientRect(), run.getBoundingClientRect()]
       const y = (own.top + own.bottom) / 2
       const found: number[][] = [] // pixel by pixel leftwards from the number's own box: [left edge of the first pixel hit, right edge of the last]
-      for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 60; k++, pixel--) {
-        if (!index.contains(document.elementFromPoint(pixel + 0.5, y))) continue
+      const circles: number[][] = [] // the same for the one box of the state circles: one mark at most
+      for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 80; k++, pixel--) {
+        const hit = document.elementFromPoint(pixel + 0.5, y)
+        if (hit === menu) circles[0] = [number.left - pixel, circles[0]?.[1] ?? number.left - pixel - 1]
+        if (!index.contains(hit)) continue
         const last = found[found.length - 1]
         if (last && last[0] == number.left - pixel - 1) last[0] = number.left - pixel
         else found.push([number.left - pixel, number.left - pixel - 1])
@@ -862,6 +868,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const placed = getComputedStyle(spacer)
       const result = {
         marks: found,
+        circles,
         run: [Math.round(number.left - button.right), Math.round(number.left - button.left)],
         text,
         room: [placed.marginLeft, placed.paddingLeft],
@@ -904,18 +911,19 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   // does, an inline box on the number's baseline lowered 2px, so the two are rounded to the pixel
   // grid together: the rows the ring inks (blue) and the rows the sparkle inks (yellow) have the
   // same middle, where the item sits and with the item half a pixel lower. Read off a screenshot
-  // of the 40px left of the digits, with the ring standing still
-  const inked = async () => {
+  // of the 40px left of the digits (or as many as asked: the state circles' step, below, which
+  // reads their orange and pink too), with the ring standing still
+  const inked = async (left = 40) => {
     const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
-    const clip = await page.evaluate(async id => {
+    const clip = await page.evaluate(async ([id, left]) => {
       const index = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index`) as HTMLElement
       index.scrollIntoView({ block: 'center' })
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const digits = document.createRange()
       digits.selectNodeContents(index.firstChild!)
       const own = index.getBoundingClientRect()
-      return { x: Math.floor(digits.getBoundingClientRect().left) - 40, y: Math.floor(own.top) - 2, width: 40, height: Math.ceil(own.height) + 4 }
-    }, runId)
+      return { x: Math.floor(digits.getBoundingClientRect().left) - left, y: Math.floor(own.top) - 2, width: left, height: Math.ceil(own.height) + 4 }
+    }, [runId, left] as const)
     const png = (await page.screenshot({ clip })).toString('base64')
     await still.evaluate(style => (style as Element).remove())
     return page.evaluate(async png => {
@@ -926,11 +934,13 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const context = canvas.getContext('2d')!
       context.drawImage(image, 0, 0)
       const { data, width, height } = context.getImageData(0, 0, image.width, image.height)
-      const rows: Record<string, number[]> = { ring: [], sparkle: [] }
+      const rows: Record<string, number[]> = { ring: [], sparkle: [], pushable: [], previewable: [] }
       for (let y = 0; y < height; y++)
         for (let x = 0; x < width; x++) {
-          const [r, b] = [data[4 * (y * width + x)], data[4 * (y * width + x) + 2]]
+          const [r, g, b] = [0, 1, 2].map(channel => data[4 * (y * width + x) + channel])
           if (b - r > 25) rows.ring.push(y)
+          else if (r - b > 50 && g < 0.7 * r) rows.pushable.push(y) // the orange #a52 (the sparkle's yellow keeps its green)
+          else if (r - g > 40 && b - g > 40) rows.previewable.push(y) // the pink #c7c
           else if (r - b > 50) rows.sparkle.push(y)
         }
       return Object.fromEntries(Object.entries(rows).map(([mark, inked]) => [mark, [Math.min(...inked), Math.max(...inked) + 1]]))
@@ -970,6 +980,57 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   // an older #vault item's stylesheet on this app: no room said, and the same picture
   const older = await beside('the older stylesheet says no room, and the marks, the run button and the room are the same', m => [marksAre(m.marks, [[18, 4], [36, 21]]), m.run, m.room, m.said], [true, both.run, both.room, ''], { older: true })
   expect(older.text).toBeGreaterThanOrEqual(older.run[1] + 1)
+  // THE STATE CIRCLES (2026-11-19: an item that can be pushed, or previewed, shows a still ring
+  // where its border was coloured; tests/e2e/layout.spec.ts has them alone). Beside the sparkle
+  // itself: the sparkle nearest the digits, the circle left of it by the room the item says, the
+  // ring left of the circle; the rooms add up, the item's in the margin and the app's in the
+  // padding. `pushable` is set as item code sets it, `previewable` on the page's own record (the
+  // app alone sets it), shown by the re-ranking that a change of the first causes. (The circles'
+  // box, an image of 18px per circle with 3px of air on its left, reads 3px wider than its circle)
+  const states = (pushable: boolean, previewable = false) =>
+    page.evaluate(([id, pushable, previewable]) => {
+      const item = window._item(id, true) as unknown as { pushable: boolean }
+      ;(window.__items.find(item => item.id == id) as unknown as { previewable: boolean }).previewable = previewable
+      item.pushable = !pushable
+      item.pushable = pushable
+    }, [runId, pushable, previewable] as const)
+  await states(true)
+  const three = await beside(
+    'watched, running and pushable: the sparkle, the circle left of it, the ring left of the circle, and the run button left of all three',
+    m => [marksAre(m.marks, [[18, 4], [54, 39]]), marksAre(m.circles, [[39, 21]]), m.run, m.room],
+    [true, true, alone.run.map(edge => edge + 36), ['18px', '36px']],
+  )
+  expect(three.text, 'the text keeps out of all three').toBeGreaterThanOrEqual(three.run[1] + 1)
+  // ALL FOUR AT ONE HEIGHT, by pixels as the two marks above: pushable and previewable too, the
+  // ring, the two circles and the sparkle have one middle, the ring and each circle inking 15
+  // rows, where the item sits and with the item half a pixel lower (a strip of 74px: from the
+  // left the ring, the previewable circle, the pushable one and the sparkle, 18px each)
+  await states(true, true)
+  await beside('watched, running, pushable and previewable: the two circles between the sparkle and the ring', m => [marksAre(m.marks, [[18, 4], [72, 57]]), marksAre(m.circles, [[57, 21]])], [true, true])
+  for (const lower of [false, true]) {
+    const nudge = lower ? await page.addStyleTag({ content: `.container[data-item-id="${runId}"] { top: 0.5px }` }) : null
+    const ink = await inked(74)
+    const middle = (mark: string) => ink[mark][0] + ink[mark][1] - ink.sparkle[0] - ink.sparkle[1]
+    expect([...['ring', 'previewable', 'pushable'].map(mark => ink[mark][1] - ink[mark][0]), ...['ring', 'previewable', 'pushable'].map(middle)], `the ring and the two circles ink 15 rows each, with the sparkle's middle${lower ? ', the item half a pixel lower' : ''} (${JSON.stringify(ink)})`).toEqual([15, 15, 15, 0, 0, 0])
+    await nudge?.evaluate(style => (style as Element).remove())
+  }
+  await states(true)
+  await runs(false)
+  await boxed(false)
+  const circled = await beside('watched and pushable: the sparkle where it was, the circle left of it', m => [marksAre(m.marks, [[18, 4]]), marksAre(m.circles, [[39, 21]]), m.run, m.room], [true, true, alone.run.map(edge => edge + 18), ['18px', '18px']])
+  // a click on the circle is a click on the item, as one on the border was (the circle is the
+  // menu's, not the number's, whose click selects or moves the item): the editor opens
+  await page.mouse.click(circled.at[0] + 4 - 36 + 7.5, circled.at[1])
+  await expect(page.locator(`#textarea-${runId}`), 'a click on the circle opens the item\'s editor').toBeVisible()
+  await close(runId)
+  // (the circle has the room the item SAYS and nothing else: beside an older stylesheet's sparkle,
+  // which says none, it stands in the sparkle's place, read with the sparkle hidden; the room
+  // kept free is the same)
+  await beside('an older stylesheet: the circle in the sparkle\'s place, the room the same', m => [marksAre(m.circles, [[21, 4]]), m.run, m.room], [true, alone.run.map(edge => edge + 18), ['18px', '18px']], { older: true, without: '::before' })
+  await states(false)
+  await beside('no longer pushable: the sparkle alone, as before', m => [marksAre(m.marks, [[18, 4]]), m.circles, m.run, m.room], [true, [], alone.run, alone.room])
+  await runs(true)
+  await boxed(true)
   // in the editor: the ring, then the sparkle, then the buttons, each 23px and 6px before the next,
   // in ONE row that ends at the item's right edge, out of flow, where the edit menu always stood
   // (a menu that wrapped into further rows was built, and the owner declined it, 2026-11-18: "just
@@ -991,6 +1052,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
         before: Math.round(buttons[0].left - own.left), // the marks' room: the menu is as wide as its row
         ring: ring ? [ring.order, ring.width, ring.marginRight, getComputedStyle(running!, '::before').borderTopColor] : null,
         mark: mark.content == 'none' ? null : [mark.order, mark.width, mark.marginRight, mark.backgroundImage.slice(0, 26)],
+        states: (circles => (circles.content == 'none' ? null : [circles.order, circles.width, circles.height, circles.marginRight]))(getComputedStyle(menu, '::after')),
         buttons: buttons.length,
         rows: new Set(buttons.map(button => Math.round(button.top))).size,
         right: Math.round(own.right - item.right),
@@ -1020,13 +1082,71 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await expect.poll(edited, { message: 'a status and a progress, in the editor: the tooltip and the fill', timeout: 15_000 }).toEqual({ tip: 'waiting for the lanes …', ring: ['23px', '23px', '3px', true, '75'], corners: ['5px', '5px'] })
   await page.evaluate(id => (window._item(id, true) as unknown as { clear_status: () => void }).clear_status(), runId)
   await expect.poll(edited, { timeout: 15_000 }).toMatchObject({ tip: 'running', ring: ['23px', '23px', '3px', false, null] })
+  // THE STATE CIRCLES IN THE EDITOR, between the ring and the sparkle as by the number: the edit
+  // menu's ::after, after the ring by its order (the ring stays the row's first, where its note is
+  // placed), each circle 23px and 6px before the next, centred on the buttons as the ring and the
+  // sparkle are; in neither state there is none, and the row is as it was. The item, pushable,
+  // has one button more (push). What the row draws is read by its INK (`menuInk`): a screenshot of
+  // the edit menu from its left edge to its first button, with the ring standing still, each mark
+  // by its colour (the ring's blue, the previewable pink, the pushable orange, the sparkle's
+  // yellow, told apart as `inked` tells them) as its columns from the menu's left edge and its rows
+  const menuInk = async () => {
+    const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
+    const clip = await page.evaluate(async id => {
+      const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .edit-menu`) as HTMLElement
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const [own, button] = [menu.getBoundingClientRect(), menu.querySelector(':scope > .button')!.getBoundingClientRect()]
+      return { x: Math.ceil(own.left), y: Math.floor(own.top), width: Math.floor(button.left) - Math.ceil(own.left), height: Math.ceil(own.height) }
+    }, runId)
+    const png = (await page.screenshot({ clip })).toString('base64')
+    await still.evaluate(style => (style as Element).remove())
+    return page.evaluate(async png => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + png
+      await image.decode()
+      const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height })
+      const context = canvas.getContext('2d')!
+      context.drawImage(image, 0, 0)
+      const { data, width, height } = context.getImageData(0, 0, image.width, image.height)
+      const inked: Record<string, number[][]> = { ring: [], previewable: [], pushable: [], sparkle: [] }
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++) {
+          const [r, g, b] = [0, 1, 2].map(channel => data[4 * (y * width + x) + channel])
+          if (b - r > 25) inked.ring.push([x, y])
+          else if (r - b > 50 && g < 0.7 * r) inked.pushable.push([x, y])
+          else if (r - g > 40 && b - g > 40) inked.previewable.push([x, y])
+          else if (r - b > 50) inked.sparkle.push([x, y])
+        }
+      return Object.fromEntries(Object.entries(inked).map(([mark, pixels]) => [mark, pixels.length ? { cols: [Math.min(...pixels.map(p => p[0])), Math.max(...pixels.map(p => p[0])) + 1], rows: [Math.min(...pixels.map(p => p[1])), Math.max(...pixels.map(p => p[1])) + 1] } : null]))
+    }, png)
+  }
+  // the marks' columns as found, each within a pixel of the place wanted (null: not drawn)
+  const placed = (ink: Record<string, { cols: number[] } | null>, wanted: Record<string, number[] | null>) => Object.entries(wanted).every(([mark, cols]) => (cols ? !!ink[mark] && ink[mark]!.cols.every((edge, side) => Math.abs(edge - cols[side]) <= 1) : !ink[mark]))
+  const first = () => page.evaluate(id => (menu => menu.querySelector(':scope > .running-mark')!.getBoundingClientRect().left - menu.getBoundingClientRect().left)(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .edit-menu`)!), runId)
+  const plain = await menu()
+  expect([plain.states, plain.before, await first()], 'edited, in neither state: no circles, and the ring first').toEqual([null, 2 * (23 + 6), 0])
+  await states(true, true)
+  await expect.poll(menu, 'edited while running, watched, pushable and previewable: the ring at the row\'s left end, then the two circles, then the sparkle').toMatchObject({ before: 4 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], states: ['-1', '52px', '23px', '6px'], buttons: plain.buttons + 1, rows: 1, right: 0, over: 5 })
+  expect(await first(), 'the ring is still the row\'s first').toBe(0)
+  const all = await menuInk()
+  expect([placed(all, { ring: [0, 23], previewable: [29, 52], pushable: [58, 81], sparkle: [87, 110] }), ...['previewable', 'pushable'].map(mark => all[mark] && all[mark]!.rows[0] + all[mark]!.rows[1] - all.ring!.rows[0] - all.ring!.rows[1])], `by their ink: the ring, the pink circle, the orange one and the sparkle, 23px each and 6px apart, the circles centred as the ring is (${JSON.stringify(all)})`).toEqual([true, 0, 0])
+  await runs(false)
+  await expect.poll(menu, 'no longer running: the two circles first').toMatchObject({ before: 3 * (23 + 6), ring: null, states: ['-1', '52px', '23px', '6px'], rows: 1, right: 0, over: 5 })
+  await states(true)
+  await expect.poll(menu, 'pushable alone: its circle, then the sparkle').toMatchObject({ before: 2 * (23 + 6), ring: null, mark: ['0', '23px', '6px', SPARKLE], states: ['-1', '23px', '23px', '6px'], rows: 1, right: 0, over: 5 })
+  expect(placed(await menuInk(), { ring: null, previewable: null, pushable: [0, 23], sparkle: [29, 52] }), 'by their ink: the orange circle first, then the sparkle').toBe(true)
+  await states(false)
+  await expect.poll(menu, 'in neither state and not running: the sparkle alone, the row as it was').toMatchObject({ before: 23 + 6, ring: null, mark: ['0', '23px', '6px', SPARKLE], states: null, buttons: plain.buttons, rows: 1, right: 0, past: false, over: 5 })
+  await runs(true)
+  await expect.poll(async () => (await menu()).ring, { timeout: 15_000 }).toEqual(['-1', '23px', '6px', BLUE])
   await runs(false)
   await expect.poll(menu, 'no longer running: the sparkle alone').toMatchObject({ before: 23 + 6, ring: null, mark: ['0', '23px', '6px', SPARKLE], rows: 1, right: 0, past: false, over: 5 })
   // a FULL menu in a phone's window: the item given every button (pushable, and from a source:
   // set on the page's own record of it, since this account has no pusher and the item was not
-  // installed), watched and running, at 375px. Its row is wider than the item: still one row,
-  // ending at the item's right edge, it begins left of the item's left edge (the marks first,
-  // where the list cuts them off), and adds nothing to the item's height
+  // installed), watched and running, at 375px: the ring, the pushable circle, the sparkle and
+  // eight buttons. Its row is wider than the item: still one row, ending at the item's right
+  // edge, it begins left of the item's left edge (the marks first, where the list cuts them
+  // off), and adds nothing to the item's height
   const sourced = (source: string | null) =>
     page.evaluate(([id, source]) => {
       const record = window.__items.find(item => item.id == id) as unknown as { attr: Record<string, unknown> | null }
@@ -1037,10 +1157,10 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await runs(true)
   await page.setViewportSize({ width: 375, height: 667 })
   await expect
-    .poll(menu, { message: 'a full menu at 375px: one row of the ring, the sparkle and all eight buttons, ending at the item\'s right edge and beginning left of its left edge, 5px over the editor; the stored height the box\'s', timeout: 15_000 })
-    .toMatchObject({ before: 2 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], buttons: 8, rows: 1, right: 0, past: true, over: 5, agree: true })
+    .poll(menu, { message: 'a full menu at 375px: one row of the ring, the circle, the sparkle and all eight buttons, ending at the item\'s right edge and beginning left of its left edge, 5px over the editor; the stored height the box\'s', timeout: 15_000 })
+    .toMatchObject({ before: 3 * (23 + 6), ring: ['-1', '23px', '6px', BLUE], mark: ['0', '23px', '6px', SPARKLE], states: ['-1', '23px', '23px', '6px'], buttons: 8, rows: 1, right: 0, past: true, over: 5, agree: true })
   // watched or not changes no height. The item no longer runs, and the window is made as wide as
-  // the row of the eight buttons and half a sparkle more: watched, the sparkle takes the row past
+  // the row of the eight buttons, the circle and half a sparkle more: watched, the sparkle takes the row past
   // the item's left edge, not watched the row fits in the item; one row either way, and the
   // item's height, as the layout holds it and as the box has it, stays what it was. The watch is
   // changed as the watcher changes it, by its published rule: the #vault item rewrites its
@@ -1052,7 +1172,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     const row = [...box.querySelectorAll('.edit-menu > .button')].reduce((sum, button) => sum + button.getBoundingClientRect().width, 0)
     return { row, beside: innerWidth - box.getBoundingClientRect().width } // the buttons' row, and what of the window is not the item's
   }, runId)
-  await page.setViewportSize({ width: Math.ceil(fit.row + 14 + fit.beside), height: 667 })
+  await page.setViewportSize({ width: Math.ceil(fit.row + (23 + 6) + 14 + fit.beside), height: 667 })
   const changed = async (past: boolean, message: string) => {
     await expect.poll(async () => (found => [found.rows, found.past])(await menu()), { message, timeout: 30_000 }).toEqual([1, past])
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))

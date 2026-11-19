@@ -393,7 +393,7 @@ function marksLeftOf(index: HTMLElement): number[][] {
   still.remove()
   return marks
 }
-type Scanning = { __marksLeftOf: typeof marksLeftOf }
+type Scanning = { __marksLeftOf: typeof marksLeftOf; __stateCircles?: typeof stateCircles }
 // what an item's box shows of running, read off the item in the SHOWN column (an element can be
 // mounted in the offscreen render column alone) and found again after the frames it waits. `text` is how far left of the digits the nearest
 // line of the item's text ends, of the lines that stand beside the number; `run` the same for a
@@ -495,6 +495,95 @@ const ringInk = async (page: Page, id: string) => {
     return { ring: [top, bottom], wide: right - left, digits: rows(digits.filter(pixel => pixel[2] - 17 > (most - 17) / 2)), bright: [quarter(true, false), quarter(true, true), quarter(false, true), quarter(false, false)], hollow }
   }, [png, clip.split] as const)
 }
+
+// THE RING, THE STATE CIRCLES AND THE DIGITS BY PIXELS, as `ringInk` reads the ring: a screenshot
+// of the number's line from the ring (without one, from 56 px left of the number's box, past both
+// circles) to the digits' end, read in the page, the ring standing still. Each mark's rows, [first, past the last], from the clip's top, and its columns as [from,
+// to] px left of the digits' box (blue for the ring, the orange #a52 for the pushable circle, the
+// pink #c7c for the previewable one; the digits are what is bright right of the digits' box's
+// left edge, as `ringInk` reads them). And of each mark, whether its middle is empty (`hollow`:
+// none of its ink within 2 px of the middle of its bounds, as `ringInk` reads the ring) and its
+// STROKE across its middle line: the runs of its ink there, left to right, and the colour of the
+// strongest pixel of them (the reddest), which a classifier of hues alone does not tell from
+// another of the same hue (the push button's #f84 passes for the orange)
+const marksInk = async (page: Page, id: string) => {
+  const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
+  const clip = await page.evaluate(async id => {
+    const index = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index`) as HTMLElement
+    index.scrollIntoView({ block: 'center' })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const [mark, own] = [index.querySelector('.running-mark')?.getBoundingClientRect(), index.getBoundingClientRect()]
+    const digits = document.createRange()
+    digits.selectNodeContents(index.firstChild!)
+    const left = mark ? Math.floor(mark.left) - 2 : Math.floor(own.left) - 56
+    return { x: left, y: Math.floor(own.top) - 2, width: Math.ceil(own.right) - left, height: Math.ceil(own.height) + 4, digits: digits.getBoundingClientRect().left - left }
+  }, id)
+  const png = (await page.screenshot({ clip })).toString('base64')
+  await still.evaluate(style => (style as Element).remove())
+  return page.evaluate(async ([png, at]) => {
+    const image = new Image()
+    image.src = 'data:image/png;base64,' + png
+    await image.decode()
+    const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height })
+    const context = canvas.getContext('2d')!
+    context.drawImage(image, 0, 0)
+    const { data, width, height } = context.getImageData(0, 0, image.width, image.height)
+    const inked: Record<string, number[][]> = { ring: [], pushable: [], previewable: [], digits: [] } // x, y, and the colour (for the digits the green channel alone)
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        const [r, g, b] = [0, 1, 2].map(channel => data[4 * (y * width + x) + channel])
+        if (x + 0.5 > at) {
+          if (b - r < 25 && g > 40) inked.digits.push([x, y, g])
+        } else if (b - r > 25) inked.ring.push([x, y, r, g, b])
+        else if (r - b > 50 && g < 0.7 * r) inked.pushable.push([x, y, r, g, b])
+        else if (r - g > 40 && b - g > 40) inked.previewable.push([x, y, r, g, b])
+      }
+    const most = Math.max(...inked.digits.map(pixel => pixel[2])) // (a digit's ink: more than half of its own brightest pixel)
+    inked.digits = inked.digits.filter(pixel => pixel[2] - 17 > (most - 17) / 2)
+    return Object.fromEntries(
+      Object.entries(inked).map(([mark, pixels]) => {
+        if (!pixels.length) return [mark, null]
+        const [xs, ys] = [pixels.map(pixel => pixel[0]), pixels.map(pixel => pixel[1])]
+        const [left, right, top, bottom] = [Math.min(...xs), Math.max(...xs) + 1, Math.min(...ys), Math.max(...ys) + 1]
+        const found = { rows: [top, bottom], wide: right - left, cols: [at - left, at - right] }
+        if (mark == 'digits') return [mark, found]
+        const middle = top + Math.floor((bottom - top) / 2) // (the 8th of 15 rows: the circle's middle runs through it)
+        const across = pixels.filter(pixel => pixel[1] == middle).sort((one, other) => one[0] - other[0])
+        const runs: number[] = []
+        across.forEach((pixel, at) => (at && pixel[0] == across[at - 1][0] + 1 ? runs[runs.length - 1]++ : runs.push(1)))
+        const strongest = across.reduce((best, pixel) => (pixel[2] > best[2] ? pixel : best), across[0] ?? [0, 0, 0, 0, 0])
+        const hollow = !pixels.some(([x, y]) => Math.abs(x + 0.5 - (left + right) / 2) < 2 && Math.abs(y + 0.5 - (top + bottom) / 2) < 2)
+        return [mark, { ...found, hollow, stroke: { runs, colour: strongest.slice(2) } }]
+      }),
+    ) as Record<'ring' | 'pushable' | 'previewable' | 'digits', { rows: number[]; wide: number; cols: number[]; hollow?: boolean; stroke?: { runs: number[]; colour: number[] } } | null>
+  }, [png, clip.digits] as const)
+}
+
+// a number BEYOND FOUR DIGITS, as the app renders one: the item's menu cloned over itself with
+// 12345 and without the reserved class. Its width, the marks left of its number, the state
+// circles (the state circles' row; null where the page was not given their reader) and how far
+// before the digits a run button ends
+const fiveDigits = (page: Page, id: string) =>
+  page.evaluate(id => {
+    const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu`) as HTMLElement
+    const clone = menu.cloneNode(true) as HTMLElement
+    const index = clone.querySelector('.index') as HTMLElement
+    index.firstChild!.textContent = '12345'
+    index.classList.remove('reserved')
+    index.style.removeProperty('--index-digits')
+    menu.parentElement!.append(clone) // over the menu itself: the same place, and on top
+    const digits = document.createRange()
+    digits.selectNodeContents(index.firstChild!)
+    const found = {
+      reserved: getComputedStyle(index).justifyContent, // (the reserved width's rule packs the digits at the end)
+      menu: clone.clientWidth,
+      marks: (window as unknown as Scanning).__marksLeftOf(index),
+      circles: (window as unknown as Scanning).__stateCircles?.(clone) ?? null,
+      run: Math.round(digits.getBoundingClientRect().left - clone.querySelector('.run')!.getBoundingClientRect().right),
+    }
+    clone.remove()
+    return found
+  }, id)
 
 test('a running item is marked by a circle left of its number and by nothing else: its status is the circle\'s tooltip, its progress the circle\'s fill', async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 })
@@ -886,40 +975,20 @@ test('a running item is marked by a circle left of its number and by nothing els
   // with 12345 and without the reserved class (as the app renders such a number), keeps the width
   // it has with no mark at all, idle, marked and running, and the marks stand as they do beside a
   // short number (before the fix the menu grew by the mark's room when the run began)
-  const fiveDigits = () =>
-    page.evaluate(id => {
-      const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu`) as HTMLElement
-      const clone = menu.cloneNode(true) as HTMLElement
-      const index = clone.querySelector('.index') as HTMLElement
-      index.firstChild!.textContent = '12345'
-      index.classList.remove('reserved')
-      index.style.removeProperty('--index-digits')
-      menu.parentElement!.append(clone) // over the menu itself: the same place, and on top
-      const digits = document.createRange()
-      digits.selectNodeContents(index.firstChild!)
-      const found = {
-        reserved: getComputedStyle(index).justifyContent, // (the reserved width's rule packs the digits at the end)
-        menu: clone.clientWidth,
-        marks: (window as unknown as Scanning).__marksLeftOf(index),
-        run: Math.round(digits.getBoundingClientRect().left - clone.querySelector('.run')!.getBoundingClientRect().right),
-      }
-      clone.remove()
-      return found
-    }, runnable)
-  const natural = await fiveDigits()
+  const natural = await fiveDigits(page, runnable)
   expect([natural.reserved, natural.menu > still.placeholder[1], natural.marks, natural.run], 'a five-digit number: no reserved width, a wider menu, no mark').toEqual(['normal', true, [], 4])
   const box = `.container[data-item-id="${runnable}"]`
   await page.addStyleTag({ content: `${box} { --item-mark-room: 22px }\n${box} .item-menu > .button.index::before { content: ''; flex: none; width: 19px; height: 15px; margin: 0 3px 0 -22px; background: #f5e389 }` })
   const marked = await runningLook(page, runnable)
   expect([marksAre(marked.marks, [[22, 4]]), marked.run, marked.room, marked.placeholder], `a mark of item code (${JSON.stringify(marked.marks)}): its 22 px kept free by the app`).toEqual([true, still.run!.map(edge => edge + 22), ['22px', '0px'], still.placeholder])
-  const five = await fiveDigits()
+  const five = await fiveDigits(page, runnable)
   expect([five.menu, marksAre(five.marks, [[22, 4]]), five.run], `five digits, marked (${JSON.stringify(five.marks)}): the menu's natural width`).toEqual([natural.menu, true, 4 + 22])
   await run(runnable, true)
   await shown(runnable, true)
   const both = await runningLook(page, runnable)
   expect([marksAre(both.marks, [[22, 4], [40, 25]]), both.run, both.room, both.placeholder], `and running: the mark where it was and the ring left of it (${JSON.stringify(both.marks)}), the run button left of both, the room their sum`).toEqual([true, still.run!.map(edge => edge + 40), ['22px', '18px'], still.placeholder])
   expect(both.text, 'and the text keeps out of it all').toBeGreaterThanOrEqual(both.run![1] + 1)
-  const fiveBoth = await fiveDigits()
+  const fiveBoth = await fiveDigits(page, runnable)
   expect([fiveBoth.menu, marksAre(fiveBoth.marks, [[22, 4], [40, 25]]), fiveBoth.run], `five digits, marked and running (${JSON.stringify(fiveBoth.marks)}): still the natural width, the ring left of the mark, the run button left of both`).toEqual([natural.menu, true, 4 + 40])
   await run(runnable, false)
   await shown(runnable, false)
@@ -1195,6 +1264,30 @@ test("the running mark stands on the number's baseline in the app's own font, as
   // and why: the ring's element is a line as tall as the digits' and at their height (in this
   // font, whose ascent takes the ring's 15 px), so the two share a baseline
   expect((await lines())!.ring, 'the ring\'s line is as tall as the digits\' and at their height').toEqual([20, 0])
+  // THE STATE CIRCLES AT THE RING'S HEIGHT (2026-11-19): the same item, can be pushed and
+  // previewed too, has both circles between the ring and the digits, each an image on the
+  // baseline of a line of the number's font (the menu's ::before), lowered 2 px as the ring is:
+  // each inks the ring's 15 rows and 15 columns, the rows ending 2 px under the digits, where the
+  // item sits and with the item half a pixel lower, the ring turning and filled; from the left the
+  // ring, the previewable circle and the pushable one, 3 px apart and 3 px before the digits
+  await page.evaluate(id => {
+    ;(window.__items.find(item => item.id == id) as unknown as { previewable: boolean }).previewable = true
+    ;(window._item(id) as unknown as { pushable: boolean }).pushable = true // (a change that re-ranks, and so renders the other state too)
+  }, id)
+  await expect.poll(() => page.evaluate(box => !!document.querySelector(`${box}.pushable.previewable`), box), { timeout: 30_000 }).toBe(true)
+  for (const progress of [0, 0.5]) {
+    await page.evaluate(([id, progress]) => void ((window._item(id) as unknown as { progress: number }).progress = progress), [id, progress] as const)
+    await expect.poll(() => page.evaluate(box => document.querySelector(`${box} .running-mark`)!.classList.contains('filled'), box)).toBe(progress > 0)
+    for (const lower of [false, true]) {
+      const nudge = lower ? await page.addStyleTag({ content: `.container[data-item-id="${id}"] { top: 0.5px }` }) : null
+      const ink = await marksInk(page, id)
+      const said = `${progress ? ', filled' : ''}${lower ? ', the item half a pixel lower' : ''} (${JSON.stringify(ink)})`
+      expect((['ring', 'previewable', 'pushable'] as const).map(mark => (at => at && [at.rows[1] - at.rows[0], at.wide, at.rows[1] - ink.digits!.rows[1]])(ink[mark])), `the ring and the two circles: 15 px high and wide, ending 2 px under the digits${said}`).toEqual([[15, 15, 2], [15, 15, 2], [15, 15, 2]])
+      const wanted = { ring: [54, 39], previewable: [36, 21], pushable: [18, 3] } // px left of the digits' box
+      expect((['ring', 'previewable', 'pushable'] as const).map(mark => marksAre([ink[mark]!.cols], [wanted[mark]])), `from the left the ring, the previewable circle and the pushable one${said}`).toEqual([true, true, true])
+      await nudge?.evaluate(style => (style as Element).remove())
+    }
+  }
 })
 
 // THE TAP (the owner, 2026-11-19: "yes to the tap on mobile for the tooltip"). Where no pointer
@@ -1282,6 +1375,42 @@ test('a tap on the running mark shows its status in a note where no pointer hove
   await page.touchscreen.tap(...(await ring()))
   expect((gone => [gone.noted, gone.item])(await seen()), 'and a second tap on the ring takes it away').toEqual([[false, 'none'], before.item])
   await expect(mindbox, 'and the focus is the MindBox\'s still').toBeFocused()
+  // AND WITH BOTH STATE CIRCLES (2026-11-19, the circles' code review): the item can be pushed and
+  // previewed too, so the ring stands 36 px further left, left of the two circles (moved by its
+  // margins), and a tap on it there is the ring's as before: the note opens under the menu and
+  // takes a hit, the focus stays in the MindBox, and the item's time, its history and its editor
+  // stay as they were (as they are once the states are set: their re-ranking may touch them).
+  // The states are cleared before the row goes on
+  const states = (on: boolean) =>
+    page.evaluate(([id, on]) => {
+      ;(window.__items.find(item => item.id == id) as unknown as { previewable: boolean }).previewable = on
+      ;(window._item(id) as unknown as { pushable: boolean }).pushable = on // (a change that re-ranks, and so renders the other state too)
+    }, [id, on] as const)
+  const stated = (on: boolean) => expect.poll(() => page.evaluate(([box, on]) => !!document.querySelector(`${box}${on ? '.pushable.previewable' : ':not(.pushable):not(.previewable)'}`), [box, on] as const), { timeout: 30_000 }).toBe(true)
+  await states(true)
+  await stated(true)
+  await expect.poll(() => page.evaluate(() => (window as unknown as { _history_update_pending: boolean })._history_update_pending), { timeout: 15_000 }).toBe(false)
+  await page.evaluate(box => document.querySelector(box)!.scrollIntoView({ block: 'center' }), box)
+  // how far the ring's right edge stands from the digits: 3 px, and 36 px more beside the two circles
+  const displaced = () =>
+    page.evaluate(box => {
+      const digits = document.createRange()
+      digits.selectNodeContents(document.querySelector(`${box} .item-menu > .index`)!.firstChild!)
+      return Math.round(digits.getBoundingClientRect().left - document.querySelector(`${box} .running-mark`)!.getBoundingClientRect().right)
+    }, box)
+  const circled = await seen()
+  expect([await displaced(), circled.noted], 'the premise: the ring 39 px from the digits, left of the two circles, and no note').toEqual([39, [false, 'none']])
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
+  await expect(mindbox, 'the premise: the MindBox has the focus').toBeFocused()
+  await page.touchscreen.tap(...(await ring()))
+  const there = await seen()
+  expect([there.noted, there.inside, there.hit, there.item], `a tap on the ring left of the two circles shows the status in a note under the menu, which takes a hit, and does nothing else (${JSON.stringify(there.lies)})`).toEqual([[true, '"second status"'], true, true, circled.item])
+  await expect(mindbox, 'the tap on the displaced ring left the focus in the MindBox').toBeFocused()
+  await page.touchscreen.tap(...(await ring()))
+  expect((gone => [gone.noted, gone.item])(await seen()), 'and a second tap on it takes the note away').toEqual([[false, 'none'], circled.item])
+  await expect(mindbox).toBeFocused()
+  await states(false)
+  await stated(false)
   // shown again, and a tap elsewhere, on the item's text: the note goes, and the tap is the item's own (its editor opens)
   await page.touchscreen.tap(...(await ring()))
   expect((await seen()).noted[0]).toBe(true)
@@ -1323,4 +1452,364 @@ test('a tap on the running mark shows its status in a note where no pointer hove
   await page.evaluate(id => void ((window._item(id) as unknown as { running: boolean }).running = false), id)
   await expect.poll(() => page.evaluate(box => document.querySelectorAll(`${box} .running-mark`).length, box), { timeout: 15_000 }).toBe(0)
   await context.close()
+})
+
+// THE STATE CIRCLES (the owner, 2026-11-19, of the ring: "can we also turn the pushable (orange)
+// border into a circular indicator like this one? pushable items seem to happen a lot lately
+// (though often transient) and the orange border is a bit too distracting"; that the circle
+// stands still and that the border of an item that can be previewed goes the same way: "yes to
+// both questions"). An item that can be pushed shows a ring of the running mark's size in the
+// orange its border had, one that can be previewed the same in its border's pink, and neither has
+// a border for it or turns. Both are ONE box, the `::before` of the item's MENU (the number's
+// `::before` is a mark of item code's, and a click on the number's box would be the number's),
+// whose content is the circles, images on the baseline of a line of the number's font: the box
+// stands in the menu's line right before the number's and takes no room there, so the menu is not
+// resized; its room is a property per state on the item's box, kept free as the ring's is. The
+// order from the left: the ring, previewable, pushable, a mark of item code, the number. (Their
+// height by pixels in the app's own font is the ring's height row above; the editor, and the
+// circles beside the watched sparkle itself, are the watched mark's row.)
+const BORDERS = ['rgb(170, 85, 34)', 'rgb(204, 119, 204)'] // #a52 and #c7c, the two borders' colours
+// what a menu's `::before` draws, null when it draws nothing: its box as [from, to] in px left of
+// the digits, by the hit test of `marksLeftOf` (for the scan the menu's own box takes no hit: a
+// run button that stepped aside leaves room in it that would answer as the pseudo-element does),
+// its width, how it is placed (centred in the menu's line, 2 px down, in the number's own font)
+// and whether it turns (what it draws is read by its ink: `circlesInk`). Given to the page once
+function stateCircles(menu: HTMLElement) {
+  const drawn = getComputedStyle(menu, '::before')
+  if (drawn.content == 'none') return null
+  const index = menu.querySelector('.index') as HTMLElement
+  const digits = document.createRange()
+  digits.selectNodeContents(index.firstChild!)
+  const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
+  const only = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.item-menu { pointer-events: none !important } .item-menu > *, .item-menu::before { pointer-events: auto !important }' }))
+  const box: number[][] = [] // one mark at most, as `marksLeftOf` gives its marks
+  for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 90; k++, pixel--)
+    if (document.elementFromPoint(pixel + 0.5, (own.top + own.bottom) / 2) === menu) box[0] = [number.left - pixel, box[0]?.[1] ?? number.left - pixel - 1]
+  only.remove()
+  return { box, width: drawn.width, placed: [drawn.alignSelf, drawn.position, drawn.top, drawn.font == getComputedStyle(index).font], still: drawn.animationName == 'none' }
+}
+// the circles of an item in the shown column, and where its menu stands in its box (a bordered
+// item's is 1 px further in)
+const circlesOf = (page: Page, id: string) =>
+  page.evaluate(id => {
+    const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu`) as HTMLElement
+    return { circles: (window as unknown as Scanning).__stateCircles!(menu), inset: [getComputedStyle(menu).top, getComputedStyle(menu).right] }
+  }, id)
+const ONE = { width: '18px', placed: ['center', 'relative', '2px', true], still: true }
+// the two circles by their ink (`marksInk`): each one's columns, [from, to] px left of the digits'
+// box, its size and its rows, null for a state not shown
+const circlesInk = async (page: Page, id: string) => {
+  const ink = await marksInk(page, id)
+  return Object.fromEntries((['previewable', 'pushable'] as const).map(mark => [mark, ink[mark] && { cols: ink[mark]!.cols, size: [ink[mark]!.wide, ink[mark]!.rows[1] - ink[mark]!.rows[0]], rows: ink[mark]!.rows, hollow: ink[mark]!.hollow, stroke: ink[mark]!.stroke }])) as Record<'previewable' | 'pushable', { cols: number[]; size: number[]; rows: number[]; hollow?: boolean; stroke?: { runs: number[]; colour: number[] } } | null>
+}
+// one circle at [from, to] px left of the digits, 15 px wide and high
+const inks = (at: { cols: number[]; size: number[] } | null, cols: number[]) => !!at && marksAre([at.cols], [cols]) && at.size[0] == 15 && at.size[1] == 15
+
+test('an item that can be pushed or previewed is marked by a still circle left of its number, in place of its border', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+  await loadAnonymous(page)
+  await page.addScriptTag({ content: `window.__marksLeftOf = ${marksLeftOf.toString()}\nwindow.__stateCircles = ${stateCircles.toString()}` })
+  // as the running mark's row: the plain and the runnable item whose text comes nearest to its
+  // menu, and a second plain one
+  const gaps = await textToMenu(page, [...Array(120).keys()])
+  const at = (runnable: boolean, but = -1) => gaps.reduce((best, gap, at) => (gap.runnable == runnable && at != but && gap.nearest < (gaps[best]?.nearest ?? Infinity) ? at : best), -1)
+  expect([at(false) >= 0, at(true) >= 0, at(false, at(false)) >= 0], 'two plain items and a runnable one with text beside the menu').toEqual([true, true, true])
+  const [plain, runnable, other] = await page.evaluate(positions => positions.map(position => window.__items[position].id), [at(false), at(true), at(false, at(false))])
+  // the two states as their writers set them: `pushable` through item code's setter (the pusher
+  // and the updater mark an item so), `previewable` on the page's own record of the item (the app
+  // alone sets it, when it fetches a preview); a change of the first re-ranks and renders both
+  const mark = (id: string, pushable: boolean, previewable = false) =>
+    page.evaluate(([id, pushable, previewable]) => {
+      const item = window._item(id) as unknown as { pushable: boolean }
+      ;(window.__items.find(item => item.id == id) as unknown as { previewable: boolean }).previewable = previewable
+      item.pushable = !pushable
+      item.pushable = pushable
+    }, [id, pushable, previewable] as const)
+  const look = async (id: string) => ({ ...(await runningLook(page, id)), ...(await circlesOf(page, id)) })
+  const marked = async (id: string, pushable: boolean, previewable = false) => {
+    await mark(id, pushable, previewable)
+    await expect
+      .poll(() => page.evaluate(id => (box => box && ['pushable', 'previewable'].map(state => box.classList.contains(state)))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)), id), { timeout: 30_000 })
+      .toEqual([pushable, previewable])
+    return look(id)
+  }
+  const run = async (id: string, running: boolean) => {
+    await page.evaluate(([id, running]) => void ((window._item(id) as unknown as { running: boolean }).running = running), [id, running] as const)
+    await expect.poll(() => page.evaluate(([id, running]) => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]${running ? '.running' : ':not(.running)'}`), [id, running] as const), { timeout: 30_000 }).toBe(true)
+  }
+  const open = async (id: string) => {
+    await page.evaluate(id => void (location.hash = id), id)
+    await expect.poll(() => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"].target`), id), { timeout: 30_000 }).toBe(true)
+  }
+  // a window without the focus, as the app learns of it (its window's blur and document.hasFocus),
+  // and the opacity it gives the items: whether the list is shown focused, and each item's
+  const away = (gone: boolean) =>
+    page.evaluate(gone => {
+      if (gone) Object.defineProperty(document, 'hasFocus', { value: () => false, configurable: true })
+      else delete (document as unknown as { hasFocus?: unknown }).hasFocus
+      window.dispatchEvent(new Event(gone ? 'blur' : 'focus'))
+    }, gone)
+  const faded = (id: string) =>
+    page.evaluate(id => {
+      const opacity = (box: Element | null) => (box ? getComputedStyle(box.closest('.super-container')!).opacity : null)
+      return [
+        document.querySelector('.items')!.classList.contains('focused'),
+        opacity(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)),
+        opacity(document.querySelector('.column:not(.hidden) .super-container:not(.hidden) > .container:not(.pushable):not(.previewable):not(.target):not(.target_context):not(.editing)')), // an item shown in no state
+      ]
+    }, id)
+
+  // an item whose ONLY border was the state's: it has none now, and its menu stands where a plain
+  // item's does (a bordered item's is 1 px further in); the circle is there all the same
+  const apart = await marked(other, true)
+  expect([apart.bordered, apart.border, apart.inset], 'pushable alone: no border class, the transparent border of a plain item, the menu not inset').toEqual([false, 'rgba(0, 0, 0, 0)', ['-1px', '-1px']])
+  const apartInk = await circlesInk(page, other)
+  expect([inks(apartInk.pushable, [18, 3]), apartInk.previewable, marksAre(apart.circles?.box ?? [], [[21, 4]])], `and its circle: 15 px of orange ink in the 18 px left of the digits, in a box with 3 px of air on its left (${JSON.stringify([apartInk, apart.circles?.box])})`).toEqual([true, null, true])
+  // in a window without the focus every item dims to 0.75, and one that can be pushed or
+  // previewed dims like the others (until 2026-11-19 it stayed at 0.95, which kept its border
+  // readable: without the border it read as one oddly bright item)
+  await away(true)
+  await expect.poll(() => faded(other), { message: 'unfocused: the item that can be pushed dims as a plain one does', timeout: 15_000 }).toEqual([false, '0.75', '0.75'])
+  const pink = await marked(other, false, true)
+  expect([pink.bordered, pink.border, pink.inset], 'previewable alone: the same').toEqual([false, 'rgba(0, 0, 0, 0)', ['-1px', '-1px']])
+  expect(await faded(other), 'unfocused: the item that can be previewed dims as a plain one does').toEqual([false, '0.75', '0.75'])
+  await away(false)
+  await expect.poll(() => faded(other), { message: 'focused again: nothing dims', timeout: 15_000 }).toEqual([true, '1', '1'])
+  // (its ink read in the focused window: unfocused, the menu is at 0.5 and the item at 0.75)
+  const pinkInk = await circlesInk(page, other)
+  expect([inks(pinkInk.previewable, [18, 3]), pinkInk.pushable], `with its own circle, pink (${JSON.stringify(pinkInk)})`).toEqual([true, null])
+  await mark(other, false) // (in no state the item goes back to its rank, which need not be on the page)
+
+  // the item the address names (its place in the page is then the same in every state). No state:
+  // no circle, no room, and the text within 14 px of the digits
+  await open(plain)
+  const idle = await marked(plain, false)
+  expect([idle.circles, idle.ring, idle.marks, idle.room], 'an item in neither state').toEqual([null, null, [], ['0px', '0px']])
+  expect([idle.text > 1, idle.text < 14], `its first line runs up to its number (${idle.text})`).toEqual([true, true])
+
+  // pushable: one still ring, 15 px in the 18 px left of the digits, an image of the stroke the
+  // running mark has (2 px, in the orange the border had), on the baseline of the number's line;
+  // its room the placeholder's padding, which the text keeps out of; the menu not resized; the
+  // border as it was
+  const pushed = await marked(plain, true)
+  const pushedInk = await circlesInk(page, plain)
+  expect([pushed.circles, inks(pushedInk.pushable, [18, 3]), pushedInk.previewable], `the circle of an item that can be pushed, by its ink (${JSON.stringify(pushedInk)})`).toMatchObject([ONE, true, null])
+  expect(marksAre(pushed.circles!.box, [[21, 4]]), `in the 18 px left of the digits, the image's 3 px of air on its left (${JSON.stringify(pushed.circles!.box)})`).toBe(true)
+  expect([pushed.ring, pushed.marks, pushed.room, pushed.placeholder], 'no ring; the room is the placeholder\'s padding, and the menu is not resized').toEqual([null, [], ['0px', '18px'], idle.placeholder])
+  expect(pushed.text, 'the text, which reached into those 18 px, keeps out of them').toBeGreaterThanOrEqual(18 + 1)
+  expect([pushed.border, BORDERS.includes(pushed.border), pushed.overlay], 'the border is as it was, not the state\'s').toEqual([idle.border, false, 'hidden'])
+  // the item the address names is the page's target, and a target stays at 0.95 in a window
+  // without the focus, in a state too (the rule's other half, as it was)
+  await away(true)
+  await expect.poll(() => faded(plain), { message: 'unfocused: the target, which can be pushed, at 0.95', timeout: 15_000 }).toEqual([false, '0.95', '0.75'])
+  await away(false)
+  await expect.poll(() => faded(plain), { timeout: 15_000 }).toEqual([true, '1', '1'])
+  // gone with the state, and the height the layout holds for the item with it
+  await mark(plain, false)
+  await expect.poll(() => look(plain), { message: 'no longer pushable: everything as before, the stored height too', timeout: 15_000 }).toEqual(idle)
+
+  // previewable: the same in the pink of its border; both: two rings in one box, the previewable
+  // one at its left end and the pushable one nearest the number, and the room of both
+  const previewed = await marked(plain, false, true)
+  const previewedInk = await circlesInk(page, plain)
+  expect([previewed.circles, inks(previewedInk.previewable, [18, 3]), previewedInk.pushable], `the circle of an item that can be previewed, by its ink (${JSON.stringify(previewedInk)})`).toMatchObject([ONE, true, null])
+  expect([marksAre(previewed.circles!.box, [[21, 4]]), previewed.room, previewed.text >= 18 + 1, previewed.border], `in the same 18 px (${JSON.stringify(previewed.circles!.box)}), kept free; the border as it was`).toEqual([true, ['0px', '18px'], true, idle.border])
+  const both = await marked(plain, true, true)
+  const bothInk = await circlesInk(page, plain)
+  expect([both.circles, inks(bothInk.previewable, [36, 21]), inks(bothInk.pushable, [18, 3]), bothInk.previewable?.rows, bothInk.pushable?.rows], `both states: the previewable circle left of the pushable one, 3 px apart, on the same rows (${JSON.stringify(bothInk)})`).toMatchObject([{ ...ONE, width: '36px' }, true, true, bothInk.pushable?.rows, bothInk.previewable?.rows])
+  // and HOLLOW, each in its border's colour (the review's round 1): the middle of each circle is
+  // empty, as the running ring's is, and across its middle line its stroke is two runs of 2 px,
+  // the left and the right, whose strongest pixel is its own colour within a few levels (#a52 for
+  // the pushable circle, not the push button's brighter #f84; #c7c for the previewable one), so
+  // that a filled disk, or another orange of the same bounds, fails
+  const COLOURS = { previewable: [204, 119, 204], pushable: [170, 85, 34] } // #c7c and #a52
+  const tinted = (colour: number[] | undefined, want: number[]) => !!colour && colour.every((channel, at) => Math.abs(channel - want[at]) <= 12)
+  expect((['previewable', 'pushable'] as const).map(mark => [bothInk[mark]?.hollow, bothInk[mark]?.stroke?.runs, tinted(bothInk[mark]?.stroke?.colour, COLOURS[mark])]), `both circles hollow, each a stroke of 2 px on either side of its middle in its own colour (${JSON.stringify((['previewable', 'pushable'] as const).map(mark => [bothInk[mark]?.hollow, bothInk[mark]?.stroke]))})`).toEqual([[true, [2, 2], true], [true, [2, 2], true]])
+  expect([marksAre(both.circles!.box, [[39, 4]]), both.room, both.text >= 36 + 1, both.placeholder, both.border], `in 36 px (${JSON.stringify(both.circles!.box)}), kept free`).toEqual([true, ['0px', '36px'], true, idle.placeholder, idle.border])
+
+  // and running: the ring left of the circles, 3 px from them, and the room of all three; its
+  // note's place is the menu's, as without the circles (the ring is moved by its margins: a
+  // translate would make it the containing block of its note)
+  await run(plain, true)
+  const three = await marked(plain, true, true)
+  expect([marksAre(three.marks, [[54, 39]]), marksAre(three.circles!.box, [[39, 4]]), three.room, three.text >= 54 + 1], `running in both states: the ring left of the two circles (${JSON.stringify(three.marks)}, ${JSON.stringify(three.circles!.box)})`).toEqual([true, true, ['0px', '54px'], true])
+  expect(three.ring, 'the ring is the running mark still, and turns').toEqual(['15px', 'solid', '2px', BLUE, '50%', true])
+  expect(await page.evaluate(id => getComputedStyle(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index > .running-mark`)!).translate, plain), 'the ring is not translated').toBe('none')
+  const two = await marked(plain, true)
+  expect([marksAre(two.marks, [[36, 21]]), marksAre(two.circles!.box, [[21, 4]]), two.room], `running and pushable: the ring left of the circle (${JSON.stringify(two.marks)})`).toEqual([true, true, ['0px', '36px']])
+  await run(plain, false)
+  await mark(plain, false)
+  await expect.poll(() => look(plain), { message: 'neither running nor in a state: everything as before, the stored height too', timeout: 15_000 }).toEqual(idle)
+
+  // beside a run button: the button moves aside by the circle's room without the menu resizing,
+  // and the text keeps out of where it then stands
+  await open(runnable)
+  const still = await marked(runnable, false)
+  const natural = await fiveDigits(page, runnable)
+  expect([still.circles, still.marks, still.run![0], natural.circles], 'a run button stands right before the number\'s box').toEqual([null, [], 4, null])
+  const moved = await marked(runnable, true)
+  expect([marksAre(moved.circles!.box, [[21, 4]]), moved.run, moved.room, moved.placeholder], `pushable: the circle between the run button and the digits (${JSON.stringify(moved.circles!.box)}), the button 18 px further left, the menu not resized`).toEqual([true, still.run!.map(edge => edge + 18), ['0px', '18px'], still.placeholder])
+  expect(moved.text, 'and the text keeps out of where the button now stands').toBeGreaterThanOrEqual(moved.run![1] + 1)
+
+  // beside a mark of item code, which says its room (22 px here, as in the running mark's row):
+  // the circle stands left of it, and while the item runs the ring left of the circle. The same
+  // beside a number beyond four digits, whose menu keeps its natural width
+  const box = `.container[data-item-id="${runnable}"]`
+  await page.addStyleTag({ content: `${box} { --item-mark-room: 22px }\n${box} .item-menu > .button.index::before { content: ''; flex: none; width: 19px; height: 15px; margin: 0 3px 0 -22px; background: #f5e389 }` })
+  const beside = await marked(runnable, true)
+  expect([marksAre(beside.marks, [[22, 4]]), marksAre(beside.circles!.box, [[43, 25]]), beside.run, beside.room, beside.placeholder], `a mark of item code nearest the digits and the circle left of it (${JSON.stringify(beside.marks)}, ${JSON.stringify(beside.circles!.box)})`).toEqual([true, true, still.run!.map(edge => edge + 40), ['22px', '18px'], still.placeholder])
+  const five = await fiveDigits(page, runnable)
+  expect([five.menu, marksAre(five.marks, [[22, 4]]), marksAre(five.circles!.box, [[43, 25]]), five.run], `five digits: the menu's natural width, the same marks (${JSON.stringify(five.marks)}, ${JSON.stringify(five.circles!.box)})`).toEqual([natural.menu, true, true, 4 + 40])
+  await run(runnable, true)
+  const all = await marked(runnable, true)
+  expect([marksAre(all.marks, [[22, 4], [58, 43]]), marksAre(all.circles!.box, [[43, 25]]), all.run, all.room, all.placeholder], `and running: the ring left of the circle (${JSON.stringify(all.marks)}), the run button left of all three`).toEqual([true, true, still.run!.map(edge => edge + 58), ['22px', '36px'], still.placeholder])
+  expect(all.text, 'and the text keeps out of it all').toBeGreaterThanOrEqual(all.run![1] + 1)
+  const fiveAll = await fiveDigits(page, runnable)
+  expect([fiveAll.menu, marksAre(fiveAll.marks, [[22, 4], [58, 43]]), marksAre(fiveAll.circles!.box, [[43, 25]]), fiveAll.run], `five digits, running: still the natural width (${JSON.stringify(fiveAll.marks)})`).toEqual([natural.menu, true, true, 4 + 58])
+  await run(runnable, false)
+  await marked(runnable, false)
+
+  // THE RE-WRAP (the circles' code review, 2026-11-19: the movement is the owner's to accept). While
+  // a circle shows, the text's placeholder is 18 px wider (36 px for both), so at a wrap boundary a
+  // word moves to the next line, the item grows by a line and the next item of its column moves
+  // down; clearing the state reverses it. A local item whose one line of text ends 8 px before the
+  // placeholder (a filler, an inline box, made as wide as puts it there), held first as the page's
+  // target, with the item after it in its column: on each transition the box and the height the
+  // layout holds for the item agree, the item is a line (30 px) taller while it can be pushed, and
+  // its neighbour lower by as much
+  const near = await page.evaluate(async () => ((await window._create('#e2e_rewrap its one line ends just before the number <span class="e2e-filler" style="display: inline-block"></span> wrapped')) as unknown as { id: string }).id)
+  await open(near)
+  const filler = await page.evaluate(async id => {
+    const shown = () => document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+    shown().scrollIntoView({ block: 'center' })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const box = shown()
+    const [word, spacer] = [box.querySelector('.e2e-filler')!.nextSibling!, box.querySelector('.item > [id^="menu-"]')!]
+    const range = document.createRange()
+    range.selectNodeContents(word)
+    return Math.floor(spacer.getBoundingClientRect().left - range.getBoundingClientRect().right) - 8
+  }, near)
+  await page.addStyleTag({ content: `.e2e-filler { width: ${filler}px }` })
+  // the item's box, the height the layout holds for it, the lines of its text, how far the word
+  // after the filler ends before the placeholder, and where the next item of its column begins,
+  // below the item's own top (and in the window)
+  const wrapped = () =>
+    page.evaluate(async id => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve))))
+      const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+      const own = box.closest('.super-container')!
+      const after = [...own.parentElement!.querySelectorAll(':scope > .super-container:not(.hidden)')]
+      const next = after[after.indexOf(own) + 1]!.querySelector(':scope > .container')!
+      const [word, spacer] = [box.querySelector('.e2e-filler')!.nextSibling!, box.querySelector('.item > [id^="menu-"]')!]
+      const range = document.createRange()
+      range.selectNodeContents(word)
+      // (the lines of its text: the tops of its text's boxes, the empty filler's left out)
+      const texts: DOMRect[] = []
+      const walker = document.createTreeWalker(box.querySelector('.item')!, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent!.trim()) texts.push(...(text => (range => (range.selectNodeContents(text), [...range.getClientRects()]))(document.createRange()))(node))
+      const lines = new Set(texts.filter(line => line.width).map(line => Math.round(line.top))).size
+      return {
+        height: box.offsetHeight,
+        stored: (window.__items.find(item => item.id == id) as unknown as { height: number }).height,
+        lines,
+        gap: Math.round(spacer.getBoundingClientRect().left - range.getBoundingClientRect().right),
+        next: Math.round(next.getBoundingClientRect().top - box.getBoundingClientRect().top),
+        at: Math.round(next.getBoundingClientRect().top),
+        neighbour: next.getAttribute('data-item-id'), // (the same item on every reading: the premise that it is the one that moved)
+      }
+    }, near)
+  const flat = await wrapped()
+  expect([flat.lines, flat.stored, flat.gap > 0 && flat.gap < 18, flat.next > flat.height, !!flat.neighbour], `the premise: one line ending within the 18 px a circle takes (8 px before the placeholder, give or take the rounding of a place), the stored height the box's, the neighbour below (${JSON.stringify(flat)})`).toEqual([1, flat.height, true, true, true])
+  await mark(near, true)
+  await expect.poll(wrapped, { message: 'pushable: the word wrapped, the item a line taller and its stored height that of its box, the neighbour as much lower', timeout: 15_000 }).toMatchObject({ lines: 2, height: flat.height + 30, stored: flat.height + 30, next: flat.next + 30, neighbour: flat.neighbour })
+  await mark(near, false)
+  await expect.poll(wrapped, { message: 'no longer pushable: one line again, the height and the stored height as they were, the neighbour back', timeout: 15_000 }).toMatchObject({ lines: 1, height: flat.height, stored: flat.height, gap: flat.gap, next: flat.next, neighbour: flat.neighbour })
+})
+
+// A PRESS ON A STATE CIRCLE, WITH THE MINDBOX FOCUSED, DOES WHAT ONE AT THAT POINT OF A PLAIN ITEM'S
+// TEXT DID. The ring's press takes no focus (its note is shown and taken away with the focus where
+// it is); a circle shows nothing and is no control of its own: it is the item's menu's ::before,
+// with no listener, so a press on it is the item's. Read with the MindBox focused, on the first
+// item of the anonymous corpus, which is plain (no run button, no ring, no sparkle) and whose text
+// stands at that point: a press at the middle of its pushable circle, and the same press at the
+// same point of the same item in no state, for a click at a desktop's width and for a tap in a
+// phone's window, one page each, the starting state restored after each press. At a desktop's
+// width the click is the item's: its editor opens and takes the focus. In a phone's window the
+// browser hands the tap to the NUMBER, 6.5 px from that point (Chromium's touch adjustment: the
+// nearest element that takes clicks within the finger's area, the number's box beginning 4 px
+// before the digits), which selects the item and takes the focus out of the MindBox: with the
+// circle as without it. (Where a control stood at that point the circle changes what a press
+// there does, as the ring and the sparkle do: a run button and the ring move left by the circles'
+// room. That is the circles' row's.)
+test('a press on a state circle, with the MindBox focused, is what a press at that point of a plain item was', async ({ browser }) => {
+  for (const touch of [false, true]) {
+    const context = await browser.newContext(touch ? { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } : { viewport: { width: 700, height: 900 } })
+    const page = await context.newPage()
+    await loadAnonymous(page)
+    const id = await firstShown(page)
+    const box = `.column:not(.hidden) .container[data-item-id="${id}"]`
+    // whether the item's editor is open, where the focus is, and the history's index
+    const state = () =>
+      page.evaluate(
+        ([box, id]) => ({
+          editing: !!document.querySelector(`${box}.editing`),
+          focus: (focused => (focused == 'textarea-' + id ? 'its editor' : focused == 'textarea-mindbox' ? 'the MindBox' : focused || 'none'))(document.activeElement?.id ?? ''),
+          entry: (window as unknown as { _history_index: number })._history_index,
+        }),
+        [box, id] as const,
+      )
+    const pressed = async (pushable: boolean) => {
+      await page.evaluate(([id, pushable]) => void ((window._item(id) as unknown as { pushable: boolean }).pushable = pushable), [id, pushable] as const)
+      await expect.poll(() => page.evaluate(([box, pushable]) => !!document.querySelector(`${box}${pushable ? '.pushable' : ':not(.pushable)'}`), [box, pushable] as const), { timeout: 30_000 }).toBe(true)
+      // the point: the middle of the pushable circle, whose ink is the 15 px that end 3 px before the
+      // digits, on the number's middle line; what a hit there answers; and a listener of the row's,
+      // which sees the click first, for what the click is delivered to
+      const spot = await page.evaluate(async box => {
+        document.querySelector(box)!.scrollIntoView({ block: 'center' })
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve))))
+        const index = document.querySelector(`${box} .item-menu > .index`) as HTMLElement
+        const digits = document.createRange()
+        digits.selectNodeContents(index.firstChild!)
+        const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
+        const [x, y] = [number.left - 3 - 7.5, (own.top + own.bottom) / 2]
+        const hit = document.elementFromPoint(x, y) as HTMLElement
+        const where = (target: HTMLElement) => (target.closest('.item-menu') ? (target.closest('.index') ? 'number' : 'menu') : target.closest('a, mark, button, input') ? 'control' : target.closest('.item') ? 'text' : target.className)
+        delete (window as unknown as { __clicked?: string }).__clicked
+        window.addEventListener('click', e => void ((window as unknown as { __clicked: string }).__clicked = where(e.target as HTMLElement)), { capture: true, once: true })
+        return { x, y, hit: where(hit) }
+      }, box)
+      await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
+      const before = await state()
+      expect(before, 'the premise: the MindBox has the focus, and no editor is open').toMatchObject({ editing: false, focus: 'the MindBox' })
+      if (touch) await page.touchscreen.tap(spot.x, spot.y)
+      else await page.mouse.click(spot.x, spot.y)
+      // the outcome as it shows, polled as the whole state, so that a press that did otherwise says
+      // what it did: at a desktop's width the item's editor, with the focus, and no history entry
+      // more; in a phone's window a select, a history entry more, the focus out of the MindBox
+      await expect
+        .poll(state, { message: `${touch ? 'a tap in a phone\'s window' : 'a click'} at that point${pushable ? ', on the circle' : ', on the text'}: its outcome`, timeout: 10_000 })
+        .toEqual(touch ? { editing: false, focus: 'none', entry: before.entry + 1 } : { editing: true, focus: 'its editor', entry: before.entry })
+      const after = await state()
+      const found = { hit: spot.hit, clicked: await page.evaluate(() => (window as unknown as { __clicked?: string }).__clicked ?? null), editing: after.editing, focus: after.focus, selected: after.entry != before.entry }
+      // the starting state again: the editor closed, Back to the entry the select left, no state
+      if (after.editing) {
+        await page.keyboard.press('Escape')
+        await expect.poll(async () => (await state()).editing, { timeout: 15_000 }).toBe(false)
+      }
+      if (after.entry != before.entry) {
+        await page.goBack()
+        await expect.poll(async () => (await state()).entry, { timeout: 15_000 }).toBe(before.entry)
+      }
+      if (pushable) await page.evaluate(id => void ((window._item(id) as unknown as { pushable: boolean }).pushable = false), id)
+      return found
+    }
+    const [plain, circled] = [await pressed(false), await pressed(true)]
+    const how = touch ? 'a tap in a phone\'s window' : 'a click'
+    expect([plain.hit, circled.hit], `${how}: the spot is the item's text, and the circle's (the menu's) when it can be pushed`).toEqual(['text', 'menu'])
+    const outcome = ({ editing, focus, selected }: typeof plain) => ({ editing, focus, selected })
+    expect(outcome(circled), `${how} on the circle does what one at that point of the text did (${JSON.stringify([plain, circled])})`).toEqual(outcome(plain))
+    if (touch) expect([plain.clicked, circled.clicked, outcome(circled)], `${how}: delivered to the number, with the circle as without it, which selects the item and takes the focus out of the MindBox`).toEqual(['number', 'number', { editing: false, focus: 'none', selected: true }])
+    else expect([plain.clicked, circled.clicked, outcome(circled)], `${how}: delivered where it is made, to the item's text and to the circle (the menu), and the item's editor opens and takes the focus`).toEqual(['text', 'menu', { editing: true, focus: 'its editor', selected: false }])
+    await context.close()
+  }
 })
