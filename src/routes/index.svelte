@@ -3014,6 +3014,7 @@
   let finalizeStateOnEditorChange = false
   let replaceStateOnEditorChange = false
   let ignoreStateOnEditorChange = false
+  let launchStateOnEditorChange = false // the launch's own first view (initialize): see record in onEditorChange
   let hideIndex = 0
   let hideIndexFixed = 0
   let hideIndexMinimal = 0
@@ -3705,6 +3706,7 @@
       const text = editorText
       const force = forceNewStateOnEditorChange
       const replace = replaceStateOnEditorChange
+      const launch = launchStateOnEditorChange
       const view = () => ({
         index: undefined, // set by pushState or replaceState
         editorText,
@@ -3735,7 +3737,12 @@
         if (text != shown?.editorText || orderHash != shown?.orderHash || fragmentPosition) {
           // need to update history
           // console.debug(history.state.final ? "push" : "replace", state);
-          const push = positionUnknown ? text != shown?.editorText : shown?.final
+          // a LAUNCH on a final kept entry of its own query (a reload on the full list: the launch's first view
+          // is the empty query) takes that entry over, replaced where it is by the view loaded, and the entries
+          // ahead stay. Until 2026-11-18 it pushed the view after the entry whenever the order loaded differed
+          // from the one the entry recorded (the session's soft touches are gone after a reload, an item has
+          // changed since): a second entry of the same query, whose Back "returned" to the same list (the owner)
+          const push = positionUnknown ? text != shown?.editorText : shown?.final && !(launch && text == shown?.editorText)
           if (force || (push && !replace)) pushState(state ?? view())
           else replaceState(state ?? view())
         }
@@ -3760,6 +3767,7 @@
     finalizeStateOnEditorChange = false // processed above
     replaceStateOnEditorChange = false // processed above
     ignoreStateOnEditorChange = false // processed above
+    launchStateOnEditorChange = false // processed above
 
     // invoke _on_search on all _listen items, but only if editor text was modified (i.e. not for ranking changes)
     if (editorTextModified) {
@@ -9612,6 +9620,7 @@
     retireReturn()
     sessionEntryKey = place.held ? historyKey() : place.deferred && launchAnchor(launchEntry, historyOwner) ? launchKey : null
     finalizeStateOnEditorChange = true // make initial empty state final
+    launchStateOnEditorChange = true // the launch's own view (see record in onEditorChange)
     regroupTimeRowsPending = regroupTimeRowsForced = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
     onEditorChange('') // initial sorting
     // the label tree of every item (the tag parents, ancestries, adoptions and closures at once)
