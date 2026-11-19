@@ -1364,14 +1364,18 @@ test('a delegation enqueues one command document, marks the item, and moves it t
 // first, and the server's first revision brings a change made elsewhere, whose re-ranking pushes a second
 // entry of the same empty query in between; a row's click then replaced that entry, so the first one,
 // its 0 intact, was one Back away (a row's click is now the app's select, in an entry of its
-// own: Back from the item is the re-ranking's entry). The row's own account holds the pinned widgets, a tall pinned item
+// own). Since 2026-11-19 that re-ranking is written over the launch's own entry (`first` in index.svelte's
+// onEditorChange: no second entry of the same query), so the first view is ONE entry, which the scroll
+// listener's write reaches, and Back from the item is that entry; the first entry that holds no position is
+// the one a launch with a query in the address leaves (the last phase). The row's own account holds the pinned widgets, a tall pinned item
 // (the item a row names is ranked below the pinned ones, out of view from the header), one todo and one
 // item rewritten behind the app while the page is closed. The launch is a returning device's (a new tab
 // of the same profile), its index build stalled through the app's seam (`_initialize_stall_ms`, as the
 // startup-race row of lifecycle.spec.ts does) so that the server's revision is normally received before
-// the first view is laid out. The stall delays the index build and cannot fix when the server answers, so
-// the row checks its premise at the launch (entry 0 without the header's position) instead of trusting
-// the timing. A launch with a query in the address leaves the
+// the first view is laid out. The stall delays the index build and cannot fix when the server answers, and
+// since 2026-11-19 the row no longer depends on it nor establishes it: the re-ranking adds no entry whether
+// the revision arrives before the first position is written or after (the stall stays so that the change
+// arrives around the launch, as on a real account, not seconds later). A launch with a query in the address leaves the
 // same first entry behind (the query's entry is pushed before the listener's write): its Back is the
 // row's last phase
 // what the two launch rows below share: their account's making, a launch, and what they read off a page
@@ -1442,21 +1446,20 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await rewriteText(elsewhereId, text => text + ', changed elsewhere', LAUNCH_SECRET)
 
   // (a) the launch: the change made elsewhere arrives with the server's revision and re-ranks the page
-  // before the first view's position is recorded; the page shows the header
+  // (whether before or after the first view's position is recorded is not established by this row, and
+  // since 2026-11-19 it does not matter: the re-ranking is written over the launch's entry); the page
+  // shows the header
   const launched = await launch(context, '/', 2_500)
   await expect.poll(() => launched.evaluate(name => window._item(name, true)?.text ?? null, ELSEWHERE), { timeout: 30_000 }).toContain('changed elsewhere')
   await at(launched, () => header(launched), 'the launch leaves the page at the header')
   await recorded(launched)
-  expect(await entries(launched), "the re-ranking's entry, a second one of the empty query").toEqual([2, 1])
-  // the row's premise, checked (review 0): the header is below the page's top, and entry 0 missed the scroll
-  // listener's write: 0 on the app before the change, no position on this one. An entry 0 that holds the
-  // header's offset means the launch recorded its position BEFORE the re-ranking pushed: the timing window
-  // was missed, and Back below would pass on either build
+  // the re-ranking is written over the launch's own entry, whenever it comes (until 2026-11-19 it pushed a
+  // second entry of the empty query, before the first one's position was recorded)
+  expect(await entries(launched), "one entry: the re-ranking is written over the launch's own").toEqual([1, 0])
   expect(await header(launched), 'the header is below the top of the page').toBeGreaterThan(2)
-  expect(await launched.evaluate(() => (window as any)._history[0].scrollPosition ?? 0), 'entry 0 missed the scroll write: the re-ranking pushed before the first position was recorded').toBe(0)
   // (b) the row's click (at its right end, past its text) selects the item and scrolls to it, in an entry
   // of its own (the app's select, as a click on an item's number; the widget used to set the box,
-  // which replaced the re-ranking's entry: it is not final); Back is the first view, at the header. The
+  // which pushed from the launch's entry too: it is final); Back is the first view, at the header. The
   // entry that recorded no position and restores to the header is the one of phase (c)
   const row = todoRow(launched)
   await expect(row).toBeVisible()
@@ -1466,11 +1469,11 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await expect.poll(async () => (await top(launched)) - (await header(launched)), { message: 'the click scrolled to the item, out of view from the header', timeout: 10_000 }).toBeGreaterThan(300)
   await recorded(launched)
   const itemTop = await top(launched)
-  expect(await entries(launched), "the click's own entry: the first view is one Back away").toEqual([3, 2])
+  expect(await entries(launched), "the click's own entry: the first view is one Back away").toEqual([2, 1])
   await launched.goBack()
   await expect.poll(() => box(launched), { timeout: 10_000 }).toBe('')
   await at(launched, () => header(launched), 'Back returns to where the launch left the page')
-  expect(await entries(launched)).toEqual([3, 1])
+  expect(await entries(launched)).toEqual([2, 0])
   // Forward and Back again, the first view's position recorded by now (the restore's own scroll)
   await recorded(launched)
   await launched.goForward()
@@ -1489,23 +1492,19 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   await recorded(launched)
   await launched.goBack()
   await at(launched, async () => 0, 'Back returns to the recorded top')
-  // one more Back is the first view's own entry, which the launch wrote before the header was on the page
-  // and which this tab has not been on since: it holds NO position (not a zero), and restores to the header,
-  // away from the top the page is at
-  await recorded(launched)
-  expect(await launched.evaluate(() => [(window as any)._history[0].editorText, (window as any)._history[0].scrollPosition]), 'entry 0 recorded no position').toEqual(['', undefined])
-  await launched.goBack()
-  await at(launched, () => header(launched), 'Back again reaches the first entry, at the header')
-  expect(await entries(launched)).toEqual([3, 0])
+  expect(await entries(launched)).toEqual([2, 0])
   await launched.close()
 
   // (c) a launch with a query in the address: the query's entry is pushed over the first one, and the
-  // page scrolls to the item it names; Back is the first view, which this launch never showed, at the header
+  // page scrolls to the item it names; Back is the first view, which this launch never showed, at the header:
+  // its entry, which the launch wrote before the header was on the page and which this tab has not been on
+  // since, holds NO position (not a zero), and restores to the header
   const named = await launch(context, '/' + TODO)
   await expect.poll(() => box(named), { timeout: 10_000 }).toBe(TODO + ' ')
   await expect.poll(async () => (await top(named)) - (await header(named)), { message: 'the launch scrolled to the named item', timeout: 10_000 }).toBeGreaterThan(300)
   await recorded(named)
   expect(await entries(named), "the address's query in a second entry").toEqual([2, 1])
+  expect(await named.evaluate(() => [(window as any)._history[0].editorText, (window as any)._history[0].scrollPosition]), 'entry 0 recorded no position').toEqual(['', undefined])
   await named.goBack()
   await expect.poll(() => box(named), { timeout: 10_000 }).toBe('')
   await at(named, () => header(named), "Back from the address's query shows the first view at the header")
@@ -1513,8 +1512,10 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
 
 // BACK AFTER A RELOAD AND A TODO ROW'S CLICK (the owner, 2026-11-17, on the fix the row above came with:
 // after a reload, a todo row's click and Back logged "ignoring onPopState for current index", and the
-// page stayed on the item). A page that a change made elsewhere has re-ranked sits on a second entry of the
-// empty query, which is not final: a reload keeps that entry in the browser, with its state and its index
+// page stayed on the item). A page that a change made elsewhere had re-ranked sat on a second entry of the
+// empty query, which is not final (since 2026-11-19 such a re-ranking is written over the launch's own
+// entry, and the row makes its second entry by a query that names nothing, set and cleared again; the
+// change then re-ranks the view in that entry): a reload keeps that entry in the browser, with its state and its index
 // 1, and the row's click replaced it (the click is now the app's select, in an entry of its
 // own after the kept one, and the first view's kept entry is two Backs away). A session that numbered its entries from 0 again made that entry its
 // entry 0, so Back onto the first view's kept entry, index 0 too, read as the current one: the handler
@@ -1537,10 +1538,17 @@ test("after a reload on a re-ranked first view, a todo row's click and Back retu
   await tab.evaluate(y => document.body.scrollTo(0, y), left)
   await recorded(tab)
   expect(await top(tab), 'the first view, left below the header').toBe(left)
-  // the change made elsewhere re-ranks the first view: a second entry of the empty query, not final
+  // a second entry of the first view, not final: a query that names nothing, set from the blurred box and
+  // cleared again
+  await tab.evaluate(() => void (window as any).MindBox.set('e2e_reload_nothing'))
+  await expect.poll(() => entries(tab), { message: 'the query that names nothing, in an entry of its own', timeout: 10_000 }).toEqual([2, 1])
+  await tab.evaluate(() => void (window as any).MindBox.set(''))
+  await expect.poll(() => tab.evaluate(() => [history.state.index, history.state.editorText, history.state.final]), { message: 'cleared again in the same entry', timeout: 10_000 }).toEqual([1, '', false])
+  expect((await tab.evaluate(() => (window as any)._history[0].scrollPosition)) as number, "the first view's own entry holds where it was left").toBe(left)
+  // the change made elsewhere re-ranks the first view, in that entry (it is not final)
   await rewriteText(elsewhereId, text => text + ', changed elsewhere', RELOAD_SECRET)
   await expect.poll(() => tab.evaluate(name => window._item(name, true)?.text ?? null, '#e2e_reload_elsewhere'), { timeout: 30_000 }).toContain('changed elsewhere')
-  expect(await entries(tab), "the re-ranking's entry").toEqual([2, 1])
+  expect(await entries(tab), 'the re-ranking adds no entry').toEqual([2, 1])
   await recorded(tab)
   // the reload: the page starts on the entry the browser kept, at the header
   await tab.reload()
@@ -1708,12 +1716,28 @@ test("after a sign-out in the same tab, Back onto the account's entries keeps it
   const links = page.locator('.history-item') // the list above the header
   // the browser's state and the session's place: the index, and the position its entry there recorded
   const place = () => page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_index, (window as any)._history[(window as any)._history_index].scrollPosition])
-  // Back to the visitor's first view: where it was left, the typed query's link above the header
+  // Back to the visitor's first view, at the position ITS ENTRY HOLDS, the typed query's link above the
+  // header. That is the writer's own result, read off the session's copy: the step shows that Back restores
+  // what the entry recorded, not, by a measure of its own, where the visitor left the list (the steps on the
+  // rejected entry below use the row's own position). Since 2026-11-19 the first view stays ONE entry
+  // through the re-ranking of the items created above (written over the launch's own entry), so it is the
+  // entry on which the scrolls of the box's focus and of the typing are written (on the release of the day
+  // before Back returned to `left` here; by the code that re-ranking's own entry took them: not probed).
+  // The view is then put at `left` again for what follows
+  const leftAt = (await page.evaluate(() => (window as any)._history[0].scrollPosition)) as number
   await page.goBack()
   await expect(mindbox(page)).toHaveValue('#e2e_switch_listener')
   await page.goBack()
   await expect(mindbox(page)).toHaveValue('')
-  await at(page, async () => left, "Back to the visitor's first view, where it was left")
+  await at(page, async () => leftAt, "Back to the visitor's first view, at the position its entry holds")
+  await recorded(page)
+  await expect
+    .poll(async () => {
+      await page.evaluate(y => document.body.scrollTo(0, y), left)
+      await page.waitForTimeout(150)
+      return top(page)
+    })
+    .toBe(left)
   await recorded(page)
   await expect(links).toHaveText(['#e2e_switch_listener'])
   expect(await page.evaluate(() => (window as any).__popped ?? []), "no entry of the account's yet").not.toContain(QUERY)

@@ -2853,6 +2853,13 @@
     state.owner = historyOwner
     state.run = sessionRun
     sessionStateHistory.truncate(state.index)
+    // the launch's first view is gone with the branch this push drops (its index in its run, or one before
+    // it): the entry now at that index is another one, and a re-ranking there is that entry's own (review 0
+    // of reload_rerank: Back from the reloaded list onto a tag's view and a click on the tag's own label
+    // open the list again at the same run and index, and the next re-ranking was written over the new entry
+    // as if it were the launch's, so Back skipped the list as it had been opened). A traversal alone drops
+    // nothing, and keeps the mark (see record in onEditorChange)
+    if (launchView && launchView.run === sessionRun && launchView.index >= state.index) launchView = null
     if (state.index == 0) state.intro = true // force intro at 0 index
     // replace invalid history from prior sessions by going back to second entry before replaceState
     // note we can not go back to first entry since that could be chrome://newtab, about:blank, etc
@@ -3015,6 +3022,9 @@
   let replaceStateOnEditorChange = false
   let ignoreStateOnEditorChange = false
   let launchStateOnEditorChange = false // the launch's own first view (initialize): see record in onEditorChange
+  // the entry of the launch's own first view, by its run and index: the one the launch wrote or took over, or
+  // the kept one it left as it was (null when the launch could write none): see record in onEditorChange
+  let launchView: { run: number; index: number } | null = null
   let hideIndex = 0
   let hideIndexFixed = 0
   let hideIndexMinimal = 0
@@ -3707,6 +3717,10 @@
       const force = forceNewStateOnEditorChange
       const replace = replaceStateOnEditorChange
       const launch = launchStateOnEditorChange
+      // whether a traversal's restore has yet to scroll (onPopState): until it does the viewport is the
+      // departed view's, under the index of the entry reached (see record). Read now, with the other flags:
+      // a view kept through a stop's return is written later
+      const restoring = popStateScrollPending
       const view = () => ({
         index: undefined, // set by pushState or replaceState
         editorText,
@@ -3729,7 +3743,16 @@
       const record = (state: ReturnType<typeof view> | null = null) => {
         // the entry of the view shown: the browser's own, or the session's while the browser is on a position
         // that holds none (there a new query is always a new entry, and nothing else is written)
-        const shown: { editorText?: string; orderHash?: string; final?: boolean } | null = positionUnknown
+        const shown: {
+          editorText?: string
+          orderHash?: string
+          final?: boolean
+          run?: number
+          index?: number
+          scrollPosition?: number
+          scrolledToTop?: boolean
+          intro?: boolean
+        } | null = positionUnknown
           ? (sessionStateHistory.get(sessionStateHistoryIndex) ?? { editorText: '' }) // none held yet: the launch's first view
           : ownState()
         // (a native fragment's own position is written whatever the view shown: an alias of the item shown names
@@ -3742,10 +3765,42 @@
           // ahead stay. Until 2026-11-18 it pushed the view after the entry whenever the order loaded differed
           // from the one the entry recorded (the session's soft touches are gone after a reload, an item has
           // changed since): a second entry of the same query, whose Back "returned" to the same list (the owner)
-          const push = positionUnknown ? text != shown?.editorText : shown?.final && !(launch && text == shown?.editorText)
-          if (force || (push && !replace)) pushState(state ?? view())
-          else replaceState(state ?? view())
+          // A RE-RANKING OF THE LAUNCH'S FIRST VIEW is written over that entry too (`first`: the same query,
+          // with the browser on the entry the launch wrote or took over, by its run and index), and the entry
+          // STAYS FINAL: a re-ranking's own view is not final, and written so the next typed query would
+          // replace the full list instead of following it. Until 2026-11-19 the first ranking after a launch
+          // whose order differed pushed one entry after the launch's (measured: item code that touches an item
+          // from `_init` or `_on_welcome` or marks one `pushable` or `running`, a change from another client,
+          // and a ranking that changes nothing of its own where the count of an item's missing tag moves the
+          // item: the launch ranks before the missing tags are counted), so Back from such a reloaded page
+          // first showed the same query again (the owner, on the release of 2026-11-18). The entry is the
+          // launch's while it exists: a push that drops its branch clears the mark (pushState)
+          const same = text == shown?.editorText
+          const first = !launch && !positionUnknown && !!shown?.final && same && !!launchView && shown?.run === launchView.run && shown?.index === launchView.index
+          const push = positionUnknown ? !same : shown?.final && !(launch && same) && !first
+          const next = state ?? view()
+          if (force || (push && !replace)) pushState(next)
+          else {
+            // a re-ranking written over the entry it is on (the same query), proposed while a traversal's
+            // restore had yet to scroll: the position stays the one the entry holds, none included (it is
+            // restored to the header). The view's own is the departed view's viewport, and written over the
+            // entry reached it stayed there whenever that entry was left again before a scroll's write
+            // corrected it (review 0 of reload_rerank: Back onto the launch's entry saved at 700 px from a
+            // view at 200 px, a listener's touch in the frames before the restore scrolls, Forward, Back:
+            // 200 px). The select's write of the position left keeps out of that interval too (selectItem)
+            if (restoring && same) next.scrollPosition = shown?.scrollPosition
+            // and what the launch's entry holds of its own stays with it: only the ranking is new. Its mark
+            // of an Up (scrolledToTop: without it Down no longer undoes the Up that made the entry) and the
+            // narration's saved choice (intro), which a reload that writes nothing leaves on the entry
+            // while the page starts with its own (review 0 of reload_rerank). The launch's take-over of an
+            // entry whose order differs writes its whole view, as before
+            const own = { final: true, intro: shown?.intro ?? next.intro, ...(shown?.scrolledToTop === undefined ? {} : { scrolledToTop: shown.scrolledToTop }) }
+            replaceState(first ? { ...next, ...own } : next)
+          }
         }
+        // the entry of the launch's first view, whatever the launch did to it (none where it could write none:
+        // a traversal while the page was starting has the browser on another position)
+        if (launch) launchView = historyOffEntry() ? null : { run: sessionRun, index: sessionStateHistoryIndex }
       }
       // while a stop's return is on its way (onPopState) the browser is on a position that holds no entry, for
       // a few milliseconds: decided there, a typed update of a query was a PUSH (a new query on such a

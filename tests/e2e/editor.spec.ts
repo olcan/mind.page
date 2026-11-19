@@ -4517,7 +4517,7 @@ test('an item being edited keeps its unsaved text, its selection and its focus t
 // empty query (a launch's first view, a click on the tag the query names) the launch pushed its first view after
 // it, a second entry of the same list, and dropped the entries ahead. It takes that entry over now, replaced
 // where it is by the view it loads (`launch` in index.svelte's onEditorChange); a re-ranking within the session
-// is a new entry as before.
+// is a new entry as before, except on the launch's own first view, whose entry it is written over (`first`).
 // the browser's list of positions by key, the one it is on and what the entry there holds
 const places = (page: Page) =>
   page.evaluate(() => {
@@ -4619,38 +4619,109 @@ test('a reload on a kept first view whose order differs adds no history entry: t
   await shows('#e2e_target ', atTag, 'Back from the first view, as before the reload')
 })
 
-// What the change leaves as it was, and the owner's case without an installed order: a change from another
-// client re-ranks the first view, a new entry of the same list (a re-ranking within the session); Back onto the
-// first view, whose entry holds the order from before the change, and a reload there, which loads the change's
-// order: no entry added, and the change's entry stays ahead (on the app before 2026-11-18 the reload pushed a
-// second first view, which dropped it, and Back from that showed nothing new). After the reload the same kind
-// of change is a new entry again. The item changed is the one ranked last among the unpinned (a new time, its
-// text as it was): it moves up, so the order changes wherever it is shown
-test("a change from another client still adds an entry on the first view, before a reload and after one; a reload on the first view that Back left it on adds none, and the change's entry stays ahead of it", async ({ page }) => {
-  const { recorded, shows } = historyReads(page)
+// A CHANGE FROM ANOTHER CLIENT changes the list's order, a re-ranking within the session. On a final first
+// view that is NOT the launch's (the full list reached by a click on the tag the query names) it is a new entry
+// of the same query, as before. On the LAUNCH'S OWN first view (the entry the launch wrote or took over) it is
+// written over that entry, which stays final, since 2026-11-19 (`first` in index.svelte's onEditorChange): until
+// then it pushed an entry there too, and an order change as a page started left a second entry of the same
+// query after that reload (the next row). And the owner's case of 2026-11-18 without an installed order: Back
+// onto the first view, whose entry holds the order from before the change, and a reload there, which loads the
+// change's order: no entry added, the change's entry stays ahead (the launch takes the entry over), and it
+// still does after a further change, which the reloaded page writes over its own entry (a push dropped it).
+// The item changed is the one ranked last among the unpinned (a new time, its text as it was): it moves up, so
+// the order changes wherever it is shown
+test("a change from another client adds an entry on a final first view that is not the launch's and is written over the launch's own, which stays final and keeps its mark of Up and its narration's choice; a reload on the first view that Back left it on adds none, and the change's entry stays ahead of it, through a change after the reload too; a list opened again at the launch entry's index is not the launch's", async ({ page }) => {
+  const reads = historyReads(page)
+  const { recorded, shows } = reads
   await loadAdmin(page)
   const top = await headerTop(page)
   await shows('', top, 'the first view at the header')
   await recorded()
-  const changedElsewhere = async (message: string) => {
-    const before = await places(page)
+  const change = async () => {
     const saved = await page.evaluate(() => [...(window as any).__items].reverse().find((item: any) => !item.pinned && !item.log && item.savedId).savedId as string)
     await firestore().collection('items').doc(saved).update({ time: Date.now() })
+  }
+  // on the launch's own first view: the entry where it was, final, of the order the change gave
+  const changedInPlace = async (message: string) => {
+    const before = await places(page)
+    await change()
+    await expect.poll(async () => (await places(page)).state.orderHash, { message: `${message}: the change re-ranked the page`, timeout: 30_000 }).not.toBe(before.state.orderHash)
+    await settled(page)
+    expect(await places(page), `${message}: no entry added, the launch's entry updated where it is and still final`).toEqual({ ...before, state: { ...before.state, orderHash: await orderShown(page) } })
+  }
+  // on any other final first view: a new entry of the same query, right after it
+  const changedElsewhere = async (message: string) => {
+    const before = await places(page)
+    await change()
     await expect.poll(async () => (await places(page)).state, { message: `${message}: a new entry of the first view`, timeout: 30_000 }).toMatchObject({ index: before.state.index + 1, editorText: '', final: false })
     const after = await places(page)
     expect([after.keys.indexOf(after.at), before.keys.includes(after.at)], `${message}: a new position, right after the first view's`).toEqual([before.keys.indexOf(before.at) + 1, false])
     return after
   }
 
-  // a change on the launch's first view (final) is a new entry; Back onto the first view
-  const first = await places(page)
-  expect(first.state, 'premise: the first view, final').toMatchObject({ editorText: '', final: true })
-  const ahead = await changedElsewhere('a change from another client')
+  // THE LAUNCH'S ENTRY WITH WHAT IS ITS OWN TO KEEP (review 0 of reload_rerank, B3): an entry that Up made,
+  // whose mark is what lets Down undo the Up, and which holds a narration's choice that is not the page's
+  // live one (`intro`: the lane's page does not narrate, so its live value is false, and the row installs
+  // `true` on the entry in the turn of the reload; entry 0 always holds true, this one is entry 1), reloaded
+  // on with its order unchanged: the launch writes nothing and leaves both. A re-ranking written over the
+  // entry wrote the page's whole view until that review: the mark gone, the live choice saved over the entry's
+  const below = await scrollDown(page)
+  await recorded()
+  await blur(page)
+  await page.keyboard.press('Control+Meta+ArrowUp')
+  await nearTop(page, 'Up: the top of the page, in an entry of its own')
+  await recorded()
+  await page
+    .evaluate(() => {
+      window.addEventListener('pagehide', () => sessionStorage.setItem('e2e_up_left', String(history.state?.scrolledToTop)))
+      history.replaceState({ ...history.state, intro: true }, '')
+      location.reload()
+    })
+    .catch(() => undefined) // (the turn's result can be lost to the navigation it starts)
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('e2e_up_left')).catch(() => null), { message: "premise: the page went away on Up's entry", timeout: 30_000 }).toBe('true')
+  await waitForApp(page)
+  await shows('', top, 'the reloaded page shows the first view at the header')
+  await settled(page)
+  await recorded()
+  const own = () => page.evaluate(() => (({ scrolledToTop, intro, final, editorText }) => ({ scrolledToTop, intro, final, editorText }))(history.state))
+  const marked = await own()
+  expect(marked, "premise: a reload that changes nothing leaves Up's entry as it was: its mark, its narration's choice, final").toEqual({ scrolledToTop: true, intro: true, final: true, editorText: '' })
+  expect((await places(page)).state.index, 'premise: and it is not entry 0, which always holds the intro').toBeGreaterThan(0)
+
+  // a change on the launch's first view is written over its entry, which keeps what is its own
+  await changedInPlace("a change from another client on the launch's first view")
+  expect(await own(), "the launch's entry keeps its mark of Up and its narration's choice through the re-ranking written over it").toEqual(marked)
+  // so Down still undoes the Up, once the session knows the entry below (a reloaded session holds the entry
+  // it was reloaded on alone): a visit, then Down from the top is Back to the position Up left
   await page.goBack()
-  await shows('', top, 'Back onto the first view')
+  await shows('', below, 'Back onto the view Up left, where it was left')
+  await page.goForward()
+  await shows('', top, "Forward onto Up's entry")
+  await recorded()
+  await blur(page)
+  await page.keyboard.press('Control+Meta+ArrowDown')
+  await shows('', below, 'Down undoes the Up: Back to the position it left')
+  await recorded()
+
+  // a first view that is not the launch's, final too (a click on the tag the query names): a change there is
+  // a new entry; Back onto the first view
+  await typedThenTag(page, reads)
+  const targetId = await page.evaluate(() => window._item('#e2e_target')!.id)
+  const label = page.locator(`#item-${targetId} mark[title="#e2e_target"]`).first()
+  await label.scrollIntoViewIfNeeded()
+  await recorded()
+  await label.click()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  const atList = await scrollTop(page)
+  const list = await places(page)
+  expect(list.state, "premise: a first view that is not the launch's, final").toMatchObject({ editorText: '', final: true })
+  const ahead = await changedElsewhere("a change from another client on a first view that is not the launch's")
+  await page.goBack()
+  await shows('', atList, 'Back onto the first view')
   await recorded()
   const kept = await places(page)
-  expect(kept, "premise: the first view as it was, the change's entry ahead of it").toEqual({ ...first, keys: ahead.keys })
+  expect(kept, "premise: the first view as it was, the change's entry ahead of it").toEqual({ ...list, keys: ahead.keys })
   expect(kept.state.orderHash, 'premise: the entry holds the order from before the change').not.toBe(await orderShown(page))
 
   // the reload: no entry added, the entry where and what it was, of the order loaded; the change's entry ahead
@@ -4662,15 +4733,146 @@ test("a change from another client still adds an entry on the first view, before
   expect({ ...reloaded, state: { ...reloaded.state, orderHash: kept.state.orderHash } }, 'a reload on the first view: no entry added, the entry where and what it was').toEqual(kept)
   expect(reloaded.state.orderHash, 'the entry holds the order loaded').toBe(await orderShown(page))
   await recorded()
+
+  // the entry is the reloaded page's own first view now: a change is written over it, and the entry ahead stays
+  await changedInPlace('a change from another client after the reload')
+  await recorded()
   await page.goForward()
-  await shows('', top, "Forward onto the change's entry")
+  await shows('', atList, "Forward onto the change's entry from before the reload")
   expect((await places(page)).at, "the change's entry, kept").toBe(ahead.at)
   await page.goBack()
   await shows('', top, 'Back onto the first view again')
-  await recorded()
 
-  // after the reload a change from another client is a new entry again
-  await changedElsewhere('a change from another client after the reload')
+  // A NEW BRANCH IS NOT THE LAUNCH'S ENTRY (review 0 of reload_rerank, B1): Back onto the tag's view and a
+  // click on the tag's own label open the full list again, in a new final entry at the launch entry's index
+  // and in its run (another position of the browser's: its key). A change there is that entry's own, a new
+  // entry after it; taken for the launch's by its run and index, it was written over the list just opened,
+  // which stayed final, and Back skipped the list as it had been opened
+  await recorded()
+  const launched = await places(page)
   await page.goBack()
-  await shows('', top, 'Back onto the first view, once more')
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await label.scrollIntoViewIfNeeded()
+  await recorded()
+  await label.click()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  const reopened = await places(page)
+  expect(
+    [reopened.state.run, reopened.state.index, reopened.state.editorText, reopened.state.final, reopened.at == launched.at],
+    "the list opened again: the launch entry's run and index, the empty query, final, at another position of the browser's"
+  ).toEqual([launched.state.run, launched.state.index, '', true, false])
+  await changedElsewhere('a change from another client on the list opened again')
+})
+
+// A RE-RANKING AS THE PAGE STARTS (the owner on the release of 2026-11-18: "i'm still seeing a reload on empty
+// mindbox, with #vault in back, adds another empty step, so i have to hit back twice on reload to get to
+// #vault"). The launch writes or takes over a FINAL entry, and the first ranking after it whose order differed
+// pushed one more entry of the same query (history compares the ordered item ids): item code that touches an
+// item or marks one as the page starts, a change from another client, a ranking that counts a missing tag
+// which the launch ranked without, where the count moves the item. The fixture is an item whose `_init`
+// touches itself (a soft touch, gone with every reload, and the item's saved time is old: every launch of a
+// page that holds it changes the order while the page is still initializing), written behind the app before
+// the page loads. The re-ranking is written
+// over the launch's entry, which STAYS FINAL: written as a re-ranking's own view is, not final, the next typed
+// query would replace the full list instead of following it
+test("a re-ranking as a reloaded page starts adds no history entry on the full list: the entry is updated where it is, the entry ahead is kept and Back reaches the tag's view behind in one step; the entry stays final, so a query typed on it is a new entry and Back from that returns to the full list; a re-ranking while that Back is restoring the entry leaves it its own position", async ({ page }) => {
+  const reads = historyReads(page)
+  const { recorded, place, shows } = reads
+  const fixture = await firestore()
+    .collection('items')
+    .add({ user: 'anonymous', time: Date.UTC(2021, 0, 1), attr: null, text: '#e2e_startup_touch #_init\n```js\nfunction _init() { _this.touch() }\n```' })
+  const touched = () =>
+    page.evaluate(() => {
+      const item = (window as any).__items.find((item: any) => item.label == '#e2e_startup_touch')
+      return item.time > item.savedTime
+    })
+
+  await loadAdmin(page)
+  const top = await headerTop(page)
+  expect(await touched(), 'premise: the item code touched its item as the page started').toBe(true)
+  await typedThenTag(page, reads)
+  // the full list in a final entry of its own (a click on the tag the query names), an entry ahead of it left
+  // at a position of its own (a query set from a blurred box), then Back onto the full list
+  const targetId = await page.evaluate(() => window._item('#e2e_target')!.id)
+  const label = page.locator(`#item-${targetId} mark[title="#e2e_target"]`).first()
+  await label.scrollIntoViewIfNeeded()
+  await recorded()
+  const atTag = await scrollTop(page)
+  await label.click()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  await blur(page)
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  const atAhead = await place(60)
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  await settled(page)
+  const before = await places(page)
+  expect(before.state, 'premise: a final entry of the empty query').toMatchObject({ editorText: '', final: true })
+  expect(before.keys.indexOf(before.at), 'premise: one entry ahead of it').toBe(before.keys.length - 2)
+
+  // THE RELOAD, WITH ITS RE-RANKING, ADDED NOTHING: the same positions, the browser on the same one, the entry
+  // its own (index, run, query, final), of the order shown, which is the touched one
+  await page.reload()
+  await waitForApp(page)
+  await shows('', top, 'the reloaded page shows the first view at the header')
+  await settled(page)
+  await recorded()
+  expect(await touched(), 'premise: the item code touched its item again as the reloaded page started').toBe(true)
+  const after = await places(page)
+  expect(after, 'a reload whose start re-ranks the list: no entry added, the entry where it was, final, of the order shown').toEqual({ ...before, state: { ...before.state, orderHash: await orderShown(page) } })
+
+  // Back from the full list reaches the tag's view in ONE step, and the entry ahead is still there (a push
+  // would have dropped it)
+  await page.goBack()
+  await shows('#e2e_target ', atTag, "Back from the reloaded full list reaches the tag's view in one step")
+  await page.goForward()
+  await shows('', top, 'Forward onto the full list')
+  await recorded()
+  await page.goForward()
+  await shows('#e2e_source', atAhead, 'Forward onto the entry ahead of the full list')
+
+  // the entry is still final: a query typed on it is a new entry right after it, and Back returns to the list
+  await page.goBack()
+  await shows('', top, 'Back onto the full list')
+  await recorded()
+  const atList = await page.evaluate(() => history.state.scrollPosition as number)
+  await blur(page)
+  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await recorded()
+  const typed = await places(page)
+  expect([typed.keys.indexOf(after.at), typed.keys.indexOf(typed.at)], 'a query typed on the full list is a new entry right after it').toEqual([after.keys.indexOf(after.at), after.keys.indexOf(after.at) + 1])
+  // A RE-RANKING WHILE BACK IS RESTORING THE ENTRY (review 0 of reload_rerank, B2): the route reads the
+  // position of the entry reached and scrolls to it frames later; a re-ranking in between (an item's listener
+  // that touches an item; here a one-shot listener of the row's, registered after the route's, which touches
+  // the item ranked last) is written over the launch's entry while the viewport is still the departed view's,
+  // and saved that position on it. The typed view is left at a position of its own, 60 px from the list's
+  const atTyped = await place(60)
+  await page.evaluate(() => {
+    const w = window as any
+    window.addEventListener(
+      'popstate',
+      () => {
+        const order = history.state.orderHash
+        const last = [...w.__items].reverse().find((item: any) => !item.pinned && !item.log && item.savedId)
+        w._item(last.id).touch()
+        w.__restoring = { rewritten: history.state.orderHash != order, viewport: document.body.scrollTop, stored: history.state.scrollPosition, held: w._history[w._history_index].scrollPosition }
+      },
+      { once: true }
+    )
+  })
+  await page.goBack()
+  await shows('', top, 'Back from the typed query returns to the full list')
+  expect((await places(page)).at, "on the full list's entry").toBe(after.at)
+  expect(await page.evaluate(() => (window as any).__restoring), "a re-ranking before the restore has scrolled is written over the entry reached, the viewport still the typed view's, and the entry keeps its own position").toEqual({
+    rewritten: true,
+    viewport: atTyped,
+    stored: atList,
+    held: atList,
+  })
+  await fixture.delete()
 })
