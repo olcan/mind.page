@@ -6135,12 +6135,24 @@
   }
 
   // note return value of this function is also returned to any programmatic context where commands are triggered, either directly via return value of _create, or indirectly via window._mindbox_return when triggered via MindBox using dispatched DOM events; only allowed return values are undefined, null, or _Item, w/ strings in particular reserved for alerting errors returned as a string due to return_alerts option
-  function handleCommandReturn(cmd, item, obj, run, edit, return_alerts, handleError) {
+  // `mindbox` false: the command was dispatched by a control of the page and not from the MindBox
+  // (onEditorDone's `mindbox`, onItemPush). WHAT THAT COVERS is what a push returns: NOTHING
+  // (undefined) and a TEXT (the pusher's, when it finds no item by the name) leave the box's text
+  // and its focus alone, where the box's own command is cleared and blurred, or given the text
+  // and the focus. WHAT IT DOES NOT COVER: an error and an invalid return still show their dialog
+  // (which takes the focus while it shows); and a handler that returns an item to create
+  // ({ text, ... }) has it created with the box's text kept across the creation (_create), but
+  // where that text is itself a COMMAND TO RUN ({ command: true }) the command is the box's own
+  // again: it is dispatched with `mindbox` true, and its later return can clear and blur the box.
+  // the shipping pusher returns no such object, and `mindbox` is not carried into nested commands
+  function handleCommandReturn(cmd, item, obj, run, edit, return_alerts, handleError, mindbox = true) {
     if (typeof obj == 'string') {
+      if (!mindbox) return
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(obj)
       setTimeout(() => textArea(-1).focus()) // refocus (may require dispatch)
     } else if (obj === undefined) {
+      if (!mindbox) return
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange('')
       setTimeout(() => textArea(-1).blur()) // defocus, requires dispatch on chrome
@@ -6161,11 +6173,12 @@
       obj.edit ??= edit
       obj.history ??= false
       obj.command ??= false
-      obj.mindbox_text ??= ''
+      if (mindbox) obj.mindbox_text ??= ''
+      else obj.mindbox_text = undefined // (the box keeps its text: see _create)
       obj.return_alerts ??= return_alerts
       let textarea = textArea(-1)
       // reset focus for generated text
-      textarea.selectionStart = textarea.selectionEnd = 0
+      if (mindbox) textarea.selectionStart = textarea.selectionEnd = 0
       let item = _create(text, obj)
       // run programmatic initializer (and return promise) if any
       if (obj.init) {
@@ -6198,9 +6211,17 @@
     editing = null,
     attr = null,
     ignore_command = false,
-    return_alerts = false
+    return_alerts = false,
+    // false for a COMMAND THAT A CONTROL OF THE PAGE DISPATCHES (onItemPush: the push button of an
+    // item's editor, the push circle by its number): the MindBox is no part of it. its text is not
+    // replaced by the command's, and the command's return leaves the box and its focus alone
+    // (handleCommandReturn, which says for which returns: nothing and a text, as a push's are),
+    // so a draft in the box, and what is typed while the command is still at work, stay. only the
+    // commands that items handle read this (#commands/<name>, a listener's _on_command_<name>):
+    // the built-in ones write the box themselves, and none of them is dispatched this way
+    mindbox = true
   ) {
-    editorText = text // in case invoked without setting editorText
+    if (mindbox) editorText = text // in case invoked without setting editorText
     const key = eventKey(e) // physical code, except a character on a remapped keycode
     window['_mindbox_event'] = e
     window['_mindbox_return'] = undefined // set on non-empty returns for MindBox.create
@@ -7150,7 +7171,7 @@
                     async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                   })
                 )
-                  .then(carryInput((obj: any) => handleCommandReturn(cmd, cmd_item, obj, run, editing, return_alerts, handleError)))
+                  .then(carryInput((obj: any) => handleCommandReturn(cmd, cmd_item, obj, run, editing, return_alerts, handleError, mindbox)))
                   .catch(handleError))
               } catch (e) {
                 handleError(e)
@@ -7177,7 +7198,7 @@
                 })
                 // return promise so caller can wait for command output
                 return (window['_mindbox_return'] = Promise.resolve(ret)
-                  .then(carryInput((obj: any) => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError)))
+                  .then(carryInput((obj: any) => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError, mindbox)))
                   .catch(handleError))
               }
               return alert(`unknown command ${cmd} ${args}`)
@@ -8513,7 +8534,13 @@
       _modal(`can not push ${items[index].name}, #pusher must be installed first`)
       return
     }
-    onEditorDone('/push ' + items[index].name)
+    // the manual push, for both of its controls (the push button of the item's editor and the
+    // push circle by its number), dispatched as a command with the MindBox left out of it: as
+    // the box's own command it replaced the box's text with `/push <name>` at once and cleared and
+    // blurred the box when the pusher was done, so a draft in the box was lost, and with it what
+    // was typed while the push was still at work (the review of 2026-11-19; the button had done
+    // so all along, and a circle can be clicked while composing)
+    onEditorDone('/push ' + items[index].name, null, false, false, true, null, null, false, false, false /* mindbox */)
   }
 
   function onItemPreview(index: number) {

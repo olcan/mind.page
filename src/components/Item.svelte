@@ -30,6 +30,23 @@
     window.addEventListener('resize', () => menuSizes.clear())
     document.fonts?.addEventListener('loadingdone', () => menuSizes.clear())
   }
+  // THE MOUSE PRESS THAT THE PAGE IS HANDLING, by the element it was made on: the target of a
+  // mouse's pointerdown with its main button, noted at the window when the press begins, before
+  // any handler of an item's. an item's mousedown takes it, once (onMouseDown: a state circle is
+  // armed only by the mouse press that was made on that circle), since a mousedown does not say
+  // what made it: a tap's compatibility mousedown comes after the finger is gone, at the element
+  // the browser chose for the tap.
+  // it is the record of ONE PRESS, not of the last pointer seen: the press of any other pointer
+  // takes its place (a finger's and a pen's leave none), and the end or the cancelling of the
+  // mouse's own press clears it. (it first held the last pointer's type, for as long as nothing
+  // else pressed: a finger that was down while a mouse pressed elsewhere had its later mousedown
+  // taken for the mouse's, and pushed. the review of 2026-11-19)
+  let mousePress: EventTarget = null
+  if (typeof window != 'undefined') {
+    window.addEventListener('pointerdown', e => void (mousePress = e.pointerType == 'mouse' && e.button == 0 ? e.target : null), { capture: true })
+    for (const type of ['pointerup', 'pointercancel'] as const)
+      window.addEventListener(type, e => void (e.pointerType == 'mouse' && (mousePress = null)), { capture: true })
+  }
   function menuSize(menu: Element, zoom: string, digits: number) {
     if (!digits) return { width: menu.clientWidth, height: menu.clientHeight }
     const key = zoom + '|' + digits + '|' + [...menu.children].map(c => c.className).join(',')
@@ -204,17 +221,89 @@
     onEditing(index, (editing = false), cancelled, run, e)
   }
   let mouseDownTime = 0
+  // THE STATE CIRCLES BY THE NUMBER ARE A MOUSE'S CONTROLS (the owner, 2026-11-19: "would it make
+  // sense for the pushable indicator to accept clicks (with hand icon) and actually trigger a push
+  // of the item, same as the push button in the editor?"). a mouse's click on the circle of an
+  // item that can be pushed pushes it, by the call of the edit menu's push button, and one on the
+  // circle of an item that can be previewed previews it, by the call that a click on such an item
+  // makes; on an item in both states each circle acts for itself. such a click is the circle's
+  // alone: it opens no editor and is no click on the number, and its press takes no focus.
+  // BY WHAT PRESSED, not by what the device is said to have: a circle is armed by the mouse press
+  // that began on it (mousePress, in the module script: the mouse's own pointerdown names the
+  // circle), and where the click says what made it, that must be a mouse too. a mouse acts; a
+  // finger and a pen do not, on any device, nor while a mouse presses elsewhere: their press and
+  // their tap at a circle are the item's, as they were. the hand and the tooltip come with a
+  // mouse's pointer over the circle (onPointerOver).
+  // ONLY THIS ITEM'S OWN CIRCLES: the two elements bound below, never a class name, which the
+  // item's own rendered text could carry too.
+  // THE WHOLE GESTURE ON ONE CIRCLE: the press arms the circle it is on, and only a click
+  // delivered to that same element acts. a press on a circle is never the item's: released
+  // elsewhere (the click is then their common ancestor's), or on a circle that was removed or
+  // made anew meanwhile, it does nothing, neither the circle's action nor the item's (mouseDownTime
+  // is kept for the item's own presses).
+  // THE SECOND CLICK OF A DOUBLE CLICK ACTS ON NO CIRCLE (the owner's rule): a preview that
+  // succeeds turns a previewable item into a pushable one, whose circle takes the other's place
+  // under the pointer, and a push goes outward: it takes a deliberate single click.
+  // TOUCH TARGETING, in short: the circles have NO LISTENER OF THEIR OWN and no :hover or :active
+  // rule (these handlers are the item's, and tell a circle by the event's target), because a
+  // touch browser hands a tap to the nearest element within the finger's area that takes clicks,
+  // and counts an element with either among those: a tap at a circle is the number's today, 1px
+  // away, and would become the circle's (the ring's lesson, onIndexClick; the probes and the
+  // devices are in the vault's docs/mind_page_testing.md)
+  let pushableMark: HTMLElement = null
+  let previewableMark: HTMLElement = null
+  let pressedMark: HTMLElement = null // the circle a mouse's single press is on, until the click that follows
+  function ownStateMark(e: Event): HTMLElement | null {
+    const target = e.target as HTMLElement
+    return target && (target === pushableMark || target === previewableMark) ? target : null
+  }
+  // the hand and the tooltip of a circle are a mouse's: written on the circle when a mouse's
+  // pointer comes over it, and taken away when another pointer's does (a pen that hovers).
+  // `moused` is a class of this code's, not a class directive, so the stylesheet names it :global
+  function onPointerOver(e: PointerEvent) {
+    const mark = ownStateMark(e)
+    if (!mark) return
+    const mouse = e.pointerType == 'mouse'
+    mark.classList.toggle('moused', mouse)
+    if (mouse) mark.title = mark === pushableMark ? 'push' : 'preview'
+    else mark.removeAttribute('title')
+  }
   function onMouseDown(e: MouseEvent) {
-    mouseDownTime = Date.now()
+    // a mouse's press on one of this item's state circles (its main button): this mousedown is
+    // on a circle of the item's, and the mouse press the page noted was made on that same element.
+    // the note is taken here, whatever it names: a later mousedown finds none (see above)
+    const pressed = mousePress
+    mousePress = null
+    const own = e.button == 0 ? ownStateMark(e) : null
+    const mark = own && own === pressed ? own : null
+    pressedMark = mark && e.detail < 2 ? mark : null
+    mouseDownTime = mark ? 0 : Date.now()
     // a press on the running mark by the number, or on its note (the mark's own ::after), takes
     // no focus: the default would blur whatever has it, another item's editor or the MindBox (on a
     // phone that should close the keyboard: not yet seen on the owner's), before the click that
     // shows or takes away the note is even made.
     // (the edit menu's mark prevents it itself; here the mark has no listener of its own, see
     // onIndexClick, and this is the press's first listener above it)
-    if ((e.target as HTMLElement).closest?.('.item-menu .running-mark')) e.preventDefault()
+    // the same for a mouse's press on a state circle, which pushes or previews with the focus
+    // where it was
+    if (mark || (e.target as HTMLElement).closest?.('.item-menu .running-mark')) e.preventDefault()
   }
   function onClick(e) {
+    // a click on the state circle that a mouse's single press armed is the circle's alone: a
+    // push, as the edit menu's push button's click, or a preview. (before the rules below: as a
+    // button's, it is a click however long its press was held)
+    // (where the click says what made it, as a pointer event's does, that is a mouse: a click
+    // that says otherwise acts on no circle, whatever armed one)
+    const pressed = pressedMark
+    pressedMark = null
+    const mark = ownStateMark(e)
+    if (mark && mark === pressed && !(e.pointerType && e.pointerType != 'mouse')) {
+      e.stopPropagation()
+      e.preventDefault()
+      if (mark === pushableMark) onPush(index)
+      else onPreview(index)
+      return
+    }
     // reject click without mousedown within 250ms (can happen due to tags shifting during click)
     if (Date.now() - mouseDownTime > 250) return
     // ignore clicks on loading div
@@ -2412,6 +2501,7 @@
   {/if}
   <div
     bind:this={container}
+    on:pointerover={onPointerOver}
     on:mousedown={onMouseDown}
     on:click={onClick}
     class="container"
@@ -2508,6 +2598,10 @@
         <div class="button index" class:leader class:matching class:reserved={menuDigits(index) > 0} style:--index-digits={menuDigits(index)} on:click={onIndexClick}>
           {index + 1}{#if running}<span class="running-mark" class:noted={runningNote} use:runningMark></span>{/if}
         </div>
+        <!-- (the state circles: the menu's last child, shown before the number by its order. no listener of their own: their presses and clicks are told from the item's by these two elements, see ownStateMark) -->
+        {#if pushable || previewable}
+          <div class="state-marks">{#if previewable}<span class="state-mark previewable-mark" bind:this={previewableMark}></span>{/if}{#if pushable}<span class="state-mark pushable-mark" bind:this={pushableMark}></span>{/if}</div>
+        {/if}
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
       <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal>
@@ -2766,8 +2860,8 @@
      by its room, and a run button steps left by the room of every mark.
      the means: a mark of item code is the `::before` of the number and stands nearest it, the
      running mark is an element after the digits, moved to the front of the number's line (order),
-     left of it, and the state circles are one box, the `::before` of the MENU, in the menu's line
-     right before the number's box (THE STATE CIRCLES, below): it steps left by the room the item's
+     left of it, and the state circles are one box, the last child of the MENU, moved in the
+     menu's line to right before the number's box (THE STATE CIRCLES, below): it steps left by the room the item's
      mark SAYS (--item-mark-room), and the ring steps left of it by the circles' rooms, by its
      margins (a translate would make the ring the containing block of its note).
      a mark of item code takes no room in the number's line by a negative margin of its own. where
@@ -2924,43 +3018,87 @@
 
   /* THE STATE CIRCLES: an item that can be pushed, and one that can be previewed, each a ring of
      the running mark's size and stroke in the colour its border had (#a52, #c7c; the border goes),
-     standing still: a state, where the ring that turns is an activity. no tooltip, no note, no
-     listener: a press on a circle is the item's (its default is not prevented, as the ring's is),
-     and its click the item's (it previews an item that can be previewed and edits any other).
-     measured with the MindBox focused, beside a plain item whose text stood at that point: a
-     click there opens the editor, which takes the focus, as a click at that point of the text did,
-     and a tap in a phone's window is the number's, as it was (tests/e2e/layout.spec.ts). it is not
-     what a press at that point did where a control stood there: the run button and the ring move
-     left by the circles' room, so a click where the run button ended (4px before the digits) now
-     reaches the item, and on a running item without a sparkle the pushable circle stands where
-     the ring stood. an item can be in both states (a preview's file changed again before its push): the
-     previewable circle stands left of the pushable one. each is an image of 18px by 15px whose
-     circle is its right 15px (3px to the left of it), --pushable-mark and --previewable-mark */
+     standing still: a state, where the ring that turns is an activity.
+     BY THE NUMBER EACH IS A MOUSE'S CONTROL (2026-11-19; the script, at onMouseDown): under a
+     mouse's pointer the hand and the tooltip `push` or `preview`, and a mouse's click that pushes
+     the item as the edit menu's push button does, or previews it, and is the circle's alone, with
+     the focus where it was. so each is an element of its own there (a tooltip is an element's,
+     and the two were one pseudo-element), with no listener of its own.
+     FOR A FINGER AND A PEN it is what it was, no control: a press on a circle is the item's (its
+     default is not prevented, as the ring's is), and its click the item's (it previews an item
+     that can be previewed and edits any other). measured in a phone's window with the MindBox
+     focused, beside a plain item whose text stood at that point: a tap is the number's, as it
+     was, and the one tap that reaches a circle, on the previewable one of an item in both states,
+     is the item's: it previews and takes the focus (tests/e2e/layout.spec.ts). until 2026-11-19 a
+     press was the item's for every pointer, and a click there opened the editor, which took the
+     focus.
+     a press at that point is not what it was where a control stood there: the run button and the
+     ring move left by the circles' room, so a click where the run button ended (4px before the
+     digits) now reaches the circle, and on a running item without a sparkle the pushable circle
+     stands where the ring stood. an item can be in both states (a preview's file changed again
+     before its push): the previewable circle stands left of the pushable one. each is an image of
+     18px by 15px whose circle is its right 15px (3px to the left of it), --pushable-mark and
+     --previewable-mark.
+     IN THE EDITOR they are as they were, a picture and no control: the push button stands beside
+     them there */
   .container.pushable {
     --pushable-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='15' viewBox='-3 0 18 15'%3E%3Ccircle cx='7.5' cy='7.5' r='6.5' fill='none' stroke='%23a52' stroke-width='2'/%3E%3C/svg%3E");
   }
   .container.previewable {
     --previewable-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='15' viewBox='-3 0 18 15'%3E%3Ccircle cx='7.5' cy='7.5' r='6.5' fill='none' stroke='%23c7c' stroke-width='2'/%3E%3C/svg%3E");
   }
-  /* by the number they stand WHERE THE RING AND THE SPARKLE STAND: one box, the menu's ::before (the
+  /* by the number they stand WHERE THE RING AND THE SPARKLE STAND: one box (.state-marks; the
      number's own ::before is a mark of item code's, and a click on the number's box would be the
      number's), a line of the number's own font (the menu's, which the number inherits) centred in
-     the menu's line, which is the number's box (25px from the menu's top), and the circles images
-     on that line's baseline, lowered by whole pixels (2px), as the sparkle's image and the ring's
-     inline box are. it stands in the menu's line between a run button and the number's box and
-     takes no room there (its margins): it ends 1px inside the number's box, where the digits'
-     padding leaves 3px to them (MENU_INDEX_PAD) */
+     the menu's line, which is the number's box (25px from the menu's top), and the circles boxes
+     of their images' size on that line's baseline (.state-mark: an inline box without a line of
+     its own stands on the baseline with its lower edge, as an image does), lowered by whole
+     pixels (2px), as the sparkle's image and the ring's inline box are. the box stands in the
+     menu's line between a run button and the number's box and takes no room there (its margins):
+     it ends 1px inside the number's box, where the digits' padding leaves 3px to them
+     (MENU_INDEX_PAD). it is the menu's LAST child, shown there by its order, as the ring is the
+     number's: the menu's first child is still the button that says how wide the text's
+     placeholder is (afterUpdate), and a run button is still the first of its line.
+     (until 2026-11-19 the box was the menu's ::before and the circles its content, two images:
+     the same box, line and place) */
   .container:is(.pushable, .previewable) .item-menu > .run {
     order: -1;
   }
-  .container:is(.pushable, .previewable) .item-menu::before {
-    content: var(--previewable-mark, '') var(--pushable-mark, '');
+  .item-menu > .state-marks {
+    order: -1;
     flex: none;
     align-self: center;
     position: relative;
     top: 2px;
     margin: 0 -1px 0 calc(1px - var(--pushable-mark-room) - var(--previewable-mark-room));
     translate: calc(-1 * var(--item-mark-room, 0px)) 0;
+  }
+  .state-mark {
+    display: inline-block;
+    width: 18px;
+    height: 15px;
+    background: no-repeat;
+  }
+  .pushable-mark {
+    background-image: var(--pushable-mark);
+  }
+  .previewable-mark {
+    background-image: var(--previewable-mark);
+  }
+  /* the hand, under a mouse's pointer (.moused, written by onPointerOver in the script: a class,
+     since a stylesheet cannot ask which pointer hovers). no :hover or :active rule on a circle:
+     see TOUCH TARGETING there */
+  .state-mark:global(.moused) {
+    cursor: pointer;
+  }
+  /* (the number keeps the corner it has as the menu's last button: the circles' box after it
+     takes :last-child from it. its box is transparent, so this is a matter of what a press at
+     that corner hits) */
+  .item-menu > .button:has(+ .state-marks) {
+    border-top-right-radius: 5px;
+  }
+  .bordered .item-menu > .button:has(+ .state-marks) {
+    border-top-right-radius: 4px;
   }
   /* and the ring left of them, by its margins (the same room in the number's line, moved) */
   .container:is(.pushable, .previewable) .item-menu > .index > .running-mark {

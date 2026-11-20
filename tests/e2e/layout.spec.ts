@@ -1266,7 +1266,7 @@ test("the running mark stands on the number's baseline in the app's own font, as
   expect((await lines())!.ring, 'the ring\'s line is as tall as the digits\' and at their height').toEqual([20, 0])
   // THE STATE CIRCLES AT THE RING'S HEIGHT (2026-11-19): the same item, can be pushed and
   // previewed too, has both circles between the ring and the digits, each an image on the
-  // baseline of a line of the number's font (the menu's ::before), lowered 2 px as the ring is:
+  // baseline of a line of the number's font (the circles' box in the menu), lowered 2 px as the ring is:
   // each inks the ring's 15 rows and 15 columns, the rows ending 2 px under the digits, where the
   // item sits and with the item half a pixel lower, the ring turning and filled; from the left the
   // ring, the previewable circle and the pushable one, 3 px apart and 3 px before the digits
@@ -1460,32 +1460,34 @@ test('a tap on the running mark shows its status in a note where no pointer hove
 // stands still and that the border of an item that can be previewed goes the same way: "yes to
 // both questions"). An item that can be pushed shows a ring of the running mark's size in the
 // orange its border had, one that can be previewed the same in its border's pink, and neither has
-// a border for it or turns. Both are ONE box, the `::before` of the item's MENU (the number's
-// `::before` is a mark of item code's, and a click on the number's box would be the number's),
-// whose content is the circles, images on the baseline of a line of the number's font: the box
+// a border for it or turns. Both are in ONE box in the item's MENU (an element, `.state-marks`,
+// with an element per circle, since each circle has a tooltip and takes a mouse's click: the rows
+// after this one; it was the menu's `::before`. The number's `::before` is a mark of item code's,
+// and a click on the number's box would be the number's), the circles boxes of their images' size
+// on the baseline of a line of the number's font: the box
 // stands in the menu's line right before the number's and takes no room there, so the menu is not
 // resized; its room is a property per state on the item's box, kept free as the ring's is. The
 // order from the left: the ring, previewable, pushable, a mark of item code, the number. (Their
 // height by pixels in the app's own font is the ring's height row above; the editor, and the
 // circles beside the watched sparkle itself, are the watched mark's row.)
 const BORDERS = ['rgb(170, 85, 34)', 'rgb(204, 119, 204)'] // #a52 and #c7c, the two borders' colours
-// what a menu's `::before` draws, null when it draws nothing: its box as [from, to] in px left of
-// the digits, by the hit test of `marksLeftOf` (for the scan the menu's own box takes no hit: a
-// run button that stepped aside leaves room in it that would answer as the pseudo-element does),
-// its width, how it is placed (centred in the menu's line, 2 px down, in the number's own font)
-// and whether it turns (what it draws is read by its ink: `circlesInk`). Given to the page once
+// what a menu's box of state circles draws, null when the menu has none: its box as [from, to] in
+// px left of the digits, by the hit test of `marksLeftOf` (a hit on the box or on a circle in it:
+// since the circles take a mouse's click the box is an element, `.state-marks`, and each circle an
+// element in it; it was the menu's `::before`, with the same style, read here as it was), its
+// width, how it is placed (centred in the menu's line, 2 px down, in the number's own font) and
+// whether it turns (what it draws is read by its ink: `circlesInk`). Given to the page once
 function stateCircles(menu: HTMLElement) {
-  const drawn = getComputedStyle(menu, '::before')
-  if (drawn.content == 'none') return null
+  const marks = menu.querySelector(':scope > .state-marks') as HTMLElement | null
+  if (!marks) return null
+  const drawn = getComputedStyle(marks)
   const index = menu.querySelector('.index') as HTMLElement
   const digits = document.createRange()
   digits.selectNodeContents(index.firstChild!)
   const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
-  const only = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.item-menu { pointer-events: none !important } .item-menu > *, .item-menu::before { pointer-events: auto !important }' }))
   const box: number[][] = [] // one mark at most, as `marksLeftOf` gives its marks
   for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 90; k++, pixel--)
-    if (document.elementFromPoint(pixel + 0.5, (own.top + own.bottom) / 2) === menu) box[0] = [number.left - pixel, box[0]?.[1] ?? number.left - pixel - 1]
-  only.remove()
+    if (marks.contains(document.elementFromPoint(pixel + 0.5, (own.top + own.bottom) / 2))) box[0] = [number.left - pixel, box[0]?.[1] ?? number.left - pixel - 1]
   return { box, width: drawn.width, placed: [drawn.alignSelf, drawn.position, drawn.top, drawn.font == getComputedStyle(index).font], still: drawn.animationName == 'none' }
 }
 // the circles of an item in the shown column, and where its menu stands in its box (a bordered
@@ -1726,90 +1728,499 @@ test('an item that can be pushed or previewed is marked by a still circle left o
   await expect.poll(wrapped, { message: 'no longer pushable: one line again, the height and the stored height as they were, the neighbour back', timeout: 15_000 }).toMatchObject({ lines: 1, height: flat.height, stored: flat.height, gap: flat.gap, next: flat.next, neighbour: flat.neighbour })
 })
 
-// A PRESS ON A STATE CIRCLE, WITH THE MINDBOX FOCUSED, DOES WHAT ONE AT THAT POINT OF A PLAIN ITEM'S
-// TEXT DID. The ring's press takes no focus (its note is shown and taken away with the focus where
-// it is); a circle shows nothing and is no control of its own: it is the item's menu's ::before,
-// with no listener, so a press on it is the item's. Read with the MindBox focused, on the first
-// item of the anonymous corpus, which is plain (no run button, no ring, no sparkle) and whose text
-// stands at that point: a press at the middle of its pushable circle, and the same press at the
-// same point of the same item in no state, for a click at a desktop's width and for a tap in a
-// phone's window, one page each, the starting state restored after each press. At a desktop's
-// width the click is the item's: its editor opens and takes the focus. In a phone's window the
-// browser hands the tap to the NUMBER, 6.5 px from that point (Chromium's touch adjustment: the
-// nearest element that takes clicks within the finger's area, the number's box beginning 4 px
-// before the digits), which selects the item and takes the focus out of the MindBox: with the
-// circle as without it. (Where a control stood at that point the circle changes what a press
-// there does, as the ring and the sparkle do: a run button and the ring move left by the circles'
-// room. That is the circles' row's.)
-test('a press on a state circle, with the MindBox focused, is what a press at that point of a plain item was', async ({ browser }) => {
-  for (const touch of [false, true]) {
-    const context = await browser.newContext(touch ? { viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true } : { viewport: { width: 700, height: 900 } })
-    const page = await context.newPage()
-    await loadAnonymous(page)
-    const id = await firstShown(page)
-    const box = `.column:not(.hidden) .container[data-item-id="${id}"]`
-    // whether the item's editor is open, where the focus is, and the history's index
-    const state = () =>
-      page.evaluate(
-        ([box, id]) => ({
-          editing: !!document.querySelector(`${box}.editing`),
-          focus: (focused => (focused == 'textarea-' + id ? 'its editor' : focused == 'textarea-mindbox' ? 'the MindBox' : focused || 'none'))(document.activeElement?.id ?? ''),
-          entry: (window as unknown as { _history_index: number })._history_index,
-        }),
-        [box, id] as const,
-      )
-    const pressed = async (pushable: boolean) => {
-      await page.evaluate(([id, pushable]) => void ((window._item(id) as unknown as { pushable: boolean }).pushable = pushable), [id, pushable] as const)
-      await expect.poll(() => page.evaluate(([box, pushable]) => !!document.querySelector(`${box}${pushable ? '.pushable' : ':not(.pushable)'}`), [box, pushable] as const), { timeout: 30_000 }).toBe(true)
-      // the point: the middle of the pushable circle, whose ink is the 15 px that end 3 px before the
-      // digits, on the number's middle line; what a hit there answers; and a listener of the row's,
-      // which sees the click first, for what the click is delivered to
-      const spot = await page.evaluate(async box => {
-        document.querySelector(box)!.scrollIntoView({ block: 'center' })
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve))))
-        const index = document.querySelector(`${box} .item-menu > .index`) as HTMLElement
-        const digits = document.createRange()
-        digits.selectNodeContents(index.firstChild!)
-        const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
-        const [x, y] = [number.left - 3 - 7.5, (own.top + own.bottom) / 2]
-        const hit = document.elementFromPoint(x, y) as HTMLElement
-        const where = (target: HTMLElement) => (target.closest('.item-menu') ? (target.closest('.index') ? 'number' : 'menu') : target.closest('a, mark, button, input') ? 'control' : target.closest('.item') ? 'text' : target.className)
-        delete (window as unknown as { __clicked?: string }).__clicked
-        window.addEventListener('click', e => void ((window as unknown as { __clicked: string }).__clicked = where(e.target as HTMLElement)), { capture: true, once: true })
-        return { x, y, hit: where(hit) }
-      }, box)
-      await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
-      const before = await state()
-      expect(before, 'the premise: the MindBox has the focus, and no editor is open').toMatchObject({ editing: false, focus: 'the MindBox' })
-      if (touch) await page.touchscreen.tap(spot.x, spot.y)
-      else await page.mouse.click(spot.x, spot.y)
-      // the outcome as it shows, polled as the whole state, so that a press that did otherwise says
-      // what it did: at a desktop's width the item's editor, with the focus, and no history entry
-      // more; in a phone's window a select, a history entry more, the focus out of the MindBox
-      await expect
-        .poll(state, { message: `${touch ? 'a tap in a phone\'s window' : 'a click'} at that point${pushable ? ', on the circle' : ', on the text'}: its outcome`, timeout: 10_000 })
-        .toEqual(touch ? { editing: false, focus: 'none', entry: before.entry + 1 } : { editing: true, focus: 'its editor', entry: before.entry })
-      const after = await state()
-      const found = { hit: spot.hit, clicked: await page.evaluate(() => (window as unknown as { __clicked?: string }).__clicked ?? null), editing: after.editing, focus: after.focus, selected: after.entry != before.entry }
-      // the starting state again: the editor closed, Back to the entry the select left, no state
-      if (after.editing) {
-        await page.keyboard.press('Escape')
-        await expect.poll(async () => (await state()).editing, { timeout: 15_000 }).toBe(false)
-      }
-      if (after.entry != before.entry) {
-        await page.goBack()
-        await expect.poll(async () => (await state()).entry, { timeout: 15_000 }).toBe(before.entry)
-      }
-      if (pushable) await page.evaluate(id => void ((window._item(id) as unknown as { pushable: boolean }).pushable = false), id)
-      return found
+// A STATE CIRCLE UNDER A PRESS: A MOUSE'S CONTROL, AND WHAT IT WAS FOR A FINGER (the owner,
+// 2026-11-19: "would it make sense for the pushable indicator to accept clicks (with hand icon)
+// and actually trigger a push of the item, same as the push button in the editor?"). By the number
+// each circle is an element of its own with NO listener of its own: the item's handlers tell a
+// circle's press and click by the two elements the item made, and act only for a press that a
+// MOUSE began (the pointer's type at the press), single, and released on the circle it was made
+// on. The hand and the tooltip (`push`, `preview`) come with a mouse's pointer over the circle.
+// The two rows below read the first item of the anonymous corpus, which is plain (no run button,
+// no ring, no sparkle) and whose text stands where its pushable circle's middle is, and local
+// items of their own, with the MindBox focused before each press.
+
+// whether the item's editor is open, where the focus is, and the history's index
+const focusName = (focused: string, id: string) => (focused == 'textarea-' + id ? 'its editor' : focused == 'textarea-mindbox' ? 'the MindBox' : focused || 'none')
+const pressState = async (page: Page, id: string) => {
+  const state = await page.evaluate(id => ({ editing: !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"].editing`), focus: document.activeElement?.id ?? '', entry: (window as unknown as { _history_index: number })._history_index }), id)
+  return { ...state, focus: focusName(state.focus, id) }
+}
+// WHAT THE PAGE SAW OF A PRESS, in a record that listeners of the row's write (given to the
+// window once, at the window, so that they see every event first and last): what the click was
+// delivered to and its count (`clicked`: where, which circle, the event's detail), whether the
+// click went on past the item (`bubbled`: the item's own click does, a circle's own is stopped
+// at the item), the focus at the release, before any click handler has run (`held`: what the
+// press alone did to it), and how long the press lasted in the page's own time (`ms`)
+type Press = { clicked?: [string, string | null, number]; bubbled?: boolean; held?: string; down?: number; ms?: number }
+type Pressing = { __press?: Press; __pressing?: boolean }
+const where = (target: HTMLElement) => (target.closest('.item-menu') ? (target.closest('.index') ? 'number' : 'menu') : target.closest('a, mark, button, input') ? 'control' : target.closest('.item') ? 'text' : target.className)
+const circle = (target: HTMLElement) => ['pushable', 'previewable'].find(state => target.classList.contains(state + '-mark')) ?? null
+const pressRecorded = (page: Page) =>
+  page.evaluate(`(() => {
+    const where = ${where.toString()}
+    const circle = ${circle.toString()}
+    if (!window.__pressing) {
+      window.__pressing = true
+      window.addEventListener('mousedown', e => void (window.__press && (window.__press.down = e.timeStamp)), { capture: true })
+      window.addEventListener('mouseup', e => void (window.__press && Object.assign(window.__press, { ms: Math.round(e.timeStamp - window.__press.down), held: document.activeElement?.id ?? '' })), { capture: true })
+      window.addEventListener('click', e => void (window.__press && (window.__press.clicked = [where(e.target), circle(e.target), e.detail])), { capture: true })
+      window.addEventListener('click', () => void (window.__press && (window.__press.bubbled = true)))
     }
-    const [plain, circled] = [await pressed(false), await pressed(true)]
-    const how = touch ? 'a tap in a phone\'s window' : 'a click'
-    expect([plain.hit, circled.hit], `${how}: the spot is the item's text, and the circle's (the menu's) when it can be pushed`).toEqual(['text', 'menu'])
-    const outcome = ({ editing, focus, selected }: typeof plain) => ({ editing, focus, selected })
-    expect(outcome(circled), `${how} on the circle does what one at that point of the text did (${JSON.stringify([plain, circled])})`).toEqual(outcome(plain))
-    if (touch) expect([plain.clicked, circled.clicked, outcome(circled)], `${how}: delivered to the number, with the circle as without it, which selects the item and takes the focus out of the MindBox`).toEqual(['number', 'number', { editing: false, focus: 'none', selected: true }])
-    else expect([plain.clicked, circled.clicked, outcome(circled)], `${how}: delivered where it is made, to the item's text and to the circle (the menu), and the item's editor opens and takes the focus`).toEqual(['text', 'menu', { editing: true, focus: 'its editor', selected: false }])
-    await context.close()
+    window.__press = {}
+  })()`)
+const pressed = (page: Page) => page.evaluate(() => (window as unknown as Pressing).__press ?? {})
+// the point of a press: the middle of the pushable circle, whose ink is the 15 px that end 3 px
+// before the digits, on the number's middle line (`far`: the circle 18 px further left, the
+// previewable one of an item in both states), with a new record for the press
+const circleSpot = async (page: Page, id: string, far = false) => {
+  await pressRecorded(page)
+  return page.evaluate(
+    async ([id, far]) => {
+      const box = `.column:not(.hidden) .container[data-item-id="${id}"]`
+      document.querySelector(box)!.scrollIntoView({ block: 'center' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve))))
+      const index = document.querySelector(`${box} .item-menu > .index`) as HTMLElement
+      const digits = document.createRange()
+      digits.selectNodeContents(index.firstChild!)
+      const [number, own] = [digits.getBoundingClientRect(), index.getBoundingClientRect()]
+      return { x: number.left - 3 - 7.5 - (far ? 18 : 0), y: (own.top + own.bottom) / 2 }
+    },
+    [id, far] as const,
+  )
+}
+// what stands at a point: where it is, which circle, its tooltip and its cursor
+const standing = (page: Page, at: { x: number; y: number }) =>
+  page.evaluate(`(hit => { const where = ${where.toString()}; const circle = ${circle.toString()}; return [where(hit), circle(hit), hit.getAttribute('title') ?? '', getComputedStyle(hit).cursor] })(document.elementFromPoint(${at.x}, ${at.y}))`) as Promise<[string, string | null, string, string]>
+const focusMindbox = (page: Page) => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).focus({ preventScroll: true }))
+// the page's timers and frames have run: for what a press must NOT have done
+const settled = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 60)))))
+// the item's two states as their writers set them (as in the circles' row), once the page shows them
+const circlesStated = async (page: Page, id: string, pushable: boolean, previewable = false) => {
+  await page.evaluate(([id, pushable, previewable]) => {
+    const item = window._item(id) as unknown as { pushable: boolean }
+    ;(window.__items.find(item => item.id == id) as unknown as { previewable: boolean }).previewable = previewable
+    item.pushable = !pushable
+    item.pushable = pushable
+  }, [id, pushable, previewable] as const)
+  await expect.poll(() => page.evaluate(id => (box => box && ['pushable', 'previewable'].map(state => box.classList.contains(state)))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)), id), { timeout: 30_000 }).toEqual([pushable, previewable])
+}
+// the preview call, seen by its own refusal: an item marked on the page's record, with no preview
+// fetched, is refused at the call's first check, which the app logs. The refusals so far
+const REFUSAL = 'preview item missing preview text'
+const previewRefusals = (page: Page) => {
+  const refusals: string[] = []
+  page.on('console', message => void (message.type() == 'error' && message.text().includes(REFUSAL) && refusals.push(message.text())))
+  return refusals
+}
+
+// the pusher's stand-in, a visitor's local item: the app dispatches `/push <name>` to it (the
+// first listening item that defines the command), and it records the name it is asked to push,
+// writes nothing anywhere, and returns what the row holds for it
+const PUSHER = '#pusher #_listen the row\'s stand-in for the pusher: it records a push and writes nothing\n```js\nfunction _on_command_push(label) {\n  ;(window.__pushed ??= []).push(label)\n  return window.__push_return\n}\n```'
+// A PRESS AS A SCRIPT GIVES IT, event by event, on an item's pushable circle or elsewhere (the
+// page's body): for the orders of events that two pointers at once can make (a script fixes the
+// target, the order and a legacy click's shape, which the rows' driver calls do not),
+// and for the browsers whose click says nothing of its pointer. A step is an event's type, where
+// it is dispatched, and the pointer's type (a `pointer…` event's, and a click's when it says one;
+// a mousedown and a mouseup say none). Answers whether the LAST mousedown's default was prevented
+type Step = readonly [type: 'pointerdown' | 'pointerup' | 'pointercancel' | 'mousedown' | 'mouseup' | 'click', on: 'circle' | 'elsewhere', pointer?: 'mouse' | 'touch']
+const dispatched = (page: Page, id: string, steps: readonly Step[]) =>
+  page.evaluate(
+    ([id, steps]) => {
+      const circle = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu .pushable-mark`) as HTMLElement
+      let prevented: boolean | null = null
+      for (const [type, on, pointer] of steps) {
+        const init = { bubbles: true, cancelable: true, composed: true, view: window, button: 0, buttons: type.endsWith('down') ? 1 : 0, detail: type.startsWith('pointer') ? 0 : 1 }
+        const event = type.startsWith('pointer') || pointer ? new PointerEvent(type, { ...init, pointerType: pointer, pointerId: pointer == 'touch' ? 2 : 1, isPrimary: true }) : new MouseEvent(type, init)
+        const went = (on == 'circle' ? circle : document.body).dispatchEvent(event)
+        if (type == 'mousedown') prevented = !went
+      }
+      return prevented
+    },
+    [id, steps] as const,
+  )
+
+// WITH A MOUSE: the hand and the tooltip on each circle under the pointer, and a click that is the
+// circle's alone. On the circle of an item that can be pushed it is the call of the edit menu's
+// push button, seen two ways: on this notebook, which has no `#pusher` item, by the app's dialog
+// that says so and names the item; and, once the row has made a local `#pusher` listener (it
+// records the name it is asked to push and writes nothing anywhere), by that record. On the
+// circle of an item that can be previewed it is the call a click on such an item makes, seen by
+// its refusal, and for a local item with a preview, by the preview itself. No such click opens
+// the item's editor, selects the item (a history entry more) or moves it by its number (its
+// time), and the press takes no focus, from the MindBox or from another item's editor: read at
+// the release, in the page, and again once the dialog has gone (a dialog gives the focus back to
+// what had it when it opened). On an item in both states each circle acts for itself.
+// THE CONTROL is the same click at the same point of the item in no state, which is the item's:
+// its editor opens and takes the focus, as a click on a circle did until 2026-11-19. One driver
+// call, press and release back to back: the item's own click must come within 250 ms of its
+// press, which a driver round trip between the two can exceed on a loaded machine.
+// WHAT ACTS ON NO CIRCLE: content of an item's own text with the circles' class names; a press on
+// a circle released elsewhere, on the other circle or on the item's text (neither the circle's
+// action nor the item's, though the release came within the item's 250 ms); and the second click
+// of a double click, which arrives when a successful preview has put the pushable circle in the
+// previewable one's place.
+// THE PUSH ITSELF LEAVES THE MINDBOX ALONE: with a draft in the box and the focus there, the
+// box's text is not replaced by the command's, what is typed while the push is still at work
+// stays, and nothing clears or blurs the box at its end, whether the pusher resolves to nothing
+// or to a text; from the editor's push button likewise (the same call)
+test('with a mouse, a click on a state circle is the circle\'s own: it pushes the item, or previews it, and takes no focus', async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+  await loadAnonymous(page)
+  const id = await firstShown(page)
+  const name = await page.evaluate(id => window._item(id)!.name, id)
+  expect(await page.evaluate(() => !!window._item('#pusher', true)), 'the premise: a notebook without the #pusher item').toBe(false)
+  const PUSH = `can not push ${name}, #pusher must be installed first`
+  const refusals = previewRefusals(page)
+  const dialog = () => page.evaluate(() => ((window as unknown as { _modal_visible: () => boolean })._modal_visible() ? (document.querySelector('.background.visible .modal')?.textContent ?? '').trim() : null))
+  const pushes = () => page.evaluate(() => [...((window as unknown as { __pushed?: string[] }).__pushed ?? [])])
+  const box = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  // what a circle's click must leave as it was (no editor, the focus, the history's index, the
+  // item's time) beside what it adds (a dialog, a refusal, a push)
+  const read = async (of = id) => ({ ...(await pressState(page, of)), time: await page.evaluate(id => (window.__items.find(item => item.id == id) as unknown as { time: number }).time, of), refusals: refusals.length, dialog: await dialog(), pushes: (await pushes()).length })
+  // one real click at a circle's place, with the mouse brought there first (the hand and the
+  // tooltip are read under it): one driver call, the press and the release back to back. The
+  // focus is the MindBox's before it, or `holder`'s, which has it already
+  const click = async (of = id, far = false, holder = 'the MindBox') => {
+    const spot = await circleSpot(page, of, far)
+    if (holder == 'the MindBox') await focusMindbox(page)
+    const before = await read(of)
+    expect(before, `the premise: ${holder} has the focus, the item's editor is not open and no dialog shows`).toMatchObject({ editing: false, focus: holder, dialog: null })
+    await ready()
+    await page.mouse.move(spot.x, spot.y)
+    const at = await standing(page, spot)
+    await page.mouse.click(spot.x, spot.y)
+    const press = await pressed(page)
+    return { spot, at, before, press, held: focusName(press.held ?? '', of), clicked: press.clicked?.slice(0, 2) ?? null, said: JSON.stringify(press) }
   }
+  // a push's dialog, taken away by a click beside it, gives the focus back to what had it
+  const dismissed = async (entry: number) => {
+    await page.locator('.background.visible').click({ position: { x: 4, y: 4 } })
+    await expect.poll(async () => (now => [now.dialog, now.editing, now.focus, now.entry])(await read()), { message: 'the dialog gone: no editor, no entry more, and the focus in the MindBox, where it was', timeout: 10_000 }).toEqual([null, false, 'the MindBox', entry])
+  }
+  const open = async (of: string) => {
+    await page.evaluate(id => void (location.hash = id), of)
+    await expect.poll(() => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"].target`), of), { timeout: 30_000 }).toBe(true)
+  }
+  // the page is ready for a press once it is done rendering: while it renders the items of a new
+  // view (after a local item is made or named by the address) the route's own overlay lies over
+  // the page and takes the click. (That overlay alone: an item's own, shown while the item is
+  // saved, has no such class and lets a click through)
+  const ready = () => expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { message: 'the page is done rendering: the route\'s overlay is gone', timeout: 30_000 }).toBe(true)
+  const closed = async () => {
+    await page.keyboard.press('Escape')
+    await expect.poll(() => page.evaluate(() => document.querySelectorAll('.column:not(.hidden) .container.editing').length), { message: 'Escape closes the editor that was opened: none is open', timeout: 15_000 }).toBe(0)
+  }
+  // (the number's corner, which is the corner of the menu's last button: the circles' box comes
+  // after the number in the menu, and a rule keeps the number's corner as it is)
+  const corner = () => page.evaluate(id => getComputedStyle(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index`)!).borderTopRightRadius, id)
+  const cornered = await corner()
+
+  // the control: in no state the point is the item's text, and the click the item's
+  const plain = await click()
+  await expect.poll(() => pressState(page, id), { message: `in no state a click at that point opens the item's editor, which takes the focus (the press as the page saw it: ${plain.said})`, timeout: 10_000 }).toEqual({ editing: true, focus: 'its editor', entry: plain.before.entry })
+  expect([plain.at, plain.held, plain.clicked, plain.press.bubbled], `the text there: no circle, no tooltip, no hand; the press alone took the focus out of the MindBox, and the click went on past the item (${plain.said})`).toEqual([['text', null, '', 'auto'], 'none', ['text', null], true])
+  await closed()
+
+  // an item that can be pushed: the hand, the tooltip, and a click that is the push button's call
+  await circlesStated(page, id, true)
+  expect(await corner(), 'the number keeps the corner it has as the menu\'s last button').toBe(cornered)
+  const push = await click()
+  expect([push.at, push.held], `the circle of an item that can be pushed is an element of its own: under the mouse the tooltip \`push\` and the hand, and a press that takes no focus (${push.said})`).toEqual([['menu', 'pushable', 'push', 'pointer'], 'the MindBox'])
+  await expect.poll(dialog, { message: `its click is the push button's call: without #pusher, the app's dialog that names the item (${push.said})`, timeout: 10_000 }).toBe(PUSH)
+  expect([push.clicked, push.press.bubbled ?? false, await read()], 'the click was delivered to the circle and stopped at the item, and it is the circle\'s alone: no editor, no entry more (a select), the item\'s time as it was (a move by its number), no preview').toMatchObject([['menu', 'pushable'], false, { editing: false, entry: push.before.entry, time: push.before.time, refusals: push.before.refusals }])
+  await dismissed(push.before.entry)
+
+  // an item that can be previewed: the same, and a click that is the preview's call
+  await circlesStated(page, id, false, true)
+  const preview = await click()
+  expect([preview.at, preview.held], `the circle of an item that can be previewed: the tooltip \`preview\`, the hand, and a press that takes no focus (${preview.said})`).toEqual([['menu', 'previewable', 'preview', 'pointer'], 'the MindBox'])
+  await expect.poll(() => refusals.length - preview.before.refusals, { message: 'its click is the preview\'s call, seen by its refusal', timeout: 10_000 }).toBe(1)
+  expect([preview.clicked, await read()], 'the click was the circle\'s alone: no editor, the focus still in the MindBox, no entry more, the item\'s time as it was, no dialog').toEqual([['menu', 'previewable'], { editing: false, focus: 'the MindBox', entry: preview.before.entry, time: preview.before.time, refusals: preview.before.refusals + 1, dialog: null, pushes: 0 }])
+
+  // and with the focus in ANOTHER item's editor (the first other plain item shown, opened by a
+  // click on it): the press and the click on the circle leave it there
+  const other = await page.evaluate(id => (document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id]:not([data-item-id="${id}"]):not(.runnable)`) as HTMLElement).dataset.itemId!, id)
+  const beside = await circleSpot(page, other)
+  await page.mouse.click(beside.x, beside.y)
+  await expect.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), { message: 'the premise: a click on another item opens its editor, which has the focus', timeout: 10_000 }).toBe('textarea-' + other)
+  const edited = await click(id, false, 'textarea-' + other)
+  expect([edited.at, edited.held], `a press on the circle takes no focus from another item's editor (${edited.said})`).toEqual([['menu', 'previewable', 'preview', 'pointer'], 'textarea-' + other])
+  await expect.poll(() => refusals.length - edited.before.refusals, { message: 'and its click previews', timeout: 10_000 }).toBe(1)
+  expect(await read(), 'with the focus still in that editor, and no editor of its own').toMatchObject({ editing: false, focus: 'textarea-' + other, entry: edited.before.entry, dialog: null })
+  await closed()
+
+  // both states: two circles, and each acts for itself
+  await circlesStated(page, id, true, true)
+  const near = await click()
+  expect([near.at, near.held], `both states: the circle nearest the number is the pushable one (${near.said})`).toEqual([['menu', 'pushable', 'push', 'pointer'], 'the MindBox'])
+  await expect.poll(dialog, { message: 'and its click pushes, on an item that can be previewed too', timeout: 10_000 }).toBe(PUSH)
+  expect([near.clicked, await read()], 'a push alone: no preview, no editor').toMatchObject([['menu', 'pushable'], { editing: false, entry: near.before.entry, time: near.before.time, refusals: near.before.refusals }])
+  await dismissed(near.before.entry)
+  const far = await click(id, true)
+  expect([far.at, far.held], `and the circle left of it the previewable one (${far.said})`).toEqual([['menu', 'previewable', 'preview', 'pointer'], 'the MindBox'])
+  await expect.poll(() => refusals.length - far.before.refusals, { message: 'whose click previews', timeout: 10_000 }).toBe(1)
+  expect([far.clicked, await read()], 'a preview alone: no dialog of a push, no editor, the focus still in the MindBox').toEqual([['menu', 'previewable'], { editing: false, focus: 'the MindBox', entry: far.before.entry, time: far.before.time, refusals: far.before.refusals + 1, dialog: null, pushes: 0 }])
+
+  // A PRESS RELEASED OFF ITS CIRCLE DOES NOTHING. Pressed on the pushable circle and released on
+  // the previewable one, the click is delivered to their common ancestor, the circles' box: no
+  // push, and no preview by the item's own click either, which a press arms for 250 ms; pressed on
+  // the circle of an item that can only be pushed and released on the item's text, no editor. The
+  // release must come within those 250 ms for the item's click to be in question at all, so the
+  // gesture (three driver calls) is made again, five times at most, until the page saw it so
+  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    const made: Press[] = []
+    while (made.length < 5 && !(made[made.length - 1]?.ms! < 250)) {
+      await pressRecorded(page)
+      await focusMindbox(page)
+      await page.mouse.move(from.x, from.y)
+      await page.mouse.down()
+      await page.mouse.move(to.x, to.y)
+      await page.mouse.up()
+      made.push(await pressed(page))
+    }
+    await settled(page)
+    return { press: made[made.length - 1], said: JSON.stringify(made) }
+  }
+  const [onPushable, onPreviewable] = [await circleSpot(page, id), await circleSpot(page, id, true)]
+  const kept = await read()
+  const across = await drag(onPushable, onPreviewable)
+  expect([across.press.ms! < 250, across.press.clicked?.slice(0, 2), focusName(across.press.held ?? '', id)], `the premise: released within 250 ms, on the other circle, so that the click is the circles' box's; and the press took no focus (${across.said})`).toEqual([true, ['menu', null], 'the MindBox'])
+  expect(await read(), `pressed on the pushable circle and released on the previewable one: no push, no preview, no editor (${across.said})`).toEqual(kept)
+  await circlesStated(page, id, true)
+  const onText = { x: onPushable.x - 60, y: onPushable.y }
+  const off = await drag(onPushable, onText)
+  expect([off.press.ms! < 250, off.press.clicked?.[1]], `the premise: released within 250 ms, off the circle (${off.said})`).toEqual([true, null])
+  expect(await read(), `pressed on the circle and released on the item: no push, no editor (${off.said})`).toMatchObject({ editing: false, focus: 'the MindBox', dialog: null, refusals: kept.refusals, pushes: 0 })
+  // and a circle MADE ANEW under a held press (the item leaves its state and enters it again
+  // while the button is down: another element stands at that place) is not the circle that was
+  // pressed: neither a click delivered to the new one (a script's here: where a browser sends the
+  // click of such a press is its own affair, and Chromium sent the new circle none) nor the
+  // release there does anything
+  await pressRecorded(page)
+  await focusMindbox(page)
+  await page.mouse.move(onPushable.x, onPushable.y)
+  await page.mouse.down()
+  await circlesStated(page, id, false)
+  await circlesStated(page, id, true)
+  await page.evaluate(id => (document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu .pushable-mark`) as HTMLElement).click(), id)
+  await page.mouse.up()
+  const renewed = await pressed(page)
+  await settled(page)
+  expect([(await standing(page, onPushable)).slice(0, 2), await read()], `a click on the circle that took the pressed one's place, and the release there: no push, no editor (${JSON.stringify(renewed)})`).toMatchObject([['menu', 'pushable'], { editing: false, dialog: null, refusals: kept.refusals, pushes: 0 }])
+  await circlesStated(page, id, false)
+
+  // ONLY THE ITEM'S OWN CIRCLES ACT: content of an item's text that carries the menu's and the
+  // circles' class names is content. A click on it is the item's (its editor opens), and no push
+  // is called, for which this notebook would show its dialog
+  const lookalike = await page.evaluate(async () => ((await window._create('#e2e_lookalike <div class="item-menu"><span class="state-marks"><span class="state-mark pushable-mark">content with the class names of a circle</span></span></div>')) as unknown as { id: string }).id)
+  await open(lookalike)
+  const fake = await page.evaluate(async id => {
+    const span = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item .state-mark.pushable-mark`) as HTMLElement
+    span.scrollIntoView({ block: 'center' })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve))))
+    const at = span.getBoundingClientRect()
+    return { x: (at.left + at.right) / 2, y: (at.top + at.bottom) / 2, matches: !!span.closest('.item-menu .state-mark'), own: !!span.closest('.container')!.querySelector(':scope > .item-menu .state-mark') }
+  }, lookalike)
+  expect([fake.matches, fake.own], 'the premise: the content matches the selector of a circle in a menu, on an item that has no circle').toEqual([true, false])
+  await pressRecorded(page)
+  await focusMindbox(page)
+  await ready()
+  await page.mouse.move(fake.x, fake.y)
+  await page.mouse.click(fake.x, fake.y)
+  await expect.poll(async () => [(await pressState(page, lookalike)).editing, await dialog()], { message: `a click on such content is the item's: its editor opens, and nothing is pushed (${JSON.stringify(await pressed(page))})`, timeout: 10_000 }).toEqual([true, null])
+  await closed()
+
+  // THE PUSH ITSELF, AND THE MINDBOX. A local `#pusher` listener stands in for the pusher: it
+  // records the name it is asked to push and returns what the row holds for it, a promise the row
+  // settles or a text, and nothing is written anywhere. The item is a local one, shown by the
+  // draft that the row types into the MindBox, which names it
+  await page.evaluate(async text => void (await window._create(text)), PUSHER)
+  await expect.poll(() => page.evaluate(() => !!window._item('#pusher', true)), { timeout: 15_000 }).toBe(true)
+  const local = await page.evaluate(async () => ((await window._create('#e2e_pushed a local item of the row\'s, which can be pushed')) as unknown as { id: string }).id)
+  const DRAFT = '#e2e_pushed and the draft of a new item'
+  await focusMindbox(page)
+  await page.keyboard.press('ControlOrMeta+a')
+  await page.keyboard.type(DRAFT)
+  await circlesStated(page, local, true)
+  await page.evaluate(() => void ((window as unknown as { __push_return: unknown; __push_done: unknown }).__push_return = new Promise(resolve => ((window as unknown as { __push_done: unknown }).__push_done = resolve))))
+  expect(await box(), 'the premise: the MindBox holds the draft').toBe(DRAFT)
+  const sent = await click(local)
+  await expect.poll(pushes, { message: `with #pusher, the circle's click is a push of that item by name, once (${sent.said})`, timeout: 10_000 }).toEqual(['#e2e_pushed'])
+  expect([sent.at, sent.held, await box(), (await pressState(page, local)).focus, await dialog()], 'while the push is at work: the draft is still the box\'s text, not the command\'s, and the focus is still there').toEqual([['menu', 'pushable', 'push', 'pointer'], 'the MindBox', DRAFT, 'the MindBox', null])
+  await page.keyboard.type(' that goes on')
+  await page.evaluate(() => (window as unknown as { __push_done: (value?: unknown) => void }).__push_done())
+  await settled(page)
+  expect([await box(), (await pressState(page, local)).focus, await pushes()], 'the push done, resolved to nothing: the box holds the draft and what was typed meanwhile, with the focus, neither cleared nor blurred').toEqual([DRAFT + ' that goes on', 'the MindBox', ['#e2e_pushed']])
+  // a text that the pusher returns (it does when it finds no item by that name) is the box's text
+  // for a command typed there: not for this one
+  await page.evaluate(() => void ((window as unknown as { __push_return: unknown }).__push_return = '/push #e2e_pushed'))
+  await click(local)
+  await expect.poll(pushes, { timeout: 10_000 }).toEqual(['#e2e_pushed', '#e2e_pushed'])
+  await settled(page)
+  expect([await box(), (await pressState(page, local)).focus], 'a push that returns a text: the box as it was, with the focus').toEqual([DRAFT + ' that goes on', 'the MindBox'])
+  // and the push button of the item's editor, which is the same call: the item's editor opened
+  // by a click on its text, the button clicked, the box as it was
+  await page.evaluate(() => void ((window as unknown as { __push_return: unknown }).__push_return = undefined))
+  const text = await page.evaluate(id => {
+    const item = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item`)!
+    const walker = document.createTreeWalker(item, NodeFilter.SHOW_TEXT)
+    let last: Text | null = null
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) if (node.textContent!.trim() && !node.parentElement!.closest('a, mark, button, input')) last = node as Text
+    const range = document.createRange()
+    range.selectNodeContents(last!)
+    const at = range.getClientRects()[0]
+    return { x: at.left + Math.min(at.width / 2, 40), y: (at.top + at.bottom) / 2 }
+  }, local)
+  await page.mouse.click(text.x, text.y)
+  await expect.poll(async () => (await pressState(page, local)).focus, { message: 'the premise: a click on the item\'s text opens its editor', timeout: 10_000 }).toBe('its editor')
+  await page.locator(`.column:not(.hidden) .container[data-item-id="${local}"] .edit-menu .button.push`).click()
+  await expect.poll(pushes, { message: 'the editor\'s push button is the same push', timeout: 10_000 }).toEqual(['#e2e_pushed', '#e2e_pushed', '#e2e_pushed'])
+  await settled(page)
+  expect(await box(), 'and leaves the box as it was too').toBe(DRAFT + ' that goes on')
+  await closed()
+
+  // WHOSE PRESS IT IS, WHEN TWO POINTERS OVERLAP (the review's round 1: a finger was down, a mouse
+  // pressed elsewhere, and the finger's compatibility mousedown, delivered to the push circle,
+  // was taken for the mouse's: the circle was armed, the touch press's default prevented, and
+  // the click pushed though it said `touch`). A circle is armed by the mouse press that was MADE
+  // ON IT and by nothing else. The orders of events are a script's (`dispatched`: the rows'
+  // driver calls do not make a finger and a mouse overlap, and a real tap's mousedown at this
+  // circle goes to the number), in this window, whose primary pointer hovers, as a laptop's with a touch screen. Of
+  // each: the pushes it made (the stand-in's record), whether its last mousedown's default was
+  // prevented (a touch press keeps its own: the focus goes where a tap's goes), and whether it
+  // was the item's click (the editor of this item, which can only be pushed)
+  const [M, E] = ['circle', 'elsewhere'] as const
+  const orders: [string, Step[], [number, boolean, boolean]][] = [
+    ['the control: a mouse\'s own press and click on the circle push once', [['pointerdown', M, 'mouse'], ['mousedown', M], ['mouseup', M], ['click', M, 'mouse']], [1, true, false]],
+    ['THE INTERLEAVING: a finger down, a mouse press elsewhere, the finger\'s mousedown on the circle, its click a touch\'s', [['pointerdown', M, 'touch'], ['pointerdown', E, 'mouse'], ['mousedown', E], ['pointerup', M, 'touch'], ['mousedown', M], ['mouseup', M], ['click', M, 'touch']], [0, false, true]],
+    ['the same, its click saying nothing of its pointer', [['pointerdown', M, 'touch'], ['pointerdown', E, 'mouse'], ['mousedown', E], ['pointerup', M, 'touch'], ['mousedown', M], ['mouseup', M], ['click', M]], [0, false, true]],
+    ['a mouse\'s press on the circle, the click a touch\'s: refused, and not the item\'s either', [['pointerdown', M, 'mouse'], ['mousedown', M], ['mouseup', M], ['click', M, 'touch']], [0, true, false]],
+    ['superseded: a mouse\'s press on the circle whose mousedown never came, a finger down elsewhere, then a mousedown on the circle', [['pointerdown', M, 'mouse'], ['pointerdown', E, 'touch'], ['mousedown', M], ['mouseup', M], ['click', M]], [0, false, true]],
+    ['ended: the same mouse press released, then a mousedown on the circle', [['pointerdown', M, 'mouse'], ['pointerup', M, 'mouse'], ['mousedown', M], ['mouseup', M], ['click', M]], [0, false, true]],
+    ['cancelled: the same mouse press cancelled, then a mousedown on the circle', [['pointerdown', M, 'mouse'], ['pointercancel', M, 'mouse'], ['mousedown', M], ['mouseup', M], ['click', M]], [0, false, true]],
+    ['taken once: a second mousedown on the circle after the mouse\'s own', [['pointerdown', M, 'mouse'], ['mousedown', M], ['mousedown', M], ['mouseup', M], ['click', M]], [0, false, true]],
+  ]
+  for (const [what, steps, expected] of orders) {
+    await ready()
+    const count = (await pushes()).length
+    const prevented = await dispatched(page, local, steps)
+    await settled(page)
+    expect([(await pushes()).length - count, prevented, (await pressState(page, local)).editing], `${what}: its pushes, its last mousedown's default prevented, the item's editor opened`).toEqual(expected)
+    await closed()
+  }
+
+  // THE SECOND CLICK OF A DOUBLE CLICK ACTS ON NO CIRCLE (the owner's rule: a push goes outward
+  // and takes a deliberate single click). A local item with a preview that succeeds (its record
+  // given a source and the text of its file, as the app has them for an installed item): a click
+  // on its previewable circle previews it, the item can be pushed and no longer previewed, and
+  // the pushable circle stands where the previewable one stood, under the pointer. The second
+  // click of a double click arrives there (the driver's click count of 2): nothing is pushed. A
+  // single click after it pushes
+  const PREVIEW = '#e2e_previewed as its file has it now'
+  const twice = await page.evaluate(async preview => {
+    const id = ((await window._create('#e2e_previewed as it was installed')) as unknown as { id: string }).id
+    Object.assign(window.__items.find(item => item.id == id)!, { attr: { source: 'https://github.com/e2e/e2e/blob/master/e2e_previewed.md', owner: 'e2e', repo: 'e2e', branch: 'master', path: 'e2e_previewed.md', sha: 'e2e', token: null }, previewText: preview })
+    return id
+  }, PREVIEW)
+  await open(twice)
+  await circlesStated(page, twice, false, true)
+  const before = (await pushes()).length
+  const first = await click(twice)
+  expect([first.at, first.clicked, first.press.clicked?.[2]], `the premise: a single click on the previewable circle of an item that can only be previewed (${first.said})`).toEqual([['menu', 'previewable', 'preview', 'pointer'], ['menu', 'previewable'], 1])
+  const state = () => page.evaluate(id => (item => [item.text, item.pushable, item.previewable])(window.__items.find(item => item.id == id) as unknown as { text: string; pushable: boolean; previewable: boolean }), twice)
+  await expect.poll(state, { message: 'the click previews: the item has its file\'s text, can be pushed and can no longer be previewed', timeout: 15_000 }).toEqual([PREVIEW, true, false])
+  await expect.poll(() => page.evaluate(id => (box => box && ['pushable', 'previewable'].map(state => box.classList.contains(state)))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)), twice), { timeout: 15_000 }).toEqual([true, false])
+  // (read at the point of the first click itself, where the mouse still is: nothing is scrolled
+  // or measured again in between)
+  await pressRecorded(page)
+  expect((await standing(page, first.spot)).slice(0, 2), 'the premise: the pushable circle stands at the point where the previewable one was clicked, under the mouse').toEqual(['menu', 'pushable'])
+  await page.mouse.down({ clickCount: 2 })
+  await page.mouse.up({ clickCount: 2 })
+  const again = await pressed(page)
+  await settled(page)
+  expect([again.clicked, (await pushes()).length - before, (await pressState(page, twice)).editing, await dialog()], `the second click of a double click, delivered to the pushable circle: no push, no editor (${JSON.stringify(again)})`).toEqual([['menu', 'pushable', 2], 0, false, null])
+  await page.mouse.click(first.spot.x, first.spot.y)
+  await expect.poll(async () => (await pushes()).slice(before), { message: 'a single click on it pushes', timeout: 10_000 }).toEqual(['#e2e_previewed'])
+})
+
+// IN A PHONE'S WINDOW A CIRCLE IS NO CONTROL, AND A TAP AT IT DOES WHAT ONE AT THAT POINT DID. The
+// circle has no tooltip and no hand, before a tap and after one. A tap at the middle of the
+// pushable circle, and the same tap at the same point of the same item in no state: the browser
+// hands both to the NUMBER, 6.5 px from that point (Chromium's touch adjustment: the nearest
+// element that takes clicks within the finger's area, the number's box beginning 4 px before the
+// digits), which selects the item and takes the focus out of the MindBox, with the circle as
+// without it. That is why the circles have no listener of their own: with one, or with a `:hover`
+// rule that names a circle, this tap is the circle's and opens the item's editor (probed with a
+// mutant of each; the ring's lesson).
+// THE ONE TAP THAT REACHES A CIRCLE is on the previewable circle of an item in both states, 24.5 px
+// from the number's box: it is delivered where it is made, and it is the ITEM'S click, as it was
+// while the circles were the menu's `::before`. Three things say so, and a circle acting for
+// itself there would fail each: the item's own handler previews an item that can be previewed
+// (seen by the refusal), the tap takes the focus out of the MindBox, as a tap on the item's text
+// does, and the click goes on past the item (the item's own click bubbles; a circle's own is
+// stopped at the item, so a click that acted as the circle's after a press that did not would
+// still be told)
+test('in a phone\'s window a tap on a state circle, with the MindBox focused, is what a tap at that point was: no control of its own', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, hasTouch: true, isMobile: true })
+  const page = await context.newPage()
+  await loadAnonymous(page)
+  expect(await page.evaluate(() => innerWidth), "a phone's window: 375 px").toBe(375)
+  const id = await firstShown(page)
+  const refusals = previewRefusals(page)
+  const tapped = async (pushable: boolean, previewable = false) => {
+    await circlesStated(page, id, pushable, previewable)
+    const spot = await circleSpot(page, id, previewable)
+    const at = await standing(page, spot)
+    await focusMindbox(page)
+    const before = { ...(await pressState(page, id)), refusals: refusals.length }
+    expect(before, 'the premise: the MindBox has the focus, and no editor is open').toMatchObject({ editing: false, focus: 'the MindBox' })
+    await page.touchscreen.tap(spot.x, spot.y)
+    // the outcome as it shows, polled as the whole state, so that a tap that did otherwise says
+    // what it did: a select (a history entry more, the focus out of the MindBox) for a tap the
+    // number gets, and a refused preview (the focus out of the MindBox too) for one the item gets
+    await expect
+      .poll(async () => ({ ...(await pressState(page, id)), refusals: refusals.length }), { message: `a tap in a phone's window at that point${previewable ? ', on the previewable circle of an item in both states' : pushable ? ', on the circle' : ', on the text'}: its outcome (${JSON.stringify(await pressed(page))})`, timeout: 10_000 })
+      .toEqual(previewable ? { editing: false, focus: 'none', entry: before.entry, refusals: before.refusals + 1 } : { editing: false, focus: 'none', entry: before.entry + 1, refusals: before.refusals })
+    const [after, press] = [await pressState(page, id), await pressed(page)]
+    const found = { hit: at[0], circle: at[1], tooltip: at[2], cursor: at[3], after: (await standing(page, spot)).slice(1), clicked: press.clicked?.slice(0, 2) ?? null, bubbled: press.bubbled ?? false, editing: after.editing, focus: after.focus, selected: after.entry != before.entry }
+    // the starting state again: Back to the entry the select left, no state
+    if (after.entry != before.entry) {
+      await page.goBack()
+      await expect.poll(async () => (await pressState(page, id)).entry, { timeout: 15_000 }).toBe(before.entry)
+    }
+    if (pushable || previewable) await circlesStated(page, id, false)
+    return found
+  }
+  const [plain, circled] = [await tapped(false), await tapped(true)]
+  expect([plain.hit, circled.hit], 'the spot is the item\'s text, and the circle\'s (in the menu) when it can be pushed').toEqual(['text', 'menu'])
+  expect([circled.circle, circled.tooltip, circled.cursor], 'the circle is there, with no tooltip and no hand').toEqual(['pushable', '', 'auto'])
+  const outcome = ({ editing, focus, selected }: typeof plain) => ({ editing, focus, selected })
+  expect(outcome(circled), `a tap on the circle does what one at that point of the text did (${JSON.stringify([plain, circled])})`).toEqual(outcome(plain))
+  expect([plain.clicked?.[0], circled.clicked?.[0], outcome(circled)], 'delivered to the number, with the circle as without it, which selects the item and takes the focus out of the MindBox').toEqual(['number', 'number', { editing: false, focus: 'none', selected: true }])
+  const far = await tapped(true, true)
+  expect([far.circle, far.tooltip, far.cursor, far.clicked, outcome(far)], `the previewable circle of an item in both states, far from the number: the tap is delivered to it, and is the item's (${JSON.stringify(far)})`).toEqual(['previewable', '', 'auto', ['menu', 'previewable'], { editing: false, focus: 'none', selected: false }])
+  expect([far.bubbled, far.after], 'by the item\'s own click, which goes on past the item; and the finger left the circle no tooltip and no hand').toEqual([true, ['previewable', '', 'auto']])
+
+  // AND A MOUSE ATTACHED TO THIS DEVICE IS A MOUSE (the positive control of the rule "by what
+  // pressed"): in this same window, whose primary pointer is the finger and does not hover, a
+  // real mouse's pointer over the push circle shows the hand and the tooltip, and its click
+  // pushes, once, with the focus where it was. The push is seen by the pusher's stand-in, as in
+  // the mouse's row; the item is named by the address, so that it stays on the page
+  expect(await page.evaluate(() => matchMedia('(hover: none)').matches), 'the premise: the primary pointer of this window does not hover').toBe(true)
+  await page.evaluate(async text => void (await window._create(text)), PUSHER)
+  await expect.poll(() => page.evaluate(() => !!window._item('#pusher', true)), { timeout: 15_000 }).toBe(true)
+  await page.evaluate(id => void (location.hash = id), id)
+  await expect.poll(() => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"].target`), id), { timeout: 30_000 }).toBe(true)
+  await circlesStated(page, id, true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { message: 'the page is done rendering: the route\'s overlay is gone', timeout: 30_000 }).toBe(true)
+  const spot = await circleSpot(page, id)
+  await focusMindbox(page)
+  await page.mouse.move(spot.x, spot.y)
+  const under = await standing(page, spot)
+  await page.mouse.click(spot.x, spot.y)
+  const press = await pressed(page)
+  await expect.poll(() => page.evaluate(() => [...((window as unknown as { __pushed?: string[] }).__pushed ?? [])]), { message: `a mouse's click on the push circle pushes the item, once (${JSON.stringify(press)})`, timeout: 10_000 }).toEqual([await page.evaluate(id => window._item(id)!.name, id)])
+  expect([under, press.clicked?.slice(0, 2), focusName(press.held ?? '', id), (await pressState(page, id)).editing], `under the mouse the hand and the tooltip; the click delivered to the circle, the focus kept, no editor (${JSON.stringify(press)})`).toEqual([['menu', 'pushable', 'push', 'pointer'], ['menu', 'pushable'], 'the MindBox', false])
+  await context.close()
 })

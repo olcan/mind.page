@@ -832,12 +832,12 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const written = sheet.textContent!
       if (older) sheet.textContent = written.split('\n').filter(rule => !rule.includes('{ --item-mark-room')).join('\n').replaceAll('var(--item-mark-room)', '18px')
       // (the ring is measured standing still: a hit test reads a turning box up to 2 px wide of it)
-      // (and the menu's own box takes no hit, so that a hit on the menu is one on its `::before`, the state circles: tests/e2e/layout.spec.ts)
-      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.running-mark::before { animation: none !important } .item-menu { pointer-events: none !important } .item-menu > *, .item-menu::before { pointer-events: auto !important }' + (without ? ` .item-menu > .index${without} { display: none !important }` : '') }))
+      // (the state circles are one box in the menu, `.state-marks`, each circle an element in it: tests/e2e/layout.spec.ts)
+      const hide = document.head.appendChild(Object.assign(document.createElement('style'), { textContent: '.running-mark::before { animation: none !important }' + (without ? ` .item-menu > .index${without} { display: none !important }` : '') }))
       shown()?.scrollIntoView({ block: 'center' })
       await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
       const box = shown()
-      const [index, spacer, run, menu] = ['.item-menu > .index', '.item > [id^="menu-"]', '.item-menu > .run', '.item-menu'].map(part => box?.querySelector(part) as HTMLElement | null)
+      const [index, spacer, run] = ['.item-menu > .index', '.item > [id^="menu-"]', '.item-menu > .run'].map(part => box?.querySelector(part) as HTMLElement | null)
       if (!box || !index?.firstChild || !spacer || !run) {
         hide.remove()
         if (older) sheet.textContent = written
@@ -851,7 +851,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
       const circles: number[][] = [] // the same for the one box of the state circles: one mark at most
       for (let k = 1, pixel = Math.floor(own.left) - 1; k <= 80; k++, pixel--) {
         const hit = document.elementFromPoint(pixel + 0.5, y)
-        if (hit === menu) circles[0] = [number.left - pixel, circles[0]?.[1] ?? number.left - pixel - 1]
+        if (hit?.closest('.item-menu > .state-marks')) circles[0] = [number.left - pixel, circles[0]?.[1] ?? number.left - pixel - 1]
         if (!index.contains(hit)) continue
         const last = found[found.length - 1]
         if (last && last[0] == number.left - pixel - 1) last[0] = number.left - pixel
@@ -1018,11 +1018,18 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await runs(false)
   await boxed(false)
   const circled = await beside('watched and pushable: the sparkle where it was, the circle left of it', m => [marksAre(m.marks, [[18, 4]]), marksAre(m.circles, [[39, 21]]), m.run, m.room], [true, true, alone.run.map(edge => edge + 18), ['18px', '18px']])
-  // a click on the circle is a click on the item, as one on the border was (the circle is the
-  // menu's, not the number's, whose click selects or moves the item): the editor opens
+  // a click on the circle is the circle's own, beside the sparkle too (with a mouse: the layout
+  // spec's row): the call of the edit menu's push button, which in an account without the #pusher
+  // item (this one) ends in the app's dialog that names the item, and no editor opens. (Until
+  // 2026-11-19 it was a click on the item, as one on the border was, and opened the editor)
+  const pushed = await page.evaluate(id => window._item(id)!.name, runId)
   await page.mouse.click(circled.at[0] + 4 - 36 + 7.5, circled.at[1])
-  await expect(page.locator(`#textarea-${runId}`), 'a click on the circle opens the item\'s editor').toBeVisible()
-  await close(runId)
+  await expect
+    .poll(() => page.evaluate(() => ((window as any)._modal_visible() ? (document.querySelector('.background.visible .modal')?.textContent ?? '').trim() : null)), { message: 'a click on the circle is the push button\'s call', timeout: 10_000 })
+    .toBe(`can not push ${pushed}, #pusher must be installed first`)
+  await expect(page.locator(`#textarea-${runId}`), 'and opens no editor').toHaveCount(0)
+  await page.locator('.background.visible').click({ position: { x: 4, y: 4 } })
+  await expect.poll(() => page.evaluate(() => (window as any)._modal_visible())).toBe(false)
   // (the circle has the room the item SAYS and nothing else: beside an older stylesheet's sparkle,
   // which says none, it stands in the sparkle's place, read with the sparkle hidden; the room
   // kept free is the same)
