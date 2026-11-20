@@ -96,7 +96,7 @@
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
   import { renderInertMarkdown } from '../inert_markdown'
-  import { inertBlocks, sayExpanded } from '../inert_blocks'
+  import { forgetSelection, inertBlocks, sayExpanded } from '../inert_blocks'
   import { typesetInertMath } from '../inert_math'
   export let editable = true
   export let pushable = false
@@ -289,6 +289,9 @@
     // where it was
     if (mark || (e.target as HTMLElement).closest?.('.item-menu .running-mark')) e.preventDefault()
   }
+  // whether a text selection stands in `node` (its anchor or its focus): a click there is no tap. the test of
+  // the item's edit taps (onClick) and of the taps on an inert block (src/inert_blocks.ts)
+  const selectedIn = (node: Node) => getSelection().type == 'Range' && (node.contains(getSelection().anchorNode) || node.contains(getSelection().focusNode))
   function onClick(e) {
     // a click on the state circle that a mouse's single press armed is the circle's alone: a
     // push, as the edit menu's push button's click, or a preview. (before the rules below: as a
@@ -314,18 +317,14 @@
     // ignore clicks inside an inert frame (a canonical reply's dead frame, src/inert.ts): its
     // text is read and selected, its links are wired, and a click on it opens no editor (the
     // owner, 2026-09-27: a stray click in a long reply kept opening the item's editor). the same
-    // for the block around its frames (src/inert_blocks.ts), whose head line has a listener of
-    // its own: it opens and closes the block
+    // for the block around its frames (src/inert_blocks.ts), which has a listener of its own: a
+    // click anywhere on it opens and closes the block
     if (e.target.closest('.vault-result, .inert-block')) return
     // console.debug(e.target);
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest('[_clickable]')
     if (clickable && (!clickable['_clickable'] || clickable['_clickable'](e))) return true
-    if (
-      getSelection().type == 'Range' &&
-      (e.target.contains(getSelection().anchorNode) || e.target.contains(getSelection().focusNode))
-    )
-      return // ignore click when text is selected in target element
+    if (selectedIn(e.target)) return // ignore click when text is selected in target element
 
     if (editing) return // already editing
     // if item is previewable, then preview instead of edit
@@ -1733,6 +1732,11 @@
         elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
       }
     })
+    // the item's selection changed, or this component is new (an item that changes columns gets a
+    // new one): the item's manual toggles made under the other selection are forgotten, before
+    // the blocks are made, which read them
+    const turned = saidTarget !== target // (also while no body shows, the editor open, and whatever the item holds)
+    if (turned) forgetSelection(id, (saidTarget = target), itemdiv)
     // THE BLOCKS of the frames just populated (src/inert_blocks.ts: frames that follow each other
     // under one head line, closed to that line by default, open while the item is the target or
     // the search has a match inside, and as a manual toggle left them). only after a population,
@@ -1744,15 +1748,13 @@
         id,
         terms: matchingTerms + ' ' + matchingTermsSecondary, // the highlighter's terms, below
         selected: () => target,
+        selecting: selectedIn,
         resized: () => onResized(id, container, 'inert toggle'),
       })
     // and what each block's marker says of it (aria-expanded): after a population, and when the
     // selection changed with none (it opens and closes the blocks by css alone). not on the other
     // updates of an item with frames, which are many (a key in any editor updates several items)
-    if (itemdiv && vaultValues.size && (framesPopulated || saidTarget !== target)) {
-      sayExpanded(itemdiv, target)
-      saidTarget = target
-    }
+    if (itemdiv && vaultValues.size && (framesPopulated || turned)) sayExpanded(itemdiv, target)
     // always report container height for potential changes
     // WARNING: afterUpdate can be triggered for _multiple_ items on every key press in the editor of a single item, so it is critical for onResized to be efficient. These updates were traced to binding such as editor.focused when focusing on an editor or editor.selectionStart when typing into an editor, and then seem to always get propagated to every item that is rendered on the page
     // console.trace()
@@ -3634,55 +3636,58 @@
     border-radius: 2px;
     background: rgba(128, 128, 128, 0.08);
   }
-  /* THE INERT SECTIONS (src/inert_blocks.ts; the owner, 2026-11-19): a frame, or the frames that
-     follow each other, in ONE block under one head line (.inert-line: a marker, the first
-     section's small name, its status line). CLOSED, the block is that line and is exactly as
-     tall as a line of the item's text at every width (its margins, its rules and a head of the
-     item's line height less those 6px): a long status line is cut at the block's width with an
-     ellipsis, on a phone too. OPEN, it is a full-width block in
+  /* THE INERT SECTIONS (src/inert_blocks.ts; the owner, 2026-11-19 and 2026-11-20): a frame, or
+     the frames that follow each other, in ONE block under one head line (.inert-line: the first
+     section's small name, on the middle of the line, and its status line). CLOSED, the block is
+     that line and is exactly as tall as a line of the item's text at every width (its margins,
+     its rules and a head of the item's line height less those 6px): a long status line is cut at
+     the block's width with an ellipsis, on a phone too. OPEN, it is a full-width block in
      the look of the #template item's toggle() (dashed rules above and below, across the item's
-     own padding where the block stands in the item's top-level flow), the head reduced to the
-     marker and the name, the sections under their small names; the frames are not framed again.
-     only the head is a control (the pointer; its marker for a keyboard); the sections stay dead.
-     OPEN is: a search match (.matched), or what a manual toggle left (.opened, .closed), or the
-     item being the target, in that order (blockOpen in the module is this same rule, and so is
+     own padding where the block stands in the item's top-level flow), the sections under their
+     small names; the frames are not framed again. An open block starts with its first section:
+     with that section's name, 6px under the rule, or, where it has none (a reply), with the
+     section's own first line, the item's own padding under the rule (the head holds the name
+     alone then, and an empty head has no height). THE WHOLE BLOCK IS THE CONTROL (the pointer; a
+     click anywhere on it toggles), and no arrow says so: the dashed look does. its marker, the
+     control of a keyboard and a reader, lies over the block, takes no press, and shows as a ring
+     under a keyboard's focus alone.
+     OPEN is: what a manual toggle left (.opened, .closed) while it stands, else a search match
+     (.matched), else the item being the target (blockOpen in the module is this same rule, and so is
      what a marker says of its block). the two classes of a toggle and the search's are the
      module's; the target is this component's own class, so a selection opens and closes the
      blocks by css */
   /* (span.: over the rules below that take the margins of every first and last child) */
   .item > :global(.content span.inert-block) {
     display: block;
+    position: relative; /* the marker's containing block */
     white-space: normal;
     margin: 2px 0;
     padding: 0 6px;
     border: 1px dashed #444;
     border-radius: 4px;
     background: rgba(255, 255, 255, 0.075); /* transparency allows nesting, as toggle()'s */
+    cursor: pointer;
   }
   .item > :global(.content .inert-block > .inert-line) {
     display: flex;
-    align-items: baseline;
+    align-items: center; /* the small name on the middle of the status line's text, not on its baseline */
     gap: 6px;
     line-height: calc(1lh - 6px); /* of the block's line height, which is the item's */
     height: 1lh;
-    cursor: pointer;
   }
-  /* the marker: the block's disclosure control for a keyboard (a button by its role, focusable;
-     its ring shows for a keyboard's focus alone, and a mouse's press does not focus it) */
+  /* the marker: the block's disclosure control for a keyboard (a button by its role, focusable).
+     it lies over the whole block, out of the head's flow, shows nothing and takes no press (a
+     press there is the block's); its ring, just inside the block's rules, shows for a keyboard's
+     focus alone */
   .item > :global(.content .inert-block > .inert-line > .inert-toggle) {
-    flex: none;
-    width: 10px;
-    color: #888;
-    font-size: 12px;
-    line-height: 16px;
-  }
-  .item > :global(.content .inert-block > .inert-line > .inert-toggle::before) {
-    content: '▸';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
   }
   .item > :global(.content .inert-block > .inert-line > .inert-toggle:focus-visible) {
     outline: 1px solid #888;
-    outline-offset: 1px;
-    border-radius: 2px;
+    outline-offset: -1px;
+    border-radius: 3px;
   }
   .item > :global(.content .inert-block .inert-name) {
     flex: none;
@@ -3713,28 +3718,28 @@
   .item > :global(.content .inert-block > .vault-result + .vault-result) {
     margin-top: 10px;
   }
-  .item > :global(.content :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed))) {
+  .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed))) {
     margin: 5px 0;
-    padding: 6px 10px 10px;
+    padding: 10px; /* the item's own, above a reply's first line too */
     border-width: 1px 0;
     border-radius: 0;
     background: rgba(255, 255, 255, 0.05);
   }
-  .item > :global(.content > p > :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed))) {
+  .item > :global(.content > p > :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed))) {
     margin: 5px -10px;
   }
-  .item > :global(.content :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed)) > .inert-line) {
-    height: 16px;
+  .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed)) > .inert-line) {
+    height: auto; /* the name's line, or nothing */
     line-height: 16px;
-    margin-bottom: 2px;
   }
-  .item > :global(.content :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed)) > .inert-line > .inert-toggle::before) {
-    content: '▾';
+  /* (the name stands 4px into the block's padding, 6px under the rule, with 2px under it) */
+  .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed)) > .inert-line > .inert-name) {
+    margin: -4px 0 2px;
   }
-  .item > :global(.content :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed)) > .inert-line > .inert-status) {
+  .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed)) > .inert-line > .inert-status) {
     display: none;
   }
-  .item > :global(.content :is(.inert-block:is(.opened, .matched), .container.target .inert-block:not(.closed)) > .vault-result) {
+  .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed)) > .vault-result) {
     display: block;
   }
   /* set default size/padding of pending images */

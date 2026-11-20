@@ -3225,6 +3225,7 @@
     window['_mindboxDebounced'] = false
     if (explicitScrollQuery !== null && explicitScrollQuery !== editorText) explicitScrollQuery = null // a new query: its layouts scroll as usual
     const start = Date.now()
+    forgetSearch((editorText.startsWith('/') ? '/' : ' ') + text) // the search, where it is applied (its text, and whether a first slash turns it off, below): a change of it forgets the inert sections' manual toggles (src/inert_blocks.ts)
 
     const tags = parseTags(text)
     let terms = _.uniq(
@@ -9105,6 +9106,7 @@
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
+  import { forgetSearch } from '../inert_blocks'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)

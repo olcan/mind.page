@@ -3,34 +3,40 @@
 // regions (src/inert.ts; rendered by src/inert_markdown.ts into Item.svelte's `.vault-result`
 // elements) are presented as BLOCKS: a block is one frame, or the frames that follow each other
 // with nothing but blank lines between them (an agent's tree and the request under it), under
-// ONE head line. Closed, a block is that one line: a marker, the first section's small name
-// where it has one, and its STATUS LINE (the first line of what the section shows, with its
-// links). Open, it is the head (the marker and the name) over the sections, each under its
-// small name. The head toggles the block at a click anywhere on it but on a link of its status
-// line; its MARKER is the block's disclosure control for a keyboard and a reader (a focusable
-// button by its role, named after the section, that says whether the block is open: `sayExpanded`).
-// The sections stay dead, as before.
+// ONE head line. Closed, a block is that one line: the first section's small name where it has
+// one, and its STATUS LINE (the first line of what the section shows, with its links). Open, it
+// is the sections, each under its small name (the first one's is the head's; a section without
+// one, a reply, starts with its own first line). A CLICK OR A TAP ANYWHERE ON THE BLOCK toggles
+// it, closed or open (the owner, 2026-11-20: as the #template item's toggle() does), unless
+// something inside took it (a link, which is followed; a child tag's mark, whose click its
+// frame stops) or a text selection made it no tap. No arrow shows: the block's MARKER is its
+// disclosure control for a keyboard and a reader alone (a focusable button by its role, named
+// after the section, that says whether the block is open: `sayExpanded`), laid over the block,
+// where it takes no press and shows as a ring under a keyboard's focus. Nothing else in a
+// section acts, as before.
 //
 // WHAT DECIDES (blockOpen, and the same rule in Item.svelte's css over the block's classes):
-//   1. a match of the current search inside the block opens it for as long as the match lasts,
-//      whatever is remembered, EXCEPT under the very search a manual toggle was made in (the
-//      toggle is the later word there, so that a click on an open section is never a dead one).
-//      a match is one of the search's terms in a section's text (holdsTerm), or a child tag's
-//      mark in it whose resolved tag is one of the terms (holdsTag: the mark the app shows selected);
-//   2. else what a MANUAL toggle left decides;
+//   1. a MANUAL toggle, while it stands, decides, also over a search match (a click on a section
+//      is never a dead one);
+//   2. else a match of the current search inside the block opens it for as long as the match
+//      lasts: one of the search's terms in a section's text (holdsTerm), or a child tag's mark in
+//      it whose resolved tag is one of the terms (holdsTag: the mark the app shows selected);
 //   3. else the block is open while its item is selected (the app's target) and closed otherwise.
-// Only a manual toggle is remembered: `toggles` below, in this module, so in the tab's memory
-// for as long as the page lives (a reload forgets it), by item id and SECTION (sectionKeys),
-// written for every section of the toggled block; a block shows the latest of its sections'
-// (remembered). Selection and search write nothing there.
+// A manual toggle STANDS through every redraw of its item (the new block reads `toggles`), until
+// its item's selection changes (that item's toggles are forgotten: forgetSelection) or the search
+// changes in any way (every toggle is forgotten: forgetSearch); it then leaves the page with the
+// memory (unmark). Nothing else is remembered: `toggles` below, in this module, so in the tab's
+// memory, by item id and SECTION (sectionKeys), written for every section of the toggled block; a
+// block shows the latest of its sections' (remembered). An item shown as the selected one's
+// CONTEXT is not selected: nothing here reads that.
 //
 // Nothing of an item's text is read or changed here, and nothing of the grammar: the blocks are
 // made of the rendered frames, after every (re)population of them (Item.svelte afterUpdate).
 
-// what a manual toggle left: the state, the search terms it was made under, and its turn among
+// what a manual toggle left: the state, its item's selection when it was made, and its turn among
 // the tab's manual toggles (the later one decides where the sections of one block remember
 // different ones)
-export type Toggle = { open: boolean; terms: string; at: number }
+export type Toggle = { open: boolean; selected: boolean; at: number }
 
 const toggles = new Map<string, Toggle>()
 let turn = 0
@@ -51,19 +57,14 @@ export function holdsTerm(text: string, terms: string): boolean {
   return list.some(term => lower.includes(term))
 }
 
-// rule 1: a match opens the block unless a manual toggle was made under these same terms
-export function searchOpens(toggle: Toggle | undefined, matched: boolean, terms: string): boolean {
-  return matched && toggle?.terms !== terms
+// rules 1-3 over a block's inputs: the toggle that stands, the search's match inside, the selection
+export function blockOpen(toggle: Toggle | undefined, matched: boolean, selected: boolean): boolean {
+  return toggle ? toggle.open : matched || selected
 }
 
-// rules 1-3 over a block's inputs (`searched` is searchOpens)
-export function blockOpen(toggle: Toggle | undefined, searched: boolean, selected: boolean): boolean {
-  return searched || (toggle ? toggle.open : selected)
-}
-
-// the toggle a click on the head leaves: the opposite of what the block shows, under the terms
-export function toggled(toggle: Toggle | undefined, searched: boolean, selected: boolean, terms: string, at: number): Toggle {
-  return { open: !blockOpen(toggle, searched, selected), terms, at }
+// the toggle a click on the head leaves: the opposite of what the block shows, under the selection
+export function toggled(toggle: Toggle | undefined, matched: boolean, selected: boolean, at: number): Toggle {
+  return { open: !blockOpen(toggle, matched, selected), selected, at }
 }
 
 // whether one of the titles (the resolved tags of a section's marks) IS one of the search's terms,
@@ -191,7 +192,7 @@ function statusLine(frame: Element): HTMLElement {
 // what a block's marker says of it (`aria-expanded`): the css rule of Item.svelte over the
 // block's classes and the item's selection
 function says(block: Element, selected: boolean) {
-  const open = String(block.matches('.opened, .matched') || (selected && !block.classList.contains('closed')))
+  const open = String(block.matches('.opened') || ((selected || block.matches('.matched')) && !block.matches('.closed')))
   const marker = block.querySelector(':scope > .inert-line > .inert-toggle')
   if (marker && marker.getAttribute('aria-expanded') != open) marker.setAttribute('aria-expanded', open)
 }
@@ -203,15 +204,45 @@ export function sayExpanded(root: Element, selected: boolean): void {
   root.querySelectorAll('.inert-block').forEach(block => says(block, selected))
 }
 
+// the blocks under `root` that carry a forgotten toggle's class lose it, and their markers say
+// what shows then (one query, nothing of the layout)
+function unmark(root: ParentNode) {
+  root.querySelectorAll('.inert-block:is(.opened, .closed)').forEach(block => {
+    block.classList.remove('opened', 'closed')
+    says(block, !!block.closest('.container.target'))
+  })
+}
+
+// AN ITEM'S SELECTION, told by its component when that is new and when the selection changed
+// (Item.svelte afterUpdate): the item's toggles made under the other selection are forgotten
+export function forgetSelection(id: string, selected: boolean, root?: Element | null): void {
+  if (!toggles.size) return // (most items, at every turn)
+  let any = false
+  for (const [key, toggle] of toggles) if (toggle.selected != selected && key.startsWith(id + '|')) any = toggles.delete(key)
+  if (any && root) unmark(root) // (no body shows while the item's editor is open: nothing to take a class off)
+}
+
+// THE SEARCH, told by the page with every query it applies (index.svelte onEditorChange): another
+// query than the last forgets every toggle (no query of the document where nothing is toggled)
+let search = ''
+export function forgetSearch(query: string): void {
+  if (query == search) return
+  search = query
+  if (!toggles.size) return
+  toggles.clear()
+  unmark(document)
+}
+
 // make the blocks of an item's frames that are in none yet (Item.svelte afterUpdate, after a
 // population of frames: the item's children are new then, so in practice all of its frames).
 // `body` gives a frame's decoded text, `id` and `terms` the item and the highlighter's terms of
-// this render, `selected` whether the item is the app's target when asked, and `resized` is
-// called after a manual toggle (the item's height changed with no update of its component)
+// this render, `selected` whether the item is the app's target when asked, `selecting` the item's
+// own test of a text selection in a node (the one of its edit taps), and `resized` is called
+// after a manual toggle (the item's height changed with no update of its component)
 export function inertBlocks(
   root: Element,
   body: (frame: Element) => string,
-  { id, terms, selected, resized }: { id: string; terms: string; selected: () => boolean; resized: () => void },
+  { id, terms, selected, selecting, resized }: { id: string; terms: string; selected: () => boolean; selecting: (node: Node) => boolean; resized: () => void },
 ): void {
   // every filled frame of the item in its order, with its section's name and key
   const all = [...root.querySelectorAll('.vault-result[data-inert-rendered]')]
@@ -234,7 +265,7 @@ export function inertBlocks(
     block.className = 'inert-block'
     const head = doc.createElement('span')
     head.className = 'inert-line'
-    // the marker: the disclosure control (its glyph is css; `sayExpanded` gives it its state)
+    // the marker: the disclosure control (css lays it over the block; `sayExpanded` gives it its state)
     const marker = doc.createElement('span')
     marker.className = 'inert-toggle'
     marker.setAttribute('role', 'button')
@@ -278,34 +309,46 @@ export function inertBlocks(
       const toggle = left()
       block.classList.toggle('opened', !!toggle?.open)
       block.classList.toggle('closed', !!toggle && !toggle.open)
-      block.classList.toggle('matched', searchOpens(toggle, matched, terms))
     }
+    block.classList.toggle('matched', matched)
     show()
     // a manual toggle, by a click or by a key: remembered for every section of the block
     const flip = () => {
-      const toggle = left()
-      const next = toggled(toggle, searchOpens(toggle, matched, terms), selected(), terms, ++turn)
+      const next = toggled(left(), matched, selected(), ++turn)
       members.forEach(key => toggles.set(key, next))
       show()
       says(block, selected())
       resized()
     }
-    // A HEAD INSIDE A LINK OF THE OWNER'S (a region in a link's label) is no part of that link, be it
+    // A BLOCK INSIDE A LINK OF THE OWNER'S (a region in a link's label) is no part of that link, be it
     // a link to a url (an anchor) or to a tag (a mark, on whose PRESS the app goes to the tag:
-    // Item.svelte, _handleTagClick on the mark's onmousedown): the head's press and its click stop
-    // at the head. a link of the status line keeps its default action there (the click handler of
+    // Item.svelte, _handleTagClick on the mark's onmousedown): the block's press and its click stop
+    // at the block. a link inside the block keeps its default action there (the click handler of
     // an enclosing tag link would cancel it)
     const enclosed = !!block.closest('a, mark')
-    if (enclosed) head.addEventListener('mousedown', e => e.stopPropagation())
-    head.addEventListener('click', (e: MouseEvent) => {
+    // A CLICK THAT REACHES THE BLOCK toggles it, from the closed line and from an open section
+    // alike. the listener is an ordinary one, in the bubbling phase: what handles its own click
+    // inside and stops it keeps it (a frame does so for a child tag's mark). a link in the block
+    // is followed and toggles nothing, whether or not its handler stops the click. and a TEXT
+    // SELECTION is no tap, by the item's own test for its edit taps (`selecting`), read twice:
+    // at the click (a drag that selects ends in a click on what holds the selection), and at the
+    // PRESS (`ended`: a press beside a selection that stands in the block ends that selection,
+    // which the browser has collapsed before the click comes)
+    let ended = false
+    block.addEventListener('mousedown', e => {
+      if (enclosed) e.stopPropagation()
+      ended = selecting(block)
+    })
+    block.addEventListener('click', (e: MouseEvent) => {
+      const spent = ended
+      ended = false
       const link = (e.target as Element).closest('a')
-      if (link && head.contains(link)) {
+      if (link && block.contains(link)) {
         if (enclosed) e.stopPropagation()
-        return // a link of the status line is followed, and toggles nothing
+        return
       }
-      const selection = getSelection()
-      if (selection?.type == 'Range' && (head.contains(selection.anchorNode) || head.contains(selection.focusNode))) return
-      if (enclosed) e.preventDefault(), e.stopPropagation() // the head toggles and nothing else: the owner's link is not followed
+      if (enclosed) e.preventDefault(), e.stopPropagation() // nothing of the owner's link is followed from the block
+      if (spent || selecting(e.target as Node)) return
       flip()
     })
     // the keyboard: Enter and Space on the marker toggle as a click does. the key is the marker's
@@ -317,7 +360,5 @@ export function inertBlocks(
       e.stopPropagation()
       flip()
     })
-    // a mouse's press on the marker leaves the focus where it was: the app's keys go on as before a click
-    marker.addEventListener('mousedown', e => e.preventDefault())
   }
 }
