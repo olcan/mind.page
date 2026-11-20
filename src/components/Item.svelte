@@ -279,6 +279,9 @@
     const mark = own && own === pressed ? own : null
     pressedMark = mark && e.detail < 2 ? mark : null
     mouseDownTime = mark ? 0 : Date.now()
+    // a text selection that stands in this item at the press: a press beside it ends it, and the
+    // browser has collapsed it before the click comes, which is then no edit tap (onClick)
+    selectionPressed = selectedIn(container)
     // a press on the running mark by the number, or on its note (the mark's own ::after), takes
     // no focus: the default would blur whatever has it, another item's editor or the MindBox (on a
     // phone that should close the keyboard: not yet seen on the owner's), before the click that
@@ -290,9 +293,13 @@
     if (mark || (e.target as HTMLElement).closest?.('.item-menu .running-mark')) e.preventDefault()
   }
   // whether a text selection stands in `node` (its anchor or its focus): a click there is no tap. the test of
-  // the item's edit taps (onClick) and of the taps on an inert block (src/inert_blocks.ts)
+  // the item's edit taps (onClick) and of the taps on an inert block (src/inert_blocks.ts), each of which
+  // reads it at the click, with the click's target, and at the press, with its own element
   const selectedIn = (node: Node) => getSelection().type == 'Range' && (node.contains(getSelection().anchorNode) || node.contains(getSelection().focusNode))
+  let selectionPressed = false // what the last press found in this item (onMouseDown), until the click that follows
   function onClick(e) {
+    const ended = selectionPressed
+    selectionPressed = false
     // a click on the state circle that a mouse's single press armed is the circle's alone: a
     // push, as the edit menu's push button's click, or a preview. (before the rules below: as a
     // button's, it is a click however long its press was held)
@@ -324,7 +331,8 @@
     // ignore clicks on "clickable" elements
     let clickable = e.target.closest('[_clickable]')
     if (clickable && (!clickable['_clickable'] || clickable['_clickable'](e))) return true
-    if (selectedIn(e.target)) return // ignore click when text is selected in target element
+    // ignore click when text is selected in target element, or was in the item when it was pressed
+    if (ended || selectedIn(e.target)) return
 
     if (editing) return // already editing
     // if item is previewable, then preview instead of edit

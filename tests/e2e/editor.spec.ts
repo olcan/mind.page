@@ -859,7 +859,53 @@ test('an item is edited in place with shift+enter, and escape discards an edit',
   // item menu widget in the top-right corner
   const paragraph = page.locator(`#item-${id} p`).first()
   const box = (await paragraph.boundingBox())!
-  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  // A TEXT SELECTION IS NO EDIT TAP, read at the click and at the PRESS (Item.svelte, onMouseDown): a drag
+  // that selects a word opens no editor (its click finds the selection in its target), and neither does
+  // the click elsewhere in the item that only ends that selection (the browser collapses a selection at the
+  // press, so the click finds none: the item noted at the press that one stood in it). The click after
+  // that is a tap. The window's box of a word of an item's text:
+  const word = (of: string, text: string) =>
+    page.evaluate(
+      ([of, text]) => {
+        const walker = document.createTreeWalker(document.querySelector(`#item-${of}`)!, NodeFilter.SHOW_TEXT)
+        while (walker.nextNode()) {
+          const at = walker.currentNode.nodeValue!.indexOf(text)
+          if (at < 0) continue
+          const range = document.createRange()
+          range.setStart(walker.currentNode, at)
+          range.setEnd(walker.currentNode, at + text.length)
+          const r = range.getBoundingClientRect()
+          return { x: r.x, y: r.y + r.height / 2, width: r.width }
+        }
+        return null
+      },
+      [of, text] as const
+    )
+  // the selection as [its type, its text, the item its anchor is in]: now, and as the next press finds it (a
+  // capture listener on the window, which hears the press before the browser acts on it), with the item pressed
+  const reading = () => [getSelection()!.type, getSelection()!.toString(), getSelection()!.anchorNode?.parentElement?.closest('.item')?.id ?? null]
+  const selection = () => page.evaluate(reading)
+  const press = () => page.evaluate(`addEventListener('mousedown', e => (window.__e2e_press = [...(${reading})(), e.target.closest('.item')?.id ?? null]), { capture: true, once: true })`)
+  const pressed = () => page.evaluate(() => (window as unknown as { __e2e_press: unknown }).__e2e_press)
+  // whether the item's editor is open, once the page has had the time to act on a click
+  const editing = async () => {
+    await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
+    return page.evaluate(id => !!document.querySelector(`#super-container-${id} .container.editing`), id)
+  }
+  await paragraph.scrollIntoViewIfNeeded()
+  const created = (await word(id, 'created'))!
+  await page.mouse.move(created.x + 1, created.y)
+  await page.mouse.down()
+  await page.mouse.move(created.x + created.width - 1, created.y, { steps: 4 })
+  await page.mouse.up()
+  expect([await editing(), await selection()], "a drag over a word of the item's text opens no editor, and selects the word").toEqual([false, ['Range', 'created', `item-${id}`]])
+  const keyboard = (await word(id, 'keyboard'))!
+  await press()
+  await page.mouse.click(keyboard.x + keyboard.width / 2, keyboard.y)
+  const ended = [await editing(), await pressed(), (await selection())[0] == 'Range']
+  expect(ended, 'a click elsewhere in the item, pressed with that selection standing in it, opens no editor: it only ends the selection').toEqual([false, ['Range', 'created', `item-${id}`, `item-${id}`], false])
+  await page.mouse.click(keyboard.x + keyboard.width / 2, keyboard.y)
+  await expect.poll(async () => [ended[0], await editing()], 'the next click is a tap: the editor opens at it, and not before').toEqual([false, true])
   await expect(textarea).toBeVisible()
   await expect(textarea).toHaveValue('#e2e_typed created via keyboard')
   await textarea.press('ControlOrMeta+a')
@@ -882,8 +928,23 @@ test('an item is edited in place with shift+enter, and escape discards an edit',
       { timeout: 30_000 }
     )
     .toBe('#e2e_typed edited via keyboard')
+  // THE SCOPE IS THE ITEM: a selection that stands in ANOTHER item at the press does not stop this item's tap
+  // (the first shown text of another item on the page, selected by a script)
+  const other = await page.evaluate(id => {
+    const shown = (node: Node) => (node.nodeValue!.trim() && !node.parentElement!.closest('a, mark, style, script') && node.parentElement!.getClientRects().length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP)
+    for (const item of document.querySelectorAll(`.column:not(.hidden) .super-container:not(.hidden) .item:not(#item-${id})`)) {
+      const text = document.createTreeWalker(item, NodeFilter.SHOW_TEXT, shown).nextNode()
+      if (!text) continue
+      getSelection()!.setBaseAndExtent(text, 0, text, text.nodeValue!.length)
+      return [getSelection()!.type, getSelection()!.toString(), item.id]
+    }
+    return null
+  }, id)
+  expect([other?.[0], !!other?.[1].trim(), other?.[2] != `item-${id}`], "the premise: text is selected in another item's text").toEqual(['Range', true, true])
+  await press()
   await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
-  await expect(textarea).toBeVisible()
+  await expect(textarea, 'a click on the item, pressed with a selection standing in another item, opens its editor').toBeVisible()
+  expect(await pressed(), 'and its press found that selection').toEqual([...other!, `item-${id}`])
   await textarea.press('End')
   await textarea.pressSequentially(' DISCARDED')
   await page.keyboard.press('Escape')

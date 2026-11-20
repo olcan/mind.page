@@ -243,6 +243,84 @@ test('vault renderer contract', async ({ page }) => {
     await expect.poll(hiddenState, { timeout: 5_000 }).toBe(false)
     await clickToggle('div.template_toggle.' + nestedToggle)
     await expect.poll(hiddenState, { timeout: 5_000 }).toBe(true)
+    // A TEXT SELECTION IS NO TAP ON A TOGGLE, read at the click and at the PRESS (template.js, toggle()): a drag
+    // that selects text in the revealed part hides nothing (its click finds the selection in its target), and
+    // neither does the click beside the selection that only ends it (the browser collapses a selection at the
+    // press, so the click finds none: the part noted at the press that one stood in it). The click after that is
+    // a tap. Real presses, so the toggle is opened with every closed toggle around it, outermost first (the lazy
+    // projection's and the navigation's: their ids are returned), and brought into the window
+    const around = await page.evaluate(idc => {
+      const closed: string[] = []
+      for (let div = document.querySelector('div.template_toggle.' + idc); div; div = div.parentElement!.closest('div.template_toggle'))
+        if (div.classList.contains('hidden')) closed.unshift([...div.classList].find(c => c.startsWith('id_'))!)
+      for (const id of closed) (document.querySelector('span.template_toggle.' + id) as HTMLElement).click()
+      document.querySelector('div.template_toggle.' + idc)!.scrollIntoView({ block: 'center' })
+      return closed.filter(id => id != idc)
+    }, nestedToggle!)
+    expect([around.length, await hiddenState()], 'the nested toggle is open, inside two toggles that were closed').toEqual([2, false])
+    const pause = () => page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
+    await pause()
+    // the window's box of a word of a revealed part (the nested toggle's unless another is named), and the text
+    // selected on the page (null for none)
+    const word = (text: string, idc = nestedToggle!) =>
+      page.evaluate(
+        ([idc, text]) => {
+          const walker = document.createTreeWalker(document.querySelector('div.template_toggle.' + idc)!, NodeFilter.SHOW_TEXT)
+          while (walker.nextNode()) {
+            const at = walker.currentNode.nodeValue!.indexOf(text)
+            if (at < 0) continue
+            const range = document.createRange()
+            range.setStart(walker.currentNode, at)
+            range.setEnd(walker.currentNode, at + text.length)
+            const r = range.getBoundingClientRect()
+            return { x: r.x, y: r.y + r.height / 2, width: r.width }
+          }
+          return null
+        },
+        [idc, text] as const
+      )
+    const selected = () => page.evaluate(() => (getSelection()!.type == 'Range' ? getSelection()!.toString() : null))
+    const drag = async (over: { x: number; y: number; width: number }) => {
+      await page.mouse.move(over.x + 1, over.y)
+      await page.mouse.down()
+      await page.mouse.move(over.x + over.width - 1, over.y, { steps: 4 })
+      await page.mouse.up()
+      await pause()
+    }
+    await drag((await word('macro'))!)
+    expect([await selected(), await hiddenState()], 'a drag in the revealed part selects its text, and the part stays revealed').toEqual(['macro', false])
+    const docs = (await word('Docs'))!
+    await page.mouse.click(docs.x + docs.width / 2, docs.y)
+    await pause()
+    expect([await selected(), await hiddenState()], 'a click beside the selection, in the revealed part, only ends the selection: the part stays revealed').toEqual([null, false])
+    await page.mouse.click(docs.x + docs.width / 2, docs.y)
+    await expect.poll(hiddenState, { message: 'the next click is a tap: it hides the part', timeout: 5_000 }).toBe(true)
+    // THE LAZY TOGGLE of the projection (template/vault.js) reads the press too. A word of the open navigation is
+    // selected, which stands in the projection's revealed part; a click on that part's own area (beside its first
+    // label, on the label's line: the hit test answers the part itself and no toggle inside it) only ends the
+    // selection, and the next one hides the part
+    const [projection, navigation] = around
+    const hidden = (idc: string) => page.evaluate(idc => document.querySelector('div.template_toggle.' + idc)!.classList.contains('hidden'), idc)
+    await page.evaluate(idc => document.querySelector('div.template_toggle.' + idc)!.scrollIntoView({ block: 'center' }), projection)
+    await pause()
+    const beside = await page.evaluate(idc => {
+      const div = document.querySelector('div.template_toggle.' + idc)!
+      const label = div.querySelector(':scope > span.template_toggle')!.getBoundingClientRect()
+      const at = { x: label.right + 20, y: label.top + label.height / 2 }
+      return document.elementFromPoint(at.x, at.y) === div ? at : null
+    }, projection)
+    expect(beside, "the premise: a point of the projection's own area, beside its first label").not.toBeNull()
+    await drag((await word('Intro', projection))!)
+    expect([await selected(), await hidden(projection)], "a drag in the projection's revealed part selects its text, and the projection stays revealed").toEqual(['Intro', false])
+    await page.mouse.click(beside!.x, beside!.y)
+    await pause()
+    const ended = [await selected(), await hidden(projection)]
+    expect(ended, "a click beside the selection, on the projection's own area, only ends the selection: the projection stays revealed").toEqual([null, false])
+    await page.mouse.click(beside!.x, beside!.y)
+    await expect.poll(async () => [ended[1], await hidden(projection)], { message: 'the next click is a tap: it hides the projection, revealed until then', timeout: 5_000 }).toEqual([false, true])
+    expect(await page.evaluate(n => !!window._item(n, true)!.elem!.querySelector('.container.editing'), A), 'and no press in a toggle opened the editor').toBe(false)
+    await clickToggle('div.template_toggle.' + navigation)
+    expect(await hidden(navigation), 'the navigation is closed again, as the projection is').toBe(true)
     // no rescan: the nested item's marker-shaped text part renders as inert markdown (the reference a
     // tag link showing the path, never a nested toggle or template call; presentation design section 7)
     await show(nameOf(fixture('e2e_nested.md')))
