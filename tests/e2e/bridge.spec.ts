@@ -851,6 +851,8 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   await expect.poll(query).toBe('#e2e_cc/alpha ')
   await page.waitForTimeout(300)
   expect(context.pages().length, 'the anchor did not open').toBe(1)
+  // (the box holds the child's tag, and the chat's reply is open for it: the reply's mark of that tag is its match)
+  await expect(page.locator(`[id="${elemId}"] .vault-result mark.selected`).first(), "under the child's tag the reply's section is open").toBeVisible()
   // a DANGLING mark inside a link (review 0 B1): the click navigates nowhere AND still cancels the anchor
   await page.locator(`[id="${elemId}"] .vault-result a mark.dangling`).click()
   await page.waitForTimeout(300)
@@ -903,6 +905,9 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), `${CHAT}/alpha`)
   await expect.poll(() => marks().then(m => m[0].selected)).toBe(true)
   expect(await visible(page), "the chat is listed under its child's tag").toContain(CHAT)
+  // the search by the child's tag has its match INSIDE the reply, the selected mark (the reply reads `#/alpha`,
+  // no word of the tag): the reply's section is open for it (src/inert_blocks.ts, holdsTag) and the mark is seen
+  await expect(page.locator(`[id="${elemId}"] .vault-result mark.selected`).first(), 'the selected mark shows, with no click on the head').toBeVisible()
   // the frame stays dead for everything else: a text click opens no editor
   await page.locator(`[id="${elemId}"] .vault-result h2`).click()
   await page.waitForTimeout(300)
@@ -932,6 +937,7 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
     ['md', '\n```_md\n' + inert('#/x') + '\n```', true, false],
     ['div', '<div>\n' + inert('#/x') + '\n</div>', true, false],
     ['link', '[\n' + inert('#/x') + '\n](https://example.com/)', true, false],
+    ['taglink', '[\n' + inert('#/x') + '\n](#foo)', true, false], // (the link shape with a tag for its destination: a mark that acts on the press)
     ['comment', '<!-- c\n\n' + inert('#/x') + '\n-->', false, false],
     ['removed', '<!--removed-->\n\n' + inert('#/x') + '\n<!--/removed-->', false, false],
     ['rawblock', '<style>\n\n' + inert('#/x') + '\n</style>', false, false],
@@ -979,6 +985,49 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
     expect(shape.marks > 0, `${name}: marks exactly where the tag is indexed`).toBe(tagged)
     expect(shape.text + '\n' + shape.values, `${name}: the reset shows nothing`).not.toMatch(/\/removed--|\]\]>/) // the reset's own text (a shape's text may show the owner's markers as code) and the fragment of review 6
   }
+  // THE HEAD INSIDE AN OWNER'S LINK (the `link` shape: a region in a Markdown link's label; src/inert_blocks.ts):
+  // the marker of the region's block toggles the block and nothing else. The owner's link, which holds the
+  // block, is not followed: no new page, the same url
+  await page.evaluate(() => void (location.hash = '#e2e_sh_link'))
+  const linkElem = await page.evaluate(() => window._item('#e2e_sh_link', true)!.elem!.id)
+  const linked = () =>
+    page.evaluate(id => {
+      const block = document.querySelector(`[id="${id}"] .inert-block`)
+      return block && { inLink: !!block.closest('a[href^="https://example.com"]'), closed: block.classList.contains('closed'), shown: block.querySelector(':scope > .vault-result')!.getClientRects().length > 0 }
+    }, linkElem)
+  await expect.poll(linked, "the block stands in the owner's link, open in its selected item").toEqual({ inLink: true, closed: false, shown: true })
+  const url = page.url()
+  await page.locator(`[id="${linkElem}"] .inert-block > .inert-line > .inert-toggle`).click()
+  await expect.poll(linked, 'the marker closes the block').toEqual({ inLink: true, closed: true, shown: false })
+  await page.waitForTimeout(300)
+  expect([context.pages().length, page.url()], "and the owner's link is not followed").toEqual([1, url])
+  // INSIDE A TAG LINK of the owner's (the `taglink` shape: the same label, `#foo` for its destination). The app
+  // renders such a link as a mark that goes to its tag on the PRESS (onmousedown), before any click: the press
+  // stops at the head too, so the marker toggles and the MindBox is as it was
+  await page.evaluate(() => void (location.hash = '#e2e_sh_taglink'))
+  const tagElem = await page.evaluate(() => window._item('#e2e_sh_taglink', true)!.elem!.id)
+  const tagged = () =>
+    page.evaluate(id => {
+      const block = document.querySelector(`[id="${id}"] .inert-block`)
+      return block && { inTag: !!block.closest('mark.link[onmousedown]'), closed: block.classList.contains('closed'), shown: block.querySelector(':scope > .vault-result')!.getClientRects().length > 0 }
+    }, tagElem)
+  await expect.poll(tagged, "the block stands in the owner's tag link, open in its selected item").toEqual({ inTag: true, closed: false, shown: true })
+  const box = await query()
+  await page.locator(`[id="${tagElem}"] .inert-block > .inert-line > .inert-toggle`).click()
+  await expect.poll(tagged, 'the marker closes the block').toEqual({ inTag: true, closed: true, shown: false })
+  await page.waitForTimeout(300)
+  expect(await query(), 'and the MindBox is as it was: the tag link is not followed').toBe(box)
+  // a link of the status line keeps its own default action there: it is followed (the tag link's click
+  // handler does not cancel it), the MindBox is as it was, and nothing toggles
+  const plan = new URL('/server_id', page.url()).href
+  await page.evaluate(text => void window._item('#e2e_sh_taglink')!.write(text, ''), `#e2e_sh_taglink\n[\n${inert(`see [the plan](${plan})`)}\n](#foo)`)
+  const statusLink = page.locator(`[id="${tagElem}"] .inert-block > .inert-line > .inert-status a`)
+  await expect(statusLink, 'the closed block shows its status line with the link').toBeVisible()
+  const followed = context.waitForEvent('page', { timeout: 5_000 })
+  await statusLink.click()
+  expect((await followed).url(), 'the status link is followed').toBe(plan)
+  await (await followed).close()
+  expect([await query(), await tagged()], 'the MindBox and the block are as they were').toEqual([box, { inTag: true, closed: true, shown: false }])
 })
 
 test('a deleted child that held macro expansions turns its tags missing (dangling for the frame\'s relative marks): the marks in the frame and plain tags alike', async ({ page }) => {
@@ -1008,7 +1057,10 @@ test('a deleted child that held macro expansions turns its tags missing (danglin
           .map(m => [m.textContent, m.classList.contains('missing'), m.classList.contains('dangling')])
       return { chat: marks(label, '.vault-result mark[data-tag]'), plain: marks(`${label}/plain`, 'mark') }
     }, CHAT)
+  // (the head line of the reply's block, src/inert_blocks.ts, repeats the reply's first line as text: the deletion redraws the item, and the new head has the mark's new text)
+  const head = () => page.evaluate(label => window._item(label, true)?.elem?.querySelector('.inert-block > .inert-line > .inert-status')?.textContent ?? null, CHAT)
   await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false, false], ['beta', false, false]], plain: [['gamma', false, false]] })
+  expect(await head()).toBe('see alpha and beta')
   // each child holds expansion state: the macro-evaluating read records it (expandMacros' path)
   for (const name of ['alpha', 'beta', 'gamma'])
     expect(await page.evaluate(n => window._item(n)!.read('', { eval_macros: true }), `${CHAT}/${name}`)).toContain('created in run ab12cd34')
@@ -1017,6 +1069,7 @@ test('a deleted child that held macro expansions turns its tags missing (danglin
   await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['alpha', false, false], ['beta', false, false]], plain: [['gamma', true, false]] })
   expect(await page.evaluate(n => window._item(n)!.delete(false), `${CHAT}/alpha`)).toBe(true)
   await expect.poll(state, { timeout: 15_000 }).toEqual({ chat: [['#/alpha', false, true], ['beta', false, false]], plain: [['gamma', true, false]] })
+  expect(await head(), 'the head line has the mark as the frame shows it').toBe('see #/alpha and beta')
   // the listener's removal (the server's delete)
   const betaDoc = () => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/beta`)
   await expect.poll(betaDoc, { timeout: 30_000 }).toBeTruthy()
@@ -1314,7 +1367,8 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       return next ? [next.tagName, getComputedStyle(next).display] : null
     }
     const spacer = [...content.querySelectorAll('br')].filter(br => getComputedStyle(br).display != 'none').length
-    return { frame: after('.vault-result'), rule: after('hr'), text: content.textContent, spacer }
+    // (the frame stands in its block since 2026-11-19, src/inert_blocks.ts: the break follows the block)
+    return { frame: after('.inert-block'), rule: after('hr'), text: content.textContent, spacer }
   }, breaksName)
   expect(breaks.frame, 'the <br> after the dead frame is hidden').toEqual(['BR', 'none'])
   expect(breaks.rule?.[0], 'a rule ends its paragraph: no break follows it').toBe('P')
@@ -1342,8 +1396,9 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
     const box = first.querySelector('span.task') as HTMLElement
     const ticked = first.querySelector('li.checkbox.checked') as HTMLElement
     return {
-      underFirst: lines(rect(first.closest('p')!).bottom - rect(first).bottom),
-      underSecond: lines(rect(second.closest('p')!.nextElementSibling!).top - rect(second).bottom),
+      // (measured from the frame's open block, less the block's own margin under it: the item is selected)
+      underFirst: lines(rect(first.closest('p')!).bottom - rect(first.closest('.inert-block')!).bottom - parseFloat(getComputedStyle(first.closest('.inert-block')!).marginBottom)),
+      underSecond: lines(rect(second.closest('p')!.nextElementSibling!).top - rect(second.closest('.inert-block')!).bottom - parseFloat(getComputedStyle(second.closest('.inert-block')!).marginBottom)),
       inner: inner.map(el => el.tagName + ':' + (el.textContent ?? '').replace(/\s+/g, ' ').trim()),
       innerGap: lines(rect(inner[1]).top - rect(inner[0]).top),
       wrappers: rows.map(li => li.querySelectorAll(':scope > span.list-item').length),
@@ -1900,10 +1955,13 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
   await shown('#e2e_wiki_reply')
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelector('.vault-result a[data-wiki-link]') != null), { timeout: 15_000 }).toBe(true)
   const reply = await state('#e2e_wiki_reply')
-  expect(reply.anchors).toEqual([
+  // (each twice since 2026-11-19: the head line of the reply's block repeats the reply's first line with
+  // its links, src/inert_blocks.ts, and those are the same app-built anchors, wired by the same pass)
+  const replyAnchors = [
     { href: href('docs/y'), title: 'docs/y', text: 'guide', html: 'guide', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
     { href: href('worktrees/t'), title: 'worktrees/t', text: 'the proposal', html: 'the proposal', attributes: ['data-wiki-link', 'href', 'title'], wired: true },
-  ])
+  ]
+  expect(reply.anchors).toEqual([...replyAnchors, ...replyAnchors])
   expect(reply.text).toContain('and [[../x]] and')
   expect(reply.frameViolations, 'the frame holds only the policy html, the wiki anchor included').toBe(0)
   expect(
@@ -1936,10 +1994,11 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
   expect(await page.evaluate(config => (window as any)._set_wiki_links(config), packed)).toEqual(packed)
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_reply', true)?.elem?.querySelectorAll('.vault-result a[data-wiki-link]').length), { timeout: 15_000 }).toBe(2)
   const again = await state('#e2e_wiki_reply')
-  expect(again.anchors.map(a => [a.href, a.title, a.text])).toEqual([
+  const againAnchors = [
     [link('docs/y'), 'docs/y', 'guide'],
     [link('worktrees/t', 'diff'), 'diff of worktrees/t', 'the proposal'],
-  ])
+  ]
+  expect(again.anchors.map(a => [a.href, a.title, a.text]), "the head line's two, then the frame's").toEqual([...againAnchors, ...againAnchors])
   expect(again.frameViolations, 'the frame holds only the policy html, the packed wiki anchors included').toBe(0)
   await shown('#e2e_wiki_owner')
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_owner', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(3)
@@ -2065,4 +2124,386 @@ test('wiki links: the settings item, its command, the store, and the first rende
   expect(await command('/wiki_links off')).toContain('wiki links: off')
   expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
   await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+})
+
+// THE INERT SECTIONS THAT CLOSE (src/inert_blocks.ts; the owner, 2026-11-19): the frames of an
+// item's inert regions stand in blocks under one head line each. The decision's table is
+// tests/unit/inert_blocks.spec.ts; these rows click real heads on rendered items
+const region = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+type Fold = {
+  selected: boolean
+  stored: boolean // the layout holds the height of the item's box
+  blocks: { state: string; memory: string; matched: boolean; says: string | null; head: string; frames: number; lines: number }[]
+}
+// what the inert blocks of the item ON THE PAGE show (not a mount in the offscreen column): per
+// block whether it is the one head line (its status shown, its frames not) or open (the frames
+// shown, the status not), what a click left on it, whether the search opens it, what its marker
+// says of it (aria-expanded), the head's name and status, and its height with its margins in lines
+// of the item's text
+const fold = (page: import('@playwright/test').Page, label: string): Promise<Fold | null> =>
+  page.evaluate(label => {
+    const w = window as any
+    const item = w._item(label, true)
+    const container = item && (document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${item.id}"]`) as HTMLElement | null)
+    if (!container) return null
+    const shown = (e: Element | null) => !!e && e.getClientRects().length > 0
+    const lh = parseFloat(getComputedStyle(container.querySelector('.content')!).lineHeight)
+    return {
+      selected: container.classList.contains('target'),
+      stored: container.offsetHeight == w.__items.find((i: any) => i.id == item.id).height,
+      blocks: [...container.querySelectorAll('.inert-block')].map(block => {
+        const frames = [...block.querySelectorAll(':scope > .vault-result')]
+        const status = block.querySelector(':scope > .inert-line > .inert-status')
+        const style = getComputedStyle(block)
+        return {
+          state: frames.every(shown) && !shown(status) ? 'open' : !frames.some(shown) && shown(status) ? 'line' : 'mixed',
+          says: block.querySelector(':scope > .inert-line > .inert-toggle')?.getAttribute('aria-expanded') ?? null,
+          memory: ['opened', 'closed'].filter(c => block.classList.contains(c)).join(' '),
+          matched: block.classList.contains('matched'),
+          head: [block.querySelector(':scope > .inert-line > .inert-name')?.textContent ?? '', status?.textContent ?? ''].join('|'),
+          frames: frames.length,
+          lines: Math.round((((block as HTMLElement).offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / lh) * 100) / 100,
+        }
+      }),
+    }
+  }, label)
+const query = (page: import('@playwright/test').Page, text: string) => page.evaluate(text => void (window as any).MindBox.set(text), text)
+// the head line of an item's n-th block, on the page
+const headOf = async (page: import('@playwright/test').Page, label: string, n = 0) => {
+  const id = await page.evaluate(label => (window as any)._item(label, true).id, label)
+  return page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${id}"] .inert-block`).nth(n).locator('> .inert-line')
+}
+// a click on the head's marker, at its left end (the status line can hold a link)
+const clickHead = async (page: import('@playwright/test').Page, label: string, n = 0) => (await headOf(page, label, n)).click({ position: { x: 5, y: 8 } })
+
+test('an inert section is one line until its item is selected, the search has a match inside it or its head is clicked: only the click is remembered, across redraws', async ({ page }) => {
+  await loadAdmin(page)
+  const LABEL = '#e2e_fold'
+  const text = (state: string) => `${LABEL} foldword tidy the shed\n${region(`agent\n- ${state}\n    - [x] empty the shelves\n    - [ ] sort the tools`)}\na line of the owner under the tree`
+  await page.evaluate(text => void window._create(text), text('working: sorting the tools'))
+  const line = (head: string, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head, frames: 1, lines: 1, ...more }] })
+  const open = (head: string, lines: number, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'open', memory: '', matched: false, says: 'true', head, frames: 1, lines, ...more }] })
+  const HEAD = 'agent|working: sorting the tools'
+
+  // CLOSED BY DEFAULT: listed by a word of the owner's line (a match outside the section opens
+  // nothing), the section is its head line, exactly as tall as a line of the item's text
+  await query(page, 'foldword')
+  await expect.poll(() => fold(page, LABEL), 'closed by default').toEqual(line(HEAD))
+  // OPEN WHILE SELECTED, and nothing is remembered of it: closed again once another view shows the item
+  await query(page, LABEL)
+  await expect.poll(async () => (await fold(page, LABEL))?.blocks[0].state, 'open while the item is selected').toBe('open')
+  const lines = (await fold(page, LABEL))!.blocks[0].lines
+  expect(await fold(page, LABEL), 'the selection leaves nothing on the block').toEqual({ ...open(HEAD, lines), selected: true })
+  // DESELECTED AND SELECTED WITH NOTHING BUILT. The query's FIRST word names the selected item, so a word that
+  // misses the item, put first, deselects it while what matched the item, and so its html and its children, stay
+  // as they are (the premise below: the same block element; a query that changes the item's matching terms
+  // writes its html anew, which is how every other step here gets a new block). The block closes and opens by
+  // css alone, and its marker is told by the selection's own turn (Item.svelte, saidTarget)
+  await page.evaluate(label => void (((window as any)._item(label, true).elem.querySelector('.inert-block') as any).__kept = true), LABEL)
+  await query(page, `nothingsuch ${LABEL}`)
+  await expect.poll(() => fold(page, LABEL), 'deselected with nothing built: closed, and the marker says so').toEqual(line(HEAD))
+  await query(page, LABEL)
+  await expect.poll(() => fold(page, LABEL), 'selected again with nothing built: open, and the marker says so').toEqual({ ...open(HEAD, lines), selected: true })
+  expect(await page.evaluate(label => !!((window as any)._item(label, true).elem.querySelector('.inert-block') as any).__kept, LABEL), 'the premise: nothing was built for either (the block is the same element)').toBe(true)
+  await query(page, 'foldword')
+  await expect.poll(() => fold(page, LABEL), 'closed again when no longer selected').toEqual(line(HEAD))
+
+  // A CLICK ON THE HEAD opens it and is remembered (and the layout holds the new height: `stored`, which
+  // no update of the item's component brings here, only the toggle's own report)
+  await clickHead(page, LABEL)
+  await expect.poll(() => fold(page, LABEL), 'a click on the head opens the section').toEqual(open(HEAD, lines, { memory: 'opened' }))
+  // A REDRAW (an agent's write of its tree: the item's children are all new) keeps what the click left
+  await page.evaluate(label => void (((window as any)._item(label, true).elem.querySelector('.inert-block') as any).__before = true), LABEL)
+  await page.evaluate(([label, text]) => void (window as any)._item(label, true).write(text, ''), [LABEL, text('working: labelling the boxes')] as const)
+  const HEAD2 = 'agent|working: labelling the boxes'
+  await expect.poll(() => fold(page, LABEL), 'open across a redraw, with the new status line').toEqual(open(HEAD2, lines, { memory: 'opened' }))
+  expect(await page.evaluate(label => !!((window as any)._item(label, true).elem.querySelector('.inert-block') as any).__before, LABEL), 'the block is a new element').toBe(false)
+  // the selection changes nothing of it: opened by hand, it stays open when the item is no longer selected
+  await query(page, LABEL)
+  await expect.poll(() => fold(page, LABEL)).toEqual({ ...open(HEAD2, lines, { memory: 'opened' }), selected: true })
+  await query(page, 'foldword')
+  await expect.poll(() => fold(page, LABEL), 'opened by hand: open when no longer selected').toEqual(open(HEAD2, lines, { memory: 'opened' }))
+  // closed by hand, it stays closed in a selected item
+  await clickHead(page, LABEL)
+  await expect.poll(() => fold(page, LABEL), 'a second click closes it').toEqual(line(HEAD2, { memory: 'closed' }))
+  // the toggle reports its item's new height itself: a click the head alone hears (a dispatched one that
+  // does not bubble, so nothing else of the app hears it), and the layout's height of the item read in the
+  // same turn, before any other update of the item can bring it
+  const told = () =>
+    page.evaluate(label => {
+      const w = window as any
+      const item = w._item(label, true)
+      const container = document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${item.id}"]`) as HTMLElement
+      const before = container.offsetHeight
+      container.querySelector('.inert-line')!.dispatchEvent(new MouseEvent('click'))
+      return [container.offsetHeight != before, container.offsetHeight == w.__items.find((i: any) => i.id == item.id).height]
+    }, LABEL)
+  expect(await told(), 'the height changed, and the layout holds it at once').toEqual([true, true])
+  await expect.poll(() => fold(page, LABEL)).toEqual(open(HEAD2, lines, { memory: 'opened' }))
+  expect(await told(), 'closed again likewise').toEqual([true, true])
+  await expect.poll(() => fold(page, LABEL)).toEqual(line(HEAD2, { memory: 'closed' }))
+  await query(page, LABEL)
+  await expect.poll(() => fold(page, LABEL), 'closed by hand: closed in a selected item').toEqual({ ...line(HEAD2, { memory: 'closed' }), selected: true })
+
+  // A SEARCH MATCH INSIDE opens it for as long as the match lasts and changes nothing remembered
+  await query(page, 'shelves')
+  await expect.poll(() => fold(page, LABEL), 'a match inside opens a section that was closed by hand').toEqual(open(HEAD2, lines, { memory: 'closed', matched: true }))
+  await expect.poll(() => page.evaluate(label => (window as any)._item(label, true).elem.querySelectorAll('.inert-block > .vault-result span.highlight').length, LABEL), 'the match is the highlighter\'s').toBeGreaterThan(0)
+  await query(page, 'foldword')
+  await expect.poll(() => fold(page, LABEL), 'the end of the search closes it again, as it was left').toEqual(line(HEAD2, { memory: 'closed' }))
+  // a click during the search is the later word: it closes the matched section, across a redraw too,
+  // until another search has a match inside
+  await query(page, 'shelves')
+  await expect.poll(async () => (await fold(page, LABEL))?.blocks[0].matched).toBe(true)
+  await clickHead(page, LABEL)
+  await expect.poll(() => fold(page, LABEL), 'a click closes a section the search opened').toEqual(line(HEAD2, { memory: 'closed' }))
+  await page.evaluate(([label, text]) => void (window as any)._item(label, true).write(text, ''), [LABEL, text('working: sorting the tools')] as const)
+  await expect.poll(() => fold(page, LABEL), 'and it stays closed under that search, across a redraw').toEqual(line(HEAD, { memory: 'closed' }))
+  await query(page, 'tools')
+  await expect.poll(() => fold(page, LABEL), 'another search with a match inside opens it').toEqual(open(HEAD, lines, { memory: 'closed', matched: true }))
+})
+
+test('inert sections that follow each other are one block under one head, a line of the owner keeps them apart; a link in the head is followed without a toggle; an open block is full width', async ({ page, context }) => {
+  await loadAdmin(page)
+  const link = new URL('/server_id', page.url()).href
+  const tree = region(`agent\n- working: sorting the tools · [notes](${link})\n    - [x] empty the shelves`)
+  const request = region('request\nPlease tidy the shed.\n\nKeep the red toolbox.')
+  const MERGED = '#e2e_fold_merged'
+  const BLANK = '#e2e_fold_blank'
+  const APART = '#e2e_fold_apart'
+  const ALONE = '#e2e_fold_request'
+  const PLAIN = '#e2e_fold_plain'
+  const HIDDEN = '#e2e_fold_hidden'
+  const LINKED = '#e2e_fold_linked'
+  const DIRECTIVE = '#e2e_fold_directive'
+  const BAD = '#e2e_fold_bad'
+  for (const text of [
+    // (as the bridge leaves a todo: the tree under the todo line, the request on the next line)
+    `${MERGED} foldmore a todo\n${tree}\n${request}\nthe last line of the owner`,
+    `${BLANK} foldmore\n${tree}\n\n\n${request}`,
+    `${APART} foldmore\n${region('agent\n- question: keep the old paint tins?')}\na line of the owner between\n${region('request\nSort the paint.')}`,
+    `${ALONE} foldmore\n${region('request\nSort the paint tins by colour.\n\nKeep the lids.')}`,
+    `${PLAIN} foldmore no section here\na second line`,
+    `${HIDDEN} foldmore\n<!--hidden-->\n${tree}\n<!--/hidden-->\n${request}`,
+    `${LINKED} foldmore\n[\n${tree}\n](https://example.com/)\n${request}`,
+    `${DIRECTIVE} foldmore a todo\n/land\n${request}`, // (a todo made from a chat with a directive line, before an agent wrote)
+    `${BAD} foldmore\n<!--inert-->\nnot canonical <!--/inert--> x\n<!--/inert-->`,
+  ])
+    await page.evaluate(text => void window._create(text), text)
+  await query(page, 'foldmore')
+  const block = (state: string, head: string, frames: number, more: object = {}) => ({ state, memory: '', matched: false, says: String(state == 'open'), head, frames, lines: 1, ...more })
+
+  // ONE BLOCK for the tree and the request under it, its line the agent's status; the same with blank lines between them
+  const HEAD = 'agent|working: sorting the tools · notes'
+  await expect.poll(() => fold(page, MERGED), 'two sections that follow each other: one block, one head').toEqual({ selected: false, stored: true, blocks: [block('line', HEAD, 2)] })
+  await expect.poll(() => fold(page, BLANK), 'blank lines between two sections: one block still').toEqual({ selected: false, stored: true, blocks: [block('line', HEAD, 2)] })
+  // the request's first line while no agent has written
+  await expect.poll(() => fold(page, ALONE)).toEqual({ selected: false, stored: true, blocks: [block('line', 'request|Sort the paint tins by colour.', 1)] })
+  // A LINK IN THE HEAD is followed, and toggles nothing
+  const popup = context.waitForEvent('page')
+  await (await headOf(page, MERGED)).locator('a').click()
+  expect((await popup).url(), 'the link of the status line is followed').toBe(link)
+  await (await popup).close()
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
+  expect(await fold(page, MERGED), 'and the block is as it was: no toggle').toEqual({ selected: false, stored: true, blocks: [block('line', HEAD, 2)] })
+  expect(await page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), MERGED), 'no editor either').toBe(false)
+
+  // OPEN: the sections follow each other under their small names (the first one's is the head's),
+  // a full-width block in the look of toggle(): no left border on the block or on a frame
+  await clickHead(page, MERGED)
+  await expect.poll(async () => (await fold(page, MERGED))?.blocks[0].state).toBe('open')
+  const look = await page.evaluate(label => {
+    const elem = (window as any)._item(label, true).elem as HTMLElement
+    const rect = (e: Element) => e.getBoundingClientRect()
+    const block = elem.querySelector('.inert-block')!
+    const [first, second] = [...block.querySelectorAll(':scope > .vault-result')]
+    const item = rect(elem.querySelector('.item')!)
+    const shown = (e: Element | null) => !!e && e.getClientRects().length > 0
+    return {
+      edges: [rect(block).left - item.left, item.right - rect(block).right],
+      borders: [block, first, second].map(e => getComputedStyle(e).borderLeftWidth),
+      rules: [getComputedStyle(block).borderTopStyle, getComputedStyle(block).borderBottomStyle],
+      names: [first, second].map(frame => [frame.querySelector(':scope > .inert-name')?.textContent, shown(frame.querySelector(':scope > .inert-name'))]),
+      head: [...block.querySelectorAll(':scope > .inert-line > *')].map(e => [e.className, shown(e)]),
+      gap: rect(second).top - rect(first).bottom,
+      under: (elem.querySelector('.content')!.textContent ?? '').includes('the last line of the owner'),
+    }
+  }, MERGED)
+  expect(look).toEqual({
+    edges: [0, 0],
+    borders: ['0px', '0px', '0px'],
+    rules: ['dashed', 'dashed'],
+    names: [['agent', false], ['request', true]],
+    head: [['inert-toggle', true], ['inert-name', true], ['inert-status', false]],
+    gap: 10,
+    under: true,
+  })
+
+  // APART: a line of the owner between two sections stays visible between two blocks, each with its own toggle
+  await expect.poll(() => fold(page, APART)).toEqual({
+    selected: false,
+    stored: true,
+    blocks: [block('line', 'agent|question: keep the old paint tins?', 1), block('line', 'request|Sort the paint.', 1)],
+  })
+  await clickHead(page, APART, 1)
+  await expect.poll(async () => (await fold(page, APART))?.blocks.map(b => b.state), 'the second block opens alone').toEqual(['line', 'open'])
+  const between = await page.evaluate(label => {
+    const elem = (window as any)._item(label, true).elem as HTMLElement
+    const [first, second] = [...elem.querySelectorAll('.inert-block')].map(e => e.getBoundingClientRect())
+    const walker = document.createTreeWalker(elem.querySelector('.content')!, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) if (walker.currentNode.nodeValue!.includes('a line of the owner between')) break
+    const range = document.createRange()
+    range.selectNodeContents(walker.currentNode)
+    const owner = range.getBoundingClientRect()
+    return owner.height > 0 && first.bottom <= owner.top && owner.bottom <= second.top
+  }, APART)
+  expect(between, 'the owner\'s line shows between the two blocks').toBe(true)
+
+  // NEVER ACROSS THE END OF A CONTAINER: a section in a hidden part of the item, or in the label of a link of the
+  // owner's, is not joined by the section after that part. Joined, the second one and the block's only head
+  // would be hidden with the first, or a part of the owner's link. [frames, in a link, shown] per block
+  const placed = (label: string) =>
+    page.evaluate(label => [...(window as any)._item(label, true).elem.querySelectorAll('.inert-block')].map((block: Element) => [block.querySelectorAll(':scope > .vault-result').length, !!block.closest('a'), block.getClientRects().length > 0]), label)
+  await expect.poll(() => placed(HIDDEN), 'a hidden section and the section after it: two blocks, the second one shown').toEqual([[1, false, false], [1, false, true]])
+  await expect.poll(() => placed(LINKED), "a section in a link's label and the section after it: two blocks, the second one outside the link").toEqual([[1, true, true], [1, false, true]])
+
+  // A REMEMBERED TOGGLE BELONGS TO ITS SECTION, NOT TO ITS PLACE. The request of a todo that reads todo, directive,
+  // request is opened by hand; the agent's first tree lands under the todo line, above the directive: the request
+  // stays open, and the new tree, a block of its own, is closed as a new one is
+  const kept = (label: string) => fold(page, label).then(f => f?.blocks.map(b => [b.state, b.memory, b.head, b.frames]))
+  const REQUEST = 'request|Please tidy the shed.'
+  await expect.poll(() => kept(DIRECTIVE)).toEqual([['line', '', REQUEST, 1]])
+  await clickHead(page, DIRECTIVE)
+  await expect.poll(() => kept(DIRECTIVE)).toEqual([['open', 'opened', REQUEST, 1]])
+  await page.evaluate(([label, text]) => void (window as any)._item(label, true).write(text, ''), [DIRECTIVE, `${DIRECTIVE} foldmore a todo\n${tree}\n/land\n${request}`] as const)
+  await expect.poll(() => kept(DIRECTIVE), 'a tree written above the directive line: the request keeps its choice and the tree has none').toEqual([['line', '', HEAD, 1], ['open', 'opened', REQUEST, 1]])
+  // the adjacent case: the tree lands right above an opened request, the two are one block, and it is open as the request was
+  const SORT = 'request|Sort the paint tins by colour.'
+  await clickHead(page, ALONE)
+  await expect.poll(() => kept(ALONE)).toEqual([['open', 'opened', SORT, 1]])
+  await page.evaluate(([label, text]) => void (window as any)._item(label, true).write(text, ''), [ALONE, `${ALONE} foldmore\n${tree}\n${region('request\nSort the paint tins by colour.\n\nKeep the lids.')}`] as const)
+  await expect.poll(() => kept(ALONE), 'a tree written right above an opened request: one block, open as the request was').toEqual([['open', 'opened', HEAD, 2]])
+  // and a toggle of that block is every section's of it: closed by hand, the request is closed when it stands alone again
+  await clickHead(page, ALONE)
+  await expect.poll(() => kept(ALONE)).toEqual([['line', 'closed', HEAD, 2]])
+  await page.evaluate(([label, text]) => void (window as any)._item(label, true).write(text, ''), [ALONE, `${ALONE} foldmore\n${region('request\nSort the paint tins by colour.\n\nKeep the lids.')}`] as const)
+  await expect.poll(() => kept(ALONE), "the block's toggle was the request's too").toEqual([['line', 'closed', SORT, 1]])
+
+  // NOTHING ELSE: an item without a section has no block, and a malformed region keeps its placeholder, unframed by a block
+  const others = await page.evaluate(([plain, bad]) => {
+    const elem = (label: string) => (window as any)._item(label, true).elem as HTMLElement
+    const frame = elem(bad).querySelector('.vault-result')!
+    return {
+      plain: elem(plain).querySelectorAll('.inert-block, .inert-line, .vault-result').length,
+      bad: [elem(bad).querySelectorAll('.inert-block').length, frame.textContent, frame.getClientRects().length > 0, getComputedStyle(frame).borderLeftWidth],
+    }
+  }, [PLAIN, BAD] as const)
+  expect(others).toEqual({ plain: 0, bad: [0, '⟦invalid inert region⟧', true, '2px'] })
+})
+
+test("a phone's width: a closed section is one line, a long status line cut with an ellipsis; a tap on the head opens it to the item's full width", async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 375, height: 667 }, isMobile: true, hasTouch: true })
+  const page = await context.newPage()
+  try {
+    await loadAdmin(page)
+    const LABEL = '#e2e_fold_phone'
+    const long = 'working: sorting every tool of the shed by its size and its colour, then the screws, the nails and the hooks'
+    await page.evaluate(text => void window._create(text), `${LABEL} foldphone\n${region(`agent\n- ${long}\n    - [ ] sort the tools`)}`)
+    await query(page, 'foldphone')
+    await expect.poll(() => fold(page, LABEL)).toEqual({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head: 'agent|' + long, frames: 1, lines: 1 }] })
+    const measure = () =>
+      page.evaluate(label => {
+        const elem = (window as any)._item(label, true).elem as HTMLElement
+        const block = elem.querySelector('.inert-block')!.getBoundingClientRect()
+        const item = elem.querySelector('.item')!.getBoundingClientRect()
+        const status = elem.querySelector('.inert-status') as HTMLElement
+        return {
+          cut: status.scrollWidth > status.clientWidth,
+          ellipsis: getComputedStyle(status).textOverflow,
+          inside: block.left >= item.left && block.right <= item.right,
+          edges: [block.left - item.left, item.right - block.right],
+        }
+      }, LABEL)
+    const closed = await measure()
+    expect([closed.cut, closed.ellipsis, closed.inside], 'the long status line is cut at the block\'s width, inside the item').toEqual([true, 'ellipsis', true])
+    // the tap, once the head rests in the window (a phone's page is long: the page brings the head to the
+    // window's middle itself, and the point is read until two reads agree and the head is what stands there)
+    const point = () =>
+      page.evaluate(label => {
+        const head = (window as any)._item(label, true).elem.querySelector('.inert-line') as HTMLElement
+        const rect = head.getBoundingClientRect()
+        const at = [Math.round(rect.left + 8), Math.round(rect.top + rect.height / 2)]
+        if (head.contains(document.elementFromPoint(at[0], at[1]))) return at // (the head's marker stands at that point)
+        head.scrollIntoView({ block: 'center' })
+        return null
+      }, LABEL)
+    let at: number[] | null = null
+    await expect
+      .poll(async () => {
+        const before = at
+        at = await point()
+        return !!at && !!before && at.join() == before.join()
+      }, 'the head rests in the window')
+      .toBe(true)
+    const tapped = page.evaluate(() => new Promise<boolean>(resolve => document.addEventListener('click', e => resolve(!!(e.target as Element).closest('.inert-line')), { capture: true, once: true })))
+    await page.touchscreen.tap(at![0], at![1])
+    expect(await tapped, 'the tap came with its click, on the head').toBe(true)
+    await expect.poll(async () => (await fold(page, LABEL))?.blocks.map(b => [b.state, b.memory]), 'a tap on the head opens it').toEqual([['open', 'opened']])
+    expect((await measure()).edges, 'open, the block is as wide as the item').toEqual([0, 0])
+    expect(await page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), LABEL), 'the tap opened no editor').toBe(false)
+  } finally {
+    await context.close()
+  }
+})
+
+test("a shared page, by the keyboard alone: Tab reaches a section's marker, which says closed; Enter and Space toggle it; Tab goes on to the link on the section's second line", async ({ page }) => {
+  // A shared (fixed) page has no MindBox, no search and no selected item, and the app leaves the keys
+  // alone there: a closed section opens by its marker or not at all, and a link on its second line is
+  // reached through it. (On the app's own page the window takes Tab for the MindBox, so no Tab reaches
+  // a marker there; Enter and Space are the marker's own keys on both pages.)
+  await loadAdmin(page)
+  const LABEL = '#e2e_fold_keys'
+  const KEY = 'e2e_fold_keys'
+  const [first, second] = ['first', 'second'].map(name => new URL(`/server_id?${name}`, page.url()).href)
+  await page.evaluate(text => void window._create(text), `${LABEL} shared with a section\n${region(`The plan is [here](${first}).\nThe notes are [there](${second}).`)}`)
+  const saved = () => page.evaluate(label => (window as any)._item(label, true)?.saved_id ?? null, LABEL)
+  await expect.poll(saved, { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(([label, key]) => void (window as any)._item(label).share(key, 0), [LABEL, KEY] as const) // indexed: shown on the page
+  await expect.poll(async () => (await firestore().collection('items').doc((await saved())!).get()).data()?.attr?.shared?.keys ?? null, { timeout: 30_000 }).toEqual([KEY])
+  const uid = await page.evaluate(() => (window as any)._user.uid)
+  await page.goto(`/?shared=${uid}/${KEY}`)
+  await waitForApp(page)
+  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 }) // the shared page's welcome
+  // [the marker's role, name and state], whether the section shows, and where the focus is
+  const read = () =>
+    page.evaluate(() => {
+      const block = document.querySelector('.inert-block')
+      const marker = block?.querySelector(':scope > .inert-line > .inert-toggle')
+      if (!block || !marker) return null
+      const active = document.activeElement
+      return {
+        marker: [marker.getAttribute('role'), marker.getAttribute('aria-label'), marker.getAttribute('aria-expanded')],
+        open: [...block.querySelectorAll(':scope > .vault-result')].every(frame => frame.getClientRects().length > 0),
+        focus: active === marker ? 'marker' : active instanceof HTMLAnchorElement ? (active.closest('.inert-line') ? 'head ' : 'section ') + active.href : (active?.tagName ?? ''),
+      }
+    })
+  expect(await page.evaluate(() => [new URLSearchParams(location.search).has('shared'), !!document.querySelector('.container.target')]), 'the shared page, no selected item').toEqual([true, false])
+  await expect.poll(read, 'the section is closed, and its marker is a button that says so').toMatchObject({ marker: ['button', 'section', 'false'], open: false })
+  for (let n = 0; n < 15 && (await read())!.focus != 'marker'; n++) await page.keyboard.press('Tab')
+  expect((await read())!.focus, 'Tab reaches the marker').toBe('marker')
+  await page.keyboard.press('Enter')
+  expect(await read(), 'Enter opens the section, and the marker says so').toEqual({ marker: ['button', 'section', 'true'], open: true, focus: 'marker' })
+  await page.keyboard.press('Space')
+  expect(await read(), 'Space closes it').toEqual({ marker: ['button', 'section', 'false'], open: false, focus: 'marker' })
+  // closed, the next stop is the link of the status line, a control of its own
+  await page.keyboard.press('Tab')
+  expect((await read())!.focus, "closed: the next stop is the head's link").toBe('head ' + first)
+  await page.keyboard.press('Shift+Tab')
+  expect((await read())!.focus).toBe('marker')
+  // open, the stops after the marker are the section's own links: the first line's, then the second line's
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('Tab')
+  expect((await read())!.focus, "open: the next stop is the section's first link").toBe('section ' + first)
+  await page.keyboard.press('Tab')
+  expect((await read())!.focus, "then the link on the section's second line").toBe('section ' + second)
 })
