@@ -1,6 +1,22 @@
 import { expect, test } from '@playwright/test'
 
-import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, type HistoryEntry } from '../../src/history_entries.js'
+import {
+  INPUT_EVENTS,
+  SessionEntries,
+  decodedFragment,
+  inputActive,
+  launchAnchor,
+  launchQuery,
+  launchIdentity,
+  ownEntry,
+  startupPlace,
+  stopReturn,
+  updatedEntry,
+  writeMode,
+  type HistoryEntry,
+  type WriteAsk,
+  type WriteMode,
+} from '../../src/history_entries.js'
 
 const OWNER = '|alice|'
 const entry = (index: number, editorText = '', more: Record<string, unknown> = {}): HistoryEntry => ({ index, owner: OWNER, run: 1, editorText, ...more })
@@ -109,12 +125,13 @@ test("a proposed update is a new object: a write that is then suppressed leaves 
 })
 
 // WHERE A SESSION STARTS (startupPlace), over small histories as the browser holds them: a state per
-// position and, for a position whose address names an item of the notebook, that name. `launched` is a model
-// of what the startup then WRITES (index.svelte's initialize and onEditorChange), for a page created on one
-// position and, when a traversal arrived while it was starting, standing on another: nothing when the place
-// is deferred (the page's handler applies the position once the page is initialized); else the launch's first
-// view over the state it starts on, or pushed after it when that is the notebook's own final entry (the
-// positions ahead are dropped), and then the query its address names, pushed after that
+// position and, for a position whose address names an item of the notebook, that name. `launched` applies
+// the decisions the route asks at a launch (index.svelte's initialize and its fragment step) to such a history,
+// for a page created on one position and, when a traversal arrived while it was starting, standing on another:
+// nothing when the place is deferred (the page's handler applies the position once the page is initialized);
+// else the launch's first view, written over the state it starts on unless that entry is kept for the
+// address's query (launchQuery), and then that query, written over the same position. Each write's mode is
+// writeMode's: never a push, and an entry of the notebook's keeps its `final`
 type Slot = { state: unknown; names?: string }
 const NEW_RUN = 99
 const of = (run: number, index: number, editorText: string, more: Record<string, unknown> = {}) => ({ ...entry(index, editorText, more), run })
@@ -124,18 +141,17 @@ const launched = (stack: Slot[], created: number, reached: number | null = null)
   const place = startupPlace(OWNER, launchIdentity(stack[created].state), stack[at].state, reached !== null)
   if (place.deferred) return { place, stack, at }
   const run = place.run ?? NEW_RUN
-  let next = stack.slice()
-  let now = at
-  if (place.held?.final) {
-    next = next.slice(0, at + 1).concat({ state: of(run, place.index + 1, '', { final: true }) })
-    now = at + 1
-  } else next[at] = { ...next[at], state: of(run, place.index, '', { final: true }) }
-  const named = stack[created].names
-  if (named) {
-    next = next.slice(0, now + 1).concat({ state: of(run, (next[now].state as HistoryEntry).index + 1, named + ' ', { final: true }), names: named })
-    now += 1
+  const named = stack[created].names ?? null
+  const held = place.held
+  const next = stack.slice()
+  const write = (query: string, force: boolean) => {
+    const mode = writeMode({ user: false, launch: true, force, replace: false, same: query == held?.editorText, final: !!held?.final, first: false, unknown: false, fragment: false })
+    expect(mode, `the launch's write of '${query}'`).toBe('update')
+    next[at] = { ...next[at], state: of(run, place.index, query, { final: held ? !!held.final : true }) }
   }
-  return { place, stack: next, at: now }
+  if (!launchQuery(place, named).kept) write('', false)
+  if (named) write(named + ' ', true)
+  return { place, stack: next, at }
 }
 
 test('a session starts on the entry the page was created on, or defers to the position a traversal reached: never a write over that position', () => {
@@ -153,7 +169,7 @@ test('a session starts on the entry the page was created on, or defers to the po
   let result = launched(two, 5, 1)
   expect(result.place).toEqual({ deferred: true, index: 0, run: null, held: null })
   expect(result.stack, 'the older query and the entries ahead of it are as they were').toEqual(two)
-  // the same when the older entry is final (a launch on it would push and drop the entries ahead)
+  // the same when the older entry is final
   const finals = two.map((slot, i) => (i == 1 ? { state: of(11, 1, 'the older query', { final: true }) } : slot))
   expect(launched(finals, 5, 1).stack).toEqual(finals)
   // another entry of the same run is a move too; the entry the page was created on is none (a restored tab can
@@ -163,6 +179,17 @@ test('a session starts on the entry the page was created on, or defers to the po
   expect(result.place).toEqual({ deferred: false, index: 1, run: 22, held: two[5].state })
   expect(result.stack.map(slot => (slot.state as HistoryEntry).editorText)).toEqual(['', 'the older query', '#ahead ', undefined, '', ''])
   expect(launched(two, 5).stack, 'as a reload without a traversal').toEqual(result.stack)
+  // a reload on a final entry whose address names an item: the entry is kept while the first view shows, the
+  // address's query is written over it, and nothing is added or dropped (until 2026-11-19: two pushes)
+  expect(launched(two, 2).stack, 'a reload on the entry of #ahead').toEqual(two)
+  // the address's query: pending whenever the address is not empty (cancellable, whether or not it names an
+  // item yet), and the entry kept only where the page starts on an entry of the notebook's
+  const start = (state: unknown, traversed = false) => startupPlace(OWNER, launchIdentity(two[5].state), state, traversed)
+  expect(launchQuery(start(two[5].state), '#late')).toEqual({ pending: true, kept: true })
+  expect(launchQuery(start(two[5].state), '')).toEqual({ pending: false, kept: false })
+  expect(launchQuery(start(two[5].state), null)).toEqual({ pending: false, kept: false })
+  expect(launchQuery(start(MARKER), '#late'), 'on a state that is no entry of the notebook').toEqual({ pending: true, kept: false })
+  expect(launchQuery(start(two[1].state, true), '#late'), 'deferred to the position a traversal reached').toEqual({ pending: false, kept: false })
 
   // a cleared position whose address names an item X, then the notebook's entry Q, whose address names Q
   const marked: Slot[] = [{ state: MARKER, names: '#X' }, { state: of(22, 0, '#Q ', { final: true }), names: '#Q' }]
@@ -177,10 +204,11 @@ test('a session starts on the entry the page was created on, or defers to the po
     expect(result.place.deferred, JSON.stringify(state)).toBe(true)
     expect(result.stack).toEqual(foreign)
   }
-  // a reload of a tab that stands on the marker is a launch: a new run from 0 there, and its address's query
+  // a reload of a tab that stands on the marker is a launch: a new run from 0 there, its address's query
+  // written over the same position, and Q still ahead (until 2026-11-19 the query was pushed, and Q dropped)
   result = launched(marked, 0)
   expect(result.place).toEqual({ deferred: false, index: 0, run: null, held: null })
-  expect(result.stack.map(slot => slot.state)).toEqual([of(NEW_RUN, 0, '', { final: true }), of(NEW_RUN, 1, '#X ', { final: true })])
+  expect(result.stack.map(slot => slot.state)).toEqual([of(NEW_RUN, 0, '#X ', { final: true }), marked[1].state])
   // a traversal that ends on a position without a numbered entry is always a move: nothing tells two apart
   expect(launched([{ state: MARKER }, { state: MARKER }], 1, 0).place.deferred).toBe(true)
   expect(launched([{ state: MARKER }], 0, 0).place.deferred).toBe(true)
@@ -247,4 +275,57 @@ test("the entry a page was created on is a stop's return address only when its w
   // the identity that startupPlace compares is the three fields, as before: a launch on a marker is a launch there
   expect(startupPlace(OWNER, launchIdentity(MARKER), MARKER, false)).toEqual({ deferred: false, index: 0, run: null, held: null })
   expect(startupPlace(OWNER, launchIdentity(entry(3, 'q')), entry(3, 'q'), true).deferred, 'the same entry again is no move').toBe(false)
+})
+
+// THE WRITE DECISION (2026-11-19, the owner: "changes that are not triggered by a user action should not add new
+// steps"): by the write's origin, the entry the browser is on and what the write asks for. `ask()` is a passive
+// re-ranking of the same query on a final entry that is not the launch's
+test("a history write is a step only as the user's: by its origin, never by what it asks for", () => {
+  const ask = (more: Partial<WriteAsk> = {}): WriteAsk => ({ user: false, launch: false, force: false, replace: false, same: true, final: true, first: false, unknown: false, fragment: false, ...more })
+  const rows: [string, Partial<WriteAsk>, WriteMode][] = [
+    // not the user's: never a push, whatever is asked; the entry keeps what is its own
+    ['a passive re-ranking on a final entry', {}, 'update'],
+    ['a passive re-ranking on an entry that is not final', { final: false }, 'update'],
+    ["a passive re-ranking on the launch's first view", { first: true }, 'update'],
+    ['a passive new query (MindBox.set from a timer)', { same: false }, 'update'],
+    ["a passive forced entry (a select from a timer, an autorun's /run query)", { force: true, same: false }, 'update'],
+    ['a passive replacement (the selected item deleted by item code)', { replace: true, same: false }, 'update'],
+    ["the launch's first view over a final entry of another query", { launch: true, same: false }, 'update'],
+    ["the launch's forced query, the address's, over its entry", { launch: true, force: true, same: false }, 'update'],
+    ["the launch's write while the user's input is being handled is the launch's still", { launch: true, user: true, force: true, same: false }, 'update'],
+    // on a position that holds no entry: nothing but the user's navigation
+    ['a passive re-ranking under a dropped edit on a position that holds no entry', { unknown: true, same: false }, 'none'],
+    ['a passive forced entry there', { unknown: true, force: true, same: false }, 'none'],
+    ['a passive re-ranking of the same query there', { unknown: true }, 'none'],
+    ["the user's new query there", { unknown: true, user: true, same: false }, 'push'],
+    ["the user's forced entry there", { unknown: true, user: true, force: true }, 'push'],
+    ["the user's re-ranking of the same query there", { unknown: true, user: true }, 'none'],
+    ["the user's replacement there", { unknown: true, user: true, replace: true, same: false }, 'none'],
+    // a native fragment's own position is taken, whoever asks
+    ["a native fragment's query", { fragment: true, unknown: true, force: true, same: false }, 'push'],
+    ['a native fragment that names the view shown', { fragment: true, unknown: true, force: true }, 'push'],
+    // the user's: as before the rule
+    ["the user's new query on a final entry", { user: true, same: false }, 'push'],
+    ["the user's new query on an entry that is not final (typing)", { user: true, same: false, final: false }, 'replace'],
+    ["the user's forced entry on an entry that is not final (a tag's click)", { user: true, force: true, same: false, final: false }, 'push'],
+    ["the user's re-ranking on a final entry", { user: true }, 'push'],
+    ["the user's re-ranking on an entry that is not final", { user: true, final: false }, 'replace'],
+    ["the user's re-ranking on the launch's first view", { user: true, first: true }, 'update'],
+    ["the user's forced entry on the launch's first view", { user: true, first: true, force: true }, 'push'],
+    ["the user's replacement on a final entry (their deletion of the selected item)", { user: true, replace: true, same: false }, 'replace'],
+    ["the user's forced entry wins over a replacement", { user: true, force: true, replace: true, same: false }, 'push'],
+  ]
+  for (const [name, more, mode] of rows) expect(writeMode(ask(more)), name).toBe(mode)
+})
+
+test("the user's input is a trusted input event in dispatch: not one kept afterwards, not one a script dispatches, not a traversal or a scroll", () => {
+  expect(inputActive({ isTrusted: true, type: 'click', eventPhase: 2 })).toBe(true)
+  expect(inputActive({ isTrusted: true, type: 'keydown', eventPhase: 1 })).toBe(true)
+  expect(inputActive({ isTrusted: true, type: 'input', eventPhase: 3 })).toBe(true)
+  expect(inputActive({ isTrusted: true, type: 'click', eventPhase: 0 }), 'kept after its dispatch').toBe(false)
+  expect(inputActive({ isTrusted: false, type: 'click', eventPhase: 2 }), 'dispatched by a script').toBe(false)
+  expect(inputActive({ isTrusted: true, type: 'popstate', eventPhase: 2 }), 'a traversal').toBe(false)
+  expect(inputActive({ isTrusted: true, type: 'scroll', eventPhase: 2 }), "a scroll (a script's scroll makes one too)").toBe(false)
+  expect(inputActive(undefined)).toBe(false)
+  expect(INPUT_EVENTS, 'a native drag ends with dragend').toContain('dragend')
 })

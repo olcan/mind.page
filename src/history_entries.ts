@@ -113,6 +113,15 @@ export function startupPlace(owner: string | null, launch: LaunchIdentity | null
   return own ? { deferred: false, index: own.index, run: own.run, held: own } : { deferred: false, index: 0, run: null, held: null }
 }
 
+// THE ADDRESS'S QUERY AT A LAUNCH (index.svelte's initialize): `pending` when the address is not empty and the
+// page starts where it was created, whether or not the address names an item yet (it is applied once, later,
+// resolved then, unless the user's input or a traversal supersedes it); `kept` when the page also starts on an
+// entry of the notebook's: that entry is left as it is until then, and the launch's first view is not written
+export const launchQuery = (place: StartupPlace, address: string | null): { pending: boolean; kept: boolean } => {
+  const pending = !place.deferred && !!address
+  return { pending, kept: pending && !!place.held }
+}
+
 // THE STOP: where the browser goes back to when Back or Forward has landed on a position that holds no entry
 // of the notebook's that the app can take (index.svelte's onPopState), and which way it had moved. The
 // browser moves first and tells the app afterwards, and nothing in a `popstate` says from where or which
@@ -135,6 +144,43 @@ export function stopReturn(places: HistoryPlace[] | null, landed: string | null,
   const to = places.find(place => place.key === landed)
   if (!from || !to || from.index === to.index) return null
   return { key: from.key, forward: to.index > from.index }
+}
+
+// THE USER'S INPUT, as an event shows it (index.svelte's userInput): a trusted event of a key, a pointer, a touch
+// or typed text, for as long as its dispatch lasts. `eventPhase` is 0 (NONE) before and after a dispatch, so an
+// event that is merely kept is not active; one a script dispatches again is active and untrusted. A trusted
+// `submit` can also come from a script's requestSubmit(), and `change` and `submit` follow a click's or a key's
+// dispatch as its activation: they are listed so that a widget's form or checkbox handler counts
+export const INPUT_EVENTS = [
+  'keydown', 'keyup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu', 'pointerdown', 'pointerup', 'touchstart', 'touchend',
+  'beforeinput', 'input', 'paste', 'cut', 'drop', 'dragend', 'change', 'submit', 'compositionend',
+]
+export type InputLike = { isTrusted?: boolean; type?: string; eventPhase?: number } | null | undefined
+export const inputActive = (e: InputLike): boolean => !!e && e.isTrusted === true && INPUT_EVENTS.includes(e.type ?? '') && e.eventPhase !== 0
+
+// HOW A VIEW IS WRITTEN (index.svelte's record in onEditorChange asks; the owner, 2026-11-19: "changes that are
+// not triggered by a user action should not add new steps"). What is asked, when the view differs from the entry
+// the browser is on (its query or its order) or a native fragment's position awaits its entry:
+// - `user`: the write is asked for within the user's input or a carry of it (its ORIGIN: never inferred from
+//   `force` or from a new query); `launch`: it is the launch's own (its first view, the address's query), which
+//   is never the user's
+// - `force`, `replace`: what the caller asks of the write (an entry of its own; the entry replaced)
+// - `same`: the query is the entry's; `final`: the entry is final; `first`: it is the launch's own first view
+// - `unknown`: the browser is on a position that holds no entry of the notebook's; `fragment`: a native
+//   fragment's own position awaits the entry of the query it names
+// The modes: `push` (a new entry: a step; on a fragment's position the entry takes that position), `replace` (the
+// view written over the entry as the user's own: its fields are the view's), `update` (the view written over the
+// entry, which keeps what is its own: its `final`, its mark of an Up, its narration's choice), `none`.
+// A step is the user's alone: a write that is not theirs never pushes, whatever it asks for; it updates the entry,
+// and on a position that holds no entry it writes nothing (the marker and the entries ahead stay)
+export type WriteAsk = { user: boolean; launch: boolean; force: boolean; replace: boolean; same: boolean; final: boolean; first: boolean; unknown: boolean; fragment: boolean }
+export type WriteMode = 'push' | 'replace' | 'update' | 'none'
+export function writeMode(ask: WriteAsk): WriteMode {
+  const user = ask.user && !ask.launch
+  if (ask.fragment) return 'push'
+  if (ask.unknown) return user && (ask.force || (!ask.same && !ask.replace)) ? 'push' : 'none'
+  if (user && (ask.force || (!ask.replace && ask.final && !ask.first))) return 'push'
+  return user && !ask.first ? 'replace' : 'update'
 }
 
 // a link of the list above the header: an earlier query and the distance to it (what history.go takes)

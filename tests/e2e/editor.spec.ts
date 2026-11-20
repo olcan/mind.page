@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
-import { mindbox, focusMindbox, savedId, itemText, visible } from './editor_helpers.js'
+import { asUser, mindbox, focusMindbox, savedId, itemText, userSet, visible } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
 // editor flows driven by keyboard and mouse, as admin on the anonymous account: creating items from
@@ -606,7 +606,8 @@ test("a click on an item's number selects the item while the number is plain and
     // scrolled and selected in one turn of the page, inside the 250 ms the scroll listener waits before it
     // writes: the entry being left holds the place from before the scroll, and the select writes the live one
     await recorded()
-    const scrolled = await page.evaluate(
+    const scrolled = await asUser(
+      page,
       ([id, left]) => {
         const max = document.body.scrollHeight - innerHeight
         document.body.scrollTo(0, left + 48 <= max ? left + 48 : left - 48)
@@ -636,14 +637,15 @@ test("a click on an item's number selects the item while the number is plain and
 
   await test.step("a name typed into the box and its item selected before the query applies (item code's select, as a todo's row makes it): the select applies at once, in an entry of its own, and the box gives up the focus", async () => {
     // A: the plain item's view as a typed query's entry, which is not final (a typed update of the query replaces it)
-    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${savedPlain}`)
+    await userSet(page, `id:${savedPlain}`)
     await expect.poll(async () => (await read(plain)).target).toBe(true)
     const [index, , final] = await entry()
     expect(final, "A's entry is a typed query's: not final").toBe(false)
     await focusMindboxInPlace(page)
     await expect(mindbox(page)).toBeFocused()
     // B's exact name typed (the input event a key or a paste makes) and B selected, in one turn of the page
-    const turn = await page.evaluate(
+    const turn = await asUser(
+      page,
       ([id, name]) => {
         const w = window as any
         const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
@@ -659,12 +661,12 @@ test("a click on an item's number selects the item while the number is plain and
     expect(turn, 'the typed name was pending; the select applied at once: B the target, the debounce disarmed, the box blurred, an entry of its own').toEqual({ pending: true, selected: true, target: true, still: false, focused: false, entry: [index + 1, NAMED, true] })
     await page.goBack()
     await expect(mindbox(page), 'Back reaches A').toHaveValue(`id:${savedPlain}`)
-    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await userSet(page, '')
     await expect(mindbox(page)).toHaveValue('')
   })
 
   await test.step("a tag's view: a green number moves its item up and keeps the query; shift+click selects, in an entry of its own", async () => {
-    await page.evaluate(tag => void (window as any).MindBox.set(tag), TAG)
+    await userSet(page, TAG)
     await expect(number(taggedA), 'the items under the label match the query: green').toHaveClass(/matching/)
     await expect(number(taggedB)).toHaveClass(/matching/)
     const [tagIndex, , final] = await entry()
@@ -703,21 +705,21 @@ test("a click on an item's number selects the item while the number is plain and
 
   await test.step('an item the query names already: shift+click adds no entry', async () => {
     // a tag's click leaves a space after the name it sets
-    await page.evaluate(name => void (window as any).MindBox.set(name + ' '), NAMED)
+    await userSet(page, NAMED + ' ')
     await expect(number(named)).toHaveClass(/matching/)
     const [index] = await entry()
     await number(named).click({ modifiers: ['Shift'] })
     await settled(page)
     expect([await mindbox(page).inputValue(), (await entry())[0]], 'the box and the entry as they were').toEqual([NAMED + ' ', index])
     // an id reference in the tab's own spelling is the same selection as the saved one: no entry either
-    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${plain}`)
+    await userSet(page, `id:${plain}`)
     await expect(number(plain)).toHaveClass(/matching/)
     const [tabIndex] = await entry()
     await number(plain).click({ modifiers: ['Shift'] })
     await settled(page)
     expect([await mindbox(page).inputValue(), (await entry())[0]], "the tab's own spelling of the id is left as it is").toEqual([`id:${plain}`, tabIndex])
     // a labeled item's id reference is another view (no children under it): a select gives the label's, in a new entry
-    await page.evaluate(name => void (window as any).MindBox.set(name), `id:${savedNamed}`)
+    await userSet(page, `id:${savedNamed}`)
     await expect(number(named)).toHaveClass(/matching/)
     const [idIndex] = await entry()
     await number(named).click({ modifiers: ['Shift'] })
@@ -726,7 +728,7 @@ test("a click on an item's number selects the item while the number is plain and
   })
 
   await test.step('the first view again: option and cmd move a plain number as before, and select nothing', async () => {
-    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await userSet(page, '')
     await reveal(plain)
     await expect(number(plain)).not.toHaveClass(/matching/)
     const top = await read(plain)
@@ -763,7 +765,7 @@ test("a click on an item's number selects the item while the number is plain and
   })
 
   await test.step('the query follows a selected item: a label added in its editor, removed again, then the item deleted', async () => {
-    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await userSet(page, '')
     await reveal(plain)
     await number(plain).click()
     await expect(mindbox(page)).toHaveValue(`id:${savedPlain}`)
@@ -787,7 +789,7 @@ test("a click on an item's number selects the item while the number is plain and
     // the same view under another spelling of the label, which a query accepts (its case, a trailing space, as
     // a tag's click leaves one): the next rename is followed from the query as it is written
     const SPELLED = RENAMED.toUpperCase() + ' '
-    await page.evaluate(name => void (window as any).MindBox.set(name), SPELLED)
+    await userSet(page, SPELLED)
     await expect(mindbox(page)).toHaveValue(SPELLED)
     expect([(await read(plain)).target, (await entry()).slice(0, 2)], 'the item is still the target, in the same entry').toEqual([true, [index, SPELLED]])
     await edit(texts[0])
@@ -841,7 +843,7 @@ test("a click on an item's number selects the item while the number is plain and
   })
 
   // the fixtures go: the rows after this one find the account's items as before
-  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await userSet(page, '')
   await page.evaluate(ids => ids.forEach(id => void window._item(id)!.delete(false)), [named, taggedA, taggedB, log])
   await expect.poll(() => page.evaluate(() => window._items().filter(item => item.text.includes('e2e_number_')).length), { timeout: 30_000 }).toBe(0)
 })
@@ -957,7 +959,7 @@ test('Shift with the delete shortcut deletes the target item and its subtree aft
   expect(dep.ancestors).toEqual([])
   expect(dep.deps).toContain(`${T}/a`) // a dependency, not a tree edge
   const target = async (name: string) => {
-    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await userSet(page, name, { scroll: true })
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   }
   const dialogs: string[] = []
@@ -993,7 +995,7 @@ test('Shift with the delete shortcut deletes the target item and its subtree aft
   // /_undelete restores the target (deleted last) first, then the moved-in node (the MindBox,
   // focused by the shortcut's key and still naming the lone target, is cleared first)
   const undelete = async () => {
-    await page.evaluate(() => (window as any).MindBox.set('/_undelete', {}))
+    await userSet(page, '/_undelete', {})
     await mindbox(page).focus()
     await expect(mindbox(page)).toHaveValue('/_undelete')
     await page.keyboard.press('Shift+Enter')
@@ -1241,7 +1243,7 @@ test('a chain of continuations shortens to its last segment; a branch keeps its 
   const shown = () =>
     page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.container mark.label')].map((m: any) => [m.title, m.textContent])))
   const navigate = async (name: string) => {
-    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await userSet(page, name, { scroll: true })
     await expect.poll(async () => (await shown())[name] ?? null, { timeout: 15_000 }).not.toBeNull()
     return shown()
   }
@@ -1258,7 +1260,7 @@ test('a chain of continuations shortens to its last segment; a branch keeps its 
   // the query (the prefix match; a narrow query, so the listing is not cut at the hide index);
   // the same collapse there, and both nines distinct
   const listed = async (query: string, key: string) => {
-    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), query)
+    await userSet(page, query, { scroll: true })
     // the listing is cut at the hide index: show more until the descendant is rendered
     await expect
       .poll(
@@ -1289,7 +1291,7 @@ test('ctrl+arrows at the edges of an item editor jump to the neighboring items, 
   await loadAdmin(page)
   for (const label of ['#e2e_jump/a', '#e2e_jump/b']) await page.evaluate(label => void window._create(label + ' item'), label)
   await expect.poll(() => savedId(page, '#e2e_jump/b'), { timeout: 30_000 }).toBeTruthy()
-  await page.evaluate(() => (window as any).MindBox.set('#e2e_jump', { scroll: true }))
+  await userSet(page, '#e2e_jump', { scroll: true })
   const ids = () => page.evaluate(() => [...document.querySelectorAll('.container[data-item-id]')].map(c => c.getAttribute('data-item-id')!))
   const [aId, bId] = await Promise.all(['#e2e_jump/a', '#e2e_jump/b'].map(name => page.evaluate(n => window._item(n, true)!.id, name)))
   await expect.poll(async () => (await ids()).filter(id => id == aId || id == bId).length, { timeout: 15_000 }).toBe(2)
@@ -1339,7 +1341,7 @@ test('shift with cmd/ctrl+arrows in an item editor extends the selection to the 
   await loadAdmin(page)
   await page.evaluate(() => void window._create('#e2e_select/a item with a longer text to select in'))
   await expect.poll(() => savedId(page, '#e2e_select/a'), { timeout: 30_000 }).toBeTruthy()
-  await page.evaluate(() => (window as any).MindBox.set('#e2e_select/a', { scroll: true }))
+  await userSet(page, '#e2e_select/a', { scroll: true })
   const id = await page.evaluate(() => window._item('#e2e_select/a', true)!.id)
   const paragraph = page.locator(`#item-${id} p`).first()
   const box = (await paragraph.boundingBox())!
@@ -1396,7 +1398,7 @@ test('ctrl+alt+i opens the image dialog like shift+cmd+i, in an item editor and 
   await loadAdmin(page)
   await page.evaluate(() => void window._create('#e2e_image_key item'))
   await expect.poll(() => savedId(page, '#e2e_image_key'), { timeout: 30_000 }).toBeTruthy()
-  await page.evaluate(() => (window as any).MindBox.set('#e2e_image_key', { scroll: true }))
+  await userSet(page, '#e2e_image_key', { scroll: true })
   const id = await page.evaluate(() => window._item('#e2e_image_key', true)!.id)
   await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000 }).toBe(true)
   const paragraph = page.locator(`#item-${id} p`).first()
@@ -1453,7 +1455,7 @@ test('cmd/ctrl+c from the window copies the name of the item the MindBox names (
     await expect.poll(clipboard).toBe('sentinel')
   }
   const target = async (name: string) => {
-    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), name)
+    await userSet(page, name, { scroll: true })
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
   }
   // the key as a synthetic event from the active element (the window handler reads the physical code)
@@ -1834,7 +1836,9 @@ test("cmd/ctrl+arrows in the MindBox on a query: the text and caret stay, typing
   // the layout the flush runs would scroll to that item a few frames later, and the explicit scroll to
   // the top must win, so the position is checked again once the layout has had its time
   await scrollDown(page)
-  const pending = await page.evaluate(dispatchArrow => {
+  // (within a key press of the row's, as every typed step here: text typed from the page's script alone is no
+  // input of the user's, and its query would be written over the entry instead of following it)
+  const pending = await asUser(page, dispatchArrow => {
     const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
     t.focus({ preventScroll: true })
     t.setRangeText('/a', t.value.length, t.value.length, 'end')
@@ -1870,7 +1874,8 @@ test("cmd/ctrl+arrows in the MindBox on a query: the text and caret stay, typing
   // target scroll. The precedence holds for the settled query's layouts: the body's scrollTo is called
   // once (the explicit scroll) and the page is still at the top once the reveal has rendered
   await scrollDown(page)
-  const far = await page.evaluate(
+  const far = await asUser(
+    page,
     ([dispatchArrow, leafId]) => {
       const t = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
       t.focus({ preventScroll: true })
@@ -2083,7 +2088,7 @@ test('time rows regroup on a query change, not on every layout: a passive re-ran
   const ITEM = `${ROOT}/0`
   await page.evaluate(text => void window._create(text), `${ROOT} root`)
   await page.evaluate(text => void window._create(text), `${ITEM} the item being read`)
-  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_tr ?$/)
   // both an hour old (through their records: the index button's gesture cannot age the named item, every
@@ -2137,7 +2142,7 @@ test('time rows: a query TYPED into the mindbox regroups when it applies, not at
   const ITEM = `${ROOT}/0`
   await page.evaluate(text => void window._create(text), `${ROOT} root`)
   await page.evaluate(text => void window._create(text), `${ITEM} the item`)
-  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_tr2 ?$/)
   const rows = () =>
@@ -2188,7 +2193,7 @@ test('time rows: the arrows navigate through a query change, which regroups noth
   const ITEM = `${ROOT}/0`
   const CHILD = `${ITEM}/0`
   for (const text of [`${ROOT} root`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
-  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_trn ?$/)
   await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM, CHILD])
@@ -2300,7 +2305,7 @@ test('time rows: the side arrows swap a sibling into the place of the item being
   const ROOT = '#e2e_trs'
   const [C0, C1, C2] = [0, 1, 2].map(i => `${ROOT}/${i}`)
   for (const text of [`${ROOT} root`, `${C0} the first child`, `${C1} the second child`, `${C2} the third child`]) await page.evaluate(text => void window._create(text), text)
-  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_trs ?$/)
   await page.evaluate(ages => Object.entries(ages).forEach(([label, age]) => ((window as any).__items.find((i: any) => i.label == label).time -= age)), { [ROOT]: 3600e3, [C0]: 3600e3, [C1]: 1800e3, [C2]: 3600e3 })
@@ -2357,7 +2362,7 @@ test('time rows: Down into a child the shown count hides holds the item being re
   const ITEM = `${ROOT}/0`
   const CHILD = `${ITEM}/0`
   for (const text of [`${ROOT} root`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
-  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), ROOT)
+  await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_trh ?$/)
   await page.evaluate(labels => labels.forEach(label => ((window as any).__items.find((i: any) => i.label == label).time -= 3600e3)), [ROOT, ITEM, CHILD])
@@ -2995,7 +3000,8 @@ const historyReads = (page: Page) => {
 // overwrote each entry it landed on with a copy of one of its own. The session continues at the kept entry's
 // index instead, and takes an entry it does not know as the browser holds it. Two reloads: on the first view
 // with two entries ahead of it (a reload there writes nothing, so Forward still has them), then on an
-// item's view (the reloaded page pushes its own first view and the address's query after the kept entry).
+// item's view (the reloaded page writes its first view and the address's query over the kept entry since
+// 2026-11-19: until then it pushed both after it).
 // Every entry reached shows its own query and its own scroll position, each position set by hand so that no
 // two entries share one. The items are the navigation row's
 test('Back and Forward across a reload reach the entries from before it, each with its query and its scroll position, and the history handler warns of nothing', async ({ page }) => {
@@ -3048,22 +3054,21 @@ test('Back and Forward across a reload reach the entries from before it, each wi
   await shows('#e2e_target ', atTarget, 'Forward again')
   await recorded()
 
-  // (2) a reload on an item's view: the reloaded page pushes its own first view and the address's query
-  // after the kept entry; Back passes both and reaches the entries from before the two reloads
+  // (2) a reload on an item's view (a tag click's entry): the reloaded page writes its first view and the
+  // address's query over the kept entry, which shows the query again, and adds none (until 2026-11-19 it
+  // pushed both after the kept entry: two entries more, Back first showed the first view, then the kept
+  // entry); Back reaches the entries from before the two reloads
   await page.reload()
   await waitForApp(page)
   await expect(mindbox(page)).toHaveValue('#e2e_target ')
   await recorded()
-  expect(await entries(page), 'the session continued at the kept index: its own two entries follow it').toEqual([index + 4, index + 3])
+  expect(await entries(page), 'the session continued at the kept index, and added nothing').toEqual([index + 2, index + 1])
+  expect(await page.evaluate(() => [history.state.editorText, history.state.final]), 'the kept entry shows the query again, still final').toEqual(['#e2e_target ', true])
   await page.goBack()
-  await shows('', top, "Back to the reloaded page's own first view, at the header")
-  await page.goBack()
-  await shows('#e2e_target ', atTarget, 'Back onto the entry the page was reloaded on')
-  await page.goBack()
-  await shows('#e2e_source', atSource, 'Back onto the entry before it')
+  await shows('#e2e_source', atSource, 'Back onto the entry before the one the page was reloaded on')
   await page.goBack()
   await shows('', top, 'Back to the first view')
-  expect(await entries(page), 'every entry in its place').toEqual([index + 4, index - 1])
+  expect(await entries(page), 'every entry in its place').toEqual([index + 2, index - 1])
 })
 
 // the entries of the two startup rows below, over the navigation row's items: the first view, a typed query,
@@ -3087,7 +3092,7 @@ const threeQueries = async (page: Page, { recorded, place }: ReturnType<typeof h
   // the last query is set as a todo's row sets one, from a blurred box: it applies at once (a typed query
   // waits out its debounce with the box focused, the page scrolls to it meanwhile and the scroll listener
   // records that position on the entry being left: 640 for an entry left at 672, the reading of review 1)
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await userSet(page, '#e2e_target/sub')
   await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_target/sub')
   await recorded()
   const atSub = await scrollTop(page)
@@ -3178,7 +3183,7 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   const { warnings, shows, recorded } = reads
   const errors: string[] = [] // a fragment's decoding error, should one reach the page
   page.on('pageerror', error => void (/URI/.test(String(error)) && errors.push(String(error))))
-  const { index, atTarget } = await threeQueries(page, reads)
+  const { index, atTarget, atSub } = await threeQueries(page, reads)
   const top = await headerTop(page)
   const length = await page.evaluate(() => history.length)
   const links = page.locator('.history-item') // the list above the header
@@ -3198,6 +3203,8 @@ test("Back after a reloaded page is initialized and before its launch fragment i
       .toBe(true)
   }
   await page.addInitScript(() => void ((window as any)._launch_fragment_gate = new Promise<void>(resolve => void ((window as any)._release_launch_fragment = resolve))))
+  const browserKey = () => page.evaluate(() => (window as any).navigation.currentEntry.key as string)
+  const reloadedOn = await browserKey()
   await page.reload()
   await waitForApp(page)
   const step = () => page.evaluate(() => (window as any)._launch_fragment_done === true)
@@ -3215,23 +3222,322 @@ test("Back after a reloaded page is initialized and before its launch fragment i
     await page.evaluate(i => [history.state.index, history.state.editorText, history.state.scrollPosition, (window as any)._history[i].scrollPosition, history.length], index + 1),
     'no entry was pushed, and the entry holds the position it was left at'
   ).toEqual([index + 1, '#e2e_target ', atTarget, atTarget, length])
-  // the entry ahead is the one the page was reloaded on, as its launch left it: the first view
+  // THE ENTRY AHEAD IS THE ONE THE PAGE WAS RELOADED ON, AS IT WAS (review 0 of phantom_steps, blocker 3): its
+  // address names an item, so the launch left it alone while its first view showed (the query is applied
+  // later, once, and the Back above superseded it), and Forward lands on the same position and restores the
+  // query it stores, where it was left. Until then the launch wrote its first view over the entry, and Forward
+  // restored the empty list
+  const stored = () => page.evaluate(() => [history.state.index, history.state.editorText, history.state.final])
   await page.goForward()
-  await shows('', top, 'Forward: the entry ahead, kept')
-  expect(await page.evaluate(() => [history.state.index, history.length])).toEqual([index + 2, length])
+  await shows('#e2e_target/sub', atSub, 'Forward: the entry the page was reloaded on, the query it stores restored where it was left')
+  expect([await browserKey(), await stored(), await page.evaluate(() => history.length)], 'the same position, its entry as it was').toEqual([reloadedOn, [index + 2, '#e2e_target/sub', false], length])
+  // the same on a FINAL entry with entries on both sides (the tag click's): a reload there, a change no user
+  // action triggered while the first view shows (written nowhere: the entry is kept), Back, the release, Forward
+  const gated = async (message: string) => {
+    await page.reload()
+    await waitForApp(page)
+    await shows('', top, `${message}: the reloaded page shows its first view, the address's query not applied yet`)
+    expect(await step(), `${message}: the launch's query is pending`).toBe(false)
+  }
+  const release = async () => {
+    await page.evaluate(() => (window as any)._release_launch_fragment())
+    await expect.poll(step, { message: "the launch's fragment step has run" }).toBe(true)
+    await settled(page)
+  }
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, "Back onto the tag click's entry")
+  await recorded()
+  const finalKey = await browserKey()
+  await gated('a reload on a final entry')
+  await page.evaluate(() => void (window._item(window.__items[window.__items.length - 1].id) as any).touch())
+  await settled(page)
+  expect([await browserKey(), await stored()], 'the entry is kept as it was while the first view shows, through a passive re-ranking').toEqual([finalKey, [index + 1, '#e2e_target ', true]])
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await release()
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, 'Forward after the release: the reloaded entry, its stored query restored where it was left')
+  expect([await browserKey(), await stored()], 'the same position, its entry as it was').toEqual([finalKey, [index + 1, '#e2e_target ', true]])
+  // TYPING ON AN ENTRY THAT IS NOT FINAL while the query is pending (the position and the index stay the same):
+  // the typed query replaces the entry's, and the release does not put the address's query back over it
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await recorded()
+  await gated('a reload on an entry that is not final')
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_source')
+  await expect.poll(stored, { message: 'the typed query, in the entry the page was reloaded on', timeout: 10_000 }).toEqual([index + 2, '#e2e_source', false])
+  await blur(page)
+  await release()
+  const here = async (query: string, message: string) => expect([await browserKey(), await stored(), await mindbox(page).inputValue()], message).toEqual([reloadedOn, [index + 2, query, false], query])
+  await here('#e2e_source', 'the typed query stays through the release, on the same position')
+  // THE ITEMS CHANGE BETWEEN THE PAGE'S START AND THE RELEASE (review 1 of phantom_steps, blocker 3). First an
+  // address that names NO item when the page starts (put on the entry by the row), the user's query while it is
+  // pending, and the item arriving before the release (written behind the app, as a sync brings one): the
+  // query is the user's still (resolvable only by then, the address was applied over their choice)
+  await recorded()
+  await page.evaluate(() => history.replaceState(history.state, '', location.pathname + location.search + '#e2e_late'))
+  await gated('a reload on an address that names no item yet')
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_target/sub')
+  await expect.poll(stored, { message: "the user's query, in the entry the page was reloaded on", timeout: 10_000 }).toEqual([index + 2, '#e2e_target/sub', false])
+  await blur(page)
+  const late = await firestore().collection('items').add({ user: 'anonymous', time: Date.now(), attr: null, text: '#e2e_late an item that arrives after the page has started' })
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_late')), { message: 'the item the address names has arrived', timeout: 30_000 }).toBe(true)
+  await release()
+  await here('#e2e_target/sub', "the user's query stays through the release, though the address names an item by then")
+  // the other way round: the address names an item when the page starts (the query typed for it), and the item
+  // is gone by the release (deleted behind the app). The view shown, the first view, is written over the entry
+  // (left alone, the entry held a query that the box did not show)
+  await focusMindbox(page)
+  await mindbox(page).fill('#e2e_late')
+  await expect.poll(() => page.evaluate(() => [history.state.editorText, location.hash]), { timeout: 10_000 }).toEqual(['#e2e_late', '#e2e_late'])
+  await blur(page)
+  await recorded()
+  await gated('a reload on an address whose item is deleted meanwhile')
+  await late.delete()
+  await expect.poll(() => page.evaluate(() => window._exists('#e2e_late')), { message: 'the item the address names is gone', timeout: 30_000 }).toBe(false)
+  await release()
+  await here('', 'the entry holds the view shown, the first view, on the same position and not final as before')
+  // A SELECTION OF THE USER'S WHILE THE QUERY IS PENDING supersedes it (a real click on the number of the first
+  // item of the temporary first view, which selects it): its entry is pushed after the kept one, and the
+  // release leaves it alone (applied afterwards, the address's query was written over the entry the user had
+  // just made, and Back could not recover their choice)
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, "Back onto the tag click's entry")
+  await recorded()
+  await gated('a second reload on the final entry')
+  // (pressed where it stands: the first number that is in view and on top at its own middle; the driver's own
+  // click scrolls its target first, and the first item's number cannot be brought into view at the header)
+  const number = await page.evaluate(() => {
+    for (const el of document.querySelectorAll('.column:not(.hidden) .container[data-item-id] .button.index')) {
+      const r = el.getBoundingClientRect()
+      const [x, y] = [r.x + r.width / 2, r.y + r.height / 2]
+      if (r.width > 0 && r.top > 0 && r.bottom < innerHeight && document.elementFromPoint(x, y) === el) return [x, y]
+    }
+    return null
+  })
+  expect(number, "premise: an item's number is in view on the temporary first view").toBeTruthy()
+  await page.mouse.click(number![0], number![1])
+  await expect.poll(async () => (await browserKey()) != finalKey, { message: "the click's own entry", timeout: 10_000 }).toBe(true)
+  const [chosenKey, chosen] = [await browserKey(), await mindbox(page).inputValue()]
+  expect(chosen, 'premise: the click selected an item').not.toBe('')
+  await release()
+  expect([await browserKey(), await stored(), await mindbox(page).inputValue()], "the user's entry stays theirs through the release").toEqual([chosenKey, [index + 2, chosen, true], chosen])
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  const kept = async (message: string) => expect([await browserKey(), await stored(), await mindbox(page).inputValue()], message).toEqual([finalKey, [index + 1, '#e2e_target ', true], '#e2e_target '])
+  await kept('Back recovers the reloaded entry as it was')
+  // BACK PAST THE FIRST ENTRY THE APP CAN TAKE while the launch keeps its entry (review 1, blocker 3): the entry
+  // behind is rewritten as older code wrote one, so Back onto it stops and the browser returns to the kept
+  // entry. The page never showed that entry's view (the first view stood over it), so the return RESTORES it:
+  // the box and the entry agree after the release, and a passive re-ranking leaves the stored query alone
+  // (taken for a view already shown, the box stayed empty over the entry, and the re-ranking wrote the empty
+  // query over it)
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await recorded()
+  await asOlderCode(page)
+  const olderKey = await browserKey() // (the position the app cannot take: the stops below land on it)
+  await page.goForward()
+  await shows('#e2e_target ', atTarget, "Forward onto the tag click's entry, an entry of older code behind it")
+  await recorded()
+  await gated('a third reload on the final entry')
+  await blur(page)
+  await page.goBack()
+  await expect(note(page), 'the note of a stop after Back').toHaveText('nothing to go back to')
+  await passNote(page)
+  await shows('#e2e_target ', atTarget, 'the stop returned to the reloaded entry and restored it: its query, where it was left')
+  await release()
+  await kept('after the release: the visible query, the stored one and the position')
+  await page.evaluate(() => void (window._item(window.__items[window.__items.length - 1].id) as any).touch())
+  await settled(page)
+  await kept('after a passive re-ranking: the same')
+  // A NATIVE FRAGMENT THAT NAMES NOTHING, WHILE THE LAUNCH KEEPS ITS ENTRY, then a jump back past that entry onto
+  // the position the app cannot take (review 2 of phantom_steps, blocker 2). The fragment takes no entry and the
+  // page still shows the temporary first view, so the launch's entry stays kept, and the stop's return restores
+  // it (unkept by the fragment, the return took its view for shown: the box stayed empty over the entry, and a
+  // passive re-ranking then wrote the empty query over it)
+  await recorded()
+  await gated('a fourth reload on the final entry')
+  await page.evaluate(() => void (location.hash = '#e2e_no_such_item'))
+  await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: "the fragment's own position, its marker" }).toBe(JSON.stringify({ owner: 'admin|anonymous|', unknown: true, fragment: true }))
+  await page.evaluate(() => history.go(-2))
+  await expect(note(page), 'the note of a stop after the jump').toHaveText('nothing to go back to')
+  await passNote(page)
+  await shows('#e2e_target ', atTarget, 'the stop returned to the reloaded entry and restored it, past the fragment that named nothing')
+  await release()
+  await kept('after the jump and the release: the visible query, the stored one and the position')
+  await page.evaluate(() => void (window._item(window.__items[window.__items.length - 1].id) as any).touch())
+  await settled(page)
+  await kept('after a passive re-ranking: the same')
+  // THE TEMPORARY VIEW'S SCROLL IS NOT THE KEPT ENTRY'S, AND A QUERY TYPED OVER THAT VIEW OUTLASTS A STOP (review 2
+  // of phantom_steps, blockers 3 and 2; one launch for both since review 3). The first view is scrolled to a
+  // position of its own, which arms no write. A query is typed, and Back is asked for within the typing's own
+  // input event (so always inside its debounce) onto the position the app cannot take: the browser lands there
+  // and returns to the kept entry while the typing waits, and the page stays as it is (restored at the return,
+  // as an entry the page never showed is, the kept entry's query went back into the box over the typed text).
+  // The view is then scrolled again, which arms no write either: the entry is kept until the typed query is
+  // applied. That query is recorded when its debounce ends, in an entry of its own after the kept one, and Back
+  // restores the kept entry WHERE IT WAS SAVED (with the keep ended at the keystroke, the second scroll's write
+  // fired within the debounce and stored the temporary view's position on the kept entry)
+  await recorded()
+  await gated('a fifth reload on the final entry')
+  // (the scroll's own event is waited for, and the tasks due after it: the app's listener has run by then, and
+  // it has ARMED NO WRITE for the held view, review 3. Armed there and dropped only when it fired, a write
+  // still reached the kept entry when a stop's return had brought the page back to it before its restore
+  // scrolled: the reviewer's replay)
+  const [savedAt, scrolledTo, armed] = await page.evaluate(async y => {
+    const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    box.focus({ preventScroll: true })
+    const heard = new Promise(resolve => document.body.addEventListener('scroll', () => setTimeout(resolve), { once: true }))
+    document.body.scrollTo(0, y)
+    await heard
+    return [history.state.scrollPosition as number, document.body.scrollTop, (window as any)._history_update_pending as boolean] as const
+  }, top + 150)
+  expect([savedAt, Math.abs(scrolledTo - savedAt) > 100], 'premise: the kept entry holds its own position, far from the temporary one').toEqual([atTarget, true])
+  expect(armed, "a scroll of the launch's temporary view arms no history write").toBe(false)
+  await page.evaluate(y => {
+    const w = window as any
+    // (each landing of the browser as the page hears of it: the position's key, and whether the typing waits.
+    // At the second, the return, the view is scrolled again from a task of its own, and what that scroll finds
+    // is noted once its event has been handled: whether the typing still waits, and whether a write is armed)
+    w.__e2e_landings = []
+    w.__e2e_landed = () => {
+      if (w.__e2e_landings.push([w.navigation.currentEntry.key, w._editor_change_pending]) != 2) return
+      setTimeout(() => {
+        document.body.addEventListener('scroll', () => setTimeout(() => (w.__e2e_rescrolled = [w._editor_change_pending, w._history_update_pending])), { once: true })
+        document.body.scrollTo(0, y)
+      })
+    }
+    addEventListener('popstate', w.__e2e_landed, { capture: true })
+    addEventListener('input', () => history.go(-1), { once: true, capture: true })
+  }, top + 120)
+  await page.keyboard.insertText('e2e typed over')
+  // THE STOP ITSELF (review 3 of phantom_steps: the final key and query alone do not show that one occurred): the
+  // browser landed on the position the app cannot take and then on the kept entry again, the typing pending at both
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__e2e_landings), { message: 'a stop while the typing waits: the position the app cannot take, then the kept entry again' })
+    .toEqual([
+      [olderKey, true],
+      [finalKey, true],
+    ])
+  await page.evaluate(() => removeEventListener('popstate', (window as any).__e2e_landed, { capture: true }))
+  await expect.poll(() => page.evaluate(() => (window as any).__e2e_rescrolled), { message: 'the view scrolled again while the typing waits: no history write is armed, the entry kept still' }).toEqual([true, false])
+  await expect.poll(stored, { message: "the typed query outlasts the stop's return and is recorded in an entry of its own", timeout: 10_000 }).toEqual([index + 2, 'e2e typed over', false])
+  await expect(mindbox(page)).toHaveValue('e2e typed over')
+  const typedKey = await browserKey()
+  await blur(page)
+  await release()
+  await page.goBack()
+  await shows('#e2e_target ', atTarget, 'Back from the typed query: the reloaded entry, where it was saved')
+  await kept('the reloaded entry as it was, through the stop')
+  expect(await page.evaluate(() => history.state.scrollPosition), 'and the position it stores is its own').toBe(atTarget)
+  // A QUERY THAT IS NOT THE USER'S REPLACES THEIR TYPING OVER THE TEMPORARY VIEW (reviews 3 and 4 of
+  // phantom_steps). The keystroke cancels the address's query; the launch's step is then released, with nothing
+  // left to apply; the view is scrolled; item code sets another query in the box, which still has the focus, so
+  // that query waits in the debounce in its turn; Back is asked for onto the position the app cannot take; and
+  // once the browser has returned, an item's timer selects another item. All of it within the debounce, arranged
+  // in the page from the typing's own input event, in the order that a fix at the release alone would miss (the
+  // select comes last). Until the select the entry is kept still: the scroll after the release arms no write,
+  // and THE STOP'S RETURN LEAVES THE PAGE AS IT IS, item code's query in the box and pending (review 4: read
+  // from the typed origin alone, which the set rightly ends, the return restored the kept entry's query into
+  // the box and cancelled the pending one, which the release keeps). The select is not the user's: it is
+  // written over the kept entry, which keeps its key, its `final` and the entry ahead, and the keep ends with
+  // it, so a scroll's write is armed and made again. (The keep ended at the user's own write alone, and so
+  // never: the box showed the selected item over an entry that still held the tag, with no typing pending, and
+  // no scroll was written)
+  await recorded()
+  await gated('a sixth reload on the final entry')
+  await page.evaluate(y => {
+    const w = window as any
+    const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    box.focus({ preventScroll: true })
+    // (what a step finds: whether a query waits in the debounce, the box, the stored query, a scroll's write armed)
+    const found = () => [w._editor_change_pending, box.value, history.state?.editorText ?? null, w._history_update_pending]
+    const select = () => {
+      w.__e2e_returned = found()
+      w._item('#e2e_source').select()
+    }
+    // (each landing of the browser as the page hears of it, by the position's key; what the first, on the
+    // position the app cannot take, finds; and after the second, the return, a task of its own: the app's
+    // handler has run by then, whichever listener heard the landing first)
+    w.__e2e_stop = { keys: [], away: null }
+    const landed = () => {
+      if (w.__e2e_stop.keys.push(w.navigation.currentEntry.key) == 1) return void (w.__e2e_stop.away = found())
+      removeEventListener('popstate', landed, { capture: true })
+      setTimeout(select)
+    }
+    const replace = () => {
+      w.__e2e_scrolled = found()
+      w.MindBox.set('e2e set') // item code's, in the focused box: it waits in the debounce
+      addEventListener('popstate', landed, { capture: true })
+      history.go(-1)
+    }
+    const scroll = () => {
+      if (!w._launch_fragment_done) return void setTimeout(scroll)
+      document.body.addEventListener('scroll', () => setTimeout(replace), { once: true })
+      document.body.scrollTo(0, y)
+    }
+    addEventListener('input', () => setTimeout(() => (w._release_launch_fragment(), setTimeout(scroll))), { once: true, capture: true })
+  }, top + 150)
+  await page.keyboard.insertText('e2e typed')
+  await expect.poll(() => page.evaluate(() => (window as any).__e2e_returned !== undefined), { message: 'the steps arranged in the page have run' }).toBe(true)
+  const [scrolled, stop, returned] = await page.evaluate(() => [(window as any).__e2e_scrolled, (window as any).__e2e_stop, (window as any).__e2e_returned])
+  expect(scrolled, "premise: after the scroll, the launch's step has run, the typing still waits over the kept entry, and the scroll since the release has armed no write").toEqual([true, 'e2e typed', '#e2e_target ', false])
+  expect(stop, "the stop: the browser landed on the position the app cannot take, item code's query waiting in the box by then, and returned to the kept entry").toEqual({ keys: [olderKey, finalKey], away: [true, 'e2e set', null, false] })
+  expect(returned, "right after the return: item code's query is still in the box and pending, the entry kept as it was and no write armed").toEqual([true, 'e2e set', '#e2e_target ', false])
+  await settled(page)
+  const ahead = () =>
+    page.evaluate(() => {
+      const navigation = (window as any).navigation
+      return (navigation.entries()[navigation.currentEntry.index + 1]?.key ?? null) as string | null
+    })
+  expect(
+    [await mindbox(page).inputValue(), await stored(), await browserKey(), await ahead(), await page.evaluate(() => (window as any)._editor_change_pending)],
+    "the timer's select is written over the kept entry: the box and the entry agree, on the same key, final as it was, the entry ahead kept, nothing pending"
+  ).toEqual(['#e2e_source', [index + 1, '#e2e_source', true], finalKey, typedKey, false])
+  // and the keep has ended: a scroll arms its write, which is made
+  await recorded()
+  const rearmed = await page.evaluate(async () => {
+    const body = document.body
+    const heard = new Promise(resolve => body.addEventListener('scroll', () => setTimeout(resolve), { once: true }))
+    body.scrollTo(0, body.scrollTop + (body.scrollTop + 60 <= body.scrollHeight - body.clientHeight ? 60 : -60))
+    await heard
+    return (window as any)._history_update_pending as boolean
+  })
+  expect(rearmed, "a scroll arms its history write again, once the keep has ended").toBe(true)
+  await recorded()
+  expect(await page.evaluate(() => [history.state.scrollPosition === document.body.scrollTop, history.state.editorText, history.state.final]), "the scroll's write, on the entry as it is now").toEqual([true, '#e2e_source', true])
+  // (an entry ahead again, for what follows: a select of the user's, within a key press)
+  await asUser(page, () => void (window._item('#e2e_target/sub') as any).select())
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
 
   // a native fragment that names an item: ONE position more, the named query on it as entry 0 of a new run,
-  // and no link back (how far the earlier entries are from it is not known)
+  // and no link back (how far the earlier entries are from it is not known). The entry is FINAL, as a tag's
+  // click makes one, also when the very query it brings (with its trailing space) has just been typed and still
+  // waits in the debounce (review 3 of phantom_steps: the navigation is asked for from the typing's own input
+  // event, so always within the debounce. Settled as the typing it matched, the fragment's entry was left not
+  // final, the next typed query replaced it and Back skipped the fragment)
   const run = await page.evaluate(() => history.state.run)
-  await page.evaluate(() => void (location.hash = '#e2e_source'))
+  await page.evaluate(() => {
+    const w = window as any
+    const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    box.focus({ preventScroll: true })
+    box.select()
+    addEventListener('input', () => setTimeout(() => ((w.__e2e_typed = [w._editor_change_pending, box.value]), (location.hash = '#e2e_source'))), { once: true, capture: true })
+  })
+  await page.keyboard.insertText('#e2e_source ')
+  await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText, history.state?.final, history.length]), { message: "the browser's own position holds the entry, final" }).toEqual([0, '#e2e_source ', true, length + 1])
+  expect(await page.evaluate(() => (window as any).__e2e_typed), 'premise: the very query was typed and still pending when the fragment was navigated to').toEqual([true, '#e2e_source '])
   await expect(mindbox(page)).toHaveValue('#e2e_source ')
-  expect(await page.evaluate(() => [history.state.index, history.state.editorText, history.length]), "the browser's own position holds the entry").toEqual([0, '#e2e_source ', length + 1])
+  await blur(page)
   expect(await page.evaluate(() => history.state.run), 'a new run').not.toBe(run)
   expect(await entries(page)).toEqual([1, 0])
   await expect(links).toHaveCount(0)
   // Back is the entry before it, of the earlier run; Forward from there is the fragment's entry again
   await page.goBack()
-  await shows('', top, 'Back: the entry the fragment was navigated from')
+  await expect(mindbox(page), 'Back: the entry the fragment was navigated from').toHaveValue('#e2e_target/sub')
   expect(await page.evaluate(() => [history.state.index, history.state.run])).toEqual([index + 2, run])
   await page.goForward()
   await expect(mindbox(page), "Forward: the fragment's entry").toHaveValue('#e2e_source ')
@@ -3251,7 +3557,7 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   // two more entries of that run, and a real link among them: one entry ahead
   await page.locator(`#item-${sourceId} mark[title="#e2e_target"]`).click()
   await expect(mindbox(page)).toHaveValue('#e2e_target ')
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await userSet(page, '#e2e_target/sub')
   await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_target/sub')
   expect(await entries(page)).toEqual([3, 2])
   await page.goBack()
@@ -3306,7 +3612,7 @@ test("Back after a reloaded page is initialized and before its launch fragment i
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('#100%')
   await page.goBack()
   await expect.poll(() => page.evaluate(() => [history.state?.index, location.hash]), { timeout: 10_000 }).toEqual([1, '#e2e_target'])
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect.poll(() => page.evaluate(() => [history.state?.index, history.state?.editorText]), { timeout: 10_000 }).toEqual([2, '#e2e_source'])
   await page.goBack()
   await expect(mindbox(page), 'Back from the new query: the original query, its entry intact').toHaveValue('#e2e_target ')
@@ -3770,7 +4076,7 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   // the browser's positions are what they were), the box shows the update, and the session's entry waits
   await page.goBack()
   await held('Back onto the entry of older code: cleared, and the return held')
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_target/sub'))
+  await userSet(page, '#e2e_target/sub')
   await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
   expect([await browser(), await entry(), await page.evaluate(() => (window as any)._history_update_pending)], 'nothing written yet: the position cleared, the positions as they were, the entry as it was, a write kept').toMatchObject([[expect.not.stringMatching(keyS), length, positions], { at: CLEARED, editorText: '#e2e_source' }, true])
   // on arrival the update is the entry's own: a REPLACEMENT of a query that is not final, and the entry ahead is kept
@@ -3889,7 +4195,7 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   await recorded()
   await page.goForward()
   await held('Forward again: the return held, for good')
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect(mindbox(page)).toHaveValue('#e2e_source')
   expect([(await entry(index + 1)).at, await page.evaluate(() => (window as any)._history_update_pending)], 'the edit is kept').toEqual([CLEARED, true])
   await expect(links).toHaveCount(2)
@@ -3929,12 +4235,20 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   // Back onto the entry of older code, the return held, and an edit kept; then Back AGAIN, onto the marker
   await page.goBack()
   await held('Back onto the entry of older code: the return held')
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect.poll(() => page.evaluate(() => (window as any)._history_update_pending), { message: 'the edit is kept' }).toBe(true)
   await page.goBack()
   await expect.poll(() => page.evaluate(() => JSON.stringify(history.state)), { message: "the fragment's own position, its marker" }).toBe(FRAGMENT)
   await settled(page)
   expect([await keys(), await page.evaluate(() => [JSON.stringify(history.state), (window as any)._history_update_pending])], "nothing is written from the fragment's position: every position is still the browser's, the marker is intact, and the kept edit went with the retired return").toEqual([positionsBefore, [FRAGMENT, false]])
+  // A CHANGE NO USER ACTION TRIGGERED ON THAT POSITION (review 0 of phantom_steps, blocker 1): the box shows the
+  // dropped edit and the session holds the held entry's query, so a re-ranking there (a touch from the page's
+  // script, as a timer of item code or a snapshot makes one) differs from that entry by its QUERY. It is no
+  // navigation of the user's: nothing is written, the marker stays and the positions ahead are the browser's
+  // still (taken for an edit, it started a new run from the marker and dropped them, on the release too)
+  await page.evaluate(() => void (window._item(window.__items[window.__items.length - 1].id) as any).touch())
+  await settled(page)
+  expect([await keys(), await page.evaluate(() => JSON.stringify(history.state))], 'a passive re-ranking on a position that holds no entry writes nothing: the positions and the marker as they were').toEqual([positionsBefore, FRAGMENT])
   // ORDINARY FORWARD PRESSES from the marker (review 8 of scroll_history). The kept edit went with the retired
   // return, but the box still SHOWS it: the page is no longer the held entry's view. So the first press, onto
   // the cleared position, makes NO return to that entry (taken back there without a restore, the box held the
@@ -3987,15 +4301,22 @@ test("while a stop's return is on its way an edit, a re-ranking and a due scroll
   await expect.poll(() => page.evaluate(() => (window as any).__due.length > 0 && (window as any)._history_update_pending), { message: "a scroll in the held view: its write is armed" }).toBe(true)
   await page.goBack()
   await held('Back onto the cleared position: the return held')
-  const atEdit = await page.evaluate(() => {
+  const atEdit = await asUser(page, () => {
     const w = window as any
     w.__old = w.__due.splice(0) // the timers armed in the held view
     w.MindBox.set('#e2e_source')
     return document.body.scrollTop
   })
   await expect(mindbox(page)).toHaveValue('#e2e_source')
-  await page.evaluate(y => document.body.scrollTo(0, y), base + 140)
-  await expect.poll(() => page.evaluate(() => (window as any).__due.length > 0), { message: "a scroll in the new view: its write is armed" }).toBe(true)
+  // (the scroll's own event is waited for, by a listener registered after the app's: another timer of the same
+  // delay can be waiting already, and the write of THIS scroll is armed only once its event has been handled)
+  await page.evaluate(y => {
+    const w = window as any
+    w.__scrolled = false
+    document.body.addEventListener('scroll', () => (w.__scrolled = true), { once: true })
+    document.body.scrollTo(0, y)
+  }, base + 140)
+  await expect.poll(() => page.evaluate(() => (window as any).__scrolled && (window as any).__due.length > 0), { message: "a scroll in the new view: its write is armed" }).toBe(true)
   const atNew = await page.evaluate(() => (window as any).__run((window as any).__due))
   const atOld = await page.evaluate(y => (document.body.scrollTo(0, y), (window as any).__run((window as any).__old)), base + 90)
   expect(new Set([atEdit, atNew, atOld]).size, 'three positions: at the edit, at the write of the new view, at the older timer').toBe(3)
@@ -4216,7 +4537,7 @@ test('a change of the document width scrolls the item the query names back into 
   // new entry: the query is cleared with a target selected) and restored. A restore holds its entry's
   // position through the layouts it causes and no longer, so every correction below is of a restored view
   // (marked as an explicit scroll, which lasts until the query changes, the restore suppressed them all)
-  await page.evaluate(() => void (window as any).MindBox.clear())
+  await asUser(page, () => void (window as any).MindBox.clear())
   await expect(mindbox(page)).toHaveValue('')
   await quiet()
   await page.goBack()
@@ -4388,7 +4709,7 @@ test("ctrl+arrows in a tall item bring the caret's edge into view", async ({ pag
   await expect.poll(() => savedId(page, '#e2e_tall/pad'), { timeout: 30_000 }).toBeTruthy()
   await page.evaluate(body => void window._create(`#e2e_tall ${body}`), body)
   await expect.poll(() => savedId(page, '#e2e_tall'), { timeout: 30_000 }).toBeTruthy()
-  await page.evaluate(() => (window as any).MindBox.set('#e2e_tall', { scroll: true }))
+  await userSet(page, '#e2e_tall', { scroll: true })
   const id = await page.evaluate(() => window._item('#e2e_tall', true)!.id)
   await expect.poll(() => page.evaluate(id => !!document.querySelector(`#item-${id} p`), id), { timeout: 15_000 }).toBe(true)
   const paragraph = page.locator(`#item-${id} p`).nth(30)
@@ -4458,7 +4779,7 @@ test('no link on the page shows a focus ring', async ({ page }) => {
   await loadAdmin(page)
   await page.evaluate(() => void window._create('#e2e_link_ring see [the proposal](https://example.com/proposal)'))
   await expect.poll(() => savedId(page, '#e2e_link_ring'), { timeout: 30_000 }).toBeTruthy()
-  await page.evaluate(() => (window as any).MindBox.set('#e2e_link_ring', { scroll: true }))
+  await userSet(page, '#e2e_link_ring', { scroll: true })
   await expect.poll(() => page.evaluate(() => !!window._item('#e2e_link_ring', true)?.elem?.querySelector('a[href*="example.com"]')), { timeout: 15_000 }).toBe(true)
   const rings = await page.evaluate(() => {
     const ring = (a: HTMLAnchorElement) => {
@@ -4673,7 +4994,7 @@ test('a reload on a kept first view whose order differs adds no history entry: t
   await recorded()
   // an entry ahead of it, left at a position of its own: a query set from a blurred box; then Back
   await blur(page)
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect(mindbox(page)).toHaveValue('#e2e_source')
   const atAhead = await place(60)
   await page.goBack()
@@ -4722,20 +5043,21 @@ test('a reload on a kept first view whose order differs adds no history entry: t
   await shows('#e2e_target ', atTag, 'Back from the first view, as before the reload')
 })
 
-// A CHANGE FROM ANOTHER CLIENT changes the list's order, a re-ranking within the session. On a final first
-// view that is NOT the launch's (the full list reached by a click on the tag the query names) it is a new entry
-// of the same query, as before. On the LAUNCH'S OWN first view (the entry the launch wrote or took over) it is
-// written over that entry, which stays final, since 2026-11-19 (`first` in index.svelte's onEditorChange): until
-// then it pushed an entry there too, and an order change as a page started left a second entry of the same
-// query after that reload (the next row). And the owner's case of 2026-11-18 without an installed order: Back
-// onto the first view, whose entry holds the order from before the change, and a reload there, which loads the
-// change's order: no entry added, the change's entry stays ahead (the launch takes the entry over), and it
-// still does after a further change, which the reloaded page writes over its own entry (a push dropped it).
-// The item changed is the one ranked last among the unpinned (a new time, its text as it was): it moves up, so
-// the order changes wherever it is shown
-test("a change from another client adds an entry on a final first view that is not the launch's and is written over the launch's own, which stays final and keeps its mark of Up and its narration's choice; a reload on the first view that Back left it on adds none, and the change's entry stays ahead of it, through a change after the reload too; a list opened again at the launch entry's index is not the launch's", async ({ page }) => {
+// A CHANGE FROM ANOTHER CLIENT changes the list's order, a re-ranking within the session that no user action
+// triggered. On the LAUNCH'S OWN first view (the entry the launch wrote or took over) it is written over that
+// entry, which stays final, since the first change of 2026-11-19 (`first` in index.svelte's onEditorChange): until
+// then it pushed an entry there, and an order change as a page started left a second entry of the same query after
+// that reload (the next row). On a final first view that is NOT the launch's (the full list reached by a click on
+// the tag the query names) it was a new entry of the same query until the second change of that day, which writes
+// every change that is not the user's over the entry the browser is on (the row after the next). And the owner's
+// case of 2026-11-18 without an installed order: Back onto the first view, whose entry holds the order from before
+// a change made while the browser was on the entry ahead, and a reload there, which loads the change's order: no
+// entry added, the entry ahead stays (the launch takes the entry over), and it still does after a further change,
+// which the reloaded page writes over its own entry (a push dropped it). The item changed is the one ranked last
+// among the unpinned (a new time, its text as it was): it moves up, so the order changes wherever it is shown
+test("a change from another client is written over a final first view, the launch's own, which keeps its mark of Up and its narration's choice, and another one; a reload on the first view that Back left it on adds none, and the entry ahead stays, through a change after the reload too; a list opened again at the launch entry's index too", async ({ page }) => {
   const reads = historyReads(page)
-  const { recorded, shows } = reads
+  const { recorded, place, shows } = reads
   await loadAdmin(page)
   const top = await headerTop(page)
   await shows('', top, 'the first view at the header')
@@ -4744,22 +5066,13 @@ test("a change from another client adds an entry on a final first view that is n
     const saved = await page.evaluate(() => [...(window as any).__items].reverse().find((item: any) => !item.pinned && !item.log && item.savedId).savedId as string)
     await firestore().collection('items').doc(saved).update({ time: Date.now() })
   }
-  // on the launch's own first view: the entry where it was, final, of the order the change gave
+  // on a final first view, the launch's own or another: the entry where it was, final, of the order the change gave
   const changedInPlace = async (message: string) => {
     const before = await places(page)
     await change()
     await expect.poll(async () => (await places(page)).state.orderHash, { message: `${message}: the change re-ranked the page`, timeout: 30_000 }).not.toBe(before.state.orderHash)
     await settled(page)
-    expect(await places(page), `${message}: no entry added, the launch's entry updated where it is and still final`).toEqual({ ...before, state: { ...before.state, orderHash: await orderShown(page) } })
-  }
-  // on any other final first view: a new entry of the same query, right after it
-  const changedElsewhere = async (message: string) => {
-    const before = await places(page)
-    await change()
-    await expect.poll(async () => (await places(page)).state, { message: `${message}: a new entry of the first view`, timeout: 30_000 }).toMatchObject({ index: before.state.index + 1, editorText: '', final: false })
-    const after = await places(page)
-    expect([after.keys.indexOf(after.at), before.keys.includes(after.at)], `${message}: a new position, right after the first view's`).toEqual([before.keys.indexOf(before.at) + 1, false])
-    return after
+    expect(await places(page), `${message}: no entry added, the entry updated where it is and still final`).toEqual({ ...before, state: { ...before.state, orderHash: await orderShown(page) } })
   }
 
   // THE LAUNCH'S ENTRY WITH WHAT IS ITS OWN TO KEEP (review 0 of reload_rerank, B3): an entry that Up made,
@@ -4807,7 +5120,8 @@ test("a change from another client adds an entry on a final first view that is n
   await recorded()
 
   // a first view that is not the launch's, final too (a click on the tag the query names): a change there is
-  // a new entry; Back onto the first view
+  // written over it as well (until the second change of 2026-11-19: a new entry). Then an entry ahead of it (a
+  // query set from a blurred box), a change while the browser is on that one, and Back onto the first view
   await typedThenTag(page, reads)
   const targetId = await page.evaluate(() => window._item('#e2e_target')!.id)
   const label = page.locator(`#item-${targetId} mark[title="#e2e_target"]`).first()
@@ -4816,18 +5130,26 @@ test("a change from another client adds an entry on a final first view that is n
   await label.click()
   await expect(mindbox(page)).toHaveValue('')
   await recorded()
-  const atList = await scrollTop(page)
   const list = await places(page)
   expect(list.state, "premise: a first view that is not the launch's, final").toMatchObject({ editorText: '', final: true })
-  const ahead = await changedElsewhere("a change from another client on a first view that is not the launch's")
+  await changedInPlace("a change from another client on a first view that is not the launch's")
+  await recorded()
+  const atList = await scrollTop(page)
+  await blur(page)
+  await userSet(page, '#e2e_source')
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await place(60)
+  const ahead = await places(page)
+  await change()
+  await expect.poll(async () => (await places(page)).state.orderHash, { message: 'the change re-ranked the entry ahead', timeout: 30_000 }).not.toBe(ahead.state.orderHash)
   await page.goBack()
   await shows('', atList, 'Back onto the first view')
   await recorded()
   const kept = await places(page)
-  expect(kept, "premise: the first view as it was, the change's entry ahead of it").toEqual({ ...list, keys: ahead.keys })
+  expect({ keys: kept.keys, state: { ...kept.state, orderHash: undefined } }, 'premise: the first view as it was, the entry ahead of it').toEqual({ keys: ahead.keys, state: { ...list.state, orderHash: undefined } })
   expect(kept.state.orderHash, 'premise: the entry holds the order from before the change').not.toBe(await orderShown(page))
 
-  // the reload: no entry added, the entry where and what it was, of the order loaded; the change's entry ahead
+  // the reload: no entry added, the entry where and what it was, of the order loaded; the entry ahead
   await page.reload()
   await waitForApp(page)
   await shows('', top, 'the reloaded page shows the first view at the header')
@@ -4841,16 +5163,16 @@ test("a change from another client adds an entry on a final first view that is n
   await changedInPlace('a change from another client after the reload')
   await recorded()
   await page.goForward()
-  await shows('', atList, "Forward onto the change's entry from before the reload")
-  expect((await places(page)).at, "the change's entry, kept").toBe(ahead.at)
+  await expect(mindbox(page), 'Forward onto the entry ahead from before the reload').toHaveValue('#e2e_source')
+  expect((await places(page)).at, 'the entry ahead, kept').toBe(ahead.at)
   await page.goBack()
   await shows('', top, 'Back onto the first view again')
 
-  // A NEW BRANCH IS NOT THE LAUNCH'S ENTRY (review 0 of reload_rerank, B1): Back onto the tag's view and a
-  // click on the tag's own label open the full list again, in a new final entry at the launch entry's index
-  // and in its run (another position of the browser's: its key). A change there is that entry's own, a new
-  // entry after it; taken for the launch's by its run and index, it was written over the list just opened,
-  // which stayed final, and Back skipped the list as it had been opened
+  // A NEW BRANCH (review 0 of reload_rerank, B1): Back onto the tag's view and a click on the tag's own label
+  // open the full list again, in a new final entry at the launch entry's index and in its run (another position
+  // of the browser's: its key). A change there is written over it as over any final entry since the second change
+  // of 2026-11-19 (until then a new entry after it); that the list is not the launch's (`first`) is told by the
+  // user's own re-ranking there, a step: at the end of this row
   await recorded()
   const launched = await places(page)
   await page.goBack()
@@ -4865,7 +5187,12 @@ test("a change from another client adds an entry on a final first view that is n
     [reopened.state.run, reopened.state.index, reopened.state.editorText, reopened.state.final, reopened.at == launched.at],
     "the list opened again: the launch entry's run and index, the empty query, final, at another position of the browser's"
   ).toEqual([launched.state.run, launched.state.index, '', true, false])
-  await changedElsewhere('a change from another client on the list opened again')
+  await changedInPlace('a change from another client on the list opened again')
+  // and the user's own re-ordering there is a step: the list opened again is not the launch's, whose user's
+  // re-ordering is written over it (`first`: the mark is cleared by the push that opened this list)
+  await moveUp(page)
+  const moved = await places(page)
+  expect([moved.keys.indexOf(moved.at), moved.state.editorText, moved.state.final], "the user's re-ordering on the list opened again: a new entry right after it").toEqual([moved.keys.indexOf(reopened.at) + 1, '', false])
 })
 
 // A RE-RANKING AS THE PAGE STARTS (the owner on the release of 2026-11-18: "i'm still seeing a reload on empty
@@ -4906,7 +5233,7 @@ test("a re-ranking as a reloaded page starts adds no history entry on the full l
   await expect(mindbox(page)).toHaveValue('')
   await recorded()
   await blur(page)
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect(mindbox(page)).toHaveValue('#e2e_source')
   const atAhead = await place(60)
   await page.goBack()
@@ -4944,7 +5271,7 @@ test("a re-ranking as a reloaded page starts adds no history entry on the full l
   await recorded()
   const atList = await page.evaluate(() => history.state.scrollPosition as number)
   await blur(page)
-  await page.evaluate(() => void (window as any).MindBox.set('#e2e_source'))
+  await userSet(page, '#e2e_source')
   await expect(mindbox(page)).toHaveValue('#e2e_source')
   await recorded()
   const typed = await places(page)
@@ -4978,4 +5305,542 @@ test("a re-ranking as a reloaded page starts adds no history entry on the full l
     held: atList,
   })
   await fixture.delete()
+})
+
+// a re-ordering the USER makes: a Cmd+click on an item's number moves the item one place up (src/number_click.ts),
+// an item of the list that ranks by its time just below another's, so the order changes: a re-ranking within a
+// trusted click. The first view renders the items above its fold: its toggle (a click of the user's that replaces
+// the entry's shown count) shows more until two such items are on the page
+const moveUp = async (page: Page) => {
+  const pair = () =>
+    page.evaluate(() => {
+      const items = (window as any).__items as any[]
+      const plain = (item: any) => !item.pinned && !item.log && !item.hasError && !item.missingTags.length && !item.running && !item.pushable && !item.previewable && !item.editing && !!document.querySelector(`.column:not(.hidden) .container[data-item-id="${item.id}"] .button.index`)
+      return (items[items.findIndex((item, k) => k > 0 && plain(item) && plain(items[k - 1]) && item.time < items[k - 1].time)]?.id as string) ?? null
+    })
+  await settled(page)
+  let id = await pair()
+  for (let more = 0; !id && more < 3; more++) {
+    await page.locator('.toggle.show').first().click()
+    await settled(page)
+    id = await pair()
+  }
+  expect(id, 'premise: two items on the page that rank by their times, one below the other').toBeTruthy()
+  const order = await orderShown(page)
+  await page.locator(`.column:not(.hidden) .container[data-item-id="${id}"] .button.index`).click({ modifiers: ['Meta'] })
+  await expect.poll(() => orderShown(page), { message: 'premise: the click moved the item' }).not.toBe(order)
+  await settled(page)
+}
+
+// every write of an entry of the notebook's, noted beside the app from each document's start (an init script:
+// a reload included): a push or a replacement, and the order it wrote
+const noteWrites = (page: Page) =>
+  page.addInitScript(() => {
+    const w = window as any
+    w.__writes = []
+    for (const kind of ['pushState', 'replaceState']) {
+      const real = (History.prototype as any)[kind]
+      ;(History.prototype as any)[kind] = function (this: History, ...args: any[]) {
+        if (args[0]?.owner) w.__writes.push({ kind, orderHash: args[0].orderHash })
+        return real.apply(this, args)
+      }
+    }
+  })
+const writes = (page: Page) => page.evaluate(() => (window as any).__writes as { kind: string; orderHash: string }[])
+
+// A CHANGE THAT NO USER ACTION TRIGGERED ADDS NO STEP (the owner, 2026-11-19: "changes that are not triggered by a
+// user action should not add new steps"; the decision is writeMode in src/history_entries.ts, its table in
+// tests/unit/history_entries.spec.ts: this row is for what only a browser shows, the ORIGIN of each change).
+// - A re-ordering: on the LAUNCH'S OWN first view, item code at `_init` and at `_on_welcome` (a reload each), then
+//   in one document the missing tags the launch counts after its first ranking (a touch of the item that leads,
+//   which moves nothing of its own), a touch and a `pushable` mark from a timer of item code and a change from
+//   another client; on a TAG CLICK'S entry a timer's touch, `pushable` taken off, `running` and a change from
+//   another client. Each is written over the entry: the browser's positions, the one it is on and the entry's
+//   own fields as they were, every write since a replacement.
+// - ITEM CODE THAT CHANGES THE QUERY BY ITSELF (review 0, blocker 1), on that final entry with an entry ahead: a
+//   timer's `MindBox.set`, a timer's `select()`, and the selected item deleted by a timer. The query is accepted
+//   and written over the entry, which stays final, and Forward is kept (each pushed, or wrote `final: false`).
+// - WHAT THE USER DOES is a step as before, on a final first view that is not the launch's: a Cmd+click on an
+//   item's number (src/number_click.ts), a write of item code within a click, and A WRITE AFTER A WAIT whose
+//   intent the click's handler carried to it (blocker 2: `window._carry_input`, as the todoer's drop into the
+//   agent bin does); the same write after the same wait from no input is written over. On the launch's own
+//   first view the Cmd+click is written over the entry (`first`).
+// The fixture is one item written behind the app before the page loads: its code acts only when the row asks
+const QUIET = '#e2e_quiet'
+const QUIET_TEXT = [
+  `${QUIET} #_init #_welcome item code that changes the page when the row asks it to`,
+  '```js',
+  "const asked = () => sessionStorage.getItem('e2e_quiet')",
+  'function _init() {',
+  '  window.__e2e_quiet = act =>',
+  '    setTimeout(() => {',
+  "      if (act == 'touch') _this.touch()",
+  "      if (act == 'pushable') _this.pushable = !_this.pushable",
+  "      if (act == 'running') _this.running = !_this.running",
+  "      if (act == 'leader') _item(window.__items.find(item => !item.pinned && !item.log).id).touch()",
+  "      if (act == 'query') MindBox.set('#e2e_source')",
+  "      if (act == 'select') _item('#e2e_quiet_gone').select()",
+  "      if (act == 'delete') _item('#e2e_quiet_gone').delete(false)",
+  "      if (act == 'group') MindBox.set('#e2e_steps')",
+  '    })',
+  "  if (asked() == 'init') _this.touch()",
+  '}',
+  "function _on_welcome() { if (asked() == 'welcome') _this.touch() }",
+  '```',
+].join('\n')
+test("a change that no user action triggered adds no history entry: a re-ordering by item code, a mark or another client is written over the launch's own first view and over a tag click's entry, and so is a query that item code sets, selects or backs up by itself, the entry final as it was and Forward kept; what the user does is a step as before, across a wait of its handler's too", async ({ page }) => {
+  const reads = historyReads(page)
+  const { recorded, place, shows } = reads
+  await noteWrites(page)
+  const add = (time: number, text: string) => firestore().collection('items').add({ user: 'anonymous', time, attr: null, text })
+  const fixture = await add(Date.UTC(2021, 0, 1), QUIET_TEXT)
+  const gone = await add(Date.UTC(2021, 0, 3), '#e2e_quiet_gone an item that item code selects and deletes')
+  // two items that share a label (no item is named by it: under it they rank by their times alone)
+  const newer = await add(Date.now() - 3_600_000, '#e2e_steps the newer of two items that share a label')
+  const older = await add(Date.now() - 7_200_000, '#e2e_steps the older of the two')
+  const quiet = (act: string) => page.evaluate(act => (window as any).__e2e_quiet(act), act)
+  const touched = () => page.evaluate(label => (({ time, savedTime }) => time > savedTime)((window as any).__items.find((item: any) => item.label == label)), QUIET)
+  // a change from another client: the item ranked last among the unpinned, not the row's own (a new time saved on
+  // the fixture would make it lead the list from then on, and a touch of it would move nothing)
+  const remote = async () => {
+    const saved = await page.evaluate(() => [...(window as any).__items].reverse().find((item: any) => !item.pinned && !item.log && item.savedId && !String(item.label).startsWith('#e2e_quiet')).savedId as string)
+    await firestore().collection('items').doc(saved).update({ time: Date.now() })
+  }
+  // whether the fixture leads the unpinned items that rank by their times (an old item: only a touch puts it there)
+  const leads = () => page.evaluate(label => (window as any).__items.find((item: any) => !item.pinned && !item.log && !item.missingTags.length && !item.hasError && !item.running && !item.pushable)?.label == label, QUIET)
+  // the change written over the entry the browser is on: the positions, the one the browser is on and the entry
+  // as they were but for the order, which is the one shown; nothing pushed in the writes from `since` on; after a
+  // reload (`since` 0) another order among them, the launch's (the order the source changed)
+  const overwritten = async (before: Awaited<ReturnType<typeof places>>, since: number, message: string) => {
+    await settled(page)
+    await recorded()
+    const [after, shown] = [await places(page), await orderShown(page)]
+    const all = (await writes(page)).slice(since)
+    expect(after, `${message}: no entry added, the entry where and what it was, of the order shown`).toEqual({ ...before, state: { ...before.state, orderHash: shown } })
+    expect([all.filter(w => w.kind != 'replaceState').length, since > 0 || all.some(w => w.orderHash != shown)], `${message}: every write a replacement`).toEqual([0, true])
+  }
+  // a source set off on the entry the browser is on: the order it gives, written over the entry
+  const onEntry = async (cause: () => Promise<unknown>, message: string) => {
+    await settled(page)
+    const [before, since, order] = [await places(page), (await writes(page)).length, await orderShown(page)]
+    await cause()
+    await expect.poll(() => orderShown(page), { message: `${message}, premise: the page re-ranked`, timeout: 30_000 }).not.toBe(order)
+    await overwritten(before, since, message)
+  }
+
+  await loadAdmin(page)
+  const top = await headerTop(page)
+  await typedThenTag(page, reads)
+  // the full list in a final entry of its own (a click on the tag the query names), an entry ahead of it left at
+  // a position of its own (a query set within a key press, from a blurred box), then Back onto the full list
+  const targetId = await page.evaluate(() => window._item('#e2e_target')!.id)
+  const label = page.locator(`#item-${targetId} mark[title="#e2e_target"]`).first()
+  await label.scrollIntoViewIfNeeded()
+  await recorded()
+  const atTag = await scrollTop(page)
+  await label.click()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  await blur(page)
+  await userSet(page, '#e2e_source')
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  const atAhead = await place(60)
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('')
+  await recorded()
+  await settled(page)
+  const list = await places(page)
+  expect(list.state, 'premise: a final entry of the empty query').toMatchObject({ editorText: '', final: true })
+  expect(list.keys.indexOf(list.at), 'premise: one entry ahead of it').toBe(list.keys.length - 2)
+
+  // THE LAUNCH'S OWN FIRST VIEW. A source of the page's start (a reload each, asked for through the session's
+  // storage) touches the fixture, which its old time keeps last until then: the entry ends on an order in which
+  // the fixture leads, after the launch's own write of another one
+  const launched = async (source: string, message: string) => {
+    await page.evaluate(source => sessionStorage.setItem('e2e_quiet', source), source)
+    await page.reload()
+    await waitForApp(page)
+    await shows('', top, `${message}: the reloaded page shows the first view at the header`)
+    if (!source) return
+    await expect.poll(touched, { message: `${message}, premise: the item code touched its item` }).toBe(true)
+    await expect.poll(leads, { message: `${message}, premise: the touched item leads the list` }).toBe(true)
+    await overwritten(list, 0, message)
+  }
+  await launched('init', 'item code that touches an item at _init')
+  await launched('welcome', 'item code that touches an item at _on_welcome')
+  // and the sources the row sets off after a launch, in one document. First the missing tags: an old item with a
+  // tag that no item carries ranks above the items without one, and the launch ranks before it counts them, so
+  // the first ranking after it moves the item (a touch of the item that leads, which moves nothing of its own)
+  const missing = await add(Date.UTC(2021, 0, 2), '#e2e_quiet_missing an old item with a tag no item carries, #e2e_quiet_nowhere')
+  await launched('', 'a launch that sets off nothing')
+  const rankOf = () => page.evaluate(() => (window as any).__items.findIndex((item: any) => item.label == '#e2e_quiet_missing') as number)
+  const unranked = await rankOf()
+  await onEntry(() => quiet('leader'), 'a ranking that counts a missing tag the launch ranked without')
+  expect(await rankOf(), 'premise: the item with the missing tag moved up').toBeLessThan(unranked)
+  await onEntry(() => quiet('touch'), "a touch from a timer of item code on the launch's own first view")
+  await onEntry(() => quiet('pushable'), "a pushable mark from a timer of item code on the launch's own first view")
+  await onEntry(remote, "a change from another client on the launch's own first view")
+  await page.evaluate(() => sessionStorage.removeItem('e2e_quiet'))
+  // Back from the reloaded full list reaches the tag's view in ONE step, and the entry ahead is still there
+  await page.goBack()
+  await shows('#e2e_target ', atTag, "Back from the reloaded full list reaches the tag's view in one step")
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('')
+  await page.goForward()
+  await shows('#e2e_source', atAhead, 'Forward onto the entry ahead of the full list, kept')
+
+  // A TAG CLICK'S ENTRY (final, not the launch's): Back onto it, and each source while the browser is on it
+  await page.goBack()
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await recorded()
+  const tag = await places(page)
+  expect(tag.state, "premise: the tag click's entry, final").toMatchObject({ editorText: '#e2e_target ', final: true })
+  // (the mark set on the launch's entry first: a pushable item ranks under the target whatever its time)
+  await onEntry(() => quiet('pushable'), "a pushable mark taken off by a timer of item code on a tag click's entry")
+  await onEntry(() => quiet('touch'), "a touch from a timer of item code on a tag click's entry")
+  await onEntry(() => quiet('running'), "a running mark from a timer of item code on a tag click's entry")
+  await onEntry(remote, "a change from another client on a tag click's entry")
+  // ITEM CODE THAT CHANGES THE QUERY BY ITSELF: accepted, written over the entry, which keeps its place, its
+  // index and its `final`; nothing pushed, so the entry ahead stays
+  // a keystroke of the user's into the focused MindBox (one trusted input event), and a timer of item code armed
+  // inside its dispatch by a listener of the row's: the timer fires within the debounce whatever the driver's
+  // pace, and is no input itself
+  const typedThen = async (act: string, typed: string) => {
+    await focusMindboxInPlace(page)
+    await page.evaluate(act => {
+      const w = window as any
+      document.getElementById('textarea-mindbox')!.addEventListener('input', () => ((w.__e2e_pending = w._editor_change_pending), w.__e2e_quiet(act)), { once: true })
+    }, act)
+    await page.keyboard.insertText(typed)
+  }
+  const accepted = async (cause: () => Promise<unknown>, query: string, message: string) => {
+    await settled(page)
+    const [before, since] = [await places(page), (await writes(page)).length]
+    await cause()
+    await expect.poll(() => page.evaluate(() => [history.state.editorText, (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value]), { message: `${message}: the query is accepted, in the box and on the entry`, timeout: 10_000 }).toEqual([query, query])
+    await settled(page)
+    const after = await places(page)
+    expect({ ...after, state: { ...after.state, orderHash: '' } }, `${message}: no entry added, the entry where it was and final as it was`).toEqual({ ...before, state: { ...before.state, editorText: query, orderHash: '' } })
+    expect((await writes(page)).slice(since).filter(w => w.kind != 'replaceState').length, `${message}: nothing pushed`).toBe(0)
+  }
+  await accepted(() => quiet('query'), '#e2e_source', 'a query set by a timer of item code')
+  // A KEYSTROKE OF THE USER'S THAT IS PENDING IN THE DEBOUNCE lends its origin to no other write (review 1 of
+  // phantom_steps, blocker 1): the select below comes within the debounce of a typed character and supersedes
+  // it. It is item code's own: accepted, written over the entry, nothing pushed (the pending origin was a
+  // boolean, and the select took it: a push over the entry ahead, and the typed query never got an entry)
+  await accepted(() => typedThen('select', 'x'), '#e2e_quiet_gone', "a select by a timer of item code, over a keystroke of the user's pending in the debounce")
+  expect(await page.evaluate(() => (window as any).__e2e_pending), 'premise: the keystroke was pending when the timer was armed').toBe(true)
+  await accepted(() => quiet('delete'), '', 'the selected item deleted by a timer of item code')
+  await page.goBack()
+  await expect(mindbox(page), "Back from the tag click's entry reaches the query before it in one step").toHaveValue('#e2e_source')
+  await page.goForward()
+  await expect.poll(async () => (await places(page)).at).toBe(tag.at)
+  await page.goForward()
+  await expect.poll(async () => (await places(page)).at, { message: 'Forward from it: the full list ahead, kept' }).toBe(list.at)
+  await page.goBack()
+  await expect.poll(async () => (await places(page)).at).toBe(tag.at)
+  await expect(mindbox(page)).toHaveValue('')
+  // THE SAME KEYSTROKE, APPLIED EARLY BY A RE-RANKING, keeps its origin (the other side of the case above): the
+  // typed query is the user's whoever applies it, a new entry after the final one it was typed on
+  await typedThen('touch', 'e2e_typed_query')
+  await expect.poll(() => page.evaluate(() => history.state.editorText), { message: 'the typed query, applied by the re-ranking', timeout: 10_000 }).toBe('e2e_typed_query')
+  expect(await page.evaluate(() => (window as any).__e2e_pending), 'premise: the keystroke was pending when the timer was armed').toBe(true)
+  await settled(page)
+  const typed = await places(page)
+  expect([typed.keys.indexOf(typed.at), typed.state.final], "a typed query that a passive re-ranking applies early is the user's still: a new entry right after the one it was typed on").toEqual([typed.keys.indexOf(tag.at) + 1, false])
+  await blur(page)
+  await page.goBack()
+  await expect.poll(async () => (await places(page)).at).toBe(tag.at)
+  await expect(mindbox(page)).toHaveValue('')
+
+  // WHAT THE USER DOES, on that entry: the empty query by now, final, and not the launch's. A Cmd+click on an
+  // item's number moves the item one place up (an item of the list ranked by its time just below another's): a
+  // re-ranking within a trusted click. (The first view renders the items above its fold: its toggle, a click of
+  // the user's that replaces the entry's shown count, shows more until two such items are on the page)
+  const here = await places(page)
+  expect([here.state.editorText, here.state.final], "premise: a final first view that is not the launch's").toEqual(['', true])
+  const stepped = async (message: string) => {
+    const after = await places(page)
+    expect([after.keys.indexOf(after.at), after.state.editorText, after.state.final], `${message}: a new entry right after the list`).toEqual([after.keys.indexOf(here.at) + 1, '', false])
+    await page.goBack()
+    await expect.poll(async () => (await places(page)).at, { message: `${message}: Back from it reaches the list in one step` }).toBe(here.at)
+  }
+  await moveUp(page)
+  await stepped("the user's re-ranking on a first view that is not the launch's")
+  // item code run by the user's click: a write (of the item ranked last among the unpinned, its text as it is,
+  // which the app re-ranks from a timer) at once, and after a wait of the handler's own with the click's intent
+  // carried to it (`_carry_input`, captured in the click)
+  await page.evaluate(() => {
+    const w = window as any
+    w.__e2e_write = (wait: number | null, carry: boolean) => {
+      const last = [...w.__items].reverse().find((item: any) => !item.pinned && !item.log && item.savedId && !item.missingTags.length && !String(item.label).startsWith('#e2e_quiet'))
+      const handle = w._item(last.id)
+      const write = () => handle.write(handle.text, '')
+      if (wait === null) write()
+      else setTimeout(carry ? w._carry_input(write) : write, wait)
+    }
+    const button = Object.assign(document.createElement('button'), { id: 'e2e-write', textContent: 'write' })
+    Object.assign(button.style, { position: 'fixed', top: '40px', left: '40px', zIndex: '1000' })
+    button.addEventListener('click', () => w.__e2e_write(w.__e2e_wait, true))
+    document.body.appendChild(button)
+  })
+  const clicked = async (wait: number | null, message: string) => {
+    const order = await orderShown(page)
+    await page.evaluate(wait => void ((window as any).__e2e_wait = wait), wait)
+    await page.locator('#e2e-write').click()
+    await expect.poll(() => orderShown(page), { message: `${message}, premise: the write re-ranked the page` }).not.toBe(order)
+    await settled(page)
+    await stepped(message)
+  }
+  await clicked(null, "a write of item code within the user's click")
+  await clicked(300, "a write of item code after a wait of its handler's, the click's intent carried to it")
+  // the same write after the same wait from no input: written over the list
+  await onEntry(() => page.evaluate(() => (window as any).__e2e_write(300, false)), "the same write after the same wait, from no input, on a first view that is not the launch's")
+  await page.evaluate(() => document.getElementById('e2e-write')?.remove())
+  // on the launch's own first view (a reload there): the user's re-ranking is written over the entry, which stays final
+  await page.reload()
+  await waitForApp(page)
+  await expect(mindbox(page)).toHaveValue('')
+  await settled(page)
+  await recorded()
+  const own = await places(page)
+  await moveUp(page)
+  const since = await places(page)
+  expect({ keys: since.keys, at: since.at, final: since.state.final }, "the user's re-ranking on the launch's own first view: written over it, which stays final").toEqual({ keys: own.keys, at: own.at, final: true })
+  expect(since.state.orderHash, 'of the order the click gave').toBe(await orderShown(page))
+  // A QUERY THAT ITEM CODE WRITES OVER THE LAUNCH'S ENTRY IS NO FIRST VIEW (review 1 of phantom_steps, blocker 2): a
+  // shared label set by a timer is accepted and written over the launch's entry, final as it was; the user's
+  // Cmd+click on the older item's number under that label is then a step, and the entry behind it holds the
+  // order from before the click (recognized by its run and index alone, the launch's entry took the user's
+  // re-ordering as a replacement too, and Back could not reach the order before it)
+  await settled(page)
+  const launchAt = await places(page)
+  await quiet('group')
+  await expect.poll(() => page.evaluate(() => history.state.editorText), { message: 'the label that item code set, on the entry', timeout: 10_000 }).toBe('#e2e_steps')
+  await settled(page)
+  const grouped = await places(page)
+  expect([grouped.at, grouped.keys, grouped.state.final], "premise: the label is written over the launch's entry, final as it was").toEqual([launchAt.at, launchAt.keys, true])
+  const ordered = await orderShown(page)
+  await page.locator(`.column:not(.hidden) .container[data-item-id="${older.id}"] .button.index`).click({ modifiers: ['Meta'] })
+  await expect.poll(() => orderShown(page), { message: 'premise: the click moved the older item up' }).not.toBe(ordered)
+  await settled(page)
+  const reordered = await places(page)
+  expect([reordered.keys.indexOf(reordered.at), reordered.state.editorText, reordered.state.final], "the user's re-ordering under a label that item code set on the launch's entry: a new entry right after it").toEqual([reordered.keys.indexOf(launchAt.at) + 1, '#e2e_steps', false])
+  await page.goBack()
+  await expect.poll(async () => (({ at, state }) => [at, state.orderHash])(await places(page)), { message: 'Back reaches the entry that holds the order from before the click' }).toEqual([launchAt.at, grouped.state.orderHash])
+  for (const doc of [missing, gone, newer, older, fixture]) await doc.delete()
+})
+
+// A RELOAD WITH A QUERY IN THE BOX ADDS NO STEP (the owner, 2026-11-19, on the reload's remaining steps: "i'd
+// like these fixed also"). The launch leaves the entry the browser is on as it is while its first view shows,
+// then applies the address's query over it (its fragment step), and the entry keeps its `final`: a typed tag's
+// (not final), a tag click's and a select's by an item's id (final). The page shows the query again, as before
+// (what a reload should show is the owner's other todo). Until 2026-11-19 the launch pushed the address's query
+// after its first view, and the first view itself after a final entry of another query: one entry more for a
+// typed tag, two for a clicked one or a select, and Forward was gone. Every step of the setup is the user's: typed
+// text, a tag's click, and a query or a select made within a key press (as a click in a widget makes them)
+test("a reload with a query in the box adds no history entry: a typed tag, a tag click's and a select's by an item's id each show the query again in the entry the browser is on, which keeps its final; Back reaches the entry before in one step and Forward the entry ahead", async ({ page }) => {
+  const reads = historyReads(page)
+  const { recorded } = reads
+  await noteWrites(page)
+  const unnamed = await firestore().collection('items').add({ user: 'anonymous', time: Date.now(), attr: null, text: 'an unnamed item of the reload row, selected by its id' })
+  await loadAdmin(page)
+  // a reload on the entry the browser is on: no position added, the browser on the same one, the query shown
+  // again and kept by the entry (the fragment step gives it the space a tag's click does), its index, run and
+  // `final` as they were, nothing pushed; then Back and Forward
+  const reloaded = async (query: string, behind: string, ahead: string, message: string) => {
+    await recorded()
+    const before = await places(page)
+    await page.reload()
+    await waitForApp(page)
+    await expect(mindbox(page), `${message}: the reloaded page shows the query again`).toHaveValue(query.trim() + ' ')
+    await expect.poll(() => page.evaluate(() => (window as any)._launch_fragment_done === true), { message: `${message}: the launch's fragment step has run` }).toBe(true)
+    await settled(page)
+    const after = await places(page)
+    const kept = (p: typeof before) => ({ keys: p.keys, at: p.at, index: p.state.index, run: p.state.run, final: p.state.final, query: p.state.editorText.trim() })
+    expect(kept(after), `${message}: no entry added, the entry where it was, its query and final as they were`).toEqual(kept(before))
+    expect((await writes(page)).filter(w => w.kind != 'replaceState').length, `${message}: nothing pushed`).toBe(0)
+    await page.goBack()
+    await expect(mindbox(page), `${message}: Back reaches the entry before it in one step`).toHaveValue(behind)
+    await page.goForward()
+    await expect(mindbox(page)).toHaveValue(query.trim() + ' ')
+    await page.goForward()
+    await expect(mindbox(page), `${message}: Forward reaches the entry ahead, kept`).toHaveValue(ahead)
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue(query.trim() + ' ')
+  }
+
+  // a TYPED tag (its entry not final), the tag click's entry from its item ahead of it, Back onto the typed one
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially('#e2e_source')
+  await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_source')
+  await expect.poll(() => page.evaluate(() => !!window._item('#e2e_source')!.elem)).toBe(true)
+  await blur(page)
+  const sourceId = await page.evaluate(() => window._item('#e2e_source')!.id)
+  await page.locator(`#item-${sourceId} mark[title="#e2e_target"]`).scrollIntoViewIfNeeded()
+  await page.locator(`#item-${sourceId} mark[title="#e2e_target"]`).click()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  expect((await places(page)).state, 'premise: a typed query, not final').toMatchObject({ editorText: '#e2e_source', final: false })
+  await reloaded('#e2e_source', '', '#e2e_target ', 'a reload on a typed tag')
+  expect((await places(page)).state.final, 'the typed entry is still not final').toBe(false)
+
+  // a tag CLICK's entry (final), a query ahead of it
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  await blur(page)
+  await userSet(page, '#e2e_target/sub')
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('#e2e_target ')
+  expect((await places(page)).state, "premise: a tag click's entry, final").toMatchObject({ editorText: '#e2e_target ', final: true })
+  await reloaded('#e2e_target', '#e2e_source ', '#e2e_target/sub', "a reload on a tag click's entry")
+
+  // a SELECT's entry by an item's id (an unnamed item: `id:<saved id>`, final), a query ahead of it again
+  await expect.poll(() => page.evaluate(id => window._exists(id), unnamed.id), { message: 'premise: the unnamed item is in the page', timeout: 30_000 }).toBe(true)
+  await asUser(page, id => (window._item(id) as any).select(), unnamed.id)
+  await expect(mindbox(page)).toHaveValue('id:' + unnamed.id)
+  await blur(page)
+  await userSet(page, '#e2e_source')
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await page.goBack()
+  await expect(mindbox(page)).toHaveValue('id:' + unnamed.id)
+  expect((await places(page)).state, "premise: a select's entry, final").toMatchObject({ editorText: 'id:' + unnamed.id, final: true })
+  await reloaded('id:' + unnamed.id, '#e2e_target ', '#e2e_source', "a reload on a select's entry by an item's id")
+  await unnamed.delete()
+})
+
+// WHAT THE USER STARTS KEEPS ITS ORIGIN ACROSS A WAIT OF THE APP'S OWN, AND LENDS IT TO NOTHING ELSE (reviews 0 to 2
+// of phantom_steps): the intent is captured at the action and handed to the write that continues it
+// (index.svelte's carryInput), and the typed query's is bound to its text in the MindBox's debounce.
+// - A COMMAND THROUGH ITS DIALOG, answered by a key: `/_rename`'s confirmation resolves from a timer of the
+//   Modal's, so the rename and the clear of the box came from no input. On a FINAL entry that holds the command
+//   (the copy an Up makes) the clear is the user's new query: a new entry, and Back restores the command's entry
+//   (taken for a passive write, the clear was written over that entry, which then no longer held the command).
+// - A TYPED QUERY THROUGH THE DEBOUNCE, on a clock the row drives (page.clock, installed before the page loads
+//   and held from the first typed text on): typed text, a re-ranking that applies it early (the typed query is
+//   the user's whoever applies it: a new entry after the final one), more typing, and ONE applied query once the
+//   typing is quiet. Before 2026-11-19 the early application left its timer live: it met the new typing's own,
+//   and the two postponed each other for as long as the box kept the focus (issues/Typed Query Stays Pending
+//   When A Stale Debounce Timer Meets New Typing).
+// - WHAT A PASSIVE CALL MAKES OF A PENDING TYPED QUERY (review 2, blocker 1), each on an entry with one ahead:
+//   a timer's select of the very name typed, on an entry that is NOT final, settles the text as the user's
+//   typing is written, the entry replaced and not final (the select's forced, final entry came with the user's
+//   origin: a push over the entry ahead); and a typed query that item code supersedes and then sets again, the
+//   box focused throughout, is item code's: written over the FINAL entry, which stays final (the typed text's
+//   origin outlived the query between, and the debounce pushed it as the user's)
+test("what the user starts keeps its origin across the app's own waits and lends it to nothing else: a command confirmed by a key in its dialog clears the box in a new entry; a typed query that a re-ranking applies early, then typed further, is applied once more when the typing is quiet; a timer's select of the name typed is written as typing, and a typed query that item code supersedes is item code's, the entry ahead kept each time", async ({ page }) => {
+  const { recorded } = historyReads(page)
+  await page.clock.install() // before the page has any timer of its own; it runs with the wall's until it is held
+  await loadAdmin(page)
+  const browserKey = () => page.evaluate(() => (window as any).navigation.currentEntry.key as string)
+  const keys = () => page.evaluate(() => (window as any).navigation.entries().map((e: any) => e.key) as string[])
+  const stored = () => page.evaluate(() => [history.state.editorText, history.state.final])
+  const pending = () => page.evaluate(() => (window as any)._editor_change_pending as boolean)
+
+  // the command, typed (its entry is not final), then the copy an Up makes of it from a scrolled page: final
+  const COMMAND = '/_rename #e2e_waits #e2e_waited'
+  await page.evaluate(() => {
+    void window._create('#e2e_waits an item whose tag the command renames')
+    void window._create('#e2e_waits_b another item of the row')
+  })
+  await expect.poll(async () => !!(await savedId(page, '#e2e_waits')) && !!(await savedId(page, '#e2e_waits_b')), { timeout: 30_000 }).toBe(true)
+  await focusMindbox(page)
+  await mindbox(page).fill(COMMAND)
+  await expect.poll(stored, { message: "the typed command's entry", timeout: 10_000 }).toEqual([COMMAND, false])
+  await blur(page)
+  await scrollDown(page)
+  await recorded()
+  await page.keyboard.press('Control+Meta+ArrowUp')
+  await nearTop(page, 'Up: the top of the page, in an entry of its own')
+  const upKey = await browserKey()
+  expect(await stored(), "premise: the Up's copy holds the command, final").toEqual([COMMAND, true])
+  // the command entered from the box, and its dialog confirmed by a NEW press of Enter (the Modal answers a key
+  // from a timer)
+  await focusMindboxInPlace(page)
+  await page.keyboard.press('Shift+Enter')
+  await expect(page.locator('.background.visible .modal'), "the command's dialog").toContainText('Rename')
+  await page.keyboard.press('Enter')
+  await expect.poll(() => page.evaluate(() => [window._exists('#e2e_waited'), history.state.editorText]), { message: 'the rename is applied and the box cleared', timeout: 30_000 }).toEqual([true, ''])
+  await settled(page)
+  const cleared = await places(page)
+  expect([cleared.keys.indexOf(cleared.at), cleared.state.editorText], "the clear is the command's, the user's: a new entry right after the one that holds the command").toEqual([cleared.keys.indexOf(upKey) + 1, ''])
+  await page.goBack()
+  await expect(mindbox(page), "Back restores the command's entry").toHaveValue(COMMAND)
+  expect([await browserKey(), await stored()], 'the entry the command was entered on, as it was').toEqual([upKey, [COMMAND, true]])
+
+  // the debounce, on the row's clock, held from here. The box focused on a final entry (the Up's)
+  await focusMindboxInPlace(page)
+  const [length, index] = await entries(page)
+  await page.clock.pauseAt(Date.now() + 1_000)
+  await page.keyboard.insertText(' typed')
+  expect([await pending(), (await stored())[0]], 'typed text: pending in the debounce, the entry as it was').toEqual([true, COMMAND])
+  // 100 ms on, a re-ranking applies it early (a touch from the page's script, which is no input): the typed
+  // query is the user's, a new entry after the final one it was typed on
+  await page.clock.runFor(100)
+  await page.evaluate(() => void (window._item(window.__items[window.__items.length - 1].id) as any).touch())
+  // (a push from the Up's entry: the entry ahead of it, the cleared box's, is replaced, so the session's length stays)
+  expect([await pending(), await stored(), await entries(page), (await browserKey()) == upKey], "the early application: the typed query in a new entry, the user's").toEqual([false, [COMMAND + ' typed', false], [length, index + 1], false])
+  const typedKey = await browserKey()
+  // 100 ms on, more typing: pending again; then the quiet. The first timer is gone with the early application,
+  // and the new one applies the query once, 500 ms after the last typed text
+  await page.clock.runFor(100)
+  await page.keyboard.insertText(' more')
+  expect(await pending(), 'more typing: pending again').toBe(true)
+  await page.clock.runFor(499)
+  expect([await pending(), (await stored())[0]], 'not yet applied within the quiet').toEqual([true, COMMAND + ' typed'])
+  await page.clock.runFor(2)
+  expect([await pending(), await stored(), await entries(page), await browserKey()], 'applied once the typing has been quiet for the debounce, in the same entry').toEqual([false, [COMMAND + ' typed more', false], [length, index + 1], typedKey])
+  await page.clock.runFor(5_000)
+  expect([await pending(), (await stored())[0]], 'and nothing is pending afterwards').toEqual([false, COMMAND + ' typed more'])
+
+  // A TIMER'S SELECT OF THE VERY NAME TYPED, within the debounce, on that entry, which is NOT final, with an entry
+  // ahead of it (a select of the user's, within a key press, and Back; a traversal's restore scrolls from a
+  // frame, so the clock runs a few after each)
+  const typeOver = async (text: string) => {
+    await page.evaluate(() => {
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.focus({ preventScroll: true })
+      box.select()
+    })
+    await page.keyboard.insertText(text)
+  }
+  await asUser(page, () => void (window._item('#e2e_waits_b') as any).select())
+  const aheadKey = await browserKey()
+  expect([await stored(), aheadKey == typedKey], "premise: the user's select, final, in an entry of its own").toEqual([['#e2e_waits_b', true], false])
+  await page.goBack()
+  await expect.poll(browserKey, { message: 'Back onto the typed entry' }).toBe(typedKey)
+  await page.clock.runFor(50)
+  await typeOver('#e2e_waited')
+  expect(await pending(), 'the name typed: pending in the debounce').toBe(true)
+  await page.evaluate(() => void setTimeout(() => (window._item('#e2e_waited') as any).select()))
+  await page.clock.runFor(1)
+  expect([await pending(), await browserKey(), await stored(), (await keys()).includes(aheadKey)], "a timer's select of the name the user typed settles it as their typing: the entry replaced where it is, not final, the entry ahead kept").toEqual([false, typedKey, ['#e2e_waited', false], true])
+  await page.goForward()
+  await expect.poll(browserKey, { message: 'Forward still reaches the entry ahead, by its key' }).toBe(aheadKey)
+  await page.clock.runFor(50)
+
+  // A TYPED QUERY THAT ITEM CODE SUPERSEDES AND THEN SETS AGAIN, the box focused throughout, on the select's entry,
+  // which is FINAL, with an entry ahead of it (another select of the user's, and Back)
+  await asUser(page, () => void (window._item('#e2e_waited') as any).select())
+  const lastKey = await browserKey()
+  expect([await stored(), lastKey == aheadKey], "premise: the user's second select, final, in an entry of its own").toEqual([['#e2e_waited', true], false])
+  await page.goBack()
+  await expect.poll(browserKey, { message: "Back onto the first select's entry" }).toBe(aheadKey)
+  await page.clock.runFor(50)
+  await typeOver('e2e typed b')
+  expect(await pending(), 'the query typed: pending in the debounce').toBe(true)
+  await page.evaluate(
+    () =>
+      void setTimeout(() => {
+        ;(window as any).MindBox.set('e2e typed c')
+        ;(window as any).MindBox.set('e2e typed b')
+      }),
+  )
+  await page.clock.runFor(1)
+  expect([await pending(), (await stored())[0], await mindbox(page).inputValue()], "item code's two sets wait in the debounce, the box focused").toEqual([true, '#e2e_waits_b', 'e2e typed b'])
+  await page.clock.runFor(1_100)
+  expect([await pending(), await browserKey(), await stored(), (await keys()).includes(lastKey)], "the query item code set last is item code's, though it is the text the user had typed: written over the entry, final as it was, the entry ahead kept").toEqual([false, aheadKey, ['e2e typed b', true], true])
 })

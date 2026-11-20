@@ -1382,10 +1382,13 @@
       this.invalidate_elem_cache({ force_render: true })
 
       // update ranking/etc via onEditorChange, dispatched to prevent index changes during eval
-      setTimeout(() => {
-        lastEditorChangeTime = 0 // disable debounce even if editor focused
-        onEditorChange(editorText) // item time/text has changed
-      })
+      // (as the user's input when the write is: see userInput)
+      setTimeout(
+        carryInput(() => {
+          lastEditorChangeTime = 0 // disable debounce even if editor focused
+          onEditorChange(editorText) // item time/text has changed
+        })
+      )
       return true // the synchronous write path completed: accepted
     }
 
@@ -2112,7 +2115,7 @@
   // nothing when the top is already in view. Returns whether it scrolled
   function scrollToTopWithHistory() {
     if (scrolledToTop()) return false
-    if (historyOffEntry()) {
+    if (historyOffEntry() || launchKeeps()) {
       scrollTo(headerdiv.offsetTop) // no entry where the session has no place in the browser's history
       return true
     }
@@ -2189,7 +2192,7 @@
     // quarter disagree there, so the item can count as below the view at the very position it was brought
     // to) moves nothing and gets no entry (review 0 B1: a push per press otherwise)
     if (y == null || Math.abs(y - document.body.scrollTop) <= 2) return false
-    if (historyOffEntry()) {
+    if (historyOffEntry() || launchKeeps()) {
       scrollTo(y) // no entry where the session has no place in the browser's history
       return true
     }
@@ -2873,6 +2876,7 @@
   // for the HELD entry's index, an update of a view shown since (a query changed during the return, then
   // scrolled or shown more of) was dropped once that query's entry was pushed (review 7)
   function updateState(update, view = viewEntry()) {
+    if (launchKeeps()) return // nothing of the launch's temporary first view is written on the entry it keeps (see launchQueryPending)
     const write = () => {
       if (sessionStateHistoryIndex === view.index && sessionRun === view.run) replaceState(updatedEntry(currentState(), update))
     }
@@ -3010,14 +3014,81 @@
   let matchingItemCount = 0
   let textLength = 0
   let editorChangePending = false
+  let editorChangeTimer: ReturnType<typeof setTimeout> | undefined
+  // the RAW QUERY of the change pending in the debounce, when that change was asked for within the user's input
+  // (typing): the origin is that text's. A passive re-ranking that applies the same text early keeps it; a write
+  // that supersedes the text (item code's select within the debounce) has its own origin (review 1 of
+  // phantom_steps: as a boolean it gave the keystroke's origin to whatever write came next, so a timer's select
+  // pushed over the Forward branch and the typed query never got an entry)
+  let editorChangeInput: string | null = null
   let forceNewStateOnEditorChange = false
   let finalizeStateOnEditorChange = false
   let replaceStateOnEditorChange = false
   let ignoreStateOnEditorChange = false
-  let launchStateOnEditorChange = false // the launch's own first view (initialize): see record in onEditorChange
+  let launchStateOnEditorChange = false // the launch's own writes (initialize's first view, the address's query after it): see record in onEditorChange
   // the entry of the launch's own first view, by its run and index: the one the launch wrote or took over, or
   // the kept one it left as it was (null when the launch could write none): see record in onEditorChange
   let launchView: { run: number; index: number } | null = null
+  // THE USER'S INPUT (the owner, 2026-11-19: "changes that are not triggered by a user action should not add
+  // new steps"; the decision is writeMode, src/history_entries.ts, asked by record in onEditorChange): a write
+  // is the user's by its ORIGIN alone, never by what it asks for (a new query, a forced entry). The origin: a
+  // trusted event of a key, a pointer, a touch or typed text that the page is handling (inputActive: noted at
+  // the window before any handler of the page's sees it, each for as long as its dispatch lasts; and the event
+  // a callback of this window is handling, which takes in a notification's click, whose target is no node), or
+  // a CARRY of one (carryInput: the intent captured AT the action that starts a wait of the app's own and
+  // handed to the one delayed write or run that continues it, never a flag held over the wait: a snapshot, a
+  // preview's fetch or a save's echo that lands meanwhile stays passive). Item code carries its own waits the
+  // same way (window._carry_input: the todoer's drop into the agent bin awaits its command before it writes).
+  // WHAT THIS ESTABLISHES, and no more (review 0 of phantom_steps): an event's phase is reset when its
+  // dispatch ends, so a noted event is not active afterwards; a script can dispatch a noted event again (it is
+  // untrusted then, and not counted); a trusted `submit` can come from a script's requestSubmit(); promise
+  // callbacks that are settled while a dispatch lasts run within it. The rows ran in Chromium alone
+  let inputEvents: Event[] = []
+  let inputCarried = false
+  const userInput = () => inputCarried || inputEvents.some(inputActive) || inputActive(window.event)
+  const carryInput = <A extends unknown[], R>(f: (...args: A) => R) => {
+    const carried = userInput()
+    return (...args: A): R => {
+      const outer = inputCarried
+      inputCarried = carried
+      try {
+        return f(...args)
+      } finally {
+        inputCarried = outer
+      }
+    }
+  }
+  if (isClient) {
+    for (const type of INPUT_EVENTS)
+      window.addEventListener(type, e => void (inputActive(e) && (inputEvents = [...inputEvents.filter(inputActive), e])), { capture: true })
+    window['_carry_input'] = carryInput
+  }
+  // THE LAUNCH'S QUERY (reviews 0 and 1 of phantom_steps, blocker 3): a non-empty address has its query applied
+  // after the welcome and the frames that follow initialization, and the page shows its first view until then
+  // (`launchQueryPending`, whether or not the address names an item yet: a sync or an item's `_init` can bring
+  // or remove the item in between). It is applied ONCE, resolved then against the items as they are, while the
+  // launch still owns the view: a click or an edit of the user's supersedes it at once, typing included
+  // (applied afterwards, it was written over the entry the click had just pushed), as a traversal does
+  // (onPopState). And on an entry of the notebook's (`launchQueryKept`) that entry is LEFT AS IT IS for as long
+  // as the page shows the launch's temporary first view: the first view is not written, and nothing of it is
+  // (a passive re-ranking, a scroll's position, the shown count; the Up and Down shortcuts scroll without an
+  // entry meanwhile, as on a position that holds none: a step recorded there would copy the kept entry's state
+  // under a view that is not shown). The keep ends when the query is applied (or, when the address names
+  // nothing by then, when the first view is written over the entry: the view shown), when the query that
+  // replaces it is applied, or when a traversal restores an entry. A Back onto a position the app cannot take
+  // cancels the query but restores nothing: the keep lasts through the stop, whose return then RESTORES the kept
+  // entry (taken for a view already shown, the box stayed empty over an entry that held the query, and the next
+  // passive re-ranking wrote the empty query over it). So a cancelled address alone does not say that the kept
+  // entry has been replaced: `launchQueryReplaced` does, set where the USER's input cancels it. Their query can
+  // still wait in the debounce then, and the keep ends where a query is next APPLIED, whoever supplied its final
+  // text: a select or a set of item code's within the debounce is written over the kept entry as any query that
+  // is not the user's is (left to the user's own write alone, the keep never ended: the release had no address
+  // left to apply, the box showed item code's query over an entry that held the address's, and no scroll was
+  // written again: review 3 of phantom_steps)
+  let launchQueryPending = false
+  let launchQueryKept = false
+  let launchQueryReplaced = false
+  const launchKeeps = () => launchQueryKept
   let hideIndex = 0
   let hideIndexFixed = 0
   let hideIndexMinimal = 0
@@ -3031,6 +3102,13 @@
   function onEditorChange(text: string, keep_times = false) {
     // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
+    // a click or an edit of the user's supersedes the launch's query that is yet to be applied (see
+    // launchQueryPending); the entry the launch keeps stays kept until the query that replaces it is applied
+    // (below), which a typed one is when its debounce ends
+    if ((launchQueryPending || launchQueryKept) && !launchStateOnEditorChange && userInput()) {
+      url_fragment = null
+      launchQueryReplaced = launchQueryKept
+    }
     // in fixed mode, navigating to the item at shared index 0 (e.g. by clicking its label) is
     // treated as the main page, instead of a lone-item view without even the back triangle
     if (fixed && text.trim()) {
@@ -3111,9 +3189,14 @@
       Date.now() - lastEditorChangeTime < editorDebounceTime
     ) {
       lastEditorChangeTime = Date.now() // reset timer at each postponed change
+      // the pending query is the user's when they typed it (see record); a DIFFERENT query that supersedes it
+      // without their input ends that (item code setting the box within the debounce: set back to the typed
+      // text afterwards, the query was taken for the user's again, review 2 of phantom_steps)
+      if (userInput()) editorChangeInput = editorText
+      else if (editorChangeInput !== editorText) editorChangeInput = null
       if (!editorChangePending) {
         editorChangePending = true
-        setTimeout(() => {
+        editorChangeTimer = setTimeout(() => {
           if (!editorChangePending) return // change handled via debounce-bypass
           editorChangePending = false
           onEditorChange(editorText)
@@ -3122,6 +3205,22 @@
       return
     }
     editorChangePending = false
+    // ONE pending timer: left to run, the timer of a change applied early (a re-ranking, a key that settles the
+    // query) met the next typing's own, and the two postponed each other for as long as the box kept the focus
+    clearTimeout(editorChangeTimer)
+    const typedInput = editorChangeInput !== null && editorChangeInput === editorText // the user's pending query is applied by this call, whoever makes it
+    editorChangeInput = null
+    // a passive call that settles the user's pending text writes it as their TYPING is written: what that caller
+    // asks of its own write is no part of it (a timer's select of the very name typed brought its forced, final
+    // entry: a push over the Forward branch, where typing replaces an entry that is not final; review 2 of
+    // phantom_steps). Typing's own flags are the ones of a query cleared while a target is shown (above).
+    // Not a native fragment's query, which claims the position the browser made as a FINAL entry, whatever was
+    // being typed: with the very query typed and pending, the fragment's entry was left not final, the next
+    // typed query replaced it and Back skipped the fragment (review 3 of phantom_steps)
+    if (typedInput && !userInput() && !fragmentPosition) {
+      replaceStateOnEditorChange = false
+      forceNewStateOnEditorChange = finalizeStateOnEditorChange = !editorText.trim() && !!document.querySelector('.container.target')
+    }
     lastEditorChangeTime = Infinity // force minimum wait for next change
     window['_mindboxDebounced'] = false
     if (explicitScrollQuery !== null && explicitScrollQuery !== editorText) explicitScrollQuery = null // a new query: its layouts scroll as usual
@@ -3702,7 +3801,18 @@
     // to avoid displaying .loading overlay multiple times, we only allow a one-way change unless query has changed
     if (renderingVisibleItems || (text && editorTextModified)) checkIfRenderingVisibleItems()
 
-    if (!ignoreStateOnEditorChange) {
+    // whether the view is asked for within the user's input, or applies a change of theirs that the debounce
+    // held (see userInput)
+    const input = userInput() || typedInput
+    // a launch's keep of its entry ends HERE, where the query that replaces the address's is APPLIED (accepted
+    // as the page's view), and not at the user's input: a typed query waits in the debounce, and until one is
+    // applied the entry holds what it held, its position included (review 2 of phantom_steps). The query applied
+    // is the user's, or whichever followed their input (`launchQueryReplaced`: a select of item code's within the
+    // debounce, review 3). Its WRITE comes after, below: none when the view equals the entry's, at once
+    // otherwise, and at the return while a stop's return is on its way (stopWork). Nothing else of the temporary
+    // first view is written while the entry is kept (see launchQueryPending)
+    if (launchQueryKept && (input || launchQueryReplaced) && !launchStateOnEditorChange) launchQueryKept = false
+    if (!ignoreStateOnEditorChange && !launchKeeps()) {
       // update history, replace unless current state is final (from tag click)
       const orderHash = hash(items.map(item => item.id).join())
       // the view as it is now, and how it asks to be written (a tag click and the like force a new entry)
@@ -3753,27 +3863,33 @@
         if (text != shown?.editorText || orderHash != shown?.orderHash || fragmentPosition) {
           // need to update history
           // console.debug(history.state.final ? "push" : "replace", state);
-          // a LAUNCH on a final kept entry of its own query (a reload on the full list: the launch's first view
-          // is the empty query) takes that entry over, replaced where it is by the view loaded, and the entries
-          // ahead stay. Until 2026-11-18 it pushed the view after the entry whenever the order loaded differed
-          // from the one the entry recorded (the session's soft touches are gone after a reload, an item has
-          // changed since): a second entry of the same query, whose Back "returned" to the same list (the owner)
-          // A RE-RANKING OF THE LAUNCH'S FIRST VIEW is written over that entry too (`first`: the same query,
-          // with the browser on the entry the launch wrote or took over, by its run and index), and the entry
-          // STAYS FINAL: a re-ranking's own view is not final, and written so the next typed query would
-          // replace the full list instead of following it. Until 2026-11-19 the first ranking after a launch
-          // whose order differed pushed one entry after the launch's (measured: item code that touches an item
-          // from `_init` or `_on_welcome` or marks one `pushable` or `running`, a change from another client,
-          // and a ranking that changes nothing of its own where the count of an item's missing tag moves the
-          // item: the launch ranks before the missing tags are counted), so Back from such a reloaded page
-          // first showed the same query again (the owner, on the release of 2026-11-18). The entry is the
-          // launch's while it exists: a push that drops its branch clears the mark (pushState)
+          // A STEP IS THE USER'S (the owner, 2026-11-19: "changes that are not triggered by a user action should
+          // not add new steps"). The decision is writeMode (src/history_entries.ts, its table in
+          // tests/unit/history_entries.spec.ts), from the write's ORIGIN (`input`: within the user's input or a
+          // carry of it, see userInput) and never from what the write asks for: a new query or a forced entry
+          // from item code's timer, a hook or a snapshot is no step (a select, MindBox.set, an autorun's /run
+          // query, the query backed up from a deleted selection: taken for the user's by the query's difference
+          // or by `force`, such a write pushed and threw the Forward branch away, review 0 of phantom_steps). A
+          // write that is not the user's is written over the entry the browser is on, its query accepted, and the
+          // entry keeps what is its own (`own`, below: its `final`, so that the next typed query still follows a
+          // final entry); on a position that holds no entry it writes nothing, and the marker and the entries
+          // ahead stay (a passive re-ranking under a dropped edit started a new run there). The launch's own
+          // writes (its first view, the address's query) are never the user's: a reload adds no entry. A native
+          // fragment takes the position the browser made for it, whoever asks. The user's writes are as they
+          // were: a new query follows a final entry and replaces one that is not, a forced entry is pushed, and a
+          // re-ranking is a step from a final entry, but from the launch's own first view (`first`: the same
+          // query, with the browser on the entry the launch wrote, took over or left as it was, by its run and
+          // index, while that entry is final and still holds the launch's own query, the EMPTY one), where it is
+          // written over the entry. That entry is the launch's while it exists: a push that drops its branch
+          // clears the mark (pushState). A query that item code has written over it is no first view (review 1 of
+          // phantom_steps: recognized by run and index alone, the launch's entry under a shared label that a
+          // timer had set took the user's re-ordering as a replacement, and Back could not restore the order)
           const same = text == shown?.editorText
-          const first = !launch && !positionUnknown && !!shown?.final && same && !!launchView && shown?.run === launchView.run && shown?.index === launchView.index
-          const push = positionUnknown ? !same : shown?.final && !(launch && same) && !first
+          const first = !launch && !positionUnknown && !!shown?.final && same && text === '' && !!launchView && shown?.run === launchView.run && shown?.index === launchView.index
+          const mode = writeMode({ user: input, launch, force, replace, same, final: !!shown?.final, first, unknown: positionUnknown, fragment: fragmentPosition })
           const next = state ?? view()
-          if (force || (push && !replace)) pushState(next)
-          else {
+          if (mode == 'push') pushState(next)
+          else if (mode != 'none') {
             // a re-ranking written over the entry it is on (the same query), proposed while a traversal's
             // restore had yet to scroll: the position stays the one the entry holds, none included (it is
             // restored to the header). The view's own is the departed view's viewport, and written over the
@@ -3782,18 +3898,22 @@
             // view at 200 px, a listener's touch in the frames before the restore scrolls, Forward, Back:
             // 200 px). The select's write of the position left keeps out of that interval too (selectItem)
             if (restoring && same) next.scrollPosition = shown?.scrollPosition
-            // and what the launch's entry holds of its own stays with it: only the ranking is new. Its mark
-            // of an Up (scrolledToTop: without it Down no longer undoes the Up that made the entry) and the
-            // narration's saved choice (intro), which a reload that writes nothing leaves on the entry
-            // while the page starts with its own (review 0 of reload_rerank). The launch's take-over of an
-            // entry whose order differs writes its whole view, as before
-            const own = { final: true, intro: shown?.intro ?? next.intro, ...(shown?.scrolledToTop === undefined ? {} : { scrolledToTop: shown.scrolledToTop }) }
-            replaceState(first ? { ...next, ...own } : next)
+            // and what the entry holds of its own stays with it when the write is not the user's, and on the
+            // launch's first view (`first`): only the view is new. Its `final`, its mark of an Up
+            // (scrolledToTop: without it Down no longer undoes the Up that made the entry) and the narration's
+            // saved choice (intro), which a reload that writes nothing leaves on the entry while the page
+            // starts with its own (review 0 of reload_rerank). On a state that is not the notebook's (the
+            // launch's first write, a new run) there is none. Until 2026-11-19 the launch's take-over of an
+            // entry whose order differs wrote its whole view, and dropped the two
+            const own = shown ? { final: !!shown.final, intro: shown.intro ?? next.intro, ...(shown.scrolledToTop === undefined ? {} : { scrolledToTop: shown.scrolledToTop }) } : {}
+            replaceState(mode == 'replace' ? next : { ...next, ...own })
           }
         }
         // the entry of the launch's first view, whatever the launch did to it (none where it could write none:
-        // a traversal while the page was starting has the browser on another position)
-        if (launch) launchView = historyOffEntry() ? null : { run: sessionRun, index: sessionStateHistoryIndex }
+        // a traversal while the page was starting has the browser on another position; none once the
+        // address's query is written over it, which is no first view: a user's re-ranking there is a step, as
+        // on the query's own entry that the launch pushed until 2026-11-19)
+        if (launch) launchView = historyOffEntry() || text.trim() ? null : { run: sessionRun, index: sessionStateHistoryIndex }
       }
       // while a stop's return is on its way (onPopState) the browser is on a position that holds no entry, for
       // a few milliseconds: decided there, a typed update of a query was a PUSH (a new query on such a
@@ -4046,7 +4166,8 @@
     items[index].showLogsTime = Date.now() // invalidates auto-hide
   }
 
-  function handleFragment(fragment) {
+  // returns whether the fragment names an item, whose query it has then asked for
+  function handleFragment(fragment): boolean {
     // if fragment matches an item (by id or label), navigate to that item
     const index = indexFromId.get(fragment.substring(1).replace(/^id:/, ''))
     let unique = false
@@ -4064,9 +4185,10 @@
       finalizeStateOnEditorChange = true // finalize state
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(fragment + ' ')
-    }
+    } else return false // the fragment names no item
     // if fragment matches a unique item, scroll to that item if needed
     if (unique) update_dom().then(scrollToTarget)
+    return true
   }
 
   // the note of a stop (onPopState): why Back, or Forward, moved nothing. A PASSIVE note (.stop-note), shown
@@ -4129,6 +4251,8 @@
     skipScrollForPopState = false
     if (!e?.state) {
       url_fragment = null // the launch's fragment, when still pending, is superseded (see below)
+      const kept = launchQueryKept // (the entry a launch kept is left behind when this navigation's query takes the position: below)
+      launchQueryKept = false
       retireReturn() // and so is a stop's return on its way
       // empty state indicates a change in url fragment, which we use to navigate if it matches an item; this seems to be due to hash change triggering a change in state (to null), see step 12 in https://developer.mozilla.org/en-US/docs/Web/API/Window/popstate_event#when_popstate_is_sent
       // the browser is then on a position of its own making: one more than the session's entries when the
@@ -4148,6 +4272,11 @@
         // browser was then on (review 4 of scroll_history)
         if (fragmentPosition) {
           fragmentPosition = false
+          // (a fragment that names nothing takes no entry, and the page still shows a launch's temporary first
+          // view: the entry that launch kept stays kept, so that a stop's return to it restores it. Unkept here,
+          // the return took its view for shown, and the box stayed empty over an entry that held the query:
+          // review 2 of phantom_steps)
+          launchQueryKept = kept
           // (`fragment`: the browser made this position after one of the notebook's entries, which Back still
           // reaches through it: no stop on it, below)
           history.replaceState({ owner: historyOwner, unknown: true, fragment: true }, '')
@@ -4232,7 +4361,15 @@
       const returned = stopPending && stopPending.key === historyKey() ? stopPending : null
       if (returned) {
         stopPending = null
-        if (e.state.run == sessionRun && e.state.index == sessionStateHistoryIndex && sessionStateHistory.get(e.state.index)) {
+        // (not while a launch keeps this entry under its temporary first view: that view was never the
+        // entry's, so the entry is restored below as any entry reached, see launchQueryPending)
+        // (unless a query waits in the debounce over that view: one the user typed, or one that has replaced
+        // theirs since, as item code's set in the focused box does (`launchQueryReplaced`, with a change pending).
+        // The page stays, and the query is applied from this entry when its debounce ends. Read from the typed
+        // origin alone, which such a set rightly ends, the return restored the kept entry into the box and
+        // cancelled the pending query, which the release of 2026-11-19 keeps: review 4 of phantom_steps. An
+        // untouched temporary view has neither, and is restored)
+        if (!(launchQueryKept && editorChangeInput === null && !(launchQueryReplaced && editorChangePending)) && e.state.run == sessionRun && e.state.index == sessionStateHistoryIndex && sessionStateHistory.get(e.state.index)) {
           positionUnknown = false
           stopView = null
           for (const work of stopWork.splice(0)) work()
@@ -4275,6 +4412,7 @@
     // handled after the welcome and the frames that follow initialization): handled later, it pushed the
     // departed entry's query over the entry reached and dropped the entries ahead (review 2 of scroll_history)
     url_fragment = null
+    launchQueryKept = false // (the view restored below is its entry's own: a launch's temporary first view is gone)
     retireReturn() // and a stop's return still on its way, to another entry than this one
     // update session history index to the popped state
     // note we could be going back or forward w/ jumps allowed
@@ -5285,10 +5423,14 @@
             // if run_deps is enabled and item has _autorun, also dispatch run (w/ sanity check for non-deletion)
             // NOTE: run_deps is slow/expensive and e.g. should be false when synchronizing remote changes
             if (run_deps && depitem.autorun)
-              setTimeout(() => {
-                if (depitem.index == indexFromId.get(depitem.id))
-                  onItemRun(depitem.index, null, false /* touch_first */)
-              })
+              setTimeout(
+                // (the run, and the /run query an installed item's run navigates to, are the user's when the
+                // write that asks for them is: see userInput)
+                carryInput(() => {
+                  if (depitem.index == indexFromId.get(depitem.id))
+                    onItemRun(depitem.index, null, false /* touch_first */)
+                })
+              )
           }
         })
         if (rederived) {
@@ -6564,6 +6706,20 @@
               )
               const conflicts = renameConflicts(items.map(item => item.label), from, to)
               const ids = affected.map(item => item.id)
+              // (the rename and the query's clear are the command's, the user's: their intent is captured here,
+              // before the dialog's wait, whose Enter answers from a timer, see userInput)
+              const apply = carryInput(() => {
+                // the previewed items that are still here, each renamed from the text it has NOW: a
+                // change that arrived while the dialog was open is kept, never overwritten by the preview
+                for (const id of ids) {
+                  const index = indexFromId.get(id)
+                  if (index === undefined) continue // deleted meanwhile
+                  const renamed = renameTag(items[index].text, from, to)
+                  if (renamed != items[index].text) _item(id).write(renamed, '' /* whole item */, { keep_time: true })
+                }
+                lastEditorChangeTime = 0 // disable debounce even if editor focused
+                onEditorChange('')
+              })
               return (window['_mindbox_return'] = (async () => {
                 await _modal_close() // close/cancel all modals
                 const confirmed = await _modal({
@@ -6576,16 +6732,7 @@
                   background: 'cancel', // changes many items: background click cancels
                 })
                 if (!confirmed) return
-                // the previewed items that are still here, each renamed from the text it has NOW: a
-                // change that arrived while the dialog was open is kept, never overwritten by the preview
-                for (const id of ids) {
-                  const index = indexFromId.get(id)
-                  if (index === undefined) continue // deleted meanwhile
-                  const renamed = renameTag(items[index].text, from, to)
-                  if (renamed != items[index].text) _item(id).write(renamed, '' /* whole item */, { keep_time: true })
-                }
-                lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange('')
+                apply()
               })())
             } else if (cmd == '/_watch') {
               if (hostname != 'localhost') return alert(`/_watch: can not watch on ${hostname}`)
@@ -7003,7 +7150,7 @@
                     async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
                   })
                 )
-                  .then(obj => handleCommandReturn(cmd, cmd_item, obj, run, editing, return_alerts, handleError))
+                  .then(carryInput((obj: any) => handleCommandReturn(cmd, cmd_item, obj, run, editing, return_alerts, handleError)))
                   .catch(handleError))
               } catch (e) {
                 handleError(e)
@@ -7030,7 +7177,7 @@
                 })
                 // return promise so caller can wait for command output
                 return (window['_mindbox_return'] = Promise.resolve(ret)
-                  .then(obj => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError))
+                  .then(carryInput((obj: any) => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError)))
                   .catch(handleError))
               }
               return alert(`unknown command ${cmd} ${args}`)
@@ -7067,6 +7214,8 @@
       const { id } = unnamed
       if (__item(id).editing) return alert('can not name an item while editing it')
       if (!__item(id).editable) return alert('can not name an item that is not editable')
+      // (the creation is the key's that asked for it: its intent is captured before the dialog's wait, see userInput)
+      const named = carryInput((name: string) => onEditorDone(name, e, false, run, save, editing, attr, ignore_command, return_alerts))
       return (window['_mindbox_return'] = (async () => {
         await _modal_close() // close/cancel all modals
         let typed = freeName(_labels())
@@ -7085,7 +7234,7 @@
         // the last acknowledged time, not the query's soft touch (as the editor's alt+cmd save); known limit: it also replaces the time of a save still pending
         if (target.savedTime) target.time = target.savedTime
         if (!_item(id).write(labeledText(target.text, name), '' /* whole item */, { keep_time: true })) return
-        return onEditorDone(name, e, false, run, save, editing, attr, ignore_command, return_alerts)
+        return named(name)
       })())
     }
 
@@ -7875,13 +8024,16 @@
           confirm: 'Discard',
           cancel: 'Cancel',
           background: 'cancel',
-        }).then(confirmed => {
+        }).then(
+          // (the discard is the key's or the click's that asked for it: its intent is captured before the dialog's wait)
+          carryInput((confirmed: boolean) => {
           if (confirmed) {
             discardEdits()
             item.editing = false
             onItemEditing(item.index, false, false /* do not treat as cancellation, already discarded */)
           }
-        })
+          })
+        )
         item.editing = true // back to editing for now
         item.editorText = item.text
         return
@@ -8018,6 +8170,9 @@
       // released base (the vault's issue "Ordinary Run Looks Records Up By Id After An Await")
       const current = record => items[indexFromId.get(record.id)] === record
       _item(item.id).running = true
+      // (each run of the chain is the gesture's: its intent is captured here, before the waits for the
+      // dependencies, and handed to every run, the parent's last one included, see userInput)
+      const run = carryInput((index: number) => onItemRun(index, null /* no alt-runs */, touch_first))
       return (async () => {
         const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
         // each dependency is marked running until its run ends by ONE counted reference of this
@@ -8050,7 +8205,7 @@
             if (!current(record)) throw new Error(`item ${dep} deleted`) // a missing dependency
             _item(item.id).status = `running ${record.name} …`
             try {
-              await onItemRun(record.index, null /* no alt-runs */, touch_first)
+              await run(record.index) // (the gesture's, as the parent's run below: see `run` above)
             } finally {
               release(dep)
             }
@@ -8061,7 +8216,7 @@
         // (the parent's cached index is another item's once its record has left the page)
         if (!current(item)) throw new Error(`item ${item.id} deleted`)
         _item(item.id).status = 'running …'
-        return onItemRun(item.index, null /* no alt-run */, touch_first)
+        return run(item.index)
       })().finally(() => {
         if (!current(item)) return // its record left the page: a new one under its id holds nothing of this run's
         _item(item.id).status = ''
@@ -8072,7 +8227,8 @@
     // preview all previewable items before running
     const pending_previews = items.filter(item => item.previewable).map(previewItem)
     if (pending_previews.length) {
-      return Promise.all(pending_previews).then(() => onItemRun(item.index, e, touch_first))
+      // (the run is the click's: its intent is captured here, before the wait for the previews, see userInput)
+      return Promise.all(pending_previews).then(carryInput(() => onItemRun(item.index, e, touch_first)))
     }
 
     // create separate "run item" for installed items
@@ -8188,7 +8344,7 @@
     else {
       // touch first to avoid delayed scroll-to-top on cpu-intensive runs
       onItemTouch(index)
-      return update_dom().then(runItem) // return promise to allow pending dependents for alt-modified runs (see above)
+      return update_dom().then(carryInput(runItem)) // return promise to allow pending dependents for alt-modified runs (see above); the user's input carried (see userInput)
     }
   }
 
@@ -8529,6 +8685,11 @@
     const scrolledEntry = sessionStateHistory.get(sessionStateHistoryIndex)
     if (!popStateScrollPending && scrolledEntry?.scrolledToTop && !scrolledToTop())
       updateState({ scrolledToTop: false })
+    // (no write is ARMED for a launch's temporary first view: the entry it keeps holds its own position until
+    // the launch's query or the user's write is recorded there. Checked only when the timer fired, a scroll of
+    // the temporary view was stored on the kept entry once a keystroke had ended the keep: review 2 of
+    // phantom_steps)
+    if (launchKeeps()) return
     if (!historyUpdatePending || !sameView(historyUpdateView)) {
       clearTimeout(historyUpdateTimer)
       historyUpdatePending = true
@@ -8914,7 +9075,7 @@
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
-  import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry } from '../history_entries'
+  import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
@@ -9796,6 +9957,10 @@
     sessionEntryKey = place.held ? historyKey() : place.deferred && launchAnchor(launchEntry, historyOwner) ? launchKey : null
     finalizeStateOnEditorChange = true // make initial empty state final
     launchStateOnEditorChange = true // the launch's own view (see record in onEditorChange)
+    // the address's query, applied after the welcome: pending when the address is not empty, and over an entry
+    // of the notebook's that entry is kept as it is until then, the first view not written (see launchQueryPending)
+    ;({ pending: launchQueryPending, kept: launchQueryKept } = launchQuery(place, url_fragment))
+    launchQueryReplaced = false
     regroupTimeRowsPending = regroupTimeRowsForced = true // the initialized corpus gets its time rows, whatever ranked the empty query before it
     onEditorChange('') // initial sorting
     // the label tree of every item (the tag parents, ancestries, adoptions and closures at once)
@@ -11382,7 +11547,25 @@
             // that it can traverse between the page's initialization and the step, and reads the step's
             // completion (tests/e2e/editor.spec.ts). nothing waits in production
             if (window['_launch_fragment_gate']) await window['_launch_fragment_gate']
-            if (url_fragment) handleFragment(url_fragment)
+            launchQueryPending = false
+            if (url_fragment) {
+              // the launch's own write, as its first view is: over the entry the browser is on, which keeps what
+              // is its own (see record in onEditorChange), so a reload with a query in the box adds no entry
+              // (until 2026-11-19 the address's query was pushed after the launch's first view). Applied once,
+              // unless a click, an edit or a traversal has superseded it, and resolved NOW, against the items as
+              // they are. An address that names nothing by now, over an entry the launch kept, gets the view
+              // shown written over that entry (the launch's first view, as when the address is empty): left as
+              // it was, the entry held a query that the box did not show
+              const kept = launchQueryKept
+              launchQueryKept = false
+              launchStateOnEditorChange = true
+              if (!handleFragment(url_fragment) && kept) {
+                finalizeStateOnEditorChange = true // the launch's first view, final where the entry has no say
+                lastEditorChangeTime = 0 // disable debounce even if editor focused
+                onEditorChange(editorText)
+              }
+              launchStateOnEditorChange = false // (nothing is written where the address names nothing and no entry was kept)
+            }
             window['_launch_fragment_done'] = true
 
             // finalize dom, then evaluate _on_welcome on welcome items once the corpus SETTLED (see

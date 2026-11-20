@@ -1,7 +1,7 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
-import { focusMindbox, mindbox } from './editor_helpers.js'
+import { focusMindbox, mindbox, userSet } from './editor_helpers.js'
 import { customToken, firestore, install, interceptMindItems, loadAnonymous, secretFor, signIn, waitForApp, type TestUser } from './helpers.js'
 
 // the task-agents todoer (vault design notes/design/mind_task_agents.md, 2.2-2.4, 6; slice 3):
@@ -962,7 +962,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
       return box?.tagName == 'TEXTAREA' ? { value: box.value, start: box.selectionStart, end: box.selectionEnd } : null
     })
   const createChild = async (parent: string) => {
-    await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), parent)
+    await userSet(page, parent, { scroll: true })
     await page.waitForTimeout(500)
     await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
     await page.keyboard.press('Control+Enter')
@@ -1052,7 +1052,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // todo): the create key first asks for the todo's name, the next free `thread_<n>` offered (index.svelte,
   // onEditorDone; the dialog's own rows are in editor2.spec.ts); accepted, the label stands before the
   // #todo tag, as the owner writes it by hand, and the child is the task chat a named todo gets from the hook
-  await page.evaluate(name => (window as any).MindBox.set(name, { scroll: true }), 'id:' + twinId)
+  await userSet(page, 'id:' + twinId, { scroll: true })
   await page.waitForTimeout(500)
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
   await page.keyboard.press('Shift+Enter')
@@ -1085,7 +1085,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // created last, so another item's element is absent until a re-render happens to include it,
   // which the reads below raced (issues/The Delegation Row Reads A Null Elem.md)
   const shown = async (name: string) => {
-    await page.evaluate(n => void (window as any).MindBox.set(n, { scroll: true }), name)
+    await userSet(page, name, { scroll: true })
     await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem, name), { timeout: 30_000 }).toBe(true)
   }
   await shown(`${CC}/0`)
@@ -1192,7 +1192,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   expect(await page.evaluate(() => (window._item('#todoer') as any).eval('_scan_notify()'))).toBeGreaterThanOrEqual(1)
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 10_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context'])
   // the click: the notification closed, the item targeted by its name (its todo line selected)
-  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await userSet(page, '')
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${NOTIFY} ?$`))
   expect((await notified()).at(-1)!.closed, 'the clicked notification is closed').toBe(true)
@@ -1219,7 +1219,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await rewriteText(chatId, text => `${text.replace(/\s*$/, '')}\n<<agent('vault/default · run ab12cd34 · 2s')>>\n<!--inert-->\nHere is the answer you asked for.\nmore below\n<!--/inert-->`)
   await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(repliesBefore + 1)
   expect((await notified()).at(-1)).toMatchObject({ title: `[reply] ${CHATTY}/0`, body: 'Here is the answer you asked for.', tag: `todoer:${chatId}`, requireInteraction: true, closed: false })
-  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await userSet(page, '')
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${CHATTY}/0 ?$`))
   // THE SNOOZE DIALOG'S BOX (2026-10-21): the drop on the snooze bin opens the dialog with its
@@ -1288,7 +1288,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(async () => (await lists(page)).main.some(r => r[0].includes('answer the agent')), { timeout: 30_000 }).toBe(true)
   await page.waitForTimeout(1500) // a later observation (a render, the hook of the list's save) adds nothing
   expect((await notified()).length, 'one notification for the unsnooze').toBe(beforeSweep + 1)
-  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await userSet(page, '')
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${NOTIFY} ?$`))
   // the box starts unchecked at EVERY opening (review B1): the app's modal keeps an unchanged
@@ -1441,7 +1441,7 @@ const box = (page: Page) => page.evaluate(() => (window as any).MindBox.get())
 // the todo's row in the main list (a click at its right end, past its text, selects the item and scrolls to it)
 const todoRow = (page: Page) => page.locator('.todoer-widget').first().locator('.list > .list-item-container', { hasText: 'reach the item below' }).locator('.list-item')
 
-test("after a launch a todo row's click scrolls to its item, and Back returns to where the launch left the page, at the header; so does Back from a launch with a query in the address; a position recorded at the page's very top is restored as recorded", async ({ page, context }) => {
+test("after a launch a todo row's click scrolls to its item, and Back returns to where the launch left the page, at the header; a launch with a query in the address writes it over its own entry and adds none; a position recorded at the page's very top is restored as recorded", async ({ page, context }) => {
   const TODO = '#e2e_launch_todo'
   const ELSEWHERE = '#e2e_launch_elsewhere'
   const elsewhereId = await launchAccount(page, LAUNCH_USER, 'e2e_launch')
@@ -1461,8 +1461,7 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   expect(await header(launched), 'the header is below the top of the page').toBeGreaterThan(2)
   // (b) the row's click (at its right end, past its text) selects the item and scrolls to it, in an entry
   // of its own (the app's select, as a click on an item's number; the widget used to set the box,
-  // which pushed from the launch's entry too: it is final); Back is the first view, at the header. The
-  // entry that recorded no position and restores to the header is the one of phase (c)
+  // which pushed from the launch's entry too: it is final); Back is the first view, at the header
   const row = todoRow(launched)
   await expect(row).toBeVisible()
   const rowBox = (await row.boundingBox())!
@@ -1497,19 +1496,17 @@ test("after a launch a todo row's click scrolls to its item, and Back returns to
   expect(await entries(launched)).toEqual([2, 0])
   await launched.close()
 
-  // (c) a launch with a query in the address: the query's entry is pushed over the first one, and the
-  // page scrolls to the item it names; Back is the first view, which this launch never showed, at the header:
-  // its entry, which the launch wrote before the header was on the page and which this tab has not been on
-  // since, holds NO position (not a zero), and restores to the header
+  // (c) a launch with a query in the address: the page scrolls to the item it names, and the address's query
+  // is written over the launch's own entry, the launch's own write as its first view is: ONE entry, of the
+  // query, final (until 2026-11-19 the query's entry was pushed after the first view, which this launch never
+  // showed and which Back then reached at the header: the launch wrote that entry before the header was on the
+  // page, and it held no position)
   const named = await launch(context, '/' + TODO)
   await expect.poll(() => box(named), { timeout: 10_000 }).toBe(TODO + ' ')
   await expect.poll(async () => (await top(named)) - (await header(named)), { message: 'the launch scrolled to the named item', timeout: 10_000 }).toBeGreaterThan(300)
   await recorded(named)
-  expect(await entries(named), "the address's query in a second entry").toEqual([2, 1])
-  expect(await named.evaluate(() => [(window as any)._history[0].editorText, (window as any)._history[0].scrollPosition]), 'entry 0 recorded no position').toEqual(['', undefined])
-  await named.goBack()
-  await expect.poll(() => box(named), { timeout: 10_000 }).toBe('')
-  await at(named, () => header(named), "Back from the address's query shows the first view at the header")
+  expect(await entries(named), "the address's query in the launch's own entry").toEqual([1, 0])
+  expect(await named.evaluate(() => [history.state.index, history.state.editorText, history.state.final]), "the entry holds the address's query, final").toEqual([0, TODO + ' ', true])
 })
 
 // BACK AFTER A RELOAD AND A TODO ROW'S CLICK (the owner, 2026-11-17, on the fix the row above came with:
@@ -1542,9 +1539,9 @@ test("after a reload on a re-ranked first view, a todo row's click and Back retu
   expect(await top(tab), 'the first view, left below the header').toBe(left)
   // a second entry of the first view, not final: a query that names nothing, set from the blurred box and
   // cleared again
-  await tab.evaluate(() => void (window as any).MindBox.set('e2e_reload_nothing'))
+  await userSet(tab, 'e2e_reload_nothing')
   await expect.poll(() => entries(tab), { message: 'the query that names nothing, in an entry of its own', timeout: 10_000 }).toEqual([2, 1])
-  await tab.evaluate(() => void (window as any).MindBox.set(''))
+  await userSet(tab, '')
   await expect.poll(() => tab.evaluate(() => [history.state.index, history.state.editorText, history.state.final]), { message: 'cleared again in the same entry', timeout: 10_000 }).toEqual([1, '', false])
   expect((await tab.evaluate(() => (window as any)._history[0].scrollPosition)) as number, "the first view's own entry holds where it was left").toBe(left)
   // the change made elsewhere re-ranks the first view, in that entry (it is not final)
