@@ -31,13 +31,21 @@ import { customToken, firestore, install, interceptMindItems, loadUser, secretFo
 // (g) a visual viewport much shorter than the window hides the sparkle and its return shows it
 // (SIMULATED: a desktop lane has no on-screen keyboard); (g2) the item renamed, its code kept,
 // is no longer the page's #vault: its sparkle goes, with its store still naming the watcher and
-// the bridge fresh, and comes back when the item is #vault again; (h) the item's deletion
-// removes it at the task's next look; (i) a successful sign-out leaves none.
+// the bridge fresh, and comes back when the item is #vault again.
 // A second row, on the same account as a returning device, is the watched mark (the vault's
 // design note, D25): what the item watcher follows is published as rules in the same value, and
-// the item marks the items the rules name (its phases are at the row)
+// the item marks the items the rules name (its phases are at the row). The LAST row, on the
+// same account as a returning device too, is the sparkle's end: (h) the item's deletion removes
+// it at the task's next look; (i) installed again and watched, a successful sign-out leaves none
 test.describe.configure({ mode: 'serial' })
 test.setTimeout(300_000)
+// the bound of the polls that wait for the page or the server (30 s; the others carry their own).
+// A pin of these rows may lower it on its own command, as an opt-in, so that a caught mutant fails
+// in seconds: `E2E_POLL_MS=5000 tests/e2e/run.sh tests/e2e/sparkle.spec.ts ...`, after a control of
+// the unmutated rows at the same bound. Never set for the gate, which needs no guard: a lower bound
+// can only make a healthy row fail, never hide a failure. A positive bound below 30 s; any other
+// value, or none, is the 30 s
+const POLL_MS = (ms => (Number.isInteger(ms) && ms > 0 && ms < 30_000 ? ms : 30_000))(Number(process.env.E2E_POLL_MS))
 
 const USER: TestUser = { uid: 'sparkle_e2e', displayName: 'Sparkle Test', email: 'sparkle@e2e.test' }
 const PHRASE = 'sparkle e2e phrase'
@@ -146,7 +154,7 @@ const STARTING = 'An agent is starting to watch'
 const entries = (page: Page) => page.locator(ENTRY).allTextContents()
 const heartbeat = (page: Page) => page.evaluate(host => (window._item('#status', true) as any)._global_store._status.hosts[host].updated as number, HOST)
 const sent = async (kind: string) => {
-  await expect.poll(async () => (await commands()).map(c => c.wrapper.item.kind), { timeout: 30_000 }).toEqual([kind])
+  await expect.poll(async () => (await commands()).map(c => c.wrapper.item.kind), { timeout: POLL_MS }).toEqual([kind])
   const [command] = await commands()
   expect(command.wrapper.name).toBe('watch_command_' + command.wrapper.item.id)
   expect([command.raw.hidden, command.raw.text, command.raw.user]).toEqual([true, null, USER.uid])
@@ -173,7 +181,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
   const token = await customToken(USER)
   await page.goto('/')
-  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: 30_000 })
+  await page.waitForFunction(() => !!window.firebase?.auth?.signInWithCustomToken, null, { timeout: POLL_MS })
   await page.evaluate(token => {
     sessionStorage.setItem('mindpage_signin_pending', '1')
     document.cookie = '__session=signin_pending;max-age=600'
@@ -188,34 +196,34 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   expect(await install(page, 'status'), '/_install status').toBeNull()
   // the install returns before its writes are acknowledged, and the app asks "Discard unsaved
   // changes?" at a reload over an unsaved item: wait for the writes first
-  await page.waitForFunction(() => (window as any).__items.every((item: any) => item.text == item.savedText), null, { timeout: 30_000 })
+  await page.waitForFunction(() => (window as any).__items.every((item: any) => item.text == item.savedText), null, { timeout: POLL_MS })
   await page.reload({ timeout: 60_000 })
   await waitForApp(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
 
   // (a) an install after the page's welcome: the item's own change draws the element, hidden
   // while nobody watches, and the app's install hook provisions the store (the hook the app
   // did not run before its fix of 2026-11-15)
   expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0 })
   expect(await install(page, 'vault'), '/_install vault').toBeNull()
-  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
+  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: POLL_MS }).toBe(1)
   expect(await sparkle(page)).toMatchObject({ nodes: 1, styles: 1, menus: 0, layers: 0, shown: false })
-  await expect.poll(async () => !!(await savedId(page, '#vault')) && !!(await savedId(page, '#status')), { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => !!(await savedId(page, '#vault')) && !!(await savedId(page, '#status')), { timeout: POLL_MS }).toBe(true)
   const vaultStore = 'global_store_' + (await savedId(page, '#vault'))
   const statusStore = 'global_store_' + (await savedId(page, '#status'))
   const held = async (name: string) => (await hidden()).some(d => d.wrapper.name == name)
-  await expect.poll(() => held(statusStore), { message: 'the #status store is provisioned (its welcome)', timeout: 30_000 }).toBe(true)
-  await expect.poll(() => held(vaultStore), { message: 'the #vault store is provisioned (its _on_install)', timeout: 30_000 }).toBe(true)
+  await expect.poll(() => held(statusStore), { message: 'the #status store is provisioned (its welcome)', timeout: POLL_MS }).toBe(true)
+  await expect.poll(() => held(vaultStore), { message: 'the #vault store is provisioned (its _on_install)', timeout: POLL_MS }).toBe(true)
 
   // (b) #vault off screen: the page shows a plain item alone, and the vault item has no
   // element; the bridge publishes its #status entry and who watches
   await page.evaluate(text => void window._create(text), `${NOTE} a plain item`)
-  await expect.poll(() => savedId(page, NOTE), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => savedId(page, NOTE), { timeout: POLL_MS }).toBeTruthy()
   await page.evaluate(label => (window as any).MindBox.set(label), NOTE)
-  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false && window._item('#vault', true)?.elem == null), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false && window._item('#vault', true)?.elem == null), { timeout: POLL_MS }).toBe(true)
   await fresh(page)
   await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
   expect(await page.evaluate(() => window._item('#vault', true)?.elem == null), '#vault is still off screen').toBe(true)
   // the element is the page's own: at its lower right, above the items
   const placed = await page.evaluate(sel => {
@@ -226,13 +234,13 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   }, NODE)
   expect(placed).toEqual({ parent: true, right: 14, bottom: 10, size: [24, 24], top: true })
   await watched(page, { name: AGENT, took: TOOK, state: 'answering', by: 'gpt-6-astra-ultra' })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown('gpt-6-astra-ultra is answering', { answering: true }))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown('gpt-6-astra-ultra is answering', { answering: true }))
   await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
   await fresh(page, 4 * 60_000) // the bridge's entry four minutes old: stale
-  await expect.poll(async () => (await sparkle(page)).shown, { timeout: 30_000 }).toBe(false)
+  await expect.poll(async () => (await sparkle(page)).shown, { timeout: POLL_MS }).toBe(false)
   await fresh(page)
-  await expect.poll(async () => (await sparkle(page)).shown, { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).shown, { timeout: POLL_MS }).toBe(true)
 
   // (c) the keyboard: Enter on the focused sparkle opens the menu with its entry focused,
   // and is not the app's Enter, which would open the shown item's editor (the plain item is
@@ -265,14 +273,14 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   await page.locator(NODE).click()
   await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
   await watched(page, { name: AGENT, took: LATER, state: 'watching' })
-  await expect.poll(async () => (await sparkle(page)).menus, { timeout: 30_000 }).toBe(0)
+  await expect.poll(async () => (await sparkle(page)).menus, { timeout: POLL_MS }).toBe(0)
   expect(await sparkle(page)).toEqual(shown(`${AGENT} is watching`))
 
   // (e) Stop Watching: one command document through the app's hidden-document operation, naming
   // the watch the menu showed; the sparkle shows the stop until the watcher goes
   await page.locator(NODE).click()
   await page.locator(ENTRY).click()
-  await expect.poll(async () => (await commands()).length, { timeout: 30_000 }).toBe(1)
+  await expect.poll(async () => (await commands()).length, { timeout: POLL_MS }).toBe(1)
   const [stop] = await commands()
   expect(stop.wrapper.name).toBe('watch_command_' + stop.wrapper.item.id)
   expect(stop.wrapper.item).toEqual({ id: stop.wrapper.item.id, kind: 'stop', took: LATER, at: stop.wrapper.item.at })
@@ -292,7 +300,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   }
   await firestore().collection('items').doc(stop.doc).delete() // the bridge deletes what it dealt with
   await watched(page, null) // and the watcher it stopped is gone from the listing: the offer, dim
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(offered(OFFER))
 
   // (e1) a menu a pointer opens. No entry is highlighted until the pointer or an arrow comes,
   // and one at most: the highlight is the focus, which the pointer over an entry takes there
@@ -390,7 +398,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   // the bridge names the start: this tab's own mark is over, and the bridge's record shows
   const begun = { id: start.wrapper.item.id, agent: 'claude', at: new Date().toISOString(), state: 'starting', tab: true }
   await watched(page, { state: 'none', start: begun })
-  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: 30_000 }).toBeNull()
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: POLL_MS }).toBeNull()
   expect(await sparkle(page)).toEqual(offered(STARTING, { answering: true }))
 
   // (e3) Cancel Start names the start the menu showed
@@ -403,7 +411,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   expect(await sparkle(page)).toEqual(offered('Cancelling the start', { answering: true }))
   // the bridge could not tell what became of it: a click then opens the menu, and starts nothing
   await watched(page, { state: 'none', start: { ...begun, state: 'unknown', note: 'no watcher appeared' } })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered("A start's outcome is unknown: no watcher appeared"))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(offered("A start's outcome is unknown: no watcher appeared"))
   await page.locator(NODE).click()
   await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
   expect([await entries(page), (await commands()).length]).toEqual([['Start Claude Watcher', 'Start Codex Watcher', 'Cancel Start'], 0])
@@ -412,7 +420,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   // (e4) the last watcher that can be resumed: the right click opens the menu on the offer,
   // and the resume names that watcher by the bridge's key
   await watched(page, { state: 'none', last: { name: AGENT, agent: 'claude', key: KEY } })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(offered(OFFER))
   await page.locator(NODE).click({ button: 'right' })
   await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
   expect(await entries(page)).toEqual(['Start Claude Watcher', 'Start Codex Watcher', 'Resume Last Watcher (Claude)'])
@@ -423,7 +431,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   // hide the mark: the page cannot tell whose start a watcher was)
   const resumed = { id: resume.wrapper.item.id, agent: 'claude', resume: true, at: new Date().toISOString(), state: 'starting', tab: true }
   await watched(page, { state: 'none', start: resumed, last: { name: AGENT, agent: 'claude', key: KEY } })
-  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: 30_000 }).toBeNull()
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.marks.started), { timeout: POLL_MS }).toBeNull()
 
   // (e5) Close Agent Session, for a watcher in a herdr tab the bridge can close: the app's own
   // dialog first; cancelled, nothing is sent; confirmed, the close names the take the menu
@@ -434,7 +442,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   const hung = () => page.locator(NODE).getAttribute('data-vault-jump')
   expect(await hung(), 'nothing to bring up while nobody watches').toBeNull()
   await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true, jump: JUMP })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
   expect(await hung()).toBe(JSON.stringify(JUMP))
   const dialog = page.locator('.modal')
   for (const answer of ['cancel', 'confirm']) {
@@ -447,7 +455,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
     expect([(await sparkle(page)).menus, (await commands()).length]).toEqual([0, 0])
     if (answer == 'confirm') {
       await watched(page, { name: AGENT, took: LATER, state: 'watching', tab: true })
-      await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.shown?.took), { timeout: 30_000 }).toBe(LATER)
+      await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.shown?.took), { timeout: POLL_MS }).toBe(LATER)
     }
     await page.locator(`.modal .button.${answer}`).click()
     await expect.poll(() => page.evaluate(() => (window as any)._modal_visible())).toBe(false)
@@ -479,13 +487,13 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
     expect([recorded.key, recorded.took, recorded.session]).toEqual([KEY, TOOK, SESSION])
   }
   await watched(page, null)
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(offered(OFFER))
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(offered(OFFER))
 
   // (f) another tab updates the item while the menu is open here: this tab's controller is
   // replaced (the earlier code's menu, element and style go; one element stays), and the other
   // tab draws its own, one too
   await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
-  await expect.poll(async () => (await sparkle(page)).shown, { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).shown, { timeout: POLL_MS }).toBe(true)
   await page.locator(NODE).click()
   await expect.poll(async () => (await sparkle(page)).menus).toBe(1)
   const code = await page.evaluate(() => (window as any)._vault_sparkle.code)
@@ -499,7 +507,7 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
   })
   await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle?.code), { timeout: 60_000 }).not.toBe(code)
   expect(await sparkle(page)).toEqual(shown(`${AGENT} is watching`))
-  await expect.poll(() => sparkle(other), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
+  await expect.poll(() => sparkle(other), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
   await other.close()
 
   // (g) a visual viewport much shorter than the window, as a phone's keyboard leaves it
@@ -526,26 +534,16 @@ test('the sparkle shows who watches the account, and its menu stops that watch',
       item.write(item.read('').replace(from + ' lists', to + ' lists'), '')
     }, [from, to])
   await relabel('#vault', '#vault_old')
+  // 30 s, never POLL_MS: the cleanup can be the task's, whose next look is up to 15 s away
   await expect.poll(() => sparkle(page), { timeout: 30_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
   expect(await page.evaluate(() => (window._item('#vault_old', true) as any)?._global_store?._bridge?.watcher?.name)).toBe(AGENT)
   await relabel('#vault_old', '#vault')
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
-
-  // (h) the item is deleted: its task's next look removes everything the sparkle owned
-  await page.evaluate(() => window._item('#vault', true)!.delete(false))
-  await expect.poll(() => sparkle(page), { timeout: 45_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
-  expect(await page.evaluate(() => '_vault_sparkle' in window)).toBe(false)
-
-  // (i) installed again and watched, then a successful sign-out: the reloaded page has none
-  expect(await install(page, 'vault'), '/_install vault again').toBeNull()
-  await expect.poll(async () => !!(await savedId(page, '#vault')), { timeout: 30_000 }).toBe(true)
-  const reinstalled = 'global_store_' + (await savedId(page, '#vault'))
-  await expect.poll(async () => (await hidden()).some(d => d.wrapper.name == reinstalled), { timeout: 30_000 }).toBe(true)
-  await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
-  await expect.poll(() => sparkle(page), { timeout: 30_000 }).toEqual(shown(`${AGENT} is watching`))
-  await page.evaluate(() => void window._create('/_signout', { command: true }))
-  await expect.poll(() => page.evaluate(() => window._readonly === true && window._init_time > 0).catch(() => false), { timeout: 90_000 }).toBe(true)
-  expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
+  // the account as this row leaves it is where the rows after it start: no save is in flight when
+  // the row ends (the app's own test, hasLocalIntent). Unsent, the relabel's write left #vault_old
+  // for the next row's page: `text == savedText` held at once, the relabel back being equal to
+  // the text saved before the first relabel's save came back
+  await page.waitForFunction(() => (window as any).__items.every((item: any) => !item.saveTask && !item.saving && !item.unackedWrites?.length), null, { timeout: POLL_MS })
   expect(dialogs, 'no alert of the sparkle or the installs').toEqual([])
 })
 
@@ -589,15 +587,15 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   }, SECRET)
   await loadUser(page, USER)
   await waitForApp(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
-  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: POLL_MS }).toBe(1)
 
   const TAG = '#e2e_watched'
   const KID = '#e2e_mark_r/kid'
   const made = [`${TAG} is this item's own label`, `#e2e_mark_a an item that carries ${TAG}`, '#e2e_mark_h carries the hidden form #_e2e_watched', '#e2e_mark_r has a relative tag #/kid', '#e2e_mark_p a plain item']
   for (const text of made) {
     await page.evaluate(text => void window._create(text), text)
-    await expect.poll(() => savedId(page, text.split(' ')[0]), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => savedId(page, text.split(' ')[0]), { timeout: POLL_MS }).toBeTruthy()
   }
   // the items the marks' stylesheet names, by label, and the menu's lines
   const marks = () =>
@@ -622,7 +620,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   expect(await page.evaluate(() => (window._item('#e2e_mark_h', true) as any).tags_raw)).toEqual(['#e2e_mark_h', '#_e2e_watched'])
   await fresh(page)
   await follows([{ ...RULE, tags: [TAG, KID] }])
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_r', TAG])
+  await expect.poll(marks, { timeout: POLL_MS }).toEqual(['#e2e_mark_a', '#e2e_mark_r', TAG])
   expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (3 items)`])
   // the sparkle's tooltip says it too, on a second line below who watches (the owner, 2026-11-18)
   expect((await sparkle(page)).title).toBe(`${AGENT} is watching\nwatched: ${TAG}, ${KID} (3 items)`)
@@ -642,7 +640,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     }, [label, part])
   const shows = async (label: string) => {
     await page.evaluate(label => (window as any).MindBox.set(label), label)
-    await expect.poll(() => page.evaluate(label => (window as any)._mindboxDebounced === false && !!window._item(label, true)?.elem, label), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(label => (window as any)._mindboxDebounced === false && !!window._item(label, true)?.elem, label), { timeout: POLL_MS }).toBe(true)
   }
   const NUMBER = '.item-menu > .button.index'
   const SPARKLE = 'url("data:image/svg+xml,%3'
@@ -689,7 +687,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await page.locator(`#textarea-${id}`).fill(`#e2e_mark_p now carries ${TAG}`)
   await page.keyboard.press('Shift+Enter') // save
   await expect(page.locator(`#textarea-${id}`)).toBeHidden()
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
+  await expect.poll(marks, { timeout: POLL_MS }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
   expect(await look('#e2e_mark_p', NUMBER)).toEqual([SPARKLE, '15px', 'none'])
   expect(await lines()).toEqual([`watched: ${TAG}, ${KID} (4 items)`])
   const by_number = await drawn('#e2e_mark_p', NUMBER)
@@ -700,19 +698,19 @@ test('the watched mark is on the items an agent follows, and the menu says what 
 
   // (c) a stale bridge: the marks go with the sparkle, and come back with it
   await fresh(page, 4 * 60_000)
-  await expect.poll(marks, { timeout: 30_000 }).toEqual([])
+  await expect.poll(marks, { timeout: POLL_MS }).toEqual([])
   expect((await sparkle(page)).shown).toBe(false)
   await fresh(page)
-  await expect.poll(marks, { timeout: 30_000 }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
+  await expect.poll(marks, { timeout: POLL_MS }).toEqual(['#e2e_mark_a', '#e2e_mark_p', '#e2e_mark_r', TAG])
 
   // (d) a watch of all items: every item is marked, by a stylesheet that names none. The item a
   // rule named is drawn exactly as it was under that rule; the hidden form's carrier, which no
   // rule ever named, has the same sparkle by its number and in its edit menu; the menu and the
   // sparkle say it; and a stale bridge clears these marks as it clears any
   await follows([{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'sweep', all: true }])
-  await expect.poll(sheet, { timeout: 30_000 }).toMatch(EVERY)
+  await expect.poll(sheet, { timeout: POLL_MS }).toMatch(EVERY)
   expect(await marks(), 'the stylesheet names no item').toEqual([])
-  await expect.poll(async () => (await sparkle(page)).title, { timeout: 30_000 }).toBe(`${AGENT} is watching\nwatched: ${TAG} · all items`)
+  await expect.poll(async () => (await sparkle(page)).title, { timeout: POLL_MS }).toBe(`${AGENT} is watching\nwatched: ${TAG} · all items`)
   expect(await lines()).toEqual([`watched: ${TAG}`, 'watched: all items'])
   expect(await drawn('#e2e_mark_p', NUMBER), 'by the number, every computed property as under the rule that named the item').toBe(by_number)
   await edit(id)
@@ -725,10 +723,10 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   expect(await look('#e2e_mark_h', '.edit-menu')).toEqual(['""', '23px', SPARKLE])
   await close(unnamed)
   await fresh(page, 4 * 60_000)
-  await expect.poll(sheet, { timeout: 30_000 }).toBe('')
+  await expect.poll(sheet, { timeout: POLL_MS }).toBe('')
   expect((await look('#e2e_mark_h', NUMBER))![0]).toBe('none')
   await fresh(page)
-  await expect.poll(sheet, { timeout: 30_000 }).toMatch(EVERY)
+  await expect.poll(sheet, { timeout: POLL_MS }).toMatch(EVERY)
 
   // (e) the menu is never taller than the window (review 54, B2). Eight follows of eight long
   // tags are within the bridge's bounds (its own `rule` and `_bounded` publish them unchanged, 3,872
@@ -737,7 +735,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   // was asked for in this page, so the viewport is Playwright's to set.)
   const dense = Array.from({ length: 8 }, (_, n) => ({ ...RULE, watch: `area-${n}`, tags: Array.from({ length: 8 }, (_, m) => `#project-operations-area-weekly-planning-${n}-${m}`) }))
   await watched(page, { name: AGENT, took: TOOK, state: 'watching', tab: true, follows: dense })
-  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.found?.rules.length ?? 0), { timeout: 30_000 }).toBe(8)
+  await expect.poll(() => page.evaluate(() => (window as any)._vault_sparkle.found?.rules.length ?? 0), { timeout: POLL_MS }).toBe(8)
   await page.setViewportSize({ width: 375, height: 667 })
   await page.locator(NODE).focus()
   await page.keyboard.press('Enter')
@@ -780,7 +778,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   // (the menu is read only once the look for the rule has been made: a look closes an open menu)
   const looked = (tags: number) =>
     expect
-      .poll(() => page.evaluate(tags => ((held: any) => held.follows.length == 1 && held.follows[0].tags.length == tags && held.found !== null)((window as any)._vault_sparkle), tags), { timeout: 30_000 })
+      .poll(() => page.evaluate(tags => ((held: any) => held.follows.length == 1 && held.follows[0].tags.length == tags && held.found !== null)((window as any)._vault_sparkle), tags), { timeout: POLL_MS })
       .toBe(true)
   await follows([{ ...RULE, tags: [TAG] }])
   await looked(1)
@@ -803,8 +801,8 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   const RUN = '#e2e_mark_run'
   const RUN_TEXT = `${RUN} carries ${TAG} and can run: its first line is long enough to reach the room that the two marks keep free beside its number.\n` + '```js_input\n1\n```'
   await page.evaluate(text => void window._create(text), RUN_TEXT)
-  await expect.poll(() => savedId(page, RUN), { timeout: 30_000 }).toBeTruthy()
-  await expect.poll(marks, { timeout: 30_000 }).toContain(RUN)
+  await expect.poll(() => savedId(page, RUN), { timeout: POLL_MS }).toBeTruthy()
+  await expect.poll(marks, { timeout: POLL_MS }).toContain(RUN)
   await shows(RUN)
   const runId = await page.evaluate(label => window._item(label, true)!.id, RUN)
   const BLUE = 'rgb(68, 170, 255)' // #4af, the ring's
@@ -968,15 +966,15 @@ test('the watched mark is on the items an agent follows, and the menu says what 
     store._bridge.runs = { r1: { item: runSaved, status: 'Reading file docs/x.md', started: 1 } }
     store._supervisor = { runs: { r1: { status: "Searching the web for 'a <b> & c'", progress: 0.5 } } }
   })
-  await expect.poll(async () => [await tip(), await references()], { message: 'the listed run\'s status is the ring\'s tooltip, its progress the ring\'s fill, on a second running reference', timeout: 30_000 }).toEqual([POSTED, 2])
+  await expect.poll(async () => [await tip(), await references()], { message: 'the listed run\'s status is the ring\'s tooltip, its progress the ring\'s fill, on a second running reference', timeout: POLL_MS }).toEqual([POSTED, 2])
   await publish(page, '#vault', store => {
     store._bridge.runs = {}
     delete store._supervisor
   })
-  await expect.poll(references, { message: 'delisted: the #vault item has released its reference', timeout: 30_000 }).toBe(1)
+  await expect.poll(references, { message: 'delisted: the #vault item has released its reference', timeout: POLL_MS }).toBe(1)
   expect(await tip(), 'and has deferred its clearing while the item runs on the row\'s reference: the status and the fill are still on the ring').toEqual(POSTED)
   await page.evaluate(id => (window._item(id, true) as unknown as { clear_status: () => void }).clear_status(), runId)
-  await expect.poll(tip, { message: 'cleared by the row: the ring turns, and says that the item runs', timeout: 30_000 }).toEqual(['running', false, false, ''])
+  await expect.poll(tip, { message: 'cleared by the row: the ring turns, and says that the item runs', timeout: POLL_MS }).toEqual(['running', false, false, ''])
   // an older #vault item's stylesheet on this app: no room said, and the same picture
   const older = await beside('the older stylesheet says no room, and the marks, the run button and the room are the same', m => [marksAre(m.marks, [[18, 4], [36, 21]]), m.run, m.room, m.said], [true, both.run, both.room, ''], { older: true })
   expect(older.text).toBeGreaterThanOrEqual(older.run[1] + 1)
@@ -1181,12 +1179,12 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   }, runId)
   await page.setViewportSize({ width: Math.ceil(fit.row + (23 + 6) + 14 + fit.beside), height: 667 })
   const changed = async (past: boolean, message: string) => {
-    await expect.poll(async () => (found => [found.rows, found.past])(await menu()), { message, timeout: 30_000 }).toEqual([1, past])
+    await expect.poll(async () => (found => [found.rows, found.past])(await menu()), { message, timeout: POLL_MS }).toEqual([1, past])
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     return (await menu()).heights
   }
   await expect
-    .poll(async () => (found => [found.rows, found.past, found.agree])(await menu()), { message: 'the premise: watched at this width the one row begins left of the item\'s left edge, and the resized window\'s heights are settled', timeout: 30_000 })
+    .poll(async () => (found => [found.rows, found.past, found.agree])(await menu()), { message: 'the premise: watched at this width the one row begins left of the item\'s left edge, and the resized window\'s heights are settled', timeout: POLL_MS })
     .toEqual([1, true, true])
   const height = (await menu()).heights
   await follows([{ ...RULE, tags: [KID] }]) // the watch no longer names the item's tag
@@ -1231,7 +1229,7 @@ test('the watched mark is on the items an agent follows, and the menu says what 
   await runs(true)
   await expect.poll(dimmed, 'and begins again: the same overlay').toEqual({ ...SAVING, running: true })
   release()
-  await expect.poll(dimmed, { message: 'saved, still running: no overlay', timeout: 30_000 }).toEqual({ saving: false, running: true, overlay: 'hidden', shade: 'rgba(0, 0, 0, 0.5)', covers: true, spinner: [0, null] })
+  await expect.poll(dimmed, { message: 'saved, still running: no overlay', timeout: POLL_MS }).toEqual({ saving: false, running: true, overlay: 'hidden', shade: 'rgba(0, 0, 0, 0.5)', covers: true, spinner: [0, null] })
   await page.unroute(WRITES)
   await runs(false)
   await boxed(false)
@@ -1356,8 +1354,8 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
     }, SECRET)
     await loadUser(page, USER)
     await waitForApp(page)
-    await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
-    await expect.poll(async () => (await sparkle(page)).nodes, { timeout: 30_000 }).toBe(1)
+    await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
+    await expect.poll(async () => (await sparkle(page)).nodes, { timeout: POLL_MS }).toBe(1)
   }
   const context = await browser.newContext(PHONE)
   const phone = await context.newPage()
@@ -1373,7 +1371,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   const WORD = 'selectable'
   for (const text of [`${TAG} is this item's own label`, `${ONE} a ${WORD} item that carries ${TAG}`]) {
     await phone.evaluate(text => void window._create(text), text)
-    await expect.poll(() => savedId(phone, text.split(' ')[0]), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => savedId(phone, text.split(' ')[0]), { timeout: POLL_MS }).toBeTruthy()
   }
   const SINCE = '2026-11-18T09:01:02.000Z'
   const since = await phone.evaluate(since => new Date(since).toLocaleString(), SINCE)
@@ -1386,7 +1384,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   const ENTRIES = [['stop', 'Stop Watching', ''], ['close', 'Close Agent Session', '']]
   await fresh(phone)
   await follows([{ ...RULE, tags: [TAG] }])
-  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: POLL_MS }).toBe(`${WATCHING}\n${LINE}`)
 
   // (a) the sparkle is the desktop's, tooltip and all; a tap opens the menu, which says the
   // tooltips' words below its entries
@@ -1432,7 +1430,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   await phone.keyboard.press('Escape')
   await expect.poll(async () => (await sparkle(phone)).menus).toBe(0)
   await phone.evaluate(label => (window as any).MindBox.set(label), ONE)
-  await expect.poll(() => phone.evaluate(label => !!window._item(label, true)?.elem?.querySelector('.item'), ONE), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => phone.evaluate(label => !!window._item(label, true)?.elem?.querySelector('.item'), ONE), { timeout: POLL_MS }).toBe(true)
   const word = await phone.evaluate(
     ([label, word]) => {
       const walker = document.createTreeWalker(window._item(label, true)!.elem!.querySelector('.item')!, NodeFilter.SHOW_TEXT)
@@ -1468,7 +1466,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
     const desk = await browser.newContext()
     const desktop = await desk.newPage()
     await returning(desktop)
-    await expect.poll(async () => (await sparkle(desktop)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+    await expect.poll(async () => (await sparkle(desktop)).title, { timeout: POLL_MS }).toBe(`${WATCHING}\n${LINE}`)
     await desktop.locator(NODE).click()
     await expect.poll(async () => (await sparkle(desktop)).menus).toBe(1)
     const menu = await menuLook(desktop)
@@ -1481,7 +1479,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   const THREE = [{ ...RULE, tags: [TAG] }, { ...RULE, watch: 'phones', labels: [`${TAG}*`] }, { watch: 'one', name: OTHER, since: SINCE, ids: [oneId] }]
   await follows(THREE)
   const LINES = [LINE, `watched: ${TAG}* (2 items)`, `watched: ${ONE}`]
-  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\nwatched: ${LINES.map(line => line.slice('watched: '.length)).join(' · ')}`)
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: POLL_MS }).toBe(`${WATCHING}\nwatched: ${LINES.map(line => line.slice('watched: '.length)).join(' · ')}`)
   await tapSparkle()
   const THREE_WATCHES = [
     ...ENTRIES,
@@ -1501,10 +1499,10 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   // (the same watch and the same rules, so the menu stays), and other watches close it, as
   // they always did
   await follows(THREE, { state: 'answering', by: OTHER })
-  await expect.poll(async () => (await sparkle(phone)).answering, { timeout: 30_000 }).toBe(true)
+  await expect.poll(async () => (await sparkle(phone)).answering, { timeout: POLL_MS }).toBe(true)
   expect(await menuRows(phone), 'the open menu says who answers').toEqual(THREE_WATCHES.map(row => (row[0] == 'says:sparkle' ? ['says:sparkle', `${OTHER} is answering`, ''] : row)))
   await follows([{ ...RULE, tags: [TAG] }])
-  await expect.poll(async () => (await sparkle(phone)).title, { timeout: 30_000 }).toBe(`${WATCHING}\n${LINE}`)
+  await expect.poll(async () => (await sparkle(phone)).title, { timeout: POLL_MS }).toBe(`${WATCHING}\n${LINE}`)
   expect((await sparkle(phone)).menus, 'other watches: the menu that showed the three closed').toBe(0)
 
   // (d) an entry's tap: Stop Watching sends the one stop, naming the watch shown
@@ -1517,7 +1515,7 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
     .poll(async () => {
       const said = await sparkle(phone)
       return [said.menus, said.title]
-    }, { timeout: 30_000 })
+    }, { timeout: POLL_MS })
     .toEqual([0, `Stopping ${AGENT}'s watch\n${LINE}`])
   expect(dialogs, 'no alert of the sparkle or the items').toEqual([])
   await context.close()
@@ -1540,7 +1538,7 @@ test('the app reads every text of the reading corpus as the corpus says', async 
   }, SECRET)
   await loadUser(page, USER)
   await waitForApp(page)
-  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: 30_000 }).toBe(true)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
 
   type Reading = { label: string; label_text: string; tags: string[] }
   const rows: (Reading & { why: string; text: string })[] = JSON.parse(readFileSync(resolve('tests/e2e/fixtures/reading_corpus.json'), 'utf8')).texts
@@ -1549,7 +1547,7 @@ test('the app reads every text of the reading corpus as the corpus says', async 
   for (const row of rows) {
     const id = await page.evaluate(async text => ((await window._create(text)) as any)?.id as string | undefined, row.text)
     expect(typeof id, row.why).toBe('string')
-    await expect.poll(() => page.evaluate(id => window._item(id!, true)?.saved_id ?? null, id), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.evaluate(id => window._item(id!, true)?.saved_id ?? null, id), { timeout: POLL_MS }).toBeTruthy()
     // (as JSON: the app can cut a label's text inside a character, and half of one does not cross the page's boundary whole)
     const read: Reading & { text: string; keys: number } = JSON.parse(
       await page.evaluate(id => {
@@ -1564,4 +1562,44 @@ test('the app reads every text of the reading corpus as the corpus says', async 
   }
   // an item's text is the corpus's, but for what the app drops at any save
   expect(changed).toEqual(['a zero-width space is no part of the text'])
+})
+
+// the sparkle's end, the spec's last row since 2026-11-21 (vault design notes/design/gate_speed.md:
+// a pin of the rows above no longer waits for the deleted item's look): the first row's account
+// as a returning device, as the rows above start, with the bridge fresh. Phases (h) and (i)
+test('the deleted item draws no sparkle, and the sign-out after its install again leaves none', async ({ page }) => {
+  const dialogs: string[] = []
+  page.on('dialog', dialog => {
+    const leaving = dialog.type() == 'beforeunload'
+    dialogs.push(leaving ? `beforeunload: ${dialog.message()}` : dialog.message())
+    void (leaving ? dialog.accept() : dialog.dismiss())
+  })
+  expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+  await page.addInitScript(secret => {
+    localStorage.setItem('mindpage_github_token', 'e2e-local')
+    localStorage.setItem('mindpage_secret', secret)
+    localStorage.setItem('mindpage_kdf', 'off')
+  }, SECRET)
+  await loadUser(page, USER)
+  await waitForApp(page)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: POLL_MS }).toBe(1)
+  await fresh(page)
+
+  // (h) the item is deleted: its task's next look removes everything the sparkle owned
+  await page.evaluate(() => window._item('#vault', true)!.delete(false))
+  await expect.poll(() => sparkle(page), { timeout: 45_000 }).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
+  expect(await page.evaluate(() => '_vault_sparkle' in window)).toBe(false)
+
+  // (i) installed again and watched, then a successful sign-out: the reloaded page has none
+  expect(await install(page, 'vault'), '/_install vault again').toBeNull()
+  await expect.poll(async () => !!(await savedId(page, '#vault')), { timeout: POLL_MS }).toBe(true)
+  const reinstalled = 'global_store_' + (await savedId(page, '#vault'))
+  await expect.poll(async () => (await hidden()).some(d => d.wrapper.name == reinstalled), { timeout: POLL_MS }).toBe(true)
+  await watched(page, { name: AGENT, took: TOOK, state: 'watching' })
+  await expect.poll(() => sparkle(page), { timeout: POLL_MS }).toEqual(shown(`${AGENT} is watching`))
+  await page.evaluate(() => void window._create('/_signout', { command: true }))
+  await expect.poll(() => page.evaluate(() => window._readonly === true && window._init_time > 0).catch(() => false), { timeout: 90_000 }).toBe(true)
+  expect(await sparkle(page)).toMatchObject({ nodes: 0, styles: 0, menus: 0, layers: 0 })
+  expect(dialogs, 'no alert of the sparkle or the installs').toEqual([])
 })
