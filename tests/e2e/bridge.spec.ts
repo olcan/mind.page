@@ -2754,6 +2754,64 @@ test('inert sections that follow each other are one block under one head, a line
       [MERGED, text] as const
     )
   const selection = () => page.evaluate(() => [getSelection()!.type, getSelection()!.toString()])
+  // THE KEYBOARD FOCUS (the owner, 2026-11-20: a tap on a section took it from another item's editor). A press on
+  // a block is an ordinary press on text, which takes the focus from whatever has it; the tap that TOGGLES gives
+  // it back, and a click that toggles nothing gives nothing back. Another item's editor is opened for the steps
+  // below. `hold` gives it the focus where the page stands, with a selection of its own (backward, so that its
+  // direction is read too), and `held` reads what has the focus (an id, else a tag name) and that editor's state
+  const plainId = await page.evaluate(label => (window as any)._item(label, true).id as string, PLAIN)
+  await page.locator(`#item-${plainId} p`).first().click()
+  await expect(page.locator(`#textarea-${plainId}`)).toBeFocused()
+  const EDITOR = `textarea-${plainId}`
+  const hold = (id: string, start: number, end: number) =>
+    page.evaluate(
+      ([id, start, end]) => {
+        const textarea = document.getElementById(id) as HTMLTextAreaElement
+        textarea.focus({ preventScroll: true })
+        textarea.setSelectionRange(start, end, 'backward')
+      },
+      [id, start, end] as const
+    )
+  const held = (id: string) =>
+    page.evaluate(id => {
+      const textarea = document.getElementById(id) as HTMLTextAreaElement
+      return {
+        active: document.activeElement?.id || document.activeElement?.tagName,
+        selected: [textarea.selectionStart, textarea.selectionEnd, textarea.selectionDirection],
+        text: textarea.value,
+        shown: getComputedStyle(textarea).visibility,
+        focused: textarea.closest('.editor')!.classList.contains('focused'),
+      }
+    }, id)
+  // an element at the window's middle (or top) UNTIL IT STAYS THERE: three readings 300 ms apart that agree, in
+  // the window. FIRST A LAYOUT PASS OF THE APP'S (its seam for tests, `__layout`): an editor that opens or closes
+  // moves items, and the next layout pass, whenever it comes, scrolls the page up to the first item that moved
+  // when that stands above the window. Left to itself that pass came at any moment of the steps below (a followed
+  // link's page is one thing that brings it): in four runs of this row a word to press then stood far outside the
+  // window (at 1417 of 720) or an item a quarter of the window lower
+  const settle = (target: import('@playwright/test').Locator, block: 'center' | 'start' = 'center') =>
+    expect
+      .poll(
+        async () => {
+          await page.evaluate(() => new Promise(resolve => ((window as any).__layout(), setTimeout(resolve, 300))))
+          await target.evaluate((element, block) => element.scrollIntoView({ block }), block)
+          const tops: number[] = []
+          for (let n = 0; n < 3; n++) {
+            await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
+            tops.push(await target.evaluate(element => Math.round(element.getBoundingClientRect().top)))
+          }
+          // (and no layout that a re-measure queued is still to come: a new item's first render queues one, which
+          // waits for 500 ms without a scroll)
+          return tops.every(top => top == tops[0] && top >= -1 && top < page.viewportSize()!.height) && !(await page.evaluate(() => (window as any).__layoutPending as boolean))
+        },
+        { message: 'the element stays where the row scrolled it', timeout: 30_000 }
+      )
+      .toBe(true)
+  const centre = () => settle(mergedBlock)
+  await centre()
+  await hold(EDITOR, 5, 9)
+  const editing = await held(EDITOR)
+  expect({ ...editing, text: editing.text.length > 9 }, "the premise: the other item's editor has the focus, with a selection of its own").toEqual({ active: EDITOR, selected: [5, 9, 'backward'], text: true, shown: 'visible', focused: true })
   // a link in an open section is followed, and toggles nothing
   const followed = context.waitForEvent('page')
   await mergedBlock.locator('> .vault-result a').first().click()
@@ -2761,14 +2819,21 @@ test('inert sections that follow each other are one block under one head, a line
   await (await followed).close()
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
   expect(await merged(), 'and the block is open as it was').toEqual([['open', 'opened']])
-  // a drag that selects text in an open section is no tap: the text is selected and the block stays open
+  expect((await held(EDITOR)).active, 'a followed link gives no focus back: the editor does not have it').not.toBe(EDITOR)
+  // a drag that selects text in an open section is no tap: the text is selected and the block stays open. And the
+  // drag TAKES the focus from the editor, as it always did (a copy then takes the selected text)
+  await centre()
+  await hold(EDITOR, 5, 9)
+  expect(await held(EDITOR), 'the premise: the editor has the focus again').toEqual(editing)
   const tidy = (await word('tidy'))!
+  expect(tidy.y > 0 && tidy.y < page.viewportSize()!.height, 'the premise: the word to drag over is in the window').toBe(true)
   await page.mouse.move(tidy.x + 1, tidy.y)
   await page.mouse.down()
   await page.mouse.move(tidy.x + tidy.width - 1, tidy.y, { steps: 4 })
   await page.mouse.up()
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
   expect([await selection(), await merged()], 'a drag in an open section selects its text, and the block stays open').toEqual([['Range', 'tidy'], [['open', 'opened']]])
+  expect((await held(EDITOR)).active, 'and the drag took the keyboard focus from the editor, which gets none back').toBe('BODY')
   // the click that ends that selection (beside it: the browser collapses the selection at the press) is no tap
   // either, and the next click is one: it closes the block
   const shed = (await word('shed'))!
@@ -2778,11 +2843,175 @@ test('inert sections that follow each other are one block under one head, a line
   await page.mouse.click(shed.x + shed.width / 2, shed.y)
   await expect.poll(merged, "a click on an open section's text closes the block").toEqual([['line', 'closed']])
   expect(await page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), MERGED), 'and opens no editor').toBe(false)
+  // A TAP THAT TOGGLES LEAVES THE FOCUS WHERE IT WAS: on the closed line, which it opens, and on the open
+  // section's text, which it closes. The editor is the active element after each as it was before the press, with
+  // its selection, its text and its look, and nothing scrolled (the block's item is where it was in the window)
+  const top = () => mergedBlock.evaluate(block => Math.round(block.closest('.container')!.getBoundingClientRect().top))
+  await centre()
+  await hold(EDITOR, 5, 9)
+  expect(await held(EDITOR), 'the premise: the editor has the focus before the tap on the closed line').toEqual(editing)
+  const closedTop = await top()
+  await clickHead(page, MERGED)
+  await expect.poll(merged, 'a tap on the closed line opens the section').toEqual([['open', 'opened']])
+  expect([await held(EDITOR), await top()], 'and the focus is where it was: the editor is the active element, with its selection, and nothing scrolled').toEqual([editing, closedTop])
+  await hold(EDITOR, 5, 9)
+  expect(await held(EDITOR), "the premise: the editor has the focus before the tap on the open section's text").toEqual(editing)
+  const text = (await word('shed'))!
+  await page.mouse.click(text.x + text.width / 2, text.y)
+  await expect.poll(merged, "a tap on the open section's text closes it").toEqual([['line', 'closed']])
+  expect([await held(EDITOR), await top()], 'and the focus is where it was, the same').toEqual([editing, closedTop])
+  // what is typed then goes where the editor's selection is, straight after the real tap: nothing of the row gives
+  // the editor the focus in between (and the text is put back, so that Escape leaves the editor with nothing to
+  // discard)
+  await page.keyboard.type('Z')
+  expect((await held(EDITOR)).text, "a typed character replaces the editor's selection").toBe(editing.text.slice(0, 5) + 'Z' + editing.text.slice(9))
+  await page.keyboard.press('Backspace')
+  await page.keyboard.type(editing.text.slice(5, 9))
+  expect((await held(EDITOR)).text, 'the text is as it was').toBe(editing.text)
+  // THE NOTE OF WHAT HAD THE FOCUS LIVES FOR ONE GESTURE (the code review of 2026-11-20). A press on the closed line
+  // that is released OUTSIDE the block, on the item's own last line, is no click of the block's (and too slow to
+  // be the item's edit tap): the drag took the focus, as a drag does, and gets none back. A click that reaches the
+  // block afterwards with no press of its own (a dispatched one, which nothing else hears) toggles it and leaves the
+  // focus where it is: the block used to keep the editor from that press, and focused it then
+  await centre()
+  await hold(EDITOR, 5, 9)
+  const from = (await (await headOf(page, MERGED)).boundingBox())!
+  const outside = await mergedBlock.evaluate(block => (item => ({ x: item.left + 80, y: item.bottom - 18 }))(block.closest('.container')!.getBoundingClientRect()))
+  await page.mouse.move(from.x + 5, from.y + 8)
+  await page.mouse.down()
+  await page.mouse.move(outside.x, outside.y, { steps: 4 })
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
+  await page.mouse.up()
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)))
+  await page.evaluate(() => getSelection()!.removeAllRanges())
+  const mergedEditing = () => page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), MERGED)
+  expect([(await held(EDITOR)).active, await merged(), await mergedEditing()], 'the premise: the release outside toggled nothing and opened no editor, and the focus is on the body').toEqual(['BODY', [['line', 'closed']], false])
+  await mergedBlock.evaluate(block => void block.dispatchEvent(new MouseEvent('click')))
+  expect([await merged(), (await held(EDITOR)).active], 'a click with no press of its own toggles the block and leaves the focus alone').toEqual([[['open', 'opened']], 'BODY'])
+  await mergedBlock.evaluate(block => void block.dispatchEvent(new MouseEvent('click')))
+  await expect.poll(merged).toEqual([['line', 'closed']])
+  await hold(EDITOR, 5, 9)
+  // A TALL SECTION ABOVE THE EDITOR STAYS WHERE IT WAS TAPPED (the code review of 2026-11-20). A pinned item with a
+  // long tree stands directly above the edited item (pinned items come first, then the one being edited). The tap
+  // that opens it adds more than the 300 px that queue a layout, which finds the edited item moved, under the
+  // window's bottom edge by then, and its editor focused again: the route's scroll to the caret would take the
+  // section out of the window. The layout that the resize queued is waited for (`__layoutPending`, `__layoutCount`),
+  // then the frames its callback and the caret scroll's wait (two and four): the section is where it was tapped, and
+  // the editor has the focus, with its selection
+  const TALL = '#e2e_fold_tall'
+  await page.evaluate(text => void window._create(text), `${TALL} foldmore #_pin/zzz_e2e_fold\n${region('request\nA short one.\n\nIt adds little.')}\na line of the owner between\n${region(`agent\n- working: a long list\n${Array.from({ length: 30 }, (_, n) => `    - [ ] step ${n + 1}`).join('\n')}`)}`)
+  try {
+    await expect.poll(async () => (await fold(page, TALL))?.blocks.map(b => b.state), 'the pinned item shows its two sections, a short one and the tall one, closed').toEqual(['line', 'line'])
+    await page.waitForFunction(label => (item => !!item.savedId && !item.saving)((window as any).__items.find((item: any) => item.id == (window as any)._item(label, true).id)), TALL)
+    const tallId = await page.evaluate(label => (window as any)._item(label, true).id as string, TALL)
+    const tall = page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${tallId}"]`)
+    // (the focus first: an editor's focus updates every item, each is measured again, and a new item's first
+    // measure queues a layout, which `settle` then waits out)
+    await hold(EDITOR, 5, 9)
+    await settle(tall.locator('.inert-block').nth(0))
+    // [the section's item in the window, its height, where the editor stands under it, layouts run, one pending]
+    const stands = () =>
+      page.evaluate(
+        ([tallId, id]) => {
+          const [item, editor] = [document.querySelector(`.column:not(.hidden) .container[data-item-id="${tallId}"]`)!.getBoundingClientRect(), document.getElementById(id)!.getBoundingClientRect()]
+          return { top: Math.round(item.top), height: Math.round(item.height), under: Math.round(editor.top - item.bottom), layouts: (window as any).__layoutCount as number, pending: (window as any).__layoutPending as boolean }
+        },
+        [tallId, EDITOR] as const
+      )
+    // the layout that a resize queued has run (the count is up from `before` and none is pending), and so have
+    // the frames its callback and the caret scroll's wait
+    const laidOut = async (before: number) => {
+      await expect.poll(async () => (s => s.layouts > before && !s.pending)(await stands()), 'the layout that the resize queued has run').toBe(true)
+      await page.evaluate(() => new Promise<void>(resolve => (function frame(n: number) { requestAnimationFrame(() => (n ? frame(n - 1) : resolve())) })(12)))
+    }
+    // the item grows by 400 px as item code would grow it, reported through its resize hook with `reason`; what
+    // stood at that moment is read in the same turn
+    const grow = (reason: string) =>
+      page.evaluate(
+        ([id, reason]) => {
+          const w = window as any
+          const item = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)!
+          const stood = { top: Math.round(item.getBoundingClientRect().top), height: Math.round(item.getBoundingClientRect().height), layouts: w.__layoutCount as number }
+          const filler = document.createElement('div')
+          filler.style.height = '400px'
+          item.querySelector('.content')!.appendChild(filler)
+          w._item_hooks[id].resize(reason)
+          return { ...stood, grew: Math.round(item.getBoundingClientRect().height) - stood.height, queued: (w.__layoutPending as boolean) || w.__layoutCount > stood.layouts }
+        },
+        [tallId, reason] as const
+      )
+    // (what stands at a PRESS is read at the press: a layout of the app's own can come at any moment before it)
+    const arm = () => tall.evaluate(item => item.addEventListener('mousedown', () => void ((window as any).__tapped = { top: Math.round(item.getBoundingClientRect().top), layouts: (window as any).__layoutCount }), { capture: true, once: true }))
+    const tappedAt = () => page.evaluate(() => (window as any).__tapped as { top: number; layouts: number })
+    const states = () => fold(page, TALL).then(f => f?.blocks.map(b => b.state))
+    const closed = await stands()
+    expect([await held(EDITOR), closed.under >= 0 && closed.under < 100], 'the premise: the editor has the focus, directly under the closed sections').toEqual([editing, true])
+    // A SHORT TOGGLE WHOSE OPENED PART THEN GROWS BY ITSELF (the code review's third reading: a picture that starts to
+    // load when its part shows). The tap adds less than the 300 px that queue a layout; the growth that follows is
+    // reported under the reason an image's load uses, and queues one. The owner tapped once and did nothing since:
+    // the page stays where it was tapped, through that layout and through the next one of the same kind
+    await arm()
+    await clickHead(page, TALL, 0)
+    await expect.poll(states, 'a tap opens the short section').toEqual(['open', 'line'])
+    const short = { ...(await tappedAt()), ...(await stands()) }
+    const loaded = await grow('img.onload')
+    expect([short.height > closed.height && short.height - closed.height < 300, loaded.grew, loaded.queued, loaded.top + loaded.height + 400 + short.under > page.viewportSize()!.height], 'the premise: the tap added less than 300 px, then the item grew by 400 px, which queued a layout, and the editor under it is out of the window').toEqual([true, 400, true, true])
+    await laidOut(loaded.layouts)
+    expect([await held(EDITOR), (await stands()).top], "after a short toggle's tap, the layout that its part's own growth queued leaves the section where it was tapped, and the editor the focus").toEqual([editing, loaded.top])
+    const more = await grow('img.onload')
+    await laidOut(more.layouts)
+    expect([await held(EDITOR), (await stands()).top], 'and so does a second such layout: nothing follows a caret until the owner acts again').toEqual([editing, more.top])
+    // UNTIL THE OWNER'S NEXT INPUT: one key in the editor (a Shift, which moves no caret), and the same growth is
+    // followed to the editor's caret as it always was: the editor is back in the window, the section no longer
+    // where it was
+    await page.keyboard.press('Shift')
+    const typed = await grow('img.onload')
+    await laidOut(typed.layouts)
+    const scrolled = await page.evaluate(id => Math.round(document.getElementById(id)!.getBoundingClientRect().top), EDITOR)
+    expect([(await held(EDITOR)).active, scrolled > 0 && scrolled < page.viewportSize()!.height, (await stands()).top < typed.top], "after a key of the owner's, a layout that such growth queued scrolls to the editor's caret, as before").toEqual([EDITOR, true, true])
+    // THE TALL SECTION: its tap alone adds more than the 300 px, and queues the layout itself
+    await hold(EDITOR, 5, 9)
+    await settle(tall.locator('.inert-block').nth(1))
+    const before = await stands()
+    await arm()
+    await clickHead(page, TALL, 1)
+    await expect.poll(states, 'a tap opens the tall section').toEqual(['open', 'open'])
+    const tapped = await tappedAt()
+    const opened = await stands()
+    expect([opened.height - before.height > 300, opened.pending || opened.layouts > tapped.layouts, tapped.top + opened.height + opened.under > page.viewportSize()!.height], 'the premise: the section grew by more than 300 px, which queued a layout, and the editor under it is out of the window').toEqual([true, true, true])
+    await laidOut(tapped.layouts)
+    expect([await held(EDITOR), (await stands()).top], 'after that layout the section is where it was tapped, and the editor has the focus, with its selection').toEqual([editing, tapped.top])
+    // THE SAME FOR A TOGGLE OF ITEM CODE'S OWN, which reports its item's height through the item's resize hook, as
+    // `toggle` (template.js, toggle(), and the lazy toggle: no such item is installed in this lane, so the row grows
+    // the item's content itself and reports as their click does)
+    await page.keyboard.press('Shift') // (an input of the owner's: what the tall section's tap left is ended)
+    const hooked = await grow('toggle')
+    expect([hooked.grew, hooked.queued], 'the premise: the item grew by 400 px more, which queued a layout').toEqual([400, true])
+    await laidOut(hooked.layouts)
+    expect([await held(EDITOR), (await stands()).top], "after a layout that a toggle of item code's own queued, the same").toEqual([editing, hooked.top])
+  } finally {
+    await page.evaluate(label => (window as any)._item(label, true)?.delete(false), TALL)
+    await expect.poll(() => page.evaluate(label => !(window as any)._item(label, true), TALL), 'the pinned item is gone again').toBe(true)
+  }
+  await page.keyboard.press('Escape')
+  await expect(page.locator(`#textarea-${plainId}`)).toHaveCount(0)
 
   // AN OPEN SECTION WITHOUT A NAME (a reply) starts with its own first line: no head line above it (the empty
-  // head has no height), and the same space above its text as above the first line of the item's own text
+  // head has no height), and the same space above its text as above the first line of the item's own text.
+  // (it is opened with the MINDBOX focused, its caret at a known place: the tap leaves the focus there too. The
+  // head stands at the window's top for it, so that the MindBox, in the header above, is out of the window: a
+  // focus that scrolled would bring it back. A CARET, not a selection: a plain focus scrolls the page to a box's
+  // caret, and did not to a selection restored in the same turn, in the lanes' Chromium, so a mutant without
+  // `preventScroll` passed over a selection. [the MindBox is above the window, the item's place in the window])
+  await settle(await headOf(page, REPLY), 'start')
+  const stood = () => page.evaluate(label => [document.getElementById('textarea-mindbox')!.getBoundingClientRect().bottom < 0, Math.round((window as any)._item(label, true).elem.getBoundingClientRect().top)], REPLY)
+  await hold('textarea-mindbox', 3, 3)
+  const [box, stand] = [await held('textarea-mindbox'), await stood()]
+  expect([box.active, box.selected.slice(0, 2), box.shown, box.focused, stand[0]], 'the premise: the MindBox has the focus, out of the window, its caret at a known place').toEqual(['textarea-mindbox', [3, 3], 'visible', true, true])
   await clickHead(page, REPLY)
   await expect.poll(async () => (await fold(page, REPLY))?.blocks[0].state).toBe('open')
+  expect([await held('textarea-mindbox'), await stood()], 'a tap that opens a section leaves the focus in the MindBox, with its caret, and nothing scrolled').toEqual([box, stand])
+  await page.evaluate(() => (document.activeElement as HTMLElement).blur())
   const reply = await page.evaluate(label => {
     const elem = (window as any)._item(label, true).elem as HTMLElement
     const block = elem.querySelector('.inert-block')!

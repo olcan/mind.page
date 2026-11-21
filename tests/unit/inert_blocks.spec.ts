@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { blockOpen, holdsTag, holdsTerm, remembered, sectionKeys, sectionName, toggled, type Toggle } from '../../src/inert_blocks.js'
+import { blockOpen, focusNoted, holdsTag, holdsTerm, inertBlocks, remembered, sectionKeys, sectionName, toggled, type Toggle } from '../../src/inert_blocks.js'
 
 // what decides whether an inert section shows open (src/inert_blocks.ts): what a manual toggle
 // left while it stands, the search, the selection; a region's small name; and the keys a toggle is remembered by. The blocks themselves (the
@@ -86,4 +86,186 @@ test("a child tag's mark is a match where its resolved tag is one of the terms, 
   // the whole tag, not a part of it: the parent's tag or a longer one is no match
   expect([holdsTag(['#e2e_cc/alpha'], '#e2e_cc '), holdsTag(['#e2e_cc/alpha'], '#e2e_cc/alpha/deep '), holdsTag(['#e2e_cc/alpha'], 'alpha ')]).toEqual([false, false, false])
   expect([holdsTag([], '#e2e_cc/alpha '), holdsTag(['#e2e_cc/alpha'], ' ')]).toEqual([false, false])
+})
+
+// THE BLOCK'S OWN LISTENERS (the press, the click, the marker's key), run without a browser over stand-ins of the
+// document: just what the builder asks of an element for one unnamed section, a document that keeps its listeners
+// (taken off together by their signal) and knows what has the focus. What they do on a rendered item, with a real
+// press's default, is the collapse rows' (tests/e2e/bridge.spec.ts)
+class Elem {
+  className = ''
+  tabIndex = 0
+  isConnected = true
+  parentElement: Elem | null = null
+  children: Elem[] = []
+  heard = new Map<string, (e: unknown) => void>()
+  focused: (FocusOptions | undefined)[] = []
+  constructor(readonly ownerDocument: Doc) {}
+  get classList() {
+    const names = () => new Set(this.className.split(' ').filter(Boolean))
+    const toggle = (name: string, on: boolean) => {
+      const set = names()
+      if (on) set.add(name)
+      else set.delete(name)
+      this.className = [...set].join(' ')
+    }
+    return { contains: (name: string) => names().has(name), toggle }
+  }
+  setAttribute() {}
+  appendChild(child: Elem) {
+    child.parentElement = this
+    this.children.push(child)
+  }
+  append(...children: Elem[]) {
+    children.forEach(child => this.appendChild(child))
+  }
+  before(sibling: Elem) {
+    sibling.parentElement = this.parentElement
+  }
+  matches = (selector: string) => this.classList.contains(selector.slice(1))
+  closest = () => null
+  contains = () => false
+  querySelector = () => null
+  addEventListener(type: string, listener: (e: unknown) => void) {
+    this.heard.set(type, listener)
+  }
+  focus(options?: FocusOptions) {
+    this.focused.push(options)
+    this.ownerDocument.activeElement = this
+  }
+}
+class Doc {
+  activeElement: Elem | null = null
+  heard: [string, (e: unknown) => void][] = []
+  most = 0 // the most listeners that were live at any one time
+  defaultView = this // (the stand-in is its own window: the gesture's end is heard there)
+  createElement = () => new Elem(this)
+  addEventListener(type: string, listener: (e: unknown) => void, options: { signal: AbortSignal }) {
+    const entry: [string, (e: unknown) => void] = [type, listener]
+    this.most = Math.max(this.most, this.heard.push(entry))
+    options.signal.addEventListener('abort', () => void this.heard.splice(this.heard.indexOf(entry), 1))
+  }
+}
+// one block of one section in a document, with the item's editor that has the focus: the gesture's steps, and
+// what the toggle did (`flips`: its reports of the height)
+function staged(doc = new Doc(), id = 'item') {
+  const [home, frame, editor] = [new Elem(doc), new Elem(doc), new Elem(doc)]
+  home.appendChild(frame)
+  let flips = 0
+  const root = { ownerDocument: doc, querySelectorAll: () => [frame] } as unknown as Element
+  inertBlocks(root, () => 'a reply', { id, terms: '', selected: () => false, selecting: () => false, resized: () => void flips++ })
+  const block = frame.parentElement!
+  const press = (button = 0) => {
+    block.heard.get('mousedown')!({ button, stopPropagation() {} })
+    if (!button) doc.activeElement = null // (the press's default: the focus leaves what had it)
+  }
+  // an event of the window's (a release, a drag's end, a cancelled pointer, a blur: the window's own, or `of`'s)
+  const release = (type = 'mouseup', of: unknown = doc) => doc.heard.filter(entry => entry[0] == type).forEach(entry => entry[1]({ type, target: of }))
+  const click = () => block.heard.get('click')!({ target: { closest: () => null }, preventDefault() {}, stopPropagation() {} })
+  const key = () => block.children[0].children[0].heard.get('keydown')!({ key: 'Enter', preventDefault() {}, stopPropagation() {} })
+  const hold = () => void (doc.activeElement = editor)
+  return { doc, block, editor, press, release, click, key, hold, flips: () => flips }
+}
+const later = () => new Promise(resolve => setTimeout(resolve, 0)) // (past the timer a gesture's end sets)
+test.beforeAll(() => void ((globalThis as any).HTMLElement = Elem))
+test.afterAll(() => void delete (globalThis as any).HTMLElement)
+
+test('a tap that toggles gives the focus back to what had it at the press, and the note of it is empty at once', async () => {
+  const s = staged()
+  s.hold()
+  s.press()
+  expect([focusNoted()?.block === (s.block as unknown), focusNoted()?.had === (s.editor as unknown), s.doc.heard.map(entry => entry[0])], 'the press notes the block and what has the focus, and waits for the release').toEqual([true, true, ['mouseup', 'dragend', 'pointercancel', 'blur']])
+  s.release()
+  s.click()
+  expect([s.flips(), s.editor.focused, focusNoted(), s.doc.heard.length], 'the click toggles and focuses it again, without a scroll: no note, no listener left').toEqual([1, [{ preventScroll: true }], null, 0])
+  await later()
+  expect(focusNoted()).toBeNull()
+})
+
+test('the note of what had the focus is gone when the gesture ends, whatever ended it; an activation without a press of its own leaves the focus alone', async () => {
+  const s = staged()
+  // a click that never reaches the block (stopped inside it: a dangling child tag's mark; a release outside it)
+  s.hold()
+  s.press()
+  s.release()
+  await later()
+  expect([focusNoted(), s.doc.heard.length], 'a release with no click on the block').toEqual([null, 0])
+  // a drag the browser takes over has no release: it ends
+  s.hold()
+  s.press()
+  s.release('dragend')
+  await later()
+  expect([focusNoted(), s.doc.heard.length], 'a drag').toEqual([null, 0])
+  // a press that is not the primary one notes nothing
+  s.hold()
+  s.press(2)
+  expect([focusNoted(), s.doc.heard.length], 'a secondary press').toEqual([null, 0])
+  // a click with no press of its own (a scripted one), and the marker's key: they toggle, and focus nothing
+  s.doc.activeElement = null
+  s.click()
+  s.key()
+  expect([s.flips(), s.editor.focused], 'activations without a press').toEqual([2, []])
+})
+
+test("only the block of the press gives the focus back, only to an element still in the document, and an older gesture's end leaves a newer note", async () => {
+  const doc = new Doc()
+  const [a, b] = [staged(doc, 'item a'), staged(doc, 'item b')]
+  // pressed on one block, clicked on the other: the note is taken, nothing is given back
+  a.hold()
+  a.press()
+  a.release()
+  b.click()
+  expect([b.flips(), a.editor.focused, focusNoted()]).toEqual([1, [], null])
+  await later()
+  // the editor is closed while the press is held: its textarea is out of the document
+  a.hold()
+  a.press()
+  a.editor.isConnected = false
+  a.release()
+  a.click()
+  expect([a.flips(), a.editor.focused, focusNoted()]).toEqual([1, [], null])
+  await later()
+  // a first gesture's end, still to come, and a second press: the second note stands
+  b.hold()
+  b.press()
+  b.release()
+  b.hold()
+  b.press()
+  await later()
+  expect(focusNoted()?.block === (b.block as unknown), "the second press's note is not the first gesture's to drop").toBe(true)
+  b.release()
+  b.click()
+  expect(b.editor.focused).toEqual([{ preventScroll: true }])
+})
+
+test("one outstanding note at most, whatever interrupts a press: a cancelled pointer and the window's own blur end the gesture, an element's blur does not, and a new press takes the listeners of a press that never ended", async () => {
+  const s = staged()
+  // the press's own default blurs the editor: that blur is heard at the window too, and is no end
+  s.hold()
+  s.press()
+  s.release('blur', s.editor)
+  await later()
+  expect([focusNoted()?.had === (s.editor as unknown), s.doc.heard.length], "an element's blur leaves the note and its listeners").toEqual([true, 4])
+  // two interrupted presses, the editor closed between them: a cancelled pointer, then the window's blur
+  s.release('pointercancel')
+  await later()
+  const cancelled = [focusNoted(), s.doc.heard.length]
+  s.editor.isConnected = false
+  s.hold()
+  s.press()
+  s.release('blur')
+  await later()
+  expect([cancelled, focusNoted(), s.doc.heard.length], 'no note and no listener after either').toEqual([[null, 0], null, 0])
+  // a press that never ends at all (no event of any kind), then another: the first one's listeners are taken off
+  s.hold()
+  s.press()
+  s.hold()
+  s.press()
+  expect([s.doc.heard.length, s.doc.most], 'one set of listeners, then and at any time').toEqual([4, 4])
+  s.release('pointercancel')
+  await later()
+  // and a click with no press of its own focuses nothing
+  s.doc.activeElement = null
+  s.click()
+  expect([s.editor.focused, focusNoted(), s.doc.heard.length]).toEqual([[], null, 0])
 })

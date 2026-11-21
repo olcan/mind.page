@@ -2432,6 +2432,7 @@
 
     // from this point we try to auto-scroll for layout changes
     // we need to be careful as layout updates are often triggered in the background
+    const toggled = toggleResized // (a toggle's tap, and no input of the owner's since: see onItemResized)
     if (disableScrollingOnLayout) return // scrolling disabled explicitly
 
     // first question for scrolling is whether we are actively editing an item
@@ -2458,8 +2459,8 @@
         const textarea = textArea(index)
         if (textarea && (!textarea.isSameNode(lastFocusedEditElement) || __item(activeEditItem).mover)) {
           // console.debug('scrolling to edit item')
-          textarea.focus() // ensure focus on textarea
-          restoreItemEditor(activeEditItem)
+          textarea.focus({ preventScroll: toggled }) // ensure focus on textarea
+          if (!toggled) restoreItemEditor(activeEditItem)
         }
         lastFocusedEditElement = textarea // prevent scroll-to-caret on next layout
       })
@@ -3061,6 +3062,7 @@
   if (isClient) {
     for (const type of INPUT_EVENTS)
       window.addEventListener(type, e => void (inputActive(e) && (inputEvents = [...inputEvents.filter(inputActive), e])), { capture: true })
+    for (const type of ['keydown', 'pointerdown', 'mousedown']) window.addEventListener(type, () => void (toggleResized = false), { capture: true }) // (see toggleResized)
     window['_carry_input'] = carryInput
   }
   // THE LAUNCH'S QUERY (reviews 0 and 1 of phantom_steps, blocker 3): a non-empty address has its query applied
@@ -7547,7 +7549,16 @@
 
   let lastEditTime = 0 // updated in onItemEdited
   let layoutPending = false
+  // A TOGGLE'S TAP, UNTIL THE OWNER'S NEXT INPUT (its resize is reported as `inert toggle` by an inert section, as
+  // `toggle` by item code's toggle through the item's resize hook): the tap gives the keyboard focus back to the
+  // editor that had it, and a layout pass would then scroll to that editor's caret, away from what the owner has
+  // just opened (the code review of 2026-11-20). While this is set a pass leaves the editor its focus, in a new
+  // textarea too, and scrolls to no caret, whatever queued it (the toggle's own growth, or a picture in the opened
+  // part that loads afterwards): as on the app before the give-back, where the tap left the focus on the body. A
+  // key or a pointer press of the owner's ends it (heard at the window, below INPUT_EVENTS' listeners)
+  let toggleResized = false
   function onItemResized(id, container, trigger: string) {
+    if (trigger?.endsWith('toggle')) toggleResized = true
     if (!container) return
     const index = indexFromId.get(id)
     if (index == undefined) return // item was deleted

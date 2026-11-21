@@ -234,6 +234,17 @@ export function forgetSearch(query: string): void {
   unmark(document)
 }
 
+// WHAT HAD THE KEYBOARD FOCUS AT A PRESS ON A BLOCK, for the tap that gives it back (inertBlocks). ONE
+// note, for one gesture: a primary press writes it, the click on THAT block takes it, once, and the
+// gesture's end drops it whatever ended it, a moment after the release (a click stopped inside the
+// block, a release outside it, a drag). kept per block until its next click, it held a closed editor's
+// textarea (the code review of 2026-11-20). (`focusNoted` reads it for the unit table)
+// ONE SET OF LISTENERS AT MOST, with the note (`over`): a press whose end was never heard is ended by the next
+// press, which aborts its listeners before it registers its own (kept by each press's own closure, an interrupted
+// press held its editor until some later release: the review's third reading)
+let note: { block: Element; had: Element | null; over: AbortController } | null = null
+export const focusNoted = () => note
+
 // make the blocks of an item's frames that are in none yet (Item.svelte afterUpdate, after a
 // population of frames: the item's children are new then, so in practice all of its frames).
 // `body` gives a frame's decoded text, `id` and `terms` the item and the highlighter's terms of
@@ -336,13 +347,29 @@ export function inertBlocks(
     // PRESS (`ended`: a press beside a selection that stands in the block ends that selection,
     // which the browser has collapsed before the click comes)
     let ended = false
+    // THE KEYBOARD FOCUS IS GIVEN BACK BY THE TAP THAT TOGGLES (`note`). the press is an ordinary
+    // one on text: its default takes the focus from whatever has it (another item's editor, the
+    // MindBox) and starts the selection a drag extends, so it is not prevented. the press notes
+    // what has the focus, and the click that toggles focuses it again, without a scroll (a text
+    // box restores its own caret and selection). a click that toggles nothing gives nothing back
+    // (a followed link, the click that only ends a selection): a drag keeps the focus it took, so
+    // that a copy takes the selected text
     block.addEventListener('mousedown', e => {
       if (enclosed) e.stopPropagation()
       ended = selecting(block)
+      if (e.button) return
+      note?.over.abort()
+      const [pressed, view] = [(note = { block, had: doc.activeElement, over: new AbortController() }), doc.defaultView!]
+      // the gesture's end: a release, a drag's end, a cancelled pointer, or the WINDOW's own blur (an element's blur
+      // is heard at the window too: the press's default blurs the editor itself). from a timer, after a release's own click
+      const end = (e: Event) => void ((e.type != 'blur' || e.target === view) && (pressed.over.abort(), setTimeout(() => void (note === pressed && (note = null)))))
+      for (const type of ['mouseup', 'dragend', 'pointercancel', 'blur']) view.addEventListener(type, end, { capture: true, signal: pressed.over.signal })
     })
     block.addEventListener('click', (e: MouseEvent) => {
       const spent = ended
       ended = false
+      const had = note?.block === block ? note.had : null
+      note = null
       const link = (e.target as Element).closest('a')
       if (link && block.contains(link)) {
         if (enclosed) e.stopPropagation()
@@ -351,6 +378,7 @@ export function inertBlocks(
       if (enclosed) e.preventDefault(), e.stopPropagation() // nothing of the owner's link is followed from the block
       if (spent || selecting(e.target as Node)) return
       flip()
+      if (had instanceof HTMLElement && had.isConnected && had !== doc.activeElement) had.focus({ preventScroll: true })
     })
     // the keyboard: Enter and Space on the marker toggle as a click does. the key is the marker's
     // alone (at the window the app takes Enter for its editor and Tab, Space and every key's

@@ -287,8 +287,38 @@ test('vault renderer contract', async ({ page }) => {
       await page.mouse.up()
       await pause()
     }
+    // (THE KEYBOARD FOCUS: a press in a toggle is an ordinary press on text, which takes the focus from whatever
+    // has it. `hold` gives it to the MindBox where the page stands, with a selection of its own (backward, so that
+    // its direction is read too) or a caret; `held` reads what has the focus, the MindBox's state and where the
+    // item stands in the window. A drag takes the focus, as it always did, and gets none back: a copy takes the
+    // selected text)
+    const hold = (start = 2, end = 6) =>
+      page.evaluate(
+        ([start, end]) => {
+          const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+          box.focus({ preventScroll: true })
+          box.setSelectionRange(start, end, 'backward')
+        },
+        [start, end] as const
+      )
+    const held = () =>
+      page.evaluate(n => {
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        return {
+          active: document.activeElement?.id || document.activeElement?.tagName,
+          selected: [box.selectionStart, box.selectionEnd, box.selectionDirection],
+          text: box.value,
+          shown: getComputedStyle(box).visibility,
+          above: box.getBoundingClientRect().bottom < 0, // (whether the MindBox is out of the window, above it)
+          top: Math.round(window._item(n, true)!.elem!.getBoundingClientRect().top),
+        }
+      }, A)
+    await hold()
+    const boxed = await held()
+    expect([boxed.active, boxed.selected, boxed.shown, boxed.text.length > 6], 'the premise: the MindBox has the focus, with a selection of its own').toEqual(['textarea-mindbox', [2, 6, 'backward'], 'visible', true])
     await drag((await word('macro'))!)
     expect([await selected(), await hiddenState()], 'a drag in the revealed part selects its text, and the part stays revealed').toEqual(['macro', false])
+    expect((await held()).active, 'and the drag took the keyboard focus from the MindBox, which gets none back').toBe('BODY')
     const docs = (await word('Docs'))!
     await page.mouse.click(docs.x + docs.width / 2, docs.y)
     await pause()
@@ -303,12 +333,14 @@ test('vault renderer contract', async ({ page }) => {
     const hidden = (idc: string) => page.evaluate(idc => document.querySelector('div.template_toggle.' + idc)!.classList.contains('hidden'), idc)
     await page.evaluate(idc => document.querySelector('div.template_toggle.' + idc)!.scrollIntoView({ block: 'center' }), projection)
     await pause()
-    const beside = await page.evaluate(idc => {
-      const div = document.querySelector('div.template_toggle.' + idc)!
-      const label = div.querySelector(':scope > span.template_toggle')!.getBoundingClientRect()
-      const at = { x: label.right + 20, y: label.top + label.height / 2 }
-      return document.elementFromPoint(at.x, at.y) === div ? at : null
-    }, projection)
+    const besideLabel = () =>
+      page.evaluate(idc => {
+        const div = document.querySelector('div.template_toggle.' + idc)!
+        const label = div.querySelector(':scope > span.template_toggle')!.getBoundingClientRect()
+        const at = { x: label.right + 20, y: label.top + label.height / 2 }
+        return document.elementFromPoint(at.x, at.y) === div ? at : null
+      }, projection)
+    const beside = await besideLabel()
     expect(beside, "the premise: a point of the projection's own area, beside its first label").not.toBeNull()
     await drag((await word('Intro', projection))!)
     expect([await selected(), await hidden(projection)], "a drag in the projection's revealed part selects its text, and the projection stays revealed").toEqual(['Intro', false])
@@ -321,6 +353,78 @@ test('vault renderer contract', async ({ page }) => {
     expect(await page.evaluate(n => !!window._item(n, true)!.elem!.querySelector('.container.editing'), A), 'and no press in a toggle opened the editor').toBe(false)
     await clickToggle('div.template_toggle.' + navigation)
     expect(await hidden(navigation), 'the navigation is closed again, as the projection is').toBe(true)
+    // A TAP THAT TOGGLES LEAVES THE KEYBOARD FOCUS WHERE IT WAS (the owner, 2026-11-20: toggling took it from an
+    // editor): the press notes what has the focus, and the click that toggles focuses it again, without a scroll.
+    // Real taps, with the MindBox focused each time: on the projection's label (the lazy toggle of
+    // template/vault.js), on the navigation's label inside it (toggle() of template.js), and on the projection's
+    // own area, which hides it again. After each the MindBox is the active element as before the press, with its
+    // selection, and the item is where it was in the window. The label taps hold a CARET in the MindBox, the last
+    // one a selection: a plain focus scrolls the page to a box's caret, and did not to a selection restored in the
+    // same turn (the lanes' Chromium), so the caret is what a focus that scrolls is caught by
+    const tap = async (label: string) => {
+      const at = await page.evaluate(sel => {
+        const rect = document.querySelector(sel)!.getBoundingClientRect()
+        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+      }, 'span.template_toggle.' + label)
+      await page.mouse.click(at.x, at.y)
+    }
+    const focusKept = async (act: () => Promise<void>, idc: string, shows: boolean, message: string, [start, end] = [3, 3]) => {
+      await pause()
+      await hold(start, end)
+      const before = await held()
+      expect([before.active, before.selected.slice(0, 2), before.above], `the premise: the MindBox has the focus, out of the window (${message})`).toEqual(['textarea-mindbox', [start, end], true])
+      await act()
+      await expect.poll(() => hidden(idc), { message, timeout: 5_000 }).toBe(!shows)
+      expect(await held(), `${message}, and the focus is where it was: the MindBox is the active element, with its selection, and nothing scrolled`).toEqual(before)
+      // the note of what had the focus lives for the one gesture: nothing of it is left once the tap is done, on
+      // the window or on a toggle's element (each toggle element used to keep the box it had given the focus back to)
+      const left = await page.evaluate(() => {
+        const box = document.getElementById('textarea-mindbox')
+        return [(window as any)._toggle_focus ?? null, [...document.querySelectorAll('.template_toggle')].filter(toggle => Object.values(toggle).includes(box)).length]
+      })
+      expect(left, `${message}, and no note of the MindBox is left`).toEqual([null, 0])
+    }
+    // (the label at the window's top: the MindBox, in the header above the item, is then out of the window, where
+    // a focus that scrolled would bring it back)
+    await page.evaluate(idc => document.querySelector('span.template_toggle.' + idc)!.scrollIntoView({ block: 'start' }), projection)
+    await focusKept(() => tap(projection), projection, true, "a tap on the projection's label reveals it")
+    await focusKept(() => tap(navigation), navigation, true, "a tap on a toggle's label reveals its part")
+    await clickToggle('div.template_toggle.' + navigation)
+    await focusKept(async () => {
+      const at = await besideLabel()
+      expect(at, "the premise: a point of the projection's own area, beside its first label").not.toBeNull()
+      await page.mouse.click(at!.x, at!.y)
+    }, projection, false, "a tap on the projection's own area hides it", [2, 6])
+    // A RELEASE OUTSIDE THE LABEL ENDS THE GESTURE TOO (the code review's second reading, 2026-11-20). In an
+    // attribute an unqualified `addEventListener` is the ELEMENT's: the release listeners stood on the label, a
+    // release over anything else was not heard, and the note stayed, the MindBox in it. A real press on the
+    // projection's label with the MindBox focused, released beside it (over a sibling; held, so that it is no tap of
+    // the item's either): the note is empty after the gesture, and a click on the label with no press of its own
+    // then reveals the projection and gives no focus back. [what the note holds: its toggle's tag, the box's id]
+    await pause()
+    await hold(3, 3)
+    const gesture = await page.evaluate(idc => {
+      const label = document.querySelector('span.template_toggle.' + idc)!
+      const rect = label.getBoundingClientRect()
+      const press = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }
+      const release = [{ x: press.x, y: rect.bottom + 40 }, { x: rect.right + 60, y: press.y }].find(at => (hit => !!hit && !label.contains(hit))(document.elementFromPoint(at.x, at.y)))
+      return { press, release, onLabel: document.elementFromPoint(press.x, press.y) === label }
+    }, projection)
+    expect([gesture.onLabel, !!gesture.release, (await held()).active], "the premise: the projection's label under the press, a point of a sibling for the release, the MindBox focused").toEqual([true, true, 'textarea-mindbox'])
+    await page.mouse.move(gesture.press.x, gesture.press.y)
+    await page.mouse.down()
+    await page.mouse.move(gesture.release!.x, gesture.release!.y, { steps: 4 })
+    await pause()
+    await page.mouse.up()
+    await pause()
+    const noted = () => page.evaluate(() => ((note: [Element, Element] | null | undefined) => (note ? [note[0].tagName, note[1].id] : null))((window as any)._toggle_focus))
+    const released = [await noted(), (await held()).active, await hidden(projection)]
+    await page.evaluate(() => getSelection()!.removeAllRanges())
+    await clickToggle('span.template_toggle.' + projection)
+    expect({ released, clicked: [await hidden(projection), (await held()).active, await noted()] }, 'a press on the label released over a sibling leaves no note (nothing toggled, the focus where the press left it), and a later click with no press of its own toggles and gives no focus back').toEqual({ released: [null, 'BODY', true], clicked: [false, 'BODY', null] })
+    await clickToggle('div.template_toggle.' + projection)
+    expect(await hidden(projection), 'the projection is hidden again').toBe(true)
+    await page.evaluate(() => (document.activeElement as HTMLElement).blur())
     // no rescan: the nested item's marker-shaped text part renders as inert markdown (the reference a
     // tag link showing the path, never a nested toggle or template call; presentation design section 7)
     await show(nameOf(fixture('e2e_nested.md')))
