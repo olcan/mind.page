@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
+import { createRequire } from 'node:module'
 import { decodeEntities, grammarRefs, highlightCode, inertChildTags, renderInertMarkdown } from '../../src/inert_markdown.js'
+// parseTags (the app's own parser, which the tag links' rows are read back with) reads the lodash
+// global `_` at call time
+;(globalThis as any)._ = createRequire(import.meta.url)('lodash')
+// @ts-expect-error util.js is plain js (the app's client lib) without a declaration file
+import { parseTags } from '../../src/util.js'
 
 // the inert Markdown policy for bridge replies (src/inert_markdown.ts): the vault renderer's
 // policy ported for the dead frame. these rows check the produced html string with the REAL
@@ -310,4 +316,165 @@ test('child tags: the relative shorthands a reply may use as tags, recognized an
   expect(renderInertMarkdown('#/gone')).not.toContain('<mark')
   // the extraction walks every structure
   expect(inertChildTags('- #/a\n- b #/b\n\n> #/c\n\n| h |\n|---|\n| #/d |\n\n[#/e](https://e.org) `#/no`')).toEqual(['#/a', '#/b', '#/c', '#/d', '#/e'])
+})
+
+// TAG LINKS (the owner, 2026-11-20): a tag written in an inert section is a quiet link that searches
+// for it, by the app's own rule of what a tag is; it tags nothing. each link of a rendered body as
+// [the tag it searches for, the text it shows], its title and its data attribute being the same tag
+const decoded = (h: string) => h.replace(/&#(\d+);/g, (_m, d) => String.fromCodePoint(+d))
+const tagLinks = (h: string) =>
+  [...h.matchAll(/<code class="tag-link" title="([^"]*)" data-tag-link="\1">([^<]*)<\/code>/g)].map(m => [decoded(m[1]), decoded(m[2])])
+const link = (tag: string, shown = tag) => `<code class="tag-link" title="${grammarRefs(tag)}" data-tag-link="${grammarRefs(tag)}">${grammarRefs(shown)}</code>`
+const wrapped = (inner: string) => `<div class="inert-markdown"><p>${inner}</p></div>`
+
+test("tag links: a bare tag is a link where the app's own parser takes it as a tag in the text Marked left as text", () => {
+  // a bare tag: the item's inline code by its element, the tag as its tooltip and its data, the text as written
+  expect(html('see #todo/Alpha here')).toBe(wrapped('see ' + link('#todo/Alpha') + ' here'))
+  // the start condition of parseTags: the start, whitespace (a line start included) or an opening parenthesis
+  expect(tagLinks(html('#start of the text, after a #space, in (#paren) and\n#line start')).map(l => l[0])).toEqual(['#start', '#space', '#paren', '#line'])
+  // THE APP'S RULE, ONCE: for each of these texts the links are exactly the tags parseTags reads in it,
+  // in order. its start condition and its characters (a digit or a colour code is a tag to the app; a
+  // second `#` ends one), and what it EXCLUDES: code blocks, a code span, math, an html tag or comment,
+  // a script's content, a macro, an eval macro, a line indented by four spaces
+  for (const body of [
+    '#a at the start, a #b/c after a space, (#d) in parentheses, #e.',
+    'x#no a/#no "#no" [#no] #yes',
+    'line one\n#two starts a line\n\ta tab, then #three',
+    "#1 and #fff are tags by the app's rule; a#b is not, and of #x#y the first alone",
+    '\\#no &#35;no https://example.org/page#no #yes',
+    '- #a item\n- [ ] #b task\n\n> #c quote\n\n# #d heading\n\n| #e | f |\n|---|---|\n| g | #h |',
+    '```\n#no\n```\n\n#yes',
+    '    #no\n\n#yes',
+    'code `not #no` and ``#no too`` then #yes',
+    'math $`#no`$ then #yes',
+    'html <b title="#no"> #no</b> and <!-- #no --> then #yes',
+    'a <script> #no </script> and a <style> #no </style> then #yes',
+    '<<macro #no>> and @{ #no }@ then #yes',
+    'a line\n     #no on a line indented by five spaces\n   #yes on one indented by three',
+    // ... ALL THE WAY DOWN: an emphasis inside a macro, inside an eval macro or on an indented line holds
+    // no tag either, nor does one that a macro begins or ends in; the tag after each is a tag
+    'Try << **#topic** >> then #yes',
+    '@{ **see #topic** }@ then #yes',
+    'a line\n     four spaces and more: *see #topic* and **#topic**\nthen #yes',
+    '**a << #no** b >> then #yes',
+  ])
+    expect(tagLinks(html(body)).map(l => l[0]), body).toEqual(parseTags(body).raw)
+  // the same for a CODE SPAN that such an exclusion encloses (the app's parser reads no code span as a tag,
+  // so these are spelled out): no link, where the span after the exclusion is one. an exclusion that lies
+  // inside an emphasis is found there as anywhere; and where the app pairs backticks its own way (a span
+  // of two backticks that holds one), Marked's span is the code span
+  for (const body of ['<<m `#no` *see `#no`*>> then `#yes`', '@{ `#no` }@ then `#yes`', 'a line\n     four spaces: `#no`\nthen `#yes`', '**a <<m #no>> then `#yes`**', '``a`b`` and `#yes`'])
+    expect(tagLinks(html(body)).map(l => l[0]), body).toEqual(['#yes'])
+  // WHERE MARKED DECIDES, not the app's expression: a link's destination and an image stay as they are
+  // (parseTags takes `(#x)` there), an html block stays html, a tag that Marked split stays text (one tag
+  // to the app; emphasis, or an escape, to Marked), and a run that Marked lexes by itself starts its own
+  // text (the inside of an emphasis: the child tags' rule, above; no tag to the app, which reads the `*`
+  // before it). the label of a link that is followed holds no tag link: the next row
+  for (const body of ['[t](#no)', '![#no](https://e.org/i.png)', '<div>\n#no\n</div>', '#a*b*c', '#a\\@b']) expect(html(body), body).not.toContain('tag-link')
+  expect(tagLinks(html('**#bold** *see #em* [#label](https://e.org)')).map(l => l[0])).toEqual(['#bold', '#em'])
+  // every structure is walked
+  expect(html('- one #li')).toContain('<span class="list-item">one ' + link('#li') + '</span>')
+  expect(html('| h |\n|---|\n| #cell |')).toContain('<td>' + link('#cell') + '</td>')
+})
+
+test("tag links: none in the label of a Markdown link that is followed, bare or in a code span; a reply's child mark there is unchanged", () => {
+  // an agent writes `[#roadmap](url)`, or an issue link whose label is a hash and a number: a press on
+  // the label opens the url, as before tag links. so nothing in such a label is a tag link, at any depth;
+  // the tag after the link is one
+  const anchor = (inner: string) => '<a href="' + grammarRefs('https://example.org/roadmap') + '" target="_blank" rel="noopener">' + inner + '</a>'
+  for (const [label, inner] of [
+    ['#roadmap', '&#35;roadmap'],
+    ['`#roadmap`', '<code>&#35;roadmap</code>'],
+    ['issue #12', 'issue &#35;12'],
+    ['**see `#a` and #b**', '<strong>see <code>&#35;a</code> and &#35;b</strong>'],
+  ])
+    expect(html(`[${label}](https://example.org/roadmap) then #yes`), label).toBe(wrapped(anchor(inner) + ' then ' + link('#yes')))
+  // a reply's child mark in such a label is what it was (the frame cancels the anchor at its press and its
+  // click); a full tag beside it is the label's text. in a tree the one-segment form is text there, as before
+  const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', danglingTags: new Set<string>() }
+  expect(renderInertMarkdown('[see #/alpha and #todo/alpha](https://example.org/roadmap)', ctx)).toBe(
+    wrapped(anchor('see <mark title="&#35;Chat&#47;alpha" data-tag="&#35;Chat&#47;alpha" data-reltag="&#35;&#47;alpha">alpha</mark> and &#35;todo&#47;alpha')),
+  )
+  expect(renderInertMarkdown('[see #/alpha](https://example.org/roadmap)', null, '#Chat')).toBe(wrapped(anchor('see &#35;&#47;alpha')))
+  // a link that is NOT followed is shown as its text and its destination, with no anchor: a tag in its
+  // label is a link like any other
+  expect(html('[see #x](#y)')).toBe(wrapped('see ' + link('#x') + ' (&#35;y)'))
+})
+
+test('tag links: a code span that is exactly one tag; a relative tag resolved against the label; an unresolvable or a hidden one stays plain', () => {
+  // INLINE CODE: the whole content is one tag by tagRegex (Marked's content: a longer backtick run, one
+  // space of padding); a span that merely holds a hash-word stays the plain code span it was
+  expect(html('`#todo/alpha`')).toBe(wrapped(link('#todo/alpha'))) // the same element as a bare tag's
+  expect(tagLinks(html('``#a`` and ` #b `')).map(l => l[0])).toEqual(['#a', '#b'])
+  for (const span of ['a #x', '#x #y', '#x.', 'x#y', '#', '#x#y', '#<b>']) expect(html('`' + span + '`'), span).toBe(wrapped('<code>' + grammarRefs(span) + '</code>'))
+  // RELATIVE: the link's tag is the resolved, absolute one (resolveRelativeTag against the label as
+  // written, here of two levels); the text shown stays as written, bare or in a code span
+  const under = (label: string, body: string) => renderInertMarkdown(body, null, label)
+  expect(tagLinks(under('#Chat/4', '#/kid #//sib #///up #/a/b and `#/kid`'))).toEqual([
+    ['#Chat/4/kid', '#/kid'],
+    ['#Chat/sib', '#//sib'],
+    ['#up', '#///up'],
+    ['#Chat/4/a/b', '#/a/b'],
+    ['#Chat/4/kid', '#/kid'],
+  ])
+  // UNRESOLVABLE: a root's `#///x`, and every relative form in an item without a label, stays as it was
+  // (text, or a plain code span); an absolute tag needs no label
+  expect(under('#Chat', '#///up and `#///up`')).toBe(wrapped('&#35;&#47;&#47;&#47;up and <code>&#35;&#47;&#47;&#47;up</code>'))
+  expect(under('', '#/kid #//sib #/a/b `#/kid`')).not.toContain('tag-link')
+  expect(tagLinks(under('', '#/kid and #abs'))).toEqual([['#abs', '#abs']])
+  // HIDDEN (the app's test: the resolved tag starts with `#_`): plain, written so or resolved so (a
+  // root's `#//_x` is `#_x`); an underscore deeper in a tag hides nothing, as in the app
+  expect(under('#Chat', '#_hidden `#_hidden` #//_auto `#//_auto`')).toBe(
+    wrapped('&#35;&#95;hidden <code>&#35;&#95;hidden</code> &#35;&#47;&#47;&#95;auto <code>&#35;&#47;&#47;&#95;auto</code>'),
+  )
+  expect(tagLinks(under('#Chat', '#a/_b #/_kid'))).toEqual([
+    ['#a/_b', '#a/_b'],
+    ['#Chat/_kid', '#/_kid'],
+  ])
+})
+
+test("tag links in a reply: a child tag stays the item's mark, what the child tags do not take is a link; nothing is injected", () => {
+  // a reply's region (the child-tag context): the one-segment relative forms are the item's child tags,
+  // marks exactly as before; a full tag, a deeper relative path and a code span beside them are links
+  const ctx = { id: 'i1', label: '#chat', labelText: '#Chat', danglingTags: new Set(['#chat/gone']) }
+  const body = 'see #/alpha and #todo/alpha, #/a/b, `#/alpha` and #/gone'
+  const reply = renderInertMarkdown(body, ctx)
+  expect([...reply.matchAll(/<mark([^>]*)>([^<]*)<\/mark>/g)].map(m => m[1] + '|' + m[2])).toEqual([
+    ' title="&#35;Chat&#47;alpha" data-tag="&#35;Chat&#47;alpha" data-reltag="&#35;&#47;alpha"|alpha',
+    ' class="dangling" title="&#35;Chat&#47;gone" data-tag="&#35;Chat&#47;gone" data-reltag="&#35;&#47;gone"|&#35;&#47;gone',
+  ])
+  expect(tagLinks(reply)).toEqual([
+    ['#todo/alpha', '#todo/alpha'],
+    ['#Chat/a/b', '#/a/b'],
+    ['#Chat/alpha', '#/alpha'],
+  ])
+  // the index reads the same child tags as before, and no link is one (no mark, no data-tag)
+  expect(inertChildTags(body)).toEqual(['#/alpha', '#/gone'])
+  expect(reply.match(/data-tag=/g)).toHaveLength(2)
+  // the same body in a section that is no reply (an agent's tree, a request): no mark, every tag a link
+  const tree = renderInertMarkdown(body, null, '#Chat')
+  expect(tree).not.toContain('<mark')
+  expect(tagLinks(tree).map(l => l[0])).toEqual(['#Chat/alpha', '#todo/alpha', '#Chat/a/b', '#Chat/alpha', '#Chat/gone'])
+  // there too the app's exclusions hold for a one-segment form, and a raw-text element's content is text;
+  // so is the text inside Marked's own raw block, in a reply and in a tree, as a child tag is none there
+  expect(renderInertMarkdown('<<macro #/no>> a <style> #/no `#no` </style>', null, '#Chat')).not.toContain('tag-link')
+  for (const context of [ctx, null]) expect(renderInertMarkdown('a <kbd> #no and #/no </kbd> <code> #no </code>', context, '#Chat')).not.toMatch(/tag-link|<mark/)
+  // a code span inside such a pair is no link either, also under an emphasis; the span after the pair is one
+  for (const context of [ctx, null])
+    expect(tagLinks(renderInertMarkdown('a <kbd>`#no`</kbd> <code> `#no` **`#no`** </code> then `#yes`', context, '#Chat')).map(l => l[0])).toEqual(['#yes'])
+  expect(tagLinks(renderInertMarkdown('a <kbd>k</kbd> #yes <b> #yes2 </b>', null, '#Chat')).map(l => l[0])).toEqual(['#yes', '#yes2'])
+  // NOTHING INJECTED: a tag's characters cannot hold a quote, an angle bracket or an ampersand (the tag
+  // ends there, and what follows is the text or the visible html it was), and whatever a tag or a label
+  // holds is character references in the text and in both attribute values
+  const odd = '#on=x/%22%3E@$^|+-'
+  expect(html(odd + '<img src=x onerror=alert(1)> #q"onmouseover="x')).toBe(
+    wrapped(link(odd) + '<code>&#60;img src&#61;x onerror&#61;alert&#40;1&#41;&#62;</code> ' + link('#q') + '&#34;onmouseover&#61;&#34;x'),
+  )
+  const hostile = renderInertMarkdown('#/x and `#/x`', null, '#L"><img src=x onerror=alert(1)>')
+  expect(tagLinks(hostile)).toEqual([
+    ['#L"><img src=x onerror=alert(1)>/x', '#/x'],
+    ['#L"><img src=x onerror=alert(1)>/x', '#/x'],
+  ])
+  expect(hostile.replace(/<\/?(?:div|p|code)\b[^<>]*>/g, '')).toMatch(/^[A-Za-z0-9 &#;]*$/) // no other element, no raw character
+  expect(bareText(html(odd + ' `' + odd + '`'))).toMatch(/^[A-Za-z0-9 ]*$/)
 })

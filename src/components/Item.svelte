@@ -1687,7 +1687,7 @@
       }
       const rendered = elem.getAttribute('data-inert-rendered') ?? ''
       if (!rendered.startsWith(marker + '|')) {
-        elem.innerHTML = renderInertMarkdown(value, childTagMarkers.has(marker) ? childTagContext : null)
+        elem.innerHTML = renderInertMarkdown(value, childTagMarkers.has(marker) ? childTagContext : null, labelText)
         framesPopulated = true
         // the frame's math spans join the ELEMENT CACHE (cacheElems below, as the owner's math does through
         // wrapMath's keys): a re-render of the item (a query change re-renders its html, frames included)
@@ -1704,27 +1704,39 @@
         elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
         if (!elem.hasAttribute('data-child-tags-wired')) {
           elem.setAttribute('data-child-tags-wired', '')
+          // (a TAG LINK, `code[data-tag-link]`, is a tag written in any inert section: no tag of the item's and
+          // no mark, src/inert_markdown.ts. it acts on a completed primary CLICK that is a tap by the section's
+          // own test (src/inert_blocks.ts: no selection made by the gesture, none that stood in the block at its
+          // press), with the whole tag: the handler is given no text to map the click by. its PRESS is the
+          // browser's: it can begin a selection or open the context menu, and it navigates nothing. its click
+          // stops here, tap or not: it toggles no block and opens no editor)
+          let selection = false // a selection stood in the frame's block at a tag link's press
           const childMark = (e: Event) => {
-            const mark = (e.target as Element | null)?.closest?.('mark[data-tag]')
+            const mark = (e.target as Element | null)?.closest?.('mark[data-tag], code[data-tag-link]')
             return mark && elem.contains(mark) ? mark : null
           }
           elem.addEventListener(
             'mousedown',
             (e: MouseEvent) => {
               const mark = childMark(e)
+              if (mark?.hasAttribute('data-tag-link')) selection = selectedIn(elem.closest('.inert-block') ?? elem)
               // a dangling mark (a relative tag no item carries) navigates nowhere; its click is still cancelled
               // below, so one inside a link does not fire the anchor either
-              if (mark && !mark.classList.contains('dangling')) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
+              else if (mark && !mark.classList.contains('dangling')) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
             },
             true
           )
           elem.addEventListener(
             'click',
             (e: MouseEvent) => {
-              if (childMark(e)) {
-                e.preventDefault()
-                e.stopPropagation()
-              }
+              const tap = !selection && !selectedIn(e.target as Node)
+              selection = false
+              const mark = childMark(e)
+              if (!mark) return
+              e.preventDefault()
+              e.stopPropagation()
+              const link = mark.getAttribute('data-tag-link')
+              if (link && tap && e.button == 0) window['_handleTagClick'](id, link, '', e)
             },
             true
           )
@@ -3525,6 +3537,25 @@
     font-weight: 300;
     padding: 1px 4px;
     cursor: text;
+  }
+  /* a tag written in an inert section (src/inert_markdown.ts) is a quiet link that searches for it: the
+     item's inline code, by its element, in a bluish tint (the owner, 2026-11-20); no underline. in a
+     frame alone: an element of that class in the owner's own text is the owner's, and the closed
+     line's copy of one (src/inert_blocks.ts, statusLine) is no link there and has no tint, which
+     "would suggest a click would follow the link" (the owner): the plain inline code look */
+  .item > :global(.content .vault-result code.tag-link) {
+    color: #9bf;
+    background: rgba(102, 153, 255, 0.15);
+    cursor: pointer;
+  }
+  /* in the closed line a tag link is a piece of that one line: it does not wrap (inline code may, and
+     the line would spill out of its block), and it takes no height of its own (no vertical padding, its
+     own font's line), so the line and its text stand exactly where they stand without a tag */
+  .item > :global(.content .inert-status code.tag-link) {
+    white-space: nowrap;
+    line-height: normal;
+    padding-top: 0;
+    padding-bottom: 0;
   }
   .item > :global(:is(.content, .deps-and-dependents) mark.selected) {
     background: #9f9;

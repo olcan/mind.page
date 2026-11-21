@@ -1043,6 +1043,272 @@ test("a reply's child tags are the item's tags: marks in the frame, navigation, 
   expect([await query(), await tagged()], 'the MindBox and the block are as they were').toEqual([box, { inTag: true, closed: true, shown: false }])
 })
 
+test("a tag written in an inert section is a quiet link: a click fills the MindBox with the resolved tag, toggles nothing, opens no editor and tags nothing; its press is the browser's; a reply's child tag stays the item's mark", async ({ page }) => {
+  // the owner, 2026-11-20 (src/inert_markdown.ts, TAG LINKS; what a tag is has its table in
+  // tests/unit/inert_markdown.spec.ts): in every inert section a tag by the app's own rule shows as
+  // `code.tag-link`, the item's inline code in a bluish tint, with the resolved tag as its tooltip.
+  // a completed primary click on it that is a tap by the section's own test goes to the app's tag
+  // handler through the frame's capture listeners, and stops in the frame; its press is left to the
+  // browser (a drag from it selects, a secondary press navigates nothing), where a child mark still
+  // acts on its press. nothing is tagged and nothing is looked up
+  await loadAdmin(page)
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const TODO = '#e2e_tl/work'
+  const CHAT = '#e2e_tlc'
+  const tree = ['agent', '- working: see #e2e_tl_bare and `#e2e_tl_code`, then #//sib', '    - [ ] plain `code`, hidden #_e2e_tl_hid, deeper #/a/b'].join('\n')
+  for (const text of [
+    `${TODO} tlword tidy the shed\n${inert(tree)}\na line of the owner under the tree`,
+    `${CHAT} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/kid and #e2e_tl_full, also `#/kid`')}`,
+    `${CHAT}/kid\na child`,
+  ])
+    await page.evaluate(text => void window._create(text), text)
+  await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, `${CHAT}/kid`), { timeout: 30_000 }).toBeTruthy()
+  const select = (label: string) => page.evaluate(label => void (window as any).MindBox.set(label, { scroll: true }), label)
+  const box = () => mindbox(page).inputValue()
+  // the item on the page (not a mount in the offscreen column)
+  const shown = async (label: string) => `.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${await page.evaluate(label => (window as any)._item(label, true).id, label)}"]`
+  // an item's tag links as [the tag searched for, the tooltip, the text shown], and its frames' marks
+  const links = async (label: string) =>
+    page.evaluate(sel => [...document.querySelectorAll(`${sel} .vault-result code.tag-link`)].map(l => [l.getAttribute('data-tag-link'), (l as HTMLElement).title, l.textContent]), await shown(label))
+  const marks = async (label: string) =>
+    page.evaluate(sel => [...document.querySelectorAll(`${sel} .vault-result mark`)].map(m => [m.getAttribute('data-tag'), m.getAttribute('data-reltag'), m.textContent, m.className]), await shown(label))
+  const facts = (label: string) =>
+    page.evaluate(label => {
+      const item = ((window as any).__items as any[]).find(i => i.label == label)!
+      return { tags: [...item.tags].sort(), missing: [...item.missingTags], dangling: [...item.danglingTags] }
+    }, label)
+  // an item's editor, and per block [a toggle's class on it, its frames shown]
+  const state = async (label: string) =>
+    page.evaluate(
+      sel => ({
+        editing: !!document.querySelector(`${sel}.editing, ${sel} textarea`),
+        blocks: [...document.querySelectorAll(`${sel} .inert-block`)].map(block => [block.matches('.opened, .closed'), [...block.querySelectorAll(':scope > .vault-result')].every(frame => frame.getClientRects().length > 0)]),
+      }),
+      await shown(label),
+    )
+  const focused = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName)
+  // (a focused MindBox lies over the backdrop that focuses it)
+  const focusBox = async () => void ((await focused()) == 'textarea-mindbox' || (await focusMindbox(page)))
+
+  // THE TREE of a todo: a bare tag, a code span that is one tag, a relative tag (the label's sibling) and a
+  // deeper relative path are links; the hidden tag and the ordinary code span are what they were
+  await select(TODO)
+  await expect.poll(() => links(TODO), { timeout: 15_000 }).toEqual([
+    ['#e2e_tl_bare', '#e2e_tl_bare', '#e2e_tl_bare'],
+    ['#e2e_tl_code', '#e2e_tl_code', '#e2e_tl_code'],
+    ['#e2e_tl/sib', '#e2e_tl/sib', '#//sib'],
+    ['#e2e_tl/work/a/b', '#e2e_tl/work/a/b', '#/a/b'],
+  ])
+  const todo = await shown(TODO)
+  expect(
+    await page.evaluate(sel => {
+      const frame = document.querySelector(`${sel} .vault-result`)!
+      const status = document.querySelector(`${sel} .inert-block > .inert-line > .inert-status`)!
+      return {
+        marks: frame.querySelectorAll('mark').length,
+        plain: [...frame.querySelectorAll('code:not(.tag-link)')].map(code => code.textContent),
+        hidden: frame.textContent!.includes('hidden #_e2e_tl_hid, deeper'),
+        key: frame.getAttribute('data-inert-rendered')!.replace(/^[^|]*/, ''),
+        status: status.textContent,
+      }
+    }, todo),
+    'no mark stands in the tree (what the dangling key, the selected marks and the search by a tag read), and the status line repeats its first line',
+  ).toEqual({ marks: 0, plain: ['code'], hidden: true, key: '|', status: 'working: see #e2e_tl_bare and #e2e_tl_code, then #//sib' })
+  expect(await facts(TODO), 'nothing is tagged, and a tag no item carries is nothing missing').toEqual({ tags: [TODO], missing: [], dangling: [] })
+  // THE LOOK: the item's inline code (its font and its box) for a bare tag and a code-span tag alike, with a
+  // colour and a background of their own in which blue leads; no underline; the pointer
+  const look = await page.evaluate(sel => {
+    const style = (e: Element) => {
+      const s = getComputedStyle(e)
+      return { font: [s.fontFamily, s.fontSize, s.fontWeight, s.lineHeight].join(' | '), box: [s.padding, s.borderRadius, s.borderStyle].join(' | '), color: s.color, background: s.backgroundColor, line: s.textDecorationLine, cursor: s.cursor }
+    }
+    const frame = document.querySelector(`${sel} .vault-result`)!
+    const [bare, span] = frame.querySelectorAll('code.tag-link')
+    return { code: style(frame.querySelector('code:not(.tag-link)')!), bare: style(bare), span: style(span) }
+  }, todo)
+  const rgb = (color: string) => color.match(/[\d.]+/g)!.map(Number)
+  expect(look.bare, 'a bare tag and a code-span tag look alike').toEqual(look.span)
+  expect({ ...look.bare, color: look.code.color, background: look.code.background }, "the ordinary code span's font, box and pointer").toEqual(look.code)
+  expect([look.bare.line, look.bare.cursor]).toEqual(['none', 'pointer'])
+  for (const [mine, plain] of [
+    [look.bare.color, look.code.color],
+    [look.bare.background, look.code.background],
+  ]) {
+    expect(mine, 'a tint of its own').not.toBe(plain)
+    expect(rgb(mine)[2], `blue leads in ${mine}`).toBeGreaterThan(Math.max(rgb(mine)[0], rgb(mine)[1]))
+  }
+
+  // THE CLOSED LINE shows its tags in the inline code style (the owner, 2026-11-20): the status line's copy
+  // (src/inert_blocks.ts) keeps a tag link as the same element, with its tooltip, inside the one line,
+  // which is as tall as a line of the item's text, as before. there the tag is the line's, NO LINK: it
+  // has the PLAIN inline code look, none of the section's tint (the owner: a tint "would suggest a click
+  // would follow the link"), and a click on it opens the section, as a click anywhere on the closed line
+  // does, and searches for nothing (the frame's listeners do not reach the head)
+  await page.evaluate(() => void (window as any).MindBox.set('tlword'))
+  const closed = async () =>
+    page.evaluate(sel => {
+      const block = document.querySelector(`${sel} .inert-block`) as HTMLElement
+      const status = block.querySelector(':scope > .inert-line > .inert-status')!
+      const style = getComputedStyle(block)
+      // the colour, the background and the pointer of an element as computed; `code` is what an ordinary
+      // inline code span gets in that place (a span put into the status line for the reading, then taken out)
+      const look = (e: Element) => [getComputedStyle(e).color, getComputedStyle(e).backgroundColor, getComputedStyle(e).cursor].join(' ')
+      const tags = [...status.children]
+      const span = status.appendChild(document.createElement('code'))
+      span.textContent = 'x'
+      const looks = { tags: tags.map(look), code: look(span), link: look(block.querySelector('.vault-result code.tag-link')!) }
+      span.remove()
+      return {
+        shown: [status.getClientRects().length > 0, [...block.querySelectorAll(':scope > .vault-result')].some(frame => frame.getClientRects().length > 0)],
+        // the block with its margins, in lines of the item's text
+        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        tags: tags.map(tag => [tag.tagName, tag.className, tag.getAttribute('title'), tag.textContent]),
+        looks,
+      }
+    }, await shown(TODO))
+  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line, and holds its tags as tag link elements with their tooltips').toEqual({
+    shown: [true, false],
+    lines: 1,
+    tags: [
+      ['CODE', 'tag-link', '#e2e_tl_bare', '#e2e_tl_bare'],
+      ['CODE', 'tag-link', '#e2e_tl_code', '#e2e_tl_code'],
+      ['CODE', 'tag-link', '#e2e_tl/sib', '#//sib'],
+    ],
+    looks: 0,
+  })
+  const { looks } = await closed()
+  expect(looks.tags, 'in the closed line a tag has the plain inline code look: the colour, the background and the pointer of an ordinary code span there').toEqual([looks.code, looks.code, looks.code])
+  expect(looks.link, "which is not the tint its link has in the section").not.toBe(looks.code)
+  await page.locator(`${await shown(TODO)} .inert-block > .inert-line > .inert-status code.tag-link`).first().click()
+  await expect.poll(() => state(TODO), 'a click on a tag in the closed line opens the section').toEqual({ editing: false, blocks: [[true, true]] })
+  expect(await box(), 'and searches for nothing').toBe('tlword')
+
+  // what the page hears of a tag link's presses and clicks, as `phase:type:button`: on the way down to it
+  // (`capture`, at the window) and on the way back up (`bubble`: an event that was stopped in the frame
+  // never gets there)
+  await page.evaluate(() => {
+    const w = window as any
+    w.__tag_link_events = []
+    for (const type of ['mousedown', 'click'])
+      for (const capture of [true, false])
+        window.addEventListener(type, e => (e.target as Element).closest?.('code.tag-link') && w.__tag_link_events.push(`${capture ? 'capture' : 'bubble'}:${type}:${(e as MouseEvent).button}`), capture)
+  })
+  const events = () => page.evaluate(() => ((window as any).__tag_link_events as string[]).splice(0))
+  const CLICK = ['capture:mousedown:0', 'bubble:mousedown:0', 'capture:click:0'] // a press that went on to the page, and a click that stopped in the frame
+  const OPEN = { editing: false, blocks: [[false, true]] } // open by the selection, no toggle made, no editor
+  // the selected todo's n-th tag link: shown, at rest, with no selection standing and nothing heard yet
+  const ready = async (n = 0) => {
+    await page.evaluate(() => getSelection()!.removeAllRanges())
+    await select(TODO)
+    const link = page.locator(`${await shown(TODO)} .vault-result code.tag-link`).nth(n)
+    await expect(link, 'the selected todo shows its tree').toBeVisible()
+    await expect.poll(() => state(TODO), 'the premise: open by the selection, no toggle made').toEqual(OPEN)
+    await link.scrollIntoViewIfNeeded()
+    let last = ''
+    await expect.poll(async () => last == (last = JSON.stringify(await link.boundingBox())), { intervals: [100] }).toBe(true)
+    await events()
+    return link
+  }
+  const selection = () => page.evaluate(() => [getSelection()!.type, getSelection()!.toString()])
+
+  // A DRAG THAT STARTS ON A TAG LINK SELECTS TEXT, as on any word of a section (the owner copies tags): the
+  // press is the browser's, and the click that ends the drag, on the link that holds the selection, is no
+  // tap: nothing navigates, nothing toggles
+  let link = await ready()
+  const at = (await link.boundingBox())!
+  await page.mouse.move(at.x + 8, at.y + at.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(at.x + at.width - 8, at.y + at.height / 2, { steps: 5 })
+  await page.mouse.up()
+  const dragged = await selection()
+  expect([dragged[0], dragged[1].length > 3 && '#e2e_tl_bare'.includes(dragged[1])], `the drag selected a part of the tag: ${dragged[1]}`).toEqual(['Range', true])
+  expect(await events(), 'the press went on to the page, and the click that ended the drag stopped in the frame').toEqual(CLICK)
+  expect([await box(), await state(TODO)], 'a drag from a tag link navigates nothing and toggles nothing').toEqual([TODO, OPEN])
+  // THE CLICK THAT ONLY ENDS A SELECTION standing in the section is no tap either (the section's own rule): a
+  // click on another tag link, beside the selected text, ends the selection and navigates nothing; the
+  // next click on that link is the tap
+  const second = page.locator(`${await shown(TODO)} .vault-result code.tag-link`).nth(1)
+  await second.click()
+  expect([(await selection())[0] == 'Range', await events()], 'the click ended the selection, and stopped in the frame').toEqual([false, CLICK])
+  expect([await box(), await state(TODO)], 'the click that ends a selection navigates nothing and toggles nothing').toEqual([TODO, OPEN])
+  await second.click()
+  await expect.poll(box, 'the next click is the tap').toBe('#e2e_tl_code ')
+  // A CLICK OF ANOTHER BUTTON, which no browser makes, navigates nothing (with no selection standing: the
+  // button alone decides here), and A SECONDARY PRESS is the browser's too (its context menu; it can select
+  // the word it lands on): it navigates nothing
+  link = await ready()
+  await link.evaluate(link => void link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 2 })))
+  expect([(await selection())[0] == 'Range', await events()], 'a click of another button, with nothing selected, stops in the frame').toEqual([false, ['capture:click:2']])
+  expect([await box(), await state(TODO)], 'a click of another button navigates nothing and toggles nothing').toEqual([TODO, OPEN])
+  await link.click({ button: 'right' })
+  expect(await events(), 'the secondary press went on to the page').toEqual(['capture:mousedown:2', 'bubble:mousedown:2'])
+  expect([await box(), await state(TODO)], 'a secondary press navigates nothing and toggles nothing').toEqual([TODO, OPEN])
+
+  // A CLICK ON EACH fills the MindBox with the resolved tag, as a click on a tag does (the tag and a space):
+  // the whole tag wherever the click lands, since the text shown is the tag as written. it stops in the
+  // frame, so it toggles no block and opens no editor (after the first, the todo is still listed, by the
+  // tag's text in its tree, and its section is open by that match with no toggle on it)
+  for (const [n, tag] of [
+    [0, '#e2e_tl_bare'],
+    [1, '#e2e_tl_code'],
+    [2, '#e2e_tl/sib'],
+  ] as const) {
+    await (await ready(n)).click()
+    await expect.poll(box, `a click on ${tag}`).toBe(tag + ' ')
+    expect(await events(), 'the press went on to the page; the click acted and stopped in the frame').toEqual(CLICK)
+    expect(await page.evaluate(() => [!!document.querySelector('.container.editing'), document.querySelectorAll('.inert-block:is(.opened, .closed)').length]), 'no editor, no toggle').toEqual([false, 0])
+    if (n == 0) await expect.poll(() => state(TODO), "the todo's section under the tag's search").toEqual(OPEN)
+  }
+  // the premise of "stopped in the frame": a click beside a tag link, on the ordinary code span, reaches the
+  // block, which closes (a click anywhere on a block toggles it)
+  await ready()
+  await page.locator(`${await shown(TODO)} .vault-result code:not(.tag-link)`).click()
+  await expect.poll(() => state(TODO), 'the click beside a link reaches the block').toEqual({ editing: false, blocks: [[true, false]] })
+
+  // A REPLY: the child tag is the item's mark as before and the item carries it; the full tag beside it, and
+  // the same child form in a code span, are links, which the item does not carry
+  await select(CHAT)
+  await expect.poll(() => marks(CHAT), { timeout: 15_000 }).toEqual([['#e2e_tlc/kid', '#/kid', 'kid', '']])
+  expect(await links(CHAT)).toEqual([
+    ['#e2e_tl_full', '#e2e_tl_full', '#e2e_tl_full'],
+    ['#e2e_tlc/kid', '#e2e_tlc/kid', '#/kid'],
+  ])
+  expect((await facts(CHAT)).tags, "the item's tags: its label and the child tag").toEqual([CHAT, `${CHAT}/kid`])
+  await page.locator(`${await shown(CHAT)} .vault-result code.tag-link`).first().click()
+  await expect.poll(box, 'a click on the full tag').toBe('#e2e_tl_full ')
+  // the child mark's press, for comparison: it goes to the child, and moves no focus either
+  await select(CHAT)
+  const mark = page.locator(`${await shown(CHAT)} .vault-result mark[data-tag]`)
+  await expect(mark).toBeVisible()
+  await focusBox()
+  await mark.click()
+  await expect.poll(box, 'a click on the child mark').toBe(`${CHAT}/kid `)
+  expect(await focused(), "the child mark's press moves no focus").toBe('textarea-mindbox')
+
+  // THE CLOSED LINE AT A PHONE'S WIDTH, where it is longer than its block: still the one line, cut with an
+  // ellipsis; a tag link in it does not wrap (inline code may) and stands inside the line's own box, so
+  // nothing of the line spills out of the block
+  await page.setViewportSize({ width: 375, height: 667 })
+  await page.evaluate(() => void (window as any).MindBox.set('tlword'))
+  const narrow = async () =>
+    page.evaluate(sel => {
+      const block = document.querySelector(`${sel} .inert-block`) as HTMLElement | null
+      const head = block?.querySelector(':scope > .inert-line')?.getBoundingClientRect()
+      const status = block?.querySelector(':scope > .inert-line > .inert-status') as HTMLElement | null
+      if (!block || !head || !status || !status.getClientRects().length) return null
+      const style = getComputedStyle(block)
+      const within = (inner: DOMRect, outer: DOMRect) => inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5
+      return {
+        width: innerWidth,
+        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        cut: [status.scrollWidth > status.clientWidth, getComputedStyle(status).textOverflow],
+        line: within(status.getBoundingClientRect(), head), // the status line's box is the head's: one line
+        tags: [...status.querySelectorAll('code.tag-link')].map(tag => within(tag.getBoundingClientRect(), status.getBoundingClientRect())),
+      }
+    }, await shown(TODO))
+  await expect.poll(narrow, "the closed line at a phone's width").toEqual({ width: 375, lines: 1, cut: [true, 'ellipsis'], line: true, tags: [true, true, true] })
+})
+
 test('a deleted child that held macro expansions turns its tags missing (dangling for the frame\'s relative marks): the marks in the frame and plain tags alike', async ({ page }) => {
   // the owner's report (2026-10-01): the bridge's children carry an `<<agent(...)>>` macro, so a
   // child once rendered or pre-expanded holds expansion state (expanded.item); deleting it cleared
