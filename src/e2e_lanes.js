@@ -21,6 +21,8 @@ export const E2E_LANES = [
   'contract',
   'tasks',
   'lifecycle',
+  'editor3',
+  'editor4',
 ]
 export function lanePort(lane) {
   const index = E2E_LANES.indexOf(lane)

@@ -57,10 +57,10 @@ and the dev server (`npm run dev`) are independent and can run concurrently.
 
 ## Tests
 
-Tests run as twelve projects (see `playwright.config.ts`): `unit` (no browser) and eleven browser
+Tests run as fourteen projects (see `playwright.config.ts`): `unit` (no browser) and thirteen browser
 LANES — `chromium` (the shared-fixture baseline lane: not read-only, its server tests mutate
 anonymous and prerender state its render tests inspect, which is why it stays serial inside),
-`admin`, `editor`, `bridge`, `renderer`, `propagation`, `personal`, `editor2`, `contract`, `tasks` and `lifecycle` — each capped to one worker,
+`admin`, `editor`, `bridge`, `renderer`, `propagation`, `personal`, `editor2`, `contract`, `tasks`, `lifecycle`, `editor3` and `editor4` — each capped to one worker,
 all running at once (one worker per project). Lanes no longer depend on each other: each has its
 own project id and its own copy of the seed, so there is no chain and nothing for `--no-deps` to
 skip; naming one spec runs only its rows (every lane's server still starts and every lane's
@@ -100,7 +100,17 @@ own Firestore project (`helpers.ts`: `adminAuth()` vs `admin()`/`firestore()`).
   in the url hash), escape and shift+backspace, clicking a tag and going back, editing an item in
   place (click, shift+enter to save, escape with a discard prompt), an edit surviving a layout that
   moves the item to another column (its text, selection and focus), and `/_undelete`. The mindbox
-  textarea is hidden behind a backdrop until focused, so tests click the backdrop.
+  textarea is hidden behind a backdrop until focused, so tests click the backdrop. The suite runs on
+  four lanes: `editor2.spec.ts` holds its self-contained long rows (2026-09-07), and its later rows
+  went on 2026-11-21, in their order, to `editor3.spec.ts` (Down with two modifiers, the reload rows,
+  the stop rows) and `editor4.spec.ts` (the width row to the end: what a reload and a re-ranking add
+  to the history among them), so that no editor lane sets the gate's length. Each of those two starts
+  with a row that creates the items of the navigation row that its rows name (`#e2e_source`,
+  `#e2e_target`, `#e2e_target/sub`: `createNavigationItems`), and the helpers that two lanes use are in
+  `editor_helpers.ts`. A unit row (`tests/unit/e2e_lanes.spec.ts`) checks the FILE ASSIGNMENT as
+  Playwright makes it: every spec file goes to exactly one lane, every lane gets one, and the unit
+  project reads `tests/unit` alone. A spec file that holds no test still passes it: the rows
+  themselves are compared with `npx playwright test --list`.
 - `personal.spec.ts` - a regular account (`alice_e2e`): the first sign-in copies the welcome item
   and prompts for a new secret phrase, items are then stored as `cipher` with `text` and `attr`
   nulled, reloading decrypts silently, a new device is prompted for the phrase and a wrong one can
