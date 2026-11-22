@@ -3568,14 +3568,14 @@
             numeric: true,
             sensitivity: 'base',
           }) ||
-          // log items matching #log query ordered by time
-          (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
           // listing item context position (includes labelPrefixes)
           context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
           // target item (listing item or id-matching item)
           b.target - a.target ||
           // editing mode (except log items)
           (!b.log && b.editing) - (!a.log && a.editing) ||
+          // log items matching #log query ordered by time
+          (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
           // running items
           b.running - a.running ||
           // errors
