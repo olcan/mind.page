@@ -1102,3 +1102,339 @@ test('an old log item being edited stays in place while the search stands, moves
     await cleanup.commit()
   }
 })
+
+const SANITY_ERROR_RE = /toggles are not|toggles are incomplete|invalid toggles|invalid hideIndex|items are not ordered by time/
+
+async function clickShowMoreRevealsNext(page: Page, context: string) {
+  await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+  const before = await page.evaluate(() => {
+    const items = (window as any).__items as any[]
+    const hideIndex = (window as any).__hideIndex as number
+    return { hideIndex, total: items.length, nextId: items[hideIndex]?.id ?? null }
+  })
+  expect(before.hideIndex, `precondition: items remain hidden ${context}`).toBeLessThan(before.total)
+  const show = page.locator('.column:not(.hidden) .toggle.show').first()
+  // non-retrying check after Svelte's flush: a retrying wait can be masked seconds later by an unrelated background rerank
+  expect(await show.count(), `show more control is rendered ${context} (hideIndex=${before.hideIndex})`).toBeGreaterThan(0)
+  await expect(show, `show more control is visible ${context}`).toBeVisible()
+  const countText = (await show.locator('.count').textContent()) ?? ''
+  const shownCount = Number(countText.match(/show (\d+) items/)?.[1] ?? NaN)
+  expect(shownCount, `show more control reports a positive count ${context} ("${countText}")`).toBeGreaterThan(0)
+  await show.click()
+  await expect
+    .poll(() => page.evaluate(() => (window as any).__hideIndex as number), {
+      message: `clicking show more advances __hideIndex by ${shownCount} ${context}`,
+    })
+    .toBe(before.hideIndex + shownCount)
+  await expect(
+    page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${before.nextId}"]`),
+    `clicking show more reveals the next hidden item ${context}`
+  ).toBeVisible()
+}
+
+test('the show-more cutoff stays below deep log entries edited in place across Ctrl+Down, Tab, trailing space, and arrival', async ({ page }) => {
+  const LOG_COUNT = 45
+  const logIds = Array.from({ length: LOG_COUNT }, (_, i) => `e2e_cutoff_ab_log_${String(i).padStart(2, '0')}`)
+  const ARRIVED_ID = 'e2e_cutoff_ab_arrived'
+  const baseTime = Date.now() - 48 * 3600 * 1000
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  logIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), { user: 'anonymous', time: baseTime + i * 60_000, attr: null, text: `#log e2e_cutoff_ab entry ${i}` })
+  })
+  await batch.commit()
+
+  const sanityErrors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && SANITY_ERROR_RE.test(msg.text())) sanityErrors.push(msg.text())
+  })
+
+  const cutoffOf = (id: string) =>
+    page.evaluate(targetId => {
+      const items = (window as any).__items as any[]
+      const item = items.find(i => i.id == targetId)
+      return {
+        hideIndex: (window as any).__hideIndex as number,
+        index: item ? (item.index as number) : -1,
+        editingPromoted: !!item?.editingPromoted,
+      }
+    }, id)
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(() => page.evaluate(ids => ids.every(id => (window as any).__items.some((i: any) => i.id == id)), logIds), {
+        message: 'all seeded log fixtures loaded',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // precondition: under #log expand one group to locate a real group boundary, then expand past it
+    await searchMindbox(page, '#log')
+    const initialHideIndex = await page.evaluate(() => (window as any).__hideIndex as number)
+    await clickShowMoreRevealsNext(page, 'expanding first group under #log')
+    const boundary = await page.evaluate(() => (window as any).__hideIndex as number)
+    expect(boundary, 'precondition: group boundary lies past initial cutoff').toBeGreaterThan(initialHideIndex)
+    const { beforeId, beforeText, afterId, afterText } = await page.evaluate(b => {
+      const items = (window as any).__items as any[]
+      return {
+        beforeId: items[b - 1].id as string,
+        beforeText: items[b - 1].text as string,
+        afterId: items[b].id as string,
+        afterText: items[b].text as string,
+      }
+    }, boundary)
+    await clickShowMoreRevealsNext(page, 'expanding past boundary under #log')
+
+    // click to edit the last log before the boundary (caches hideIndexMinimal = boundary), then Ctrl+Down opens the next log across it
+    const firstDraft = `${beforeText} first`
+    const secondDraft = `${afterText} second`
+    await openEditorWithDraft(page, beforeId, ' first', firstDraft)
+    expect((await cutoffOf(beforeId)).editingPromoted, 'precondition: deep log is edited in place').toBe(false)
+    await page.keyboard.press('Control+ArrowDown')
+    const secondTextarea = page.locator(`#textarea-${afterId}`)
+    await expect(secondTextarea, 'Ctrl+Down opened and focused the editor past the boundary').toBeFocused()
+    await page.evaluate(id => {
+      const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+      t.setSelectionRange(t.value.length, t.value.length)
+    }, afterId)
+    await page.keyboard.type(' second')
+    await expect(secondTextarea).toHaveValue(secondDraft)
+
+    // expand one more group via Show more (returning focus to page), then Tab retreats across a real group boundary without hiding the Ctrl+Down draft
+    await clickShowMoreRevealsNext(page, 'expanding further before window Tab')
+    const beforeTabHideIndex = await page.evaluate(() => (window as any).__hideIndex as number)
+    await expect(secondTextarea).not.toBeFocused()
+    await page.keyboard.press('Tab')
+    await expect(mindbox(page), 'window Tab handler ran and focused MindBox').toBeFocused()
+    const afterTab = await cutoffOf(afterId)
+    expect(afterTab.hideIndex, 'precondition: Tab retreated across a real group boundary').toBeLessThan(beforeTabHideIndex)
+    expect(
+      afterTab.index,
+      `Ctrl+Down editor index (${afterTab.index}) must stay below __hideIndex (${afterTab.hideIndex}) after window Tab`
+    ).toBeLessThan(afterTab.hideIndex)
+    await expectEditorVisible(page, afterId, secondDraft, 'after window Tab across a group boundary')
+    await clickShowMoreRevealsNext(page, 'after window Tab')
+
+    // A: appending a space changes raw text (triggering cutoff reset) without promoting the deep log entry
+    await searchMindbox(page, '#log ')
+    const afterSpace = await cutoffOf(afterId)
+    expect(afterSpace.editingPromoted, 'deep log stays unpromoted after trailing space').toBe(false)
+    expect(afterSpace.index, 'deep log keeps its place after trailing space').toBe(boundary)
+    expect(
+      afterSpace.index,
+      `deep log index (${afterSpace.index}) must stay below __hideIndex (${afterSpace.hideIndex}) after trailing space`
+    ).toBeLessThan(afterSpace.hideIndex)
+    await expectEditorVisible(page, afterId, secondDraft, 'after trailing space under #log')
+
+    // B: a new log item arrives from the store above the edited entry
+    await itemsCol.doc(ARRIVED_ID).set({
+      user: 'anonymous',
+      time: Date.now(),
+      attr: null,
+      text: '#log e2e_cutoff_ab arrived remotely',
+    })
+    await expect
+      .poll(() => page.evaluate(id => (window as any).__items.some((i: any) => i.id == id), ARRIVED_ID), {
+        message: 'arrived log item integrated',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    const afterArrival = await cutoffOf(afterId)
+    expect((await cutoffOf(ARRIVED_ID)).index, 'precondition: arriving log ranks above deep log').toBeLessThan(afterArrival.index)
+    expect(afterArrival.editingPromoted, 'deep log stays unpromoted after arriving log item').toBe(false)
+    expect(afterArrival.index, 'deep log shifts by 1 in time order after arrival').toBe(boundary + 1)
+    expect(
+      afterArrival.index,
+      `deep log index (${afterArrival.index}) must stay below __hideIndex (${afterArrival.hideIndex}) after arriving log item`
+    ).toBeLessThan(afterArrival.hideIndex)
+    await expectEditorVisible(page, afterId, secondDraft, 'after arriving log item under #log')
+    expect(sanityErrors, 'toggle and ranking sanity checks stayed silent').toEqual([])
+  } finally {
+    const cleanup = firestore().batch()
+    ;[...logIds, ARRIVED_ID].forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})
+
+test('the show-more cutoff stays below an open editor ranked below search-specific pins, including after ArrowUp to a pinned parent', async ({ page }) => {
+  const TOPIC_ID = 'e2e_cutoff_c_topic'
+  const CHILD_ID = 'e2e_cutoff_c_child'
+  const TOPIC_PIN_ID = 'e2e_cutoff_c_topic_pin'
+  const EDIT_ID = 'e2e_cutoff_c_edit'
+  const EDIT_TEXT = '#e2e_cutoff_c_edit non-log item edited below search pins'
+  const DRAFT_TEXT = `${EDIT_TEXT} draft`
+  const LOG_PIN_COUNT = 12
+  const LOG_COUNT = 40
+  const OLDER_LOG_ID = 'e2e_cutoff_c_older_log'
+  const logPinIds = Array.from({ length: LOG_PIN_COUNT }, (_, i) => `e2e_cutoff_c_logpin_${String(i).padStart(2, '0')}`)
+  const logIds = Array.from({ length: LOG_COUNT }, (_, i) => `e2e_cutoff_c_log_${String(i).padStart(2, '0')}`)
+  const allIds = [TOPIC_ID, CHILD_ID, TOPIC_PIN_ID, EDIT_ID, ...logPinIds, ...logIds]
+  const baseTime = Date.now() - 48 * 3600 * 1000
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  batch.set(itemsCol.doc(TOPIC_ID), { user: 'anonymous', time: baseTime - 60_000, attr: null, text: '#e2e_cutoff_c_topic unique target item' })
+  batch.set(itemsCol.doc(CHILD_ID), { user: 'anonymous', time: baseTime - 90_000, attr: null, text: '#e2e_cutoff_c_topic/child child under pinned parent' })
+  batch.set(itemsCol.doc(TOPIC_PIN_ID), { user: 'anonymous', time: baseTime - 120_000, attr: null, text: '#e2e_cutoff_c_topic_pin #_e2e_cutoff_c_topic/pin pinned to topic' })
+  batch.set(itemsCol.doc(EDIT_ID), { user: 'anonymous', time: baseTime - 180_000, attr: null, text: EDIT_TEXT })
+  logPinIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), {
+      user: 'anonymous',
+      time: baseTime - 240_000 - i * 1000,
+      attr: null,
+      text: `#${id} #_log/pin/${String(i).padStart(2, '0')} pinned to log ${i}`,
+    })
+  })
+  logIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), { user: 'anonymous', time: baseTime + i * 60_000, attr: null, text: `#log e2e_cutoff_c entry ${i}` })
+  })
+  await batch.commit()
+
+  const sanityErrors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && SANITY_ERROR_RE.test(msg.text())) sanityErrors.push(msg.text())
+  })
+
+  const readState = () =>
+    page.evaluate(
+      ([topicId, topicPinId, editId, logPinIds]) => {
+        const items = (window as any).__items as any[]
+        const info = (id: string) => {
+          const it = items.find(i => i.id == id)
+          return it ? { index: it.index as number, pinned: !!it.pinned, pinnedMatch: !!it.pinnedMatch, target: !!it.target } : null
+        }
+        return {
+          hideIndex: (window as any).__hideIndex as number,
+          topic: info(topicId),
+          topicPin: info(topicPinId),
+          edit: info(editId),
+          logPins: logPinIds.map(id => info(id)),
+        }
+      },
+      [TOPIC_ID, TOPIC_PIN_ID, EDIT_ID, logPinIds] as const
+    )
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(() => page.evaluate(ids => ids.every(id => (window as any).__items.some((i: any) => i.id == id)), allIds), {
+        message: 'all seeded pin-match fixtures loaded',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // Back after closing promoted #log editors elsewhere: with two editors open under pinned #topic,
+    // the saved cutoff (10) falls strictly inside rebuilt step [9, 59) once both close and drop to the tail
+    const LOG_A = logIds[0]
+    const LOG_B = logIds[9]
+    await searchMindbox(page, 'e2e_cutoff_c entry 0')
+    await openEditorWithDraft(page, LOG_A, ' draft', '#log e2e_cutoff_c entry 0 draft')
+    await searchMindbox(page, 'e2e_cutoff_c entry 9')
+    await openEditorWithDraft(page, LOG_B, ' draft', '#log e2e_cutoff_c entry 9 draft')
+    await searchMindbox(page, '#e2e_cutoff_c_topic')
+    await expectEditorVisible(page, LOG_A, '#log e2e_cutoff_c entry 0 draft', 'first promoted #log under pinned #topic')
+    await expectEditorVisible(page, LOG_B, '#log e2e_cutoff_c entry 9 draft', 'second promoted #log under pinned #topic')
+    const savedHideIndex = await page.evaluate(() => (window as any).__hideIndex as number)
+    await page.locator(`#item-${TOPIC_PIN_ID} mark.label`).first().click()
+    await expect
+      .poll(() => page.evaluate(() => history.state?.editorText), { message: 'navigated away from pinned #topic' })
+      .toBe('#e2e_cutoff_c_topic_pin ')
+    for (const id of [LOG_A, LOG_B]) {
+      await visibleEditContainer(page, id).locator('.edit-menu .button.cancel').click()
+      await page.locator('.modal .button.confirm', { hasText: 'Discard' }).click()
+      await expect
+        .poll(() => page.evaluate(targetId => (window as any).__items.find((i: any) => i.id == targetId)?.editing, id))
+        .toBe(false)
+    }
+    for (let steps = 0; steps < 4; steps++) {
+      if ((await page.evaluate(() => history.state?.editorText)) == '#e2e_cutoff_c_topic') break
+      await page.goBack()
+      await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+    }
+    await expect
+      .poll(() => page.evaluate(() => history.state?.editorText), { message: 'returned to pinned #topic via Back' })
+      .toBe('#e2e_cutoff_c_topic')
+    expect(await page.evaluate(() => (window as any).__hideIndex as number), 'Back restored the saved cutoff').toBe(savedHideIndex)
+    await clickShowMoreRevealsNext(page, 'after Back with editors closed under pinned #topic')
+
+    // expand to the end of the final group, let an older unrelated log arrive (putting hideIndex inside the last group),
+    // then press Tab: earlier groups must survive so Show more still works after Tab retreats
+    for (let clicks = 0; clicks < 10; clicks++) {
+      const { hideIndex, total } = await page.evaluate(() => ({
+        hideIndex: (window as any).__hideIndex as number,
+        total: ((window as any).__items as any[]).length,
+      }))
+      if (hideIndex >= total) break
+      await clickShowMoreRevealsNext(page, `expanding to final group (step ${clicks})`)
+    }
+    const oldestTime = await page.evaluate(() => Math.min(...((window as any).__items as any[]).map(i => i.time as number)))
+    await itemsCol.doc(OLDER_LOG_ID).set({
+      user: 'anonymous',
+      time: oldestTime - 60_000,
+      attr: null,
+      text: '#log e2e_cutoff_c older unrelated log',
+    })
+    await expect
+      .poll(() => page.evaluate(id => (window as any).__items.some((i: any) => i.id == id), OLDER_LOG_ID), {
+        message: 'older unrelated log integrated',
+        timeout: 30_000,
+      })
+      .toBe(true)
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await page.keyboard.press('Tab')
+    await expect(mindbox(page), 'window Tab handler ran after older log arrival').toBeFocused()
+    await clickShowMoreRevealsNext(page, 'after older log arrival and window Tab')
+
+    await searchMindbox(page, '#e2e_cutoff_c_edit')
+    await openEditorWithDraft(page, EDIT_ID, ' draft', DRAFT_TEXT)
+
+    // C1: unique #topic with one #_topic/pin item (first toggle starts at the pinned match, above target and editor)
+    await searchMindbox(page, '#e2e_cutoff_c_topic')
+    const atTopic = await readState()
+    expect(atTopic.topicPin?.pinnedMatch && !atTopic.topicPin.pinned, 'precondition: #_topic/pin is pinnedMatch, not pinned').toBe(true)
+    expect(atTopic.topic?.target, 'precondition: #topic is the target').toBe(true)
+    expect(atTopic.topicPin!.index, 'precondition: #_topic/pin ranks above target').toBeLessThan(atTopic.topic!.index)
+    expect(atTopic.topic!.index, 'precondition: target ranks above open editor').toBeLessThan(atTopic.edit!.index)
+    expect(
+      atTopic.edit!.index,
+      `C1: edited item index (${atTopic.edit!.index}) must stay below __hideIndex (${atTopic.hideIndex}) under #topic with #_topic/pin`
+    ).toBeLessThan(atTopic.hideIndex)
+    await expectEditorVisible(page, EDIT_ID, DRAFT_TEXT, 'under #topic with #_topic/pin')
+
+    // C2: #log with 12 #_log/pin items (first toggle ends before the edited non-log item)
+    await searchMindbox(page, '#log')
+    const atLog = await readState()
+    expect(atLog.logPins.every(p => p && p.pinnedMatch && !p.pinned), 'precondition: all 12 #_log/pin items are pinnedMatch, not pinned').toBe(true)
+    expect(Math.max(...atLog.logPins.map(p => p!.index)), 'precondition: all 12 #_log/pin items rank above editor').toBeLessThan(atLog.edit!.index)
+    expect(
+      atLog.edit!.index,
+      `C2: edited item index (${atLog.edit!.index}) must stay below __hideIndex (${atLog.hideIndex}) under #log with 12 #_log/pin items`
+    ).toBeLessThan(atLog.hideIndex)
+    await expectEditorVisible(page, EDIT_ID, DRAFT_TEXT, 'under #log with 12 #_log/pin items')
+
+    // ArrowUp from #topic/child (no Hide control) to unique parent #topic with #_topic/pin: automatic collapse must not hide target or draft
+    await searchMindbox(page, '#e2e_cutoff_c_topic/child')
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    await expect(mindbox(page)).not.toBeFocused()
+    await expect(page.locator('.column:not(.hidden) .toggle.hide'), 'precondition: child view has no Hide control').toHaveCount(0)
+    await page.keyboard.press('ArrowUp')
+    await expect
+      .poll(() => page.evaluate(() => history.state?.editorText), { message: 'ArrowUp navigated to parent #topic' })
+      .toBe('#e2e_cutoff_c_topic ')
+    // wait for ArrowUp's deferred update_dom().then(...) collapse to settle
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50)))))
+    const afterArrowUp = await readState()
+    expect(afterArrowUp.topic?.target, 'parent #topic is target after ArrowUp').toBe(true)
+    expect(
+      afterArrowUp.edit!.index,
+      `after ArrowUp to pinned parent, editor index (${afterArrowUp.edit!.index}) must stay below __hideIndex (${afterArrowUp.hideIndex})`
+    ).toBeLessThan(afterArrowUp.hideIndex)
+    await expectEditorVisible(page, EDIT_ID, DRAFT_TEXT, 'after ArrowUp to pinned parent')
+    expect(sanityErrors, 'toggle and ranking sanity checks stayed silent').toEqual([])
+  } finally {
+    const cleanup = firestore().batch()
+    ;[...allIds, OLDER_LOG_ID].forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})

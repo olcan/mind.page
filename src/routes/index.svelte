@@ -3707,6 +3707,17 @@
       // minimal index is either the first time-ranked item, or the first position-based hidden item
       // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
       hideIndexMinimal = toggles.length == 0 ? hideIndexFromRanking : target ? toggles[0].start : toggles[0].end
+      // keep open editors above the cutoff, always stopping on a toggle boundary; an unpromoted in-place
+      // log item counts only when its step starts at or below the prior cutoff (at most one step past it)
+      for (let i = editingItems.length - 1; i >= 0; i--) {
+        const idx = editingItems[i]
+        if (idx < hideIndexMinimal) break
+        const step = toggles.find(t => idx >= t.start && idx < t.end)
+        if (step && (!items[idx].log || items[idx].editingPromoted || step.start <= hideIndex)) {
+          hideIndexMinimal = step.end
+          break
+        }
+      }
 
       // enforce minimal hide index
       if (hideIndex < hideIndexMinimal) hideIndex = hideIndexMinimal
@@ -3781,8 +3792,14 @@
       if (hideIndex < items.length) {
         const hideToggleIndex = toggles.findIndex(toggle => toggle.start >= hideIndex)
         if (hideToggleIndex < 0) {
-          if (toggles.length > 0) console.error('invalid toggles', toggles) // should not happen given checks above
-          toggles = [{ start: hideIndex, end: items.length }]
+          const last = _.last(toggles)
+          if (last && last.end == items.length) {
+            last.end = hideIndex
+            toggles.push({ ...last, start: hideIndex, end: items.length })
+          } else {
+            if (toggles.length > 0) console.error('invalid toggles', toggles) // should not happen given checks above
+            toggles = [{ start: hideIndex, end: items.length }]
+          }
         } else if (toggles[hideToggleIndex].start > hideIndex) {
           toggles.splice(hideToggleIndex, 0, { start: hideIndex, end: toggles[hideToggleIndex].start })
           if (hideToggleIndex > 0) toggles[hideToggleIndex - 1].end = hideIndex
@@ -4028,6 +4045,15 @@
     hideIndex = index
     checkIfRenderingVisibleItems()
     updateState({ hideIndex })
+  }
+
+  // cutoff for keyboard retreat: keep hideIndexMinimal, and also keep any visible editor opened
+  // since the last ranking (e.g. Ctrl/Cmd+Down via editItem) above the cutoff on its step boundary
+  function retreatHideIndex() {
+    const lastVisible = Math.max(-1, ...editingItems.filter(i => i < hideIndex))
+    if (lastVisible < hideIndexMinimal) return hideIndexMinimal
+    const step = toggles.find(t => lastVisible >= t.start && lastVisible < t.end)
+    return Math.min(hideIndex, step ? step.end : lastVisible + 1)
   }
 
   // whether an element's top stands in the band of the viewport a target is left alone in: at or below the
@@ -12008,9 +12034,9 @@
       }
       if (lastContext) {
         lastContext.querySelector('mark.label')?.dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
-        // also click on any hide toggle (which must be below new target)
+        // collapse any extra revealed items (e.g. session items) without hiding past hideIndexMinimal
         update_dom().then(() => {
-          document.querySelector(`.toggle.hide`)?.dispatchEvent(new Event('click'))
+          if (hideIndex > hideIndexMinimal) toggleItems(hideIndexMinimal)
         })
         return
       }
@@ -12104,7 +12130,7 @@
       key == 'Escape'
     ) {
       e.preventDefault()
-      hideIndex = hideIndexMinimal
+      hideIndex = retreatHideIndex()
       // scroll up to header if necessary
       if (document.body.scrollTop > headerdiv.offsetTop) scrollTo(headerdiv.offsetTop)
       tick().then(() => textArea(-1).focus())
@@ -12885,12 +12911,12 @@
             {#if column < columnCount}
               {#if item.index == hideIndex}
                 {#each toggles as toggle}
-                  {#if toggle.start == hideIndex}
+                  {#if toggle.start <= hideIndex && hideIndex < toggle.end}
                     <div class="toggle show" on:click={() => toggleItems(toggle.end)}>
                       ▼ {toggle.positionBased
                         ? ''
-                        : items[toggle.start].timeString || itemTimeString(items[toggle.start].time)}
-                      <span class="count">show {toggle.end - toggle.start} items</span>
+                        : item.timeString || itemTimeString(item.time)}
+                      <span class="count">show {toggle.end - hideIndex} items</span>
                     </div>
                   {/if}
                 {/each}

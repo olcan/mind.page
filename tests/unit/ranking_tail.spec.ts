@@ -209,3 +209,90 @@ test('an edited log item moves up with the edited items once the ranked query ch
   expect(afterEnd.map(i => i.id)).toEqual(['new-log', 'old-log', 'edited-log'])
   expect([editedLog.editingPromoted, editedLog.time]).toEqual([false, OLD_TIME])
 })
+
+// the REAL hideIndexMinimal floor in onEditorChange (index.svelte), anchored on code statements alone
+const floorStep = source.match(
+  /\n {6}hideIndexMinimal = toggles\.length == 0[\s\S]*?\n {6}if \(hideIndex < hideIndexMinimal\) hideIndex = hideIndexMinimal\n/,
+)?.[0]
+if (!floorStep) throw new Error('the hideIndexMinimal floor step not found in index.svelte')
+
+function runFloor({
+  items,
+  toggles = [],
+  target = null,
+  hideIndex = 0,
+  hideIndexFromRanking = toggles.at(-1)?.end ?? items.length,
+}: {
+  items: any[]
+  toggles?: Array<{ start: number; end: number }>
+  target?: any
+  hideIndex?: number
+  hideIndexFromRanking?: number
+}) {
+  const editingItems = items.flatMap((it, i) => (it.editing ? [i] : []))
+  const run = new Function(
+    'items',
+    'toggles',
+    'editingItems',
+    'hideIndexFromRanking',
+    'target',
+    'hideIndex',
+    `let hideIndexMinimal = 0\n${floorStep}\nreturn { hideIndexMinimal, hideIndex }`,
+  )
+  return run(items, toggles, editingItems, hideIndexFromRanking, target, hideIndex) as {
+    hideIndexMinimal: number
+    hideIndex: number
+  }
+}
+
+test('the cutoff floor stops on the end of the last counting editor step', () => {
+  const mk = (i: number, state: object = {}) => item(`i_${i}`, NOW - i * HOUR, state)
+  const steps = [
+    { start: 5, end: 15 },
+    { start: 15, end: 35 },
+    { start: 35, end: 52 },
+  ]
+
+  // two editors at once, with a promoted log deeper than a non-log editor: must advance to the deeper step end (52, not 35)
+  const twoEditors = _.times(52, i =>
+    mk(i, i == 17 ? { editing: true } : i == 40 ? { log: true, editing: true, editingPromoted: true } : {}),
+  )
+  expect(runFloor({ items: twoEditors, toggles: steps, target: twoEditors[6] })).toEqual({
+    hideIndexMinimal: 52,
+    hideIndex: 52,
+  })
+
+  // in-place log whose step starts at or below the prior cutoff counts (including when pushed across a boundary)
+  const inPlace = _.times(52, i => mk(i, i == 36 ? { log: true, editing: true } : { log: true }))
+  expect(runFloor({ items: inPlace, toggles: steps, hideIndex: 52 })).toEqual({
+    hideIndexMinimal: 52,
+    hideIndex: 52,
+  })
+  expect(runFloor({ items: inPlace, toggles: steps, hideIndex: 35 })).toEqual({
+    hideIndexMinimal: 52,
+    hideIndex: 52,
+  })
+
+  // in-place log whose step starts beyond the prior cutoff does not count (and an earlier non-log editor still counts)
+  expect(runFloor({ items: inPlace, toggles: steps, hideIndex: 15 })).toEqual({
+    hideIndexMinimal: 15,
+    hideIndex: 15,
+  })
+  const mixed = _.times(52, i => mk(i, i == 17 ? { editing: true } : i == 40 ? { log: true, editing: true } : {}))
+  expect(runFloor({ items: mixed, toggles: steps, hideIndex: 15 })).toEqual({
+    hideIndexMinimal: 35,
+    hideIndex: 35,
+  })
+
+  // no-toggle branch and no-editor baseline stay untouched
+  const plain = _.times(5, i => mk(i))
+  expect(runFloor({ items: plain, toggles: [{ start: 1, end: 5 }], target: plain[2] })).toEqual({
+    hideIndexMinimal: 1,
+    hideIndex: 1,
+  })
+  const noToggle = [mk(0, { pinned: true }), mk(1, { editing: true }), mk(2)]
+  expect(runFloor({ items: noToggle, toggles: [], hideIndexFromRanking: 2 })).toEqual({
+    hideIndexMinimal: 2,
+    hideIndex: 2,
+  })
+})
