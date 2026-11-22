@@ -3507,6 +3507,7 @@
         uniqueLabel: '',
         target: false,
         editing: false,
+        editingPromoted: false,
         running: 0, // a count (see initItemState); undefined, the criterion was skipped (NaN) for the dummy alone
         hasError: false,
         failedTests: false,
@@ -3534,10 +3535,14 @@
       // }
 
       // the ranking applied for this query: a query change regroups the time rows at the next layout
+      // and promotes any log item already being edited so it stays visible across the new search
       const rankedQuery = text.trim().toLowerCase()
       if (rankedQuery != lastRankedQuery) {
         lastRankedQuery = rankedQuery
         regroupTimeRowsPending = true
+        items.forEach(item => {
+          if (item.log && item.editing) item.editingPromoted = true
+        })
       }
 
       // NOTE: this assignment is what mainly triggers toHTML in Item.svelte
@@ -3572,8 +3577,8 @@
           context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
           // target item (listing item or id-matching item)
           b.target - a.target ||
-          // editing mode (except log items)
-          (!b.log && b.editing) - (!a.log && a.editing) ||
+          // editing mode (log items once the ranked query has changed during the edit)
+          (b.editing && (!b.log || b.editingPromoted) ? 1 : 0) - (a.editing && (!a.log || a.editingPromoted) ? 1 : 0) ||
           // log items matching #log query ordered by time
           (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
           // running items
@@ -8106,6 +8111,7 @@
 
     if (editing) {
       // started editing
+      item.editingPromoted = false
       editingItems.push(index)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       onEditorChange(editorText) // editing state (and possibly time) has changed
@@ -8123,6 +8129,7 @@
       })
     } else {
       // stopped editing
+      item.editingPromoted = false
       editingItems.splice(editingItems.indexOf(index), 1)
       // NOTE: onItemFocused may not get invoked (and item.focused may remain true) on destroyed editors
       if (focusedItem == index) {
@@ -8561,6 +8568,7 @@
 
   function editItem(index: number) {
     items[index].editing = true
+    items[index].editingPromoted = false
     // as onItemEditing when a click opens the editor: the editor's text starts as the item's, and
     // unsaved() reads it as the open editor's typed text (an undefined one binds as '' and would
     // read as an edit of the whole item with nothing typed)
@@ -9823,6 +9831,7 @@
     item.previewText = null
     item.expanded = null // macro expansion state initialized in expandMacros or during render toHTML in Item.svelte
     item.editing = false // otherwise undefined till rendered/bound to svelte object
+    item.editingPromoted = false
     item.matching = false
     item.listing = false
     item.target = false

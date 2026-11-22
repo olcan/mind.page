@@ -38,6 +38,7 @@ const item = (id: string, time: number, state: object = {}) => ({
   target: false,
   target_context: false,
   editing: false,
+  editingPromoted: false,
   running: 0, // a count (the _Item setter adds one per holder)
   hasError: false,
   previewable: false,
@@ -63,17 +64,37 @@ const child = () => item('child', NOW - 48 * HOUR, { ...matching, uniqueLabel: Q
 const grandchild = () =>
   item('grandchild', NOW - 24 * HOUR, { ...matching, uniqueLabel: QUERY + '/a/b', target_nesting: -2 })
 
-// runs the step over `items` (ranked in place) and returns the index its tail starts at, what it logged,
-// and the two things it made: the dummy (as pushed) and the comparator (as handed to sort)
-function rank(items: any[]) {
+type RankOptions = { text?: string; lastRankedQuery?: string | null; context?: string[]; listing?: string[] }
+
+// runs the step over `items` (ranked in place) and returns the index its tail starts at, the next
+// lastRankedQuery, what it logged, and the two things it made: the dummy (as pushed) and the comparator
+function rank(
+  items: any[],
+  {
+    text = QUERY,
+    lastRankedQuery = text,
+    context = text == '#log' ? [] : [text],
+    listing = text == '#log' ? [] : [text],
+  }: RankOptions = {},
+) {
   const made: { dummy?: any; compare?: (a: any, b: any) => number } = {}
   const errors: string[] = []
   const log = { error: (...args: unknown[]) => void errors.push(args.join(' ')) }
   items.push = (dummy: any) => Array.prototype.push.call(items, (made.dummy = dummy))
   items.sort = (compare: any) => Array.prototype.sort.call(items, (made.compare = compare))
-  const run = new Function(...FREE, `${step}\nreturn tailIndex`)
-  const tailIndex: number = run(items, NOW, QUERY, [QUERY], [QUERY], _, log, QUERY, false)
-  return { tailIndex, errors, dummy: made.dummy, compare: made.compare! }
+  const run = new Function(...FREE, `${step}\nreturn { tailIndex, lastRankedQuery }`)
+  const { tailIndex, lastRankedQuery: nextRankedQuery } = run(
+    items,
+    NOW,
+    text,
+    context,
+    listing,
+    _,
+    log,
+    lastRankedQuery,
+    false,
+  )
+  return { tailIndex, lastRankedQuery: nextRankedQuery as string, errors, dummy: made.dummy, compare: made.compare! }
 }
 
 test('the dummy ranks below a running item, as an item ranked by time alone does', () => {
@@ -102,4 +123,89 @@ test('the tail starts after the items the query ranks while an item is running',
   expect(errors).toEqual([])
   expect(ranked, 'the order is the one the query ranked').toEqual(order)
   expect([tailIndex, items[tailIndex].id]).toEqual([18, 'by time 0'])
+})
+
+test('an edited log item stays in place while the ranked query is unchanged', () => {
+  const MID_TIME = NOW - 10 * HOUR
+  // under #log: by time among the log items, below an edited non-log item
+  const editedNonLog = item('edited-non-log', NOW, { editing: true })
+  const newLog = item('new-log', NOW - HOUR, { log: true })
+  const editedLog = item('edited-log', MID_TIME, { log: true, editing: true })
+  const oldLog = item('old-log', NOW - 20 * HOUR, { log: true })
+  const atLogItems = [oldLog, editedLog, newLog, editedNonLog]
+  const atLog = rank(atLogItems, { text: '#log', lastRankedQuery: '#log' })
+  expect(atLog.errors).toEqual([])
+  expect(atLogItems.map(i => i.id)).toEqual(['edited-non-log', 'new-log', 'edited-log', 'old-log'])
+  expect([editedLog.editingPromoted, editedLog.time]).toEqual([false, MID_TIME])
+
+  // under another query: by time where it would rank without the edit
+  const editedOther = item('edited-log', MID_TIME, { log: true, editing: true })
+  const plainOther = item('edited-log', MID_TIME, { log: true, editing: false })
+  const corpus = (logItem: any) => [
+    item('older-by-time', NOW - 20 * HOUR),
+    logItem,
+    item('newer-by-time', NOW - 5 * HOUR),
+    child(),
+    item('edited-non-log', NOW, { editing: true }),
+    named(),
+  ]
+  const withEdit = corpus(editedOther)
+  const withoutEdit = corpus(plainOther)
+  const atOther = rank(withEdit, { text: QUERY, lastRankedQuery: QUERY })
+  rank(withoutEdit, { text: QUERY, lastRankedQuery: QUERY })
+  expect(atOther.errors).toEqual([])
+  expect(withEdit.map(i => i.id)).toEqual(['named', 'edited-non-log', 'child', 'newer-by-time', 'edited-log', 'older-by-time'])
+  expect(withEdit.map(i => i.id)).toEqual(withoutEdit.map(i => i.id))
+  expect([editedOther.editingPromoted, editedOther.time]).toEqual([false, MID_TIME])
+})
+
+test('an edited log item moves up with the edited items once the ranked query changes', () => {
+  const OLD_TIME = NOW - 100 * HOUR
+  const pinnedMatch = item('pinned-match', OLD_TIME - HOUR, { pinnedMatch: true, pinnedMatchTerm: '#_log/pin' })
+  const editedNonLog = item('edited-non-log', NOW, { editing: true })
+  const editedLog = item('edited-log', OLD_TIME, { log: true, editing: true })
+  const newLog = item('new-log', NOW - HOUR, { log: true })
+  const oldLog = item('old-log', NOW - 20 * HOUR, { log: true })
+  const errItem = item('err', NOW - 2 * HOUR, { hasError: true })
+
+  // query changes to #log: editedLog leaves its place and ranks with the edited items above the log list
+  const atLogItems = [oldLog, editedLog, newLog, errItem, editedNonLog, pinnedMatch]
+  const atLog = rank(atLogItems, { text: '#log', lastRankedQuery: 'old query' })
+  expect(atLog.errors).toEqual([])
+  expect(atLogItems.map(i => i.id)).toEqual(['pinned-match', 'edited-log', 'edited-non-log', 'new-log', 'old-log', 'err'])
+  expect(atLog.dummy.editingPromoted, 'dummy defines editingPromoted').toBe(false)
+  expect(atLog.compare(editedLog, atLog.dummy), 'promoted edited log ranks above dummy').toBeLessThan(0)
+  expect([editedLog.editingPromoted, editedLog.time, newLog.editingPromoted, editedNonLog.editingPromoted]).toEqual([
+    true,
+    OLD_TIME,
+    false,
+    false,
+  ])
+
+  // query changes to another query with a target: stays with edited items, below target and above running/matches/logs
+  const atOtherItems = [oldLog, child(), running(), editedLog, editedNonLog, named()]
+  const atOther = rank(atOtherItems, { text: QUERY, lastRankedQuery: atLog.lastRankedQuery })
+  expect(atOther.errors).toEqual([])
+  expect(atOther.compare(editedLog, atOther.dummy), 'promoted edited log ranks above dummy under another query').toBeLessThan(0)
+  expect([editedLog.editingPromoted, editedLog.time]).toEqual([true, OLD_TIME])
+  expect(atOtherItems.map(i => i.id)).toEqual(['named', 'edited-non-log', 'edited-log', 'running', 'child', 'old-log'])
+
+  // returning to the original query (and re-ranking it): stays promoted until the edit ends
+  const backItems = [newLog, running(), editedLog]
+  const atBack = rank(backItems, { text: 'old query', lastRankedQuery: atOther.lastRankedQuery, context: [], listing: [] })
+  expect(atBack.errors).toEqual([])
+  expect(backItems.map(i => i.id)).toEqual(['edited-log', 'running', 'new-log'])
+  const sameBack = [newLog, running(), editedLog]
+  rank(sameBack, { text: 'old query', lastRankedQuery: atBack.lastRankedQuery, context: [], listing: [] })
+  expect(sameBack.map(i => i.id)).toEqual(['edited-log', 'running', 'new-log'])
+  expect([editedLog.editingPromoted, editedLog.time]).toEqual([true, OLD_TIME])
+
+  // once the edit ends, back at its place by time under #log and never promoted while not editing
+  editedLog.editing = false
+  editedLog.editingPromoted = false
+  const afterEnd = [editedLog, oldLog, newLog]
+  const atEnd = rank(afterEnd, { text: '#log', lastRankedQuery: atBack.lastRankedQuery })
+  expect(atEnd.errors).toEqual([])
+  expect(afterEnd.map(i => i.id)).toEqual(['new-log', 'old-log', 'edited-log'])
+  expect([editedLog.editingPromoted, editedLog.time]).toEqual([false, OLD_TIME])
 })

@@ -787,6 +787,50 @@ test('a name that is no label, that an item is labeled with already or that is #
   }
 })
 
+async function searchMindbox(page: Page, q: string) {
+  await focusMindboxInPlace(page)
+  await expect(mindbox(page)).toBeFocused()
+  await mindbox(page).fill(q)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          q =>
+            (window as any)._mindboxDebounced === false &&
+            (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value === q &&
+            history.state?.editorText === q,
+          q
+        ),
+      { message: `query "${q}" applied`, timeout: 10_000 }
+    )
+    .toBe(true)
+}
+
+function visibleEditContainer(page: Page, id: string) {
+  return page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container.editing[data-item-id="${id}"]`)
+}
+
+async function expectEditorVisible(page: Page, id: string, draft: string, context: string) {
+  const editContainer = visibleEditContainer(page, id)
+  await expect(editContainer, `edited item stays rendered ${context}`).toBeVisible()
+  await expect(editContainer.locator('.edit-menu'), `edit menu stays visible ${context}`).toBeVisible()
+  await expect(editContainer.locator(`#textarea-${id}`), `unsaved draft stays intact ${context}`).toHaveValue(draft)
+}
+
+async function openEditorWithDraft(page: Page, id: string, suffix: string, expectedDraft: string) {
+  const paragraph = page.locator(`.column:not(.hidden) .super-container:not(.hidden) #item-${id} p`).first()
+  await expect(paragraph).toBeVisible()
+  await paragraph.click()
+  const editTextarea = page.locator(`#textarea-${id}`)
+  await expect(editTextarea).toBeFocused()
+  await page.evaluate(id => {
+    const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+    t.setSelectionRange(t.value.length, t.value.length)
+  }, id)
+  await page.keyboard.type(suffix)
+  await expect(editTextarea).toHaveValue(expectedDraft)
+}
+
 test('searching for #log keeps an edited non-log item visible above the log items, leaving edited log items, errors, and other queries unchanged', async ({ page }) => {
   const LOG_COUNT = 40
   const EDIT_ID = 'e2e_log_search_edit'
@@ -809,25 +853,6 @@ test('searching for #log keeps an edited non-log item visible above the log item
     batch.set(itemsCol.doc(id), { user: 'anonymous', time: baseTime + i * 60_000, attr: null, text: `#log e2e_log_search entry ${i}` })
   })
   await batch.commit()
-
-  const search = async (q: string) => {
-    await focusMindboxInPlace(page)
-    await expect(mindbox(page)).toBeFocused()
-    await mindbox(page).fill(q)
-    await expect
-      .poll(
-        () =>
-          page.evaluate(
-            q =>
-              (window as any)._mindboxDebounced === false &&
-              (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value === q &&
-              history.state?.editorText === q,
-            q
-          ),
-        { message: `query "${q}" applied`, timeout: 10_000 }
-      )
-      .toBe(true)
-  }
 
   const readState = () =>
     page.evaluate(
@@ -865,13 +890,6 @@ test('searching for #log keeps an edited non-log item visible above the log item
       [EDIT_ID, OTHER_ID, PIN_MATCH_ID, ERROR_ID, 'e2e_log_search_log_'] as const
     )
 
-  const editContainer = page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container.editing[data-item-id="${EDIT_ID}"]`)
-  const expectEditorVisible = async (context: string) => {
-    await expect(editContainer, `edited item stays rendered ${context}`).toBeVisible()
-    await expect(editContainer.locator('.edit-menu'), `edit menu stays visible ${context}`).toBeVisible()
-    await expect(editContainer.locator(`#textarea-${EDIT_ID}`), `unsaved draft stays intact ${context}`).toHaveValue(DRAFT_TEXT)
-  }
-
   try {
     await loadAdmin(page)
     await expect
@@ -882,21 +900,11 @@ test('searching for #log keeps an edited non-log item visible above the log item
       .toBe(true)
 
     // bring the non-log item into view and open its editor with an unsaved draft
-    await search('#e2e_log_search_edit')
-    const paragraph = page.locator(`.column:not(.hidden) .super-container:not(.hidden) #item-${EDIT_ID} p`).first()
-    await expect(paragraph).toBeVisible()
-    await paragraph.click()
-    const editTextarea = page.locator(`#textarea-${EDIT_ID}`)
-    await expect(editTextarea).toBeFocused()
-    await page.evaluate(id => {
-      const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
-      t.setSelectionRange(t.value.length, t.value.length)
-    }, EDIT_ID)
-    await page.keyboard.type(' draft')
-    await expect(editTextarea).toHaveValue(DRAFT_TEXT)
+    await searchMindbox(page, '#e2e_log_search_edit')
+    await openEditorWithDraft(page, EDIT_ID, ' draft', DRAFT_TEXT)
 
     // search for #log while the non-log item is in edit mode
-    await search('#log')
+    await searchMindbox(page, '#log')
     const atLog = await readState()
     expect(atLog.seededLogs.length, 'all 40 seeded log items are ranked').toBe(LOG_COUNT)
     expect(atLog.edit?.editing, 'precondition: non-log item is in edit mode').toBe(true)
@@ -912,7 +920,7 @@ test('searching for #log keeps an edited non-log item visible above the log item
     expect(atLog.edit!.index, `edited non-log item (${atLog.edit!.index}) must rank above the first log item (${firstLogIndex}) under #log`).toBeLessThan(firstLogIndex)
     expect(atLog.edit!.index, 'edited non-log item stays below dotted, pinned and pinned-match items').toBeGreaterThan(atLog.lastAbove)
     expect(atLog.pinMatch?.pinnedMatch && atLog.pinMatch.index < atLog.edit!.index, 'pinned-match item ranks above the edited non-log item').toBe(true)
-    await expectEditorVisible('under #log')
+    await expectEditorVisible(page, EDIT_ID, DRAFT_TEXT, 'under #log')
 
     // all unpinned log items stay in descending time order below the edited item, and error items stay below them
     expect(atLog.logs.every(i => i.index > atLog.edit!.index), 'every unpinned log item ranks below the edited non-log item').toBe(true)
@@ -921,15 +929,15 @@ test('searching for #log keeps an edited non-log item visible above the log item
     expect(atLog.err?.hasError && atLog.err.index > lastLogIndex, 'error non-log item stays below log items under #log').toBe(true)
 
     // under a different query (with a target that does not match the edited item), the edited item is still shown below the target as before
-    await search('#e2e_log_search_other')
+    await searchMindbox(page, '#e2e_log_search_other')
     const atOther = await readState()
     expect(atOther.other?.target, 'the other query has its target').toBe(true)
     expect(atOther.edit!.index, 'under another query the edited item stays below the target').toBeGreaterThan(atOther.other!.index)
     expect(atOther.edit!.index, 'under another query the edited item stays below __hideIndex').toBeLessThan(atOther.hideIndex)
-    await expectEditorVisible('under another query')
+    await expectEditorVisible(page, EDIT_ID, DRAFT_TEXT, 'under another query')
 
     // an edited log item keeps its place in time order under #log (opening its editor triggers onEditorChange('#log'))
-    await search('#log')
+    await searchMindbox(page, '#log')
     const midLogId = expectedLogIdsNewestFirst[2] // 3rd newest seeded log item, above __hideIndex
     const midLogParagraph = page.locator(`.column:not(.hidden) .super-container:not(.hidden) #item-${midLogId} p`).first()
     await expect(midLogParagraph).toBeVisible()
@@ -939,6 +947,155 @@ test('searching for #log keeps an edited non-log item visible above the log item
     expect(withEditedLog.seededLogs.find(i => i.id == midLogId)?.editing, 'log item is in edit mode').toBe(true)
     expect(withEditedLog.seededLogs.map(i => i.id), 'an edited log item keeps its exact place in time order under #log').toEqual(expectedLogIdsNewestFirst)
     expect(withEditedLog.edit!.index, 'edited non-log item still ranks above the first log item').toBeLessThan(withEditedLog.logs[0].index)
+  } finally {
+    const cleanup = firestore().batch()
+    allIds.forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})
+
+test('an old log item being edited stays in place while the search stands, moves into view on a new search, and returns to its time order on cancel', async ({ page }) => {
+  const LOG_COUNT = 40
+  const FIND_QUERY = 'e2e_log_edit_find'
+  const OTHER_ID = 'e2e_log_edit_other'
+  const logIds = Array.from({ length: LOG_COUNT }, (_, i) => `e2e_log_edit_log_${String(i).padStart(2, '0')}`)
+  const expectedLogIdsNewestFirst = [...logIds].reverse()
+  const OLD_LOG_ID = logIds[0] // oldest seeded log item
+  const NEW_LOG_ID = logIds[LOG_COUNT - 1] // newest seeded log item, shares FIND_QUERY so OLD_LOG_ID ranks below it
+  const OLD_LOG_TEXT = `#log ${FIND_QUERY} old entry`
+  const DRAFT_TEXT = `${OLD_LOG_TEXT} draft`
+  const allIds = [OTHER_ID, ...logIds]
+  const baseTime = Date.now() - 48 * 3600 * 1000
+  const oldLogTime = baseTime
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  batch.set(itemsCol.doc(OTHER_ID), { user: 'anonymous', time: baseTime - 60_000, attr: null, text: '#e2e_log_edit_other target for another query' })
+  logIds.forEach((id, i) => {
+    const text =
+      id == OLD_LOG_ID
+        ? OLD_LOG_TEXT
+        : id == NEW_LOG_ID
+          ? `#log ${FIND_QUERY} newest entry`
+          : `#log e2e_log_edit entry ${i}`
+    batch.set(itemsCol.doc(id), { user: 'anonymous', time: baseTime + i * 60_000, attr: null, text })
+  })
+  await batch.commit()
+
+  const readState = () =>
+    page.evaluate(
+      ([oldLogId, newLogId, otherId, logPrefix]) => {
+        const items = (window as any).__items as any[]
+        const hideIndex = (window as any).__hideIndex as number
+        const byId = (id: string) => {
+          const item = items.find(i => i.id == id)
+          return item
+            ? {
+                index: item.index as number,
+                time: item.time as number,
+                editing: !!item.editing,
+                editingPromoted: !!item.editingPromoted,
+                target: !!item.target,
+              }
+            : null
+        }
+        const logs = items
+          .filter(i => i.log && !i.dotted && !i.pinned && !i.pinnedMatch)
+          .map(i => ({ id: i.id as string, index: i.index as number, time: i.time as number, editing: !!i.editing }))
+        const seededLogs = logs.filter(i => i.id.startsWith(logPrefix))
+        return {
+          hideIndex,
+          oldLog: byId(oldLogId),
+          newLog: byId(newLogId),
+          other: byId(otherId),
+          logs,
+          seededLogs,
+        }
+      },
+      [OLD_LOG_ID, NEW_LOG_ID, OTHER_ID, 'e2e_log_edit_log_'] as const
+    )
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(() => page.evaluate(ids => ids.every(id => (window as any).__items.some((i: any) => i.id == id)), allIds), {
+        message: 'all seeded fixtures loaded',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // precondition: under #log the old log item sits past __hideIndex among the seeded log items
+    await searchMindbox(page, '#log')
+    const initialLog = await readState()
+    expect(initialLog.seededLogs.map(i => i.id), 'precondition: all 40 seeded log items ranked newest-to-oldest').toEqual(expectedLogIdsNewestFirst)
+    expect(
+      initialLog.oldLog!.index,
+      `precondition: old log item (${initialLog.oldLog!.index}) must lie past __hideIndex (${initialLog.hideIndex}) under #log`
+    ).toBeGreaterThanOrEqual(initialLog.hideIndex)
+
+    // find the old log item by its text (below NEW_LOG_ID so staying in place is observable) and open its editor with an unsaved draft
+    await searchMindbox(page, FIND_QUERY)
+    const found = await readState()
+    expect(found.oldLog!.index, 'precondition: old log item is visible under text search').toBeLessThan(found.hideIndex)
+    expect(found.oldLog!.index, 'precondition: old log item ranks below the newer matching log item').toBeGreaterThan(found.newLog!.index)
+    const inPlaceIndex = found.oldLog!.index
+    await openEditorWithDraft(page, OLD_LOG_ID, ' draft', DRAFT_TEXT)
+    const afterOpen = await readState()
+    expect(afterOpen.oldLog!.editing, 'old log item is in edit mode').toBe(true)
+    expect(afterOpen.oldLog!.index, 'opening the editor keeps the old log item in place').toBe(inPlaceIndex)
+    expect(afterOpen.oldLog!.time, 'opening the editor leaves the log item time unchanged').toBe(oldLogTime)
+
+    // (a) the same search again (same ranked query, different raw spacing to trigger a real ranking pass): index unchanged
+    await searchMindbox(page, `${FIND_QUERY} `)
+    const afterSameSearch = await readState()
+    expect(afterSameSearch.oldLog!.index, 'same search again keeps the edited log item in place').toBe(inPlaceIndex)
+    expect(afterSameSearch.oldLog!.index, 'still below the newer matching log item').toBeGreaterThan(afterSameSearch.newLog!.index)
+    expect(afterSameSearch.oldLog!.time, 'same search leaves the log item time unchanged').toBe(oldLogTime)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_TEXT, 'under the same search')
+
+    // (b) search #log: the edited log item moves into view above the first non-edited log item, keeping its draft
+    await searchMindbox(page, '#log')
+    const atLog = await readState()
+    const firstNonEditedLog = atLog.logs.find(i => !i.editing)!
+    expect(atLog.oldLog!.editing, 'old log item remains in edit mode under #log').toBe(true)
+    expect(
+      atLog.oldLog!.index,
+      `edited old log item index (${atLog.oldLog!.index}) must stay below __hideIndex (${atLog.hideIndex}) under #log`
+    ).toBeLessThan(atLog.hideIndex)
+    expect(
+      atLog.oldLog!.index,
+      `edited old log item (${atLog.oldLog!.index}) must rank above the first non-edited log item (${firstNonEditedLog.index}) under #log`
+    ).toBeLessThan(firstNonEditedLog.index)
+    expect(atLog.oldLog!.time, 'moving up under #log leaves the log item time unchanged').toBe(oldLogTime)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_TEXT, 'under #log')
+
+    // (c) another query: still visible below the target, keeping its draft
+    await searchMindbox(page, '#e2e_log_edit_other')
+    const atOther = await readState()
+    expect(atOther.other?.target, 'the other query has its target').toBe(true)
+    expect(atOther.oldLog!.index, 'under another query the edited log item stays below the target').toBeGreaterThan(atOther.other!.index)
+    expect(atOther.oldLog!.index, 'under another query the edited log item stays below __hideIndex').toBeLessThan(atOther.hideIndex)
+    expect(atOther.oldLog!.time, 'another query leaves the log item time unchanged').toBe(oldLogTime)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_TEXT, 'under another query')
+
+    // (d) end the edit by a cancel (confirming discard of the unsaved draft): under #log it returns to its place by time
+    await visibleEditContainer(page, OLD_LOG_ID).locator('.edit-menu .button.cancel').click()
+    await expect(page.locator('.modal')).toContainText('Discard unsaved changes to')
+    await page.locator('.modal .button.confirm', { hasText: 'Discard' }).click()
+    await expect(page.locator('.modal')).toBeHidden()
+    await expect
+      .poll(() => page.evaluate(id => (window as any).__items.find((i: any) => i.id == id)?.editing, OLD_LOG_ID), {
+        message: 'old log item exits edit mode after cancel',
+        timeout: 10_000,
+      })
+      .toBe(false)
+
+    await searchMindbox(page, '#log')
+    const afterCancel = await readState()
+    expect(afterCancel.oldLog!.editing, 'old log item is no longer editing').toBe(false)
+    expect(afterCancel.oldLog!.editingPromoted, 'promotion flag is cleared when the edit ends').toBe(false)
+    expect(afterCancel.oldLog!.time, 'cancelling the edit leaves the log item time unchanged').toBe(oldLogTime)
+    expect(afterCancel.oldLog!.index, 'after cancel, old log item is past __hideIndex again under #log').toBeGreaterThanOrEqual(afterCancel.hideIndex)
+    expect(afterCancel.seededLogs.map(i => i.id), 'after cancel, all 40 seeded log items are back in newest-to-oldest order').toEqual(expectedLogIdsNewestFirst)
   } finally {
     const cleanup = firestore().batch()
     allIds.forEach(id => cleanup.delete(itemsCol.doc(id)))
