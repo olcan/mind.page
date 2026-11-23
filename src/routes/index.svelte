@@ -3096,6 +3096,8 @@
   let hideIndexMinimal = 0
   let hideIndexFromRanking = 0
   let hideIndexForSession = 0
+  let restoredHideIndex = 0
+  let restartTextModified = false
   let renderingVisibleItems = false
   let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
@@ -3146,7 +3148,9 @@
 
     // editor text is considered "modified" if there is a change from sessionHistory OR from history.state, which works for BOTH for debounced and non-debounced updates; this is used when considering auto-hide/show (hideIndex change) below
     // note history.state is null after a browser-native hash navigation (e.g. a ##fragment link)
-    const editorTextModified = text != sessionHistory[sessionHistoryIndex] || text != ownState()?.editorText
+    const editorTextModified =
+      restartTextModified || text != sessionHistory[sessionHistoryIndex] || text != ownState()?.editorText
+    restartTextModified = false
 
     // if editor text is cleared while a target is selected, we force new state just as in onTagClick
     // only exception is when replaceStateOnEditorChange is set, e.g. to clear query for deleted items in deleteItem
@@ -3707,8 +3711,9 @@
       // minimal index is either the first time-ranked item, or the first position-based hidden item
       // w/o target item, first position toggle (first unpinned) is auto-opened to show most recently touched items
       hideIndexMinimal = toggles.length == 0 ? hideIndexFromRanking : target ? toggles[0].start : toggles[0].end
-      // keep open editors above the cutoff, always stopping on a toggle boundary; an unpromoted in-place
-      // log item counts only when its step starts at or below the prior cutoff (at most one step past it)
+      // keep open editors above the cutoff on a toggle boundary; an unpromoted in-place log stays in
+      // place when its step starts at or below hideIndex, and is promoted below only if still hidden
+      const skippedLogs = []
       for (let i = editingItems.length - 1; i >= 0; i--) {
         const idx = editingItems[i]
         if (idx < hideIndexMinimal) break
@@ -3717,6 +3722,25 @@
           hideIndexMinimal = step.end
           break
         }
+        if (step && items[idx].log && !items[idx].editingPromoted) skippedLogs.push(idx)
+      }
+
+      // trim position-based steps past the last target after the editor loop so in-place editors still
+      // qualify against their original step starts, then raise hideIndexMinimal to at least afterTarget
+      if (target && toggles.length > 0) {
+        const afterTarget = _.findLastIndex(items, item => item.target, hideIndexFromRanking - 1) + 1
+        toggles = toggles.filter(t => t.end > afterTarget)
+        if (toggles.length > 0 && toggles[0].start < afterTarget) toggles[0].start = afterTarget
+        if (hideIndexMinimal < afterTarget) hideIndexMinimal = afterTarget
+      }
+
+      const hiddenLogs = skippedLogs.filter(idx => idx >= Math.max(hideIndexMinimal, restoredHideIndex))
+      if (hiddenLogs.length > 0) {
+        for (const idx of hiddenLogs) items[idx].editingPromoted = true
+        lastEditorChangeTime = 0
+        if (typedInput) editorChangeInput = editorText
+        restartTextModified = editorTextModified
+        return onEditorChange(editorText, keep_times)
       }
 
       // enforce minimal hide index
@@ -4473,7 +4497,12 @@
     if (!skipScroll) restoredScrollQuery = editorText
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     ignoreStateOnEditorChange = true // do not update history when going back
-    onEditorChange(editorText, true /* keep_times */)
+    restoredHideIndex = typeof state.hideIndex == 'number' ? state.hideIndex : 0
+    try {
+      onEditorChange(editorText, true /* keep_times */)
+    } finally {
+      restoredHideIndex = 0
+    }
 
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof state.hideIndex == 'number') hideIndex = Math.max(hideIndex, state.hideIndex)

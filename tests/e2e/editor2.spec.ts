@@ -817,12 +817,33 @@ async function expectEditorVisible(page: Page, id: string, draft: string, contex
   await expect(editContainer.locator(`#textarea-${id}`), `unsaved draft stays intact ${context}`).toHaveValue(draft)
 }
 
+// wait until the route's render overlay (.loading.visible, translucent while renderingVisibleItems) is gone
+// (see docs/mind_page_testing.md and ready() in tests/e2e/layout.spec.ts)
+async function waitForRenderOverlayGone(page: Page) {
+  await expect
+    .poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), {
+      message: "the page is done rendering: the route's overlay is gone",
+      timeout: 30_000,
+    })
+    .toBe(true)
+}
+
 async function openEditorWithDraft(page: Page, id: string, suffix: string, expectedDraft: string) {
   const paragraph = page.locator(`.column:not(.hidden) .super-container:not(.hidden) #item-${id} p`).first()
-  await expect(paragraph).toBeVisible()
-  await paragraph.click()
   const editTextarea = page.locator(`#textarea-${id}`)
-  await expect(editTextarea).toBeFocused()
+  await expect(paragraph).toBeVisible()
+  await expect(async () => {
+    await waitForRenderOverlayGone(page)
+    const alreadyOpen = await page.evaluate(
+      targetId => !!(window as any).__items.find((i: any) => i.id == targetId)?.editing,
+      id
+    )
+    if (!alreadyOpen) {
+      await expect(paragraph).toBeVisible({ timeout: 2_000 })
+      await paragraph.click({ timeout: 2_000 })
+    }
+    await expect(editTextarea).toBeFocused({ timeout: 2_000 })
+  }).toPass({ timeout: 30_000 })
   await page.evaluate(id => {
     const t = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
     t.setSelectionRange(t.value.length, t.value.length)
@@ -1107,15 +1128,21 @@ const SANITY_ERROR_RE = /toggles are not|toggles are incomplete|invalid toggles|
 
 async function clickShowMoreRevealsNext(page: Page, context: string) {
   await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+  const initial = await page.evaluate(() => ({
+    hideIndex: (window as any).__hideIndex as number,
+    total: ((window as any).__items as any[]).length,
+  }))
+  expect(initial.hideIndex, `precondition: items remain hidden ${context}`).toBeLessThan(initial.total)
+  const show = page.locator('.column:not(.hidden) .toggle.show').first()
+  // non-retrying check after Svelte's flush: a retrying wait can be masked seconds later by an unrelated background rerank
+  expect(await show.count(), `show more control is rendered ${context} (hideIndex=${initial.hideIndex})`).toBeGreaterThan(0)
+  await waitForRenderOverlayGone(page)
   const before = await page.evaluate(() => {
     const items = (window as any).__items as any[]
     const hideIndex = (window as any).__hideIndex as number
     return { hideIndex, total: items.length, nextId: items[hideIndex]?.id ?? null }
   })
   expect(before.hideIndex, `precondition: items remain hidden ${context}`).toBeLessThan(before.total)
-  const show = page.locator('.column:not(.hidden) .toggle.show').first()
-  // non-retrying check after Svelte's flush: a retrying wait can be masked seconds later by an unrelated background rerank
-  expect(await show.count(), `show more control is rendered ${context} (hideIndex=${before.hideIndex})`).toBeGreaterThan(0)
   await expect(show, `show more control is visible ${context}`).toBeVisible()
   const countText = (await show.locator('.count').textContent()) ?? ''
   const shownCount = Number(countText.match(/show (\d+) items/)?.[1] ?? NaN)
@@ -1124,12 +1151,14 @@ async function clickShowMoreRevealsNext(page: Page, context: string) {
   await expect
     .poll(() => page.evaluate(() => (window as any).__hideIndex as number), {
       message: `clicking show more advances __hideIndex by ${shownCount} ${context}`,
+      timeout: 10_000,
     })
     .toBe(before.hideIndex + shownCount)
   await expect(
     page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${before.nextId}"]`),
     `clicking show more reveals the next hidden item ${context}`
   ).toBeVisible()
+  await waitForRenderOverlayGone(page)
 }
 
 test('the show-more cutoff stays below deep log entries edited in place across Ctrl+Down, Tab, trailing space, and arrival', async ({ page }) => {
@@ -1306,6 +1335,7 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
         }
         return {
           hideIndex: (window as any).__hideIndex as number,
+          editingCount: items.filter(i => i.editing).length,
           topic: info(topicId),
           topicPin: info(topicPinId),
           edit: info(editId),
@@ -1314,6 +1344,9 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
       },
       [TOPIC_ID, TOPIC_PIN_ID, EDIT_ID, logPinIds] as const
     )
+
+  const visibleItem = (id: string) =>
+    page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${id}"]`)
 
   try {
     await loadAdmin(page)
@@ -1324,8 +1357,47 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
       })
       .toBe(true)
 
+    // no item in edit mode: under unique #topic with #_topic/pin, both pin and target are rendered and below __hideIndex
+    await searchMindbox(page, '#e2e_cutoff_c_topic')
+    const atTopicNoEdit = await readState()
+    expect(atTopicNoEdit.editingCount, 'precondition: no item is in edit mode under #topic').toBe(0)
+    expect(
+      atTopicNoEdit.topicPin?.pinnedMatch && !atTopicNoEdit.topicPin.pinned,
+      'precondition: #_topic/pin is pinnedMatch, not pinned (no edit)'
+    ).toBe(true)
+    expect(atTopicNoEdit.topic?.target, 'precondition: #topic is the target (no edit)').toBe(true)
+    expect(atTopicNoEdit.topicPin!.index, 'precondition: #_topic/pin ranks above target (no edit)').toBeLessThan(
+      atTopicNoEdit.topic!.index
+    )
+    expect.soft(
+      atTopicNoEdit.topicPin!.index,
+      `no-edit #topic: #_topic/pin index (${atTopicNoEdit.topicPin!.index}) must stay below __hideIndex (${atTopicNoEdit.hideIndex})`
+    ).toBeLessThan(atTopicNoEdit.hideIndex)
+    expect.soft(
+      atTopicNoEdit.topic!.index,
+      `no-edit #topic: target index (${atTopicNoEdit.topic!.index}) must stay below __hideIndex (${atTopicNoEdit.hideIndex})`
+    ).toBeLessThan(atTopicNoEdit.hideIndex)
+    await expect.soft
+      .poll(
+        () =>
+          page.evaluate(
+            ([pinId, topicId]) => {
+              const rendered = (id: string) => {
+                const el = document.querySelector(
+                  `.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${id}"]`
+                )
+                return !!el && el.getClientRects().length > 0
+              }
+              return { pinRendered: rendered(pinId), targetRendered: rendered(topicId) }
+            },
+            [TOPIC_PIN_ID, TOPIC_ID] as const
+          ),
+        { message: 'no-edit #topic: both #_topic/pin and target are rendered' }
+      )
+      .toEqual({ pinRendered: true, targetRendered: true })
+
     // Back after closing promoted #log editors elsewhere: with two editors open under pinned #topic,
-    // the saved cutoff (10) falls strictly inside rebuilt step [9, 59) once both close and drop to the tail
+    // the saved cutoff (10) falls strictly inside a rebuilt step once both close and drop to the tail
     const LOG_A = logIds[0]
     const LOG_B = logIds[9]
     await searchMindbox(page, 'e2e_cutoff_c entry 0')
@@ -1355,7 +1427,22 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
     await expect
       .poll(() => page.evaluate(() => history.state?.editorText), { message: 'returned to pinned #topic via Back' })
       .toBe('#e2e_cutoff_c_topic')
-    expect(await page.evaluate(() => (window as any).__hideIndex as number), 'Back restored the saved cutoff').toBe(savedHideIndex)
+    const afterBack = await page.evaluate(() => ({
+      hideIndex: (window as any).__hideIndex as number,
+      toggles: ((window as any).__toggles as Array<{ start: number; end: number }>).map(t => ({
+        start: t.start,
+        end: t.end,
+      })),
+    }))
+    expect(afterBack.hideIndex, 'Back restored the saved cutoff').toBe(savedHideIndex)
+    expect(
+      afterBack.toggles.some(t => t.start == afterBack.hideIndex),
+      `precondition: restored cutoff (${afterBack.hideIndex}) is not any step start: ${JSON.stringify(afterBack.toggles)}`
+    ).toBe(false)
+    expect(
+      afterBack.toggles.some(t => t.start < afterBack.hideIndex && afterBack.hideIndex < t.end),
+      `precondition: restored cutoff (${afterBack.hideIndex}) falls strictly inside a rebuilt toggle step: ${JSON.stringify(afterBack.toggles)}`
+    ).toBe(true)
     await clickShowMoreRevealsNext(page, 'after Back with editors closed under pinned #topic')
 
     // expand to the end of the final group, let an older unrelated log arrive (putting hideIndex inside the last group),
@@ -1389,7 +1476,7 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
     await searchMindbox(page, '#e2e_cutoff_c_edit')
     await openEditorWithDraft(page, EDIT_ID, ' draft', DRAFT_TEXT)
 
-    // C1: unique #topic with one #_topic/pin item (first toggle starts at the pinned match, above target and editor)
+    // C1: unique #topic with one #_topic/pin item (first toggle is trimmed past the target to start at the open editor)
     await searchMindbox(page, '#e2e_cutoff_c_topic')
     const atTopic = await readState()
     expect(atTopic.topicPin?.pinnedMatch && !atTopic.topicPin.pinned, 'precondition: #_topic/pin is pinnedMatch, not pinned').toBe(true)
@@ -1427,6 +1514,11 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
     const afterArrowUp = await readState()
     expect(afterArrowUp.topic?.target, 'parent #topic is target after ArrowUp').toBe(true)
     expect(
+      afterArrowUp.topic!.index,
+      `after ArrowUp to pinned parent, target index (${afterArrowUp.topic!.index}) must stay below __hideIndex (${afterArrowUp.hideIndex})`
+    ).toBeLessThan(afterArrowUp.hideIndex)
+    await expect(visibleItem(TOPIC_ID), 'parent #topic stays rendered after ArrowUp').toBeVisible()
+    expect(
       afterArrowUp.edit!.index,
       `after ArrowUp to pinned parent, editor index (${afterArrowUp.edit!.index}) must stay below __hideIndex (${afterArrowUp.hideIndex})`
     ).toBeLessThan(afterArrowUp.hideIndex)
@@ -1435,6 +1527,658 @@ test('the show-more cutoff stays below an open editor ranked below search-specif
   } finally {
     const cleanup = firestore().batch()
     ;[...allIds, OLDER_LOG_ID].forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})
+
+test('an in-place log saved to a step past the cutoff is promoted below the target, matching a near save in history and keeping focus', async ({ page }) => {
+  const TOPIC_ID = 'e2e_promote_topic'
+  const PIN_ID = 'e2e_promote_pin'
+  const EXACT_COUNT = 50
+  const SUB_COUNT = 20
+  const exactIds = Array.from({ length: EXACT_COUNT }, (_, i) => `e2e_promote_log_${String(i).padStart(2, '0')}`)
+  const subIds = Array.from({ length: SUB_COUNT }, (_, i) => `e2e_promote_sub_${String(i).padStart(2, '0')}`)
+  const NEAR_LOG_ID = exactIds[EXACT_COUNT - 1]
+  // pick a deeper exact-tag log (not already directly below the target) so promotion visibly reorders items
+  const FAR_LOG_ID = exactIds[EXACT_COUNT - 5]
+  const allIds = [TOPIC_ID, PIN_ID, ...exactIds, ...subIds]
+  const baseTime = Date.now() - 48 * 3600 * 1000
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  batch.set(itemsCol.doc(TOPIC_ID), { user: 'anonymous', time: baseTime - 60_000, attr: null, text: `#${TOPIC_ID} unique target item` })
+  batch.set(itemsCol.doc(PIN_ID), { user: 'anonymous', time: baseTime - 120_000, attr: null, text: `#${PIN_ID} #_${TOPIC_ID}/pin pinned to topic` })
+  subIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), {
+      user: 'anonymous',
+      time: baseTime + i * 60_000,
+      attr: null,
+      text: `#log sub ${String(i).padStart(2, '0')} #${TOPIC_ID}/sub`,
+    })
+  })
+  exactIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), {
+      user: 'anonymous',
+      time: baseTime + (SUB_COUNT + i) * 60_000,
+      attr: null,
+      text: `#log entry ${String(i).padStart(2, '0')} #${TOPIC_ID}`,
+    })
+  })
+  await batch.commit()
+
+  const sanityErrors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && SANITY_ERROR_RE.test(msg.text())) sanityErrors.push(msg.text())
+  })
+
+  // open the target query via a label click from a non-target search so history.state.final is true and a user re-ranking pushes once
+  const openFinalTargetQuery = async () => {
+    await searchMindbox(page, `${TOPIC_ID} unique`)
+    await waitForRenderOverlayGone(page)
+    await page.locator(`#item-${TOPIC_ID} mark.label`).first().click()
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            topicId => ({
+              editorText: history.state?.editorText,
+              final: !!history.state?.final,
+              targetIdx: ((window as any).__items as any[]).findIndex(i => i.id == topicId),
+              hideIndex: (window as any).__hideIndex as number,
+            }),
+            TOPIC_ID
+          ),
+        { message: 'finalized target query active via label click', timeout: 10_000 }
+      )
+      .toMatchObject({ editorText: `#${TOPIC_ID} `, final: true })
+    await waitForRenderOverlayGone(page)
+  }
+
+  const readLogState = (id: string) =>
+    page.evaluate(
+      ([logId, topicId, firstSubId]) => {
+        const items = (window as any).__items as any[]
+        const toggles = (window as any).__toggles as Array<{ start: number; end: number }>
+        const hideIndex = (window as any).__hideIndex as number
+        const item = items.find(i => i.id == logId)
+        const target = items.find(i => i.id == topicId)
+        const firstSubIdx = items.findIndex(i => i.id == firstSubId)
+        const destIdx = firstSubIdx > 0 ? firstSubIdx - 1 : -1
+        const destStep = toggles.find(t => destIdx >= t.start && destIdx < t.end) ?? null
+        const textarea = document.getElementById(`textarea-${logId}`) as HTMLTextAreaElement | null
+        return {
+          hideIndex,
+          historyLength: history.length,
+          historyFinal: !!history.state?.final,
+          targetIndex: target ? (target.index as number) : -1,
+          destIdx,
+          destStep,
+          item: item
+            ? {
+                index: item.index as number,
+                editing: !!item.editing,
+                editingPromoted: !!item.editingPromoted,
+                firstTagMatch: !!item.firstTagMatch,
+                saving: !!item.saving,
+                savedText: item.savedText as string,
+              }
+            : null,
+          textareaValue: textarea?.value ?? null,
+          textareaFocused: !!textarea && document.activeElement === textarea,
+        }
+      },
+      [id, TOPIC_ID, subIds[SUB_COUNT - 1]] as const
+    )
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(() => page.evaluate(ids => ids.every(id => (window as any).__items.some((i: any) => i.id == id)), allIds), {
+        message: 'all seeded promotion fixtures loaded',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // 1. Near move baseline: expand until the destination step for #topic/sub starts at or below __hideIndex,
+    // retag the newest exact log in place, and save without closing (Control+s)
+    await openFinalTargetQuery()
+    for (let clicks = 0; clicks < 6; clicks++) {
+      const s = await readLogState(NEAR_LOG_ID)
+      if (s.item && s.item.index < s.hideIndex && (!s.destStep || s.destStep.start <= s.hideIndex)) break
+      await clickShowMoreRevealsNext(page, `expanding for near move (step ${clicks})`)
+    }
+    const nearPre = await readLogState(NEAR_LOG_ID)
+    expect(nearPre.item!.index, 'precondition: near log is visible').toBeLessThan(nearPre.hideIndex)
+    expect(
+      !nearPre.destStep || nearPre.destStep.start <= nearPre.hideIndex,
+      `precondition: near destination step (${nearPre.destStep?.start}..${nearPre.destStep?.end}) starts at or below hideIndex (${nearPre.hideIndex})`
+    ).toBe(true)
+
+    const nearExpectedText = `#log entry ${String(EXACT_COUNT - 1).padStart(2, '0')} #${TOPIC_ID}/sub`
+    await openEditorWithDraft(page, NEAR_LOG_ID, '/sub', nearExpectedText)
+    const nearBeforeSave = await readLogState(NEAR_LOG_ID)
+    expect(nearBeforeSave.historyFinal, 'precondition: finalized entry before near save').toBe(true)
+    expect(nearBeforeSave.textareaFocused, 'precondition: textarea focused before near save').toBe(true)
+
+    await page.keyboard.press('Control+s')
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+    await waitForRenderOverlayGone(page)
+    // let updateItemLayout's update_dom() (tick + 2 rAFs) finish restoring focus/scroll
+    await page.evaluate(
+      () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))
+    )
+    const nearAfter = await readLogState(NEAR_LOG_ID)
+    expect(nearAfter.item?.firstTagMatch, 'near log was saved with #topic/sub').toBe(false)
+    expect(nearAfter.item?.editing, 'near log stays open in edit mode').toBe(true)
+    expect(nearAfter.item?.editingPromoted, 'near move stays unpromoted in place').toBe(false)
+    expect(nearAfter.item!.index, 'near move lands in subtag order, not directly below target').toBeGreaterThan(
+      nearAfter.targetIndex + 1
+    )
+    expect(nearAfter.item!.index, 'near move stays below cutoff').toBeLessThan(nearAfter.hideIndex)
+    await expectEditorVisible(page, NEAR_LOG_ID, nearExpectedText, 'after near retag save')
+    const nearHistoryDelta = nearAfter.historyLength - nearBeforeSave.historyLength
+    expect(nearHistoryDelta, 'near save pushes one history step from final entry').toBe(1)
+
+    // wait for save to commit and close the near editor cleanly
+    await expect
+      .poll(async () => (await readLogState(NEAR_LOG_ID)).item, { message: 'near save persisted', timeout: 15_000 })
+      .toMatchObject({ saving: false, savedText: nearExpectedText })
+    await visibleEditContainer(page, NEAR_LOG_ID).locator('.edit-menu .button.save').click()
+    await expect
+      .poll(async () => (await readLogState(NEAR_LOG_ID)).item?.editing, { message: 'near editor closed', timeout: 10_000 })
+      .toBe(false)
+
+    // 2. Far move: reset to finalized target query, expand once so the destination step lies strictly past
+    // __hideIndex (more than one step away), retag the next exact log in place, and save without closing
+    await openFinalTargetQuery()
+    await clickShowMoreRevealsNext(page, 'expanding first step for far move')
+    const farPre = await readLogState(FAR_LOG_ID)
+    expect(farPre.item!.index, 'precondition: far log starts below the first log slot').toBeGreaterThan(
+      farPre.targetIndex + 1
+    )
+    expect(farPre.item!.index, 'precondition: far log is visible').toBeLessThan(farPre.hideIndex)
+    expect(
+      farPre.destStep && farPre.destStep.start > farPre.hideIndex,
+      `precondition: far destination step (${farPre.destStep?.start}..${farPre.destStep?.end}) starts strictly past hideIndex (${farPre.hideIndex})`
+    ).toBe(true)
+
+    const farExpectedText = `#log entry ${String(EXACT_COUNT - 5).padStart(2, '0')} #${TOPIC_ID}/sub`
+    await openEditorWithDraft(page, FAR_LOG_ID, '/sub', farExpectedText)
+    const farBeforeSave = await readLogState(FAR_LOG_ID)
+    expect(farBeforeSave.historyFinal, 'precondition: finalized entry before far save').toBe(true)
+    expect(farBeforeSave.textareaFocused, 'precondition: textarea focused before far save').toBe(true)
+
+    await page.keyboard.press('Control+s')
+    // non-retrying check right after Svelte's flush so a missing synchronous restart cannot be masked later
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+    const farImmediate = await readLogState(FAR_LOG_ID)
+    expect(farImmediate.item?.firstTagMatch, 'far log was saved with #topic/sub').toBe(false)
+    expect(farImmediate.item?.editing, 'far log stays open in edit mode').toBe(true)
+    expect(farImmediate.item?.editingPromoted, 'far-moving log is promoted').toBe(true)
+    expect(
+      farImmediate.item!.index,
+      `promoted log (${farImmediate.item!.index}) ranks directly below target (${farImmediate.targetIndex})`
+    ).toBe(farImmediate.targetIndex + 1)
+    expect(
+      farImmediate.item!.index,
+      `promoted log (${farImmediate.item!.index}) stays below cutoff (${farImmediate.hideIndex})`
+    ).toBeLessThan(farImmediate.hideIndex)
+    expect(farImmediate.textareaValue, 'textarea remains mounted with updated text immediately after save').toBe(
+      farExpectedText
+    )
+    const farHistoryDelta = farImmediate.historyLength - farBeforeSave.historyLength
+    expect(farHistoryDelta, `history.length delta matches near save (near=${nearHistoryDelta}, far=${farHistoryDelta})`).toBe(
+      nearHistoryDelta
+    )
+
+    await waitForRenderOverlayGone(page)
+    // let updateItemLayout's update_dom() (tick + 2 rAFs) finish restoring focus/scroll
+    await page.evaluate(
+      () => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 50))))
+    )
+    await expectEditorVisible(page, FAR_LOG_ID, farExpectedText, 'after far retag save')
+    const farSettled = await readLogState(FAR_LOG_ID)
+    expect(
+      farSettled.historyLength - farBeforeSave.historyLength,
+      'no second history write after render settles'
+    ).toBe(nearHistoryDelta)
+    // near save moves across the pre-layout cutoff (losing focus there), whereas promotion lands directly below
+    // target inside the already-visible prefix and keeps focus on the textarea
+    expect(farSettled.textareaFocused, 'textarea keeps focus after promoted far save').toBe(true)
+    expect(sanityErrors, 'toggle and ranking sanity checks stayed silent').toEqual([])
+  } finally {
+    const cleanup = firestore().batch()
+    allIds.forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})
+
+test('removing a leading space before a slash via typed keys promotes a hidden in-place log and keeps the typed history step', async ({ page }) => {
+  const NEEDLE = '/e2e_slash_needle'
+  const SEARCH_QUERY = ` ${NEEDLE}`
+  const OLD_LOG_ID = 'e2e_slash_old_log'
+  const OLD_LOG_TEXT = `#log ${NEEDLE} old log matched only with leading space`
+  const DRAFT_TEXT = `${OLD_LOG_TEXT} draft`
+  const FILLER_COUNT = 50
+  const fillerIds = Array.from({ length: FILLER_COUNT }, (_, i) => `e2e_slash_filler_${String(i).padStart(2, '0')}`)
+  const allIds = [OLD_LOG_ID, ...fillerIds]
+  const now = Date.now()
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  batch.set(itemsCol.doc(OLD_LOG_ID), {
+    user: 'anonymous',
+    time: now - 365 * 24 * 3600 * 1000,
+    attr: null,
+    text: OLD_LOG_TEXT,
+  })
+  fillerIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), {
+      user: 'anonymous',
+      time: now - (48 + i) * 60_000,
+      attr: null,
+      text: `#${id} newer filler item ${String(i).padStart(2, '0')}`,
+    })
+  })
+  await batch.commit()
+
+  const sanityErrors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && SANITY_ERROR_RE.test(msg.text())) sanityErrors.push(msg.text())
+  })
+
+  const readSlashState = () =>
+    page.evaluate(
+      ([oldLogId, fillerIds]) => {
+        const items = (window as any).__items as any[]
+        const oldLog = items.find(i => i.id == oldLogId)
+        const fillerIndices = fillerIds.map(id => items.findIndex(i => i.id == id)).filter(i => i >= 0)
+        return {
+          hideIndex: (window as any).__hideIndex as number,
+          historyLength: history.length,
+          historyIndex: (history.state?.index as number | undefined) ?? null,
+          historyEditorText: (history.state?.editorText as string | undefined) ?? null,
+          historyFinal: !!history.state?.final,
+          mindboxValue: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement)?.value ?? null,
+          debounced: !!(window as any)._mindboxDebounced,
+          minFillerIndex: fillerIndices.length ? Math.min(...fillerIndices) : -1,
+          oldLog: oldLog
+            ? {
+                index: oldLog.index as number,
+                editing: !!oldLog.editing,
+                editingPromoted: !!oldLog.editingPromoted,
+                matching: !!oldLog.matching,
+              }
+            : null,
+        }
+      },
+      [OLD_LOG_ID, fillerIds] as const
+    )
+
+  // arrive at the leading-space query on a FINAL history entry at the tip of history:
+  // tag/label clicks always start with `#`, so finalize via scrollToTopWithHistory (Control+Alt+ArrowUp)
+  const enterFinalLeadingSpaceQuery = async (resetQuery: string) => {
+    await searchMindbox(page, resetQuery)
+    await searchMindbox(page, SEARCH_QUERY)
+    await waitForRenderOverlayGone(page)
+    const headerTop = await page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+    await page.evaluate(y => document.body.scrollTo(0, y), headerTop + 200)
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'page scrolled below header', timeout: 10_000 })
+      .toBeGreaterThan(headerTop + 50)
+    await page.keyboard.press('Control+Alt+ArrowUp')
+    await expect
+      .poll(
+        async () => {
+          const s = await readSlashState()
+          return { editorText: s.historyEditorText, final: s.historyFinal }
+        },
+        { message: 'leading-space query finalized via scroll shortcut', timeout: 10_000 }
+      )
+      .toEqual({ editorText: SEARCH_QUERY, final: true })
+    await waitForRenderOverlayGone(page)
+  }
+
+  // remove the leading space with a real Backspace in the MindBox and let the debounce timer apply it
+  const deleteLeadingSpaceViaDebounce = async () => {
+    await focusMindboxInPlace(page)
+    await expect(mindbox(page)).toBeFocused()
+    await expect(mindbox(page)).toHaveValue(SEARCH_QUERY)
+    await page.evaluate(() => {
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.setSelectionRange(1, 1)
+    })
+    await page.keyboard.press('Backspace')
+    const afterKey = await readSlashState()
+    expect(afterKey.mindboxValue, 'Backspace removed only the leading space').toBe(NEEDLE)
+    expect(afterKey.debounced, 'typed leading-space deletion entered the debounce timer').toBe(true)
+    await expect
+      .poll(
+        async () => {
+          const s = await readSlashState()
+          return !s.debounced && s.historyEditorText === NEEDLE
+        },
+        { message: `debounced query "${NEEDLE}" applied`, timeout: 10_000 }
+      )
+      .toBe(true)
+    await waitForRenderOverlayGone(page)
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => r())))
+  }
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(() => page.evaluate(ids => ids.every(id => (window as any).__items.some((i: any) => i.id == id)), allIds), {
+        message: 'all seeded leading-slash fixtures loaded',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // 1. Twin (no editor open -> single pass, no restart): measure history.length delta and Back
+    await enterFinalLeadingSpaceQuery(`#${fillerIds[0]}`)
+    const twinBefore = await readSlashState()
+    expect(twinBefore.historyFinal, 'twin precondition: on a final history entry').toBe(true)
+    expect(twinBefore.oldLog?.matching, 'twin precondition: old log matches under leading-space query').toBe(true)
+    expect(twinBefore.oldLog!.index, 'twin precondition: old log starts visible').toBeLessThan(twinBefore.hideIndex)
+
+    await deleteLeadingSpaceViaDebounce()
+    const twinAfter = await readSlashState()
+    expect(twinAfter.oldLog?.matching, 'twin: removing leading space disables search').toBe(false)
+    expect(twinAfter.oldLog!.index, 'twin: unedited old log falls behind all 50 newer fillers and past cutoff').toBeGreaterThanOrEqual(
+      Math.max(twinAfter.hideIndex, FILLER_COUNT)
+    )
+    const twinHistoryDelta = twinAfter.historyLength - twinBefore.historyLength
+    const twinIndexDelta = twinAfter.historyIndex! - twinBefore.historyIndex!
+    expect(twinHistoryDelta, 'twin: debounced typed change from final entry pushes one history step').toBe(1)
+    expect(twinIndexDelta, 'twin: history state index advances by one').toBe(1)
+
+    await page.goBack()
+    await expect
+      .poll(
+        async () => {
+          const s = await readSlashState()
+          return { editorText: s.historyEditorText, index: s.historyIndex }
+        },
+        { message: 'twin: Back returns to the leading-space query entry', timeout: 10_000 }
+      )
+      .toEqual({ editorText: SEARCH_QUERY, index: twinBefore.historyIndex })
+
+    // 2. Restart path (old log open in place with a draft): removing the leading space drops it far past
+    // the cutoff, triggering promotion + synchronous restart while preserving typedInput through debounce
+    await enterFinalLeadingSpaceQuery(`#${fillerIds[1]}`)
+    await openEditorWithDraft(page, OLD_LOG_ID, ' draft', DRAFT_TEXT)
+    const restartBefore = await readSlashState()
+    expect(restartBefore.historyFinal, 'restart precondition: still on a final history entry with editor open').toBe(true)
+    expect(restartBefore.oldLog?.editing, 'restart precondition: old log editor is open').toBe(true)
+    expect(restartBefore.oldLog?.editingPromoted, 'restart precondition: old log starts unpromoted in place').toBe(false)
+    expect(restartBefore.oldLog!.index, 'restart precondition: old log starts visible').toBeLessThan(restartBefore.hideIndex)
+    expect(restartBefore.hideIndex, 'restart precondition: prior cutoff stays well above the 50 fillers').toBeLessThan(FILLER_COUNT)
+
+    await deleteLeadingSpaceViaDebounce()
+    const restartAfter = await readSlashState()
+    expect(restartAfter.oldLog?.matching, 'restart: removing leading space disables search').toBe(false)
+    expect(restartAfter.oldLog?.editing, 'restart: old log stays open in edit mode').toBe(true)
+    expect(restartAfter.oldLog?.editingPromoted, 'restart: hidden in-place log is promoted').toBe(true)
+    expect(
+      restartAfter.oldLog!.index,
+      `restart: promoted log (${restartAfter.oldLog!.index}) ranks in the editing tier above newer fillers (${restartAfter.minFillerIndex})`
+    ).toBeLessThan(restartAfter.minFillerIndex)
+    expect(
+      restartAfter.oldLog!.index,
+      `restart: promoted log (${restartAfter.oldLog!.index}) stays below cutoff (${restartAfter.hideIndex})`
+    ).toBeLessThan(restartAfter.hideIndex)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_TEXT, 'after removing leading space via debounce')
+
+    const restartHistoryDelta = restartAfter.historyLength - restartBefore.historyLength
+    const restartIndexDelta = restartAfter.historyIndex! - restartBefore.historyIndex!
+    expect(
+      restartHistoryDelta,
+      `history.length delta matches twin (twin=${twinHistoryDelta}, restart=${restartHistoryDelta})`
+    ).toBe(twinHistoryDelta)
+    expect(
+      restartIndexDelta,
+      `history.state.index delta matches twin (twin=${twinIndexDelta}, restart=${restartIndexDelta})`
+    ).toBe(twinIndexDelta)
+
+    await page.goBack()
+    await expect
+      .poll(
+        async () => {
+          const s = await readSlashState()
+          return { editorText: s.historyEditorText, index: s.historyIndex }
+        },
+        { message: 'restart: Back returns to the leading-space query entry', timeout: 10_000 }
+      )
+      .toEqual({ editorText: SEARCH_QUERY, index: restartBefore.historyIndex })
+
+    expect(sanityErrors, 'toggle and ranking sanity checks stayed silent').toEqual([])
+  } finally {
+    const cleanup = firestore().batch()
+    allIds.forEach(id => cleanup.delete(itemsCol.doc(id)))
+    await cleanup.commit()
+  }
+})
+
+test('Back onto an expanded vs shallow slash query keeps an in-place log unpromoted when restored in view and fires _on_search once', async ({ page }) => {
+  const NEEDLE = '/e2e_rslash_needle'
+  const SEARCH_QUERY = ` ${NEEDLE}`
+  const OLD_LOG_ID = 'e2e_rslash_old_log'
+  const OLD_LOG_TEXT = `#log ${NEEDLE} old log for reverse traversal`
+  const DRAFT_DEEP = `${OLD_LOG_TEXT} deep`
+  const DRAFT_SHALLOW = `${OLD_LOG_TEXT} shallow`
+  const LISTENER_ID = 'e2e_rslash_listener'
+  const LISTENER_TEXT = [
+    `#${LISTENER_ID} #_listen`,
+    '```js',
+    'function _on_change(text) { (window.__rslashChanges ??= []).push(text) }',
+    'function _on_search(text) { (window.__rslashSearches ??= []).push(text) }',
+    '```',
+  ].join('\n')
+  const FILLER_COUNT = 50
+  const fillerIds = Array.from({ length: FILLER_COUNT }, (_, i) => `e2e_rslash_filler_${String(i).padStart(2, '0')}`)
+  const allIds = [OLD_LOG_ID, LISTENER_ID, ...fillerIds]
+  const now = Date.now()
+  const batch = firestore().batch()
+  const itemsCol = firestore().collection('items')
+  // older than all 50 fillers (48..97m ago) so it drops past them when search is disabled, yet within 1d for quick expansion
+  batch.set(itemsCol.doc(OLD_LOG_ID), {
+    user: 'anonymous',
+    time: now - 2 * 3600 * 1000,
+    attr: null,
+    text: OLD_LOG_TEXT,
+  })
+  batch.set(itemsCol.doc(LISTENER_ID), {
+    user: 'anonymous',
+    time: now - 200 * 60_000,
+    attr: null,
+    text: LISTENER_TEXT,
+  })
+  fillerIds.forEach((id, i) => {
+    batch.set(itemsCol.doc(id), {
+      user: 'anonymous',
+      time: now - (48 + i) * 60_000,
+      attr: null,
+      text: `#${id} newer filler item ${String(i).padStart(2, '0')}`,
+    })
+  })
+  await batch.commit()
+
+  const sanityErrors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'error' && SANITY_ERROR_RE.test(msg.text())) sanityErrors.push(msg.text())
+  })
+
+  const readState = () =>
+    page.evaluate(
+      ([oldLogId, fillerIds]) => {
+        const items = (window as any).__items as any[]
+        const oldLog = items.find(i => i.id == oldLogId)
+        const fillerIndices = fillerIds.map(id => items.findIndex(i => i.id == id)).filter(i => i >= 0)
+        return {
+          total: items.length,
+          hideIndex: (window as any).__hideIndex as number,
+          savedHideIndex: (history.state?.hideIndex as number | undefined) ?? null,
+          historyEditorText: (history.state?.editorText as string | undefined) ?? null,
+          historyFinal: !!history.state?.final,
+          minFillerIndex: fillerIndices.length ? Math.min(...fillerIndices) : -1,
+          maxFillerIndex: fillerIndices.length ? Math.max(...fillerIndices) : -1,
+          oldLog: oldLog
+            ? {
+                index: oldLog.index as number,
+                editing: !!oldLog.editing,
+                editingPromoted: !!oldLog.editingPromoted,
+                matching: !!oldLog.matching,
+              }
+            : null,
+          changes: [...(((window as any).__rslashChanges as string[] | undefined) ?? [])],
+          searches: [...(((window as any).__rslashSearches as string[] | undefined) ?? [])],
+        }
+      },
+      [OLD_LOG_ID, fillerIds] as const
+    )
+
+  const finalizeCurrentQuery = async (expectedQuery: string) => {
+    await waitForRenderOverlayGone(page)
+    const headerTop = await page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+    await page.evaluate(y => document.body.scrollTo(0, y), headerTop + 200)
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'scrolled below header to finalize', timeout: 10_000 })
+      .toBeGreaterThan(headerTop + 50)
+    await page.keyboard.press('Control+Alt+ArrowUp')
+    await expect
+      .poll(
+        async () => {
+          const s = await readState()
+          return { editorText: s.historyEditorText, final: s.historyFinal }
+        },
+        { message: `query "${expectedQuery}" finalized via scroll shortcut`, timeout: 10_000 }
+      )
+      .toEqual({ editorText: expectedQuery, final: true })
+    await waitForRenderOverlayGone(page)
+  }
+
+  const resetListenerLogs = async () => {
+    await page.evaluate(() => new Promise<void>(r => setTimeout(r, 80)))
+    await page.evaluate(() => {
+      ;(window as any).__rslashChanges = []
+      ;(window as any).__rslashSearches = []
+    })
+  }
+
+  try {
+    await loadAdmin(page)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ([ids, listenerId]) =>
+              ids.every(id => (window as any).__items.some((i: any) => i.id == id)) &&
+              !!(window as any).__items.find((i: any) => i.id == listenerId)?.listen,
+            [allIds, LISTENER_ID] as const
+          ),
+        { message: 'all reverse-traversal fixtures and listener loaded', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    // 1. Deep reverse traversal: search `/needle`, expand to all rows, finalize, navigate to ` /needle`,
+    // open the matched old log in place, then press Back onto the expanded `/needle` view
+    await searchMindbox(page, NEEDLE)
+    for (let clicks = 0; clicks < 15; clicks++) {
+      const s = await readState()
+      if ((s.oldLog && s.oldLog.index < s.hideIndex) || s.hideIndex >= s.total) break
+      await clickShowMoreRevealsNext(page, `expanding slash view past old log for deep Back (step ${clicks})`)
+    }
+    const expanded = await readState()
+    expect(expanded.oldLog!.index, 'precondition: old log sits below all 50 fillers').toBeGreaterThan(expanded.maxFillerIndex)
+    expect(expanded.oldLog!.index, 'precondition: slash view expanded past old log').toBeLessThan(expanded.hideIndex)
+    await finalizeCurrentQuery(NEEDLE)
+    const deepSaved = await readState()
+    expect(
+      deepSaved.savedHideIndex,
+      'precondition: finalized expanded entry stores hideIndex past old log'
+    ).toBeGreaterThan(deepSaved.oldLog!.index)
+
+    await searchMindbox(page, SEARCH_QUERY)
+    await openEditorWithDraft(page, OLD_LOG_ID, ' deep', DRAFT_DEEP)
+    const beforeDeepBack = await readState()
+    expect(beforeDeepBack.oldLog?.matching, 'precondition: old log matches under leading-space query').toBe(true)
+    expect(beforeDeepBack.oldLog?.editingPromoted, 'precondition: old log starts unpromoted').toBe(false)
+    expect(beforeDeepBack.hideIndex, 'precondition: departed view cutoff is small').toBeLessThan(FILLER_COUNT)
+
+    await resetListenerLogs()
+    await page.goBack()
+    await expect
+      .poll(async () => (await readState()).historyEditorText, { message: 'deep Back returned to slash query', timeout: 10_000 })
+      .toBe(NEEDLE)
+    await waitForRenderOverlayGone(page)
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => setTimeout(r, 120))))
+
+    const afterDeepBack = await readState()
+    expect(afterDeepBack.oldLog?.editing, 'deep Back: old log stays open in edit mode').toBe(true)
+    expect(afterDeepBack.oldLog?.editingPromoted, 'deep Back: open log stays not promoted').toBe(false)
+    expect(
+      afterDeepBack.oldLog!.index,
+      `deep Back: open log (${afterDeepBack.oldLog!.index}) stays in time order below fillers (max ${afterDeepBack.maxFillerIndex})`
+    ).toBeGreaterThan(afterDeepBack.maxFillerIndex)
+    expect(
+      afterDeepBack.oldLog!.index,
+      `deep Back: open log (${afterDeepBack.oldLog!.index}) stays above restored cutoff (${afterDeepBack.hideIndex})`
+    ).toBeLessThan(afterDeepBack.hideIndex)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_DEEP, 'after deep Back onto expanded slash view')
+    expect(afterDeepBack.changes, 'deep Back: _on_change called once for returned-to query').toEqual([NEEDLE])
+    expect(afterDeepBack.searches, 'deep Back: _on_search called once for returned-to query').toEqual([NEEDLE])
+
+    // close the open draft cleanly before the shallow-traversal twin
+    await visibleEditContainer(page, OLD_LOG_ID).locator('.edit-menu .button.cancel').click()
+    await page.locator('.modal .button.confirm', { hasText: 'Discard' }).click()
+    await expect
+      .poll(async () => (await readState()).oldLog?.editing, { message: 'deep Back draft discarded', timeout: 10_000 })
+      .toBe(false)
+
+    // 2. Shallow reverse traversal: search `/needle` WITHOUT expanding (small saved cutoff), finalize,
+    // navigate to ` /needle`, open the old log in place, then press Back onto the shallow `/needle` view
+    await searchMindbox(page, `#${fillerIds[0]}`)
+    await searchMindbox(page, NEEDLE)
+    const shallow = await readState()
+    expect(shallow.oldLog!.index, 'precondition: shallow slash view hides old log behind cutoff').toBeGreaterThanOrEqual(
+      shallow.hideIndex
+    )
+    await finalizeCurrentQuery(NEEDLE)
+    const shallowSaved = await readState()
+    expect(
+      shallowSaved.savedHideIndex,
+      'precondition: finalized shallow entry stores small hideIndex below old log'
+    ).toBeLessThan(shallowSaved.oldLog!.index)
+
+    await searchMindbox(page, SEARCH_QUERY)
+    await openEditorWithDraft(page, OLD_LOG_ID, ' shallow', DRAFT_SHALLOW)
+    const beforeShallowBack = await readState()
+    expect(beforeShallowBack.oldLog?.editingPromoted, 'precondition: old log starts unpromoted for shallow Back').toBe(false)
+
+    await resetListenerLogs()
+    await page.goBack()
+    await expect
+      .poll(async () => (await readState()).historyEditorText, { message: 'shallow Back returned to slash query', timeout: 10_000 })
+      .toBe(NEEDLE)
+    await waitForRenderOverlayGone(page)
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => setTimeout(r, 120))))
+
+    const afterShallowBack = await readState()
+    expect(afterShallowBack.oldLog?.editing, 'shallow Back: old log stays open in edit mode').toBe(true)
+    expect(afterShallowBack.oldLog?.editingPromoted, 'shallow Back: hidden open log is promoted').toBe(true)
+    expect(
+      afterShallowBack.oldLog!.index,
+      `shallow Back: promoted log (${afterShallowBack.oldLog!.index}) ranks above fillers (min ${afterShallowBack.minFillerIndex})`
+    ).toBeLessThan(afterShallowBack.minFillerIndex)
+    expect(
+      afterShallowBack.oldLog!.index,
+      `shallow Back: promoted log (${afterShallowBack.oldLog!.index}) stays above cutoff (${afterShallowBack.hideIndex})`
+    ).toBeLessThan(afterShallowBack.hideIndex)
+    await expectEditorVisible(page, OLD_LOG_ID, DRAFT_SHALLOW, 'after shallow Back onto unexpanded slash view')
+    expect(afterShallowBack.changes, 'shallow Back: _on_change called once for returned-to query').toEqual([NEEDLE])
+    expect(afterShallowBack.searches, 'shallow Back: _on_search called once for returned-to query').toEqual([NEEDLE])
+    expect(sanityErrors, 'toggle and ranking sanity checks stayed silent').toEqual([])
+  } finally {
+    const cleanup = firestore().batch()
+    allIds.forEach(id => cleanup.delete(itemsCol.doc(id)))
     await cleanup.commit()
   }
 })
