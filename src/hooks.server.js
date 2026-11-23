@@ -16,7 +16,7 @@ export async function handle({ event, resolve }) {
     content = await pageContent({ url: event.url, cookie: event.cookies.get('__session'), hostname })
   }
   event.locals.meta = content?.meta ?? null
-  return resolve(event, {
+  const response = await resolve(event, {
     // the placeholder comment stays in place (content is inserted after it): removing comments in
     // transformPageChunk draws a dev warning since svelte hydration relies on comment markers.
     // the replacement MUST be a function: as a string, '$&', "$'" and '$`' in the item-authored
@@ -32,4 +32,13 @@ export async function handle({ event, resolve }) {
       return env.VENDOR_DIR ? vendorShell(page) : page
     },
   })
+  // name the charset on the page response header so the document's encoding does not depend on the
+  // parser reaching <meta charset>: a stylesheet of this app was once decoded as windows-1252 on
+  // the owner's page (2026-11-22), and a preload made from the Link header before the tag is read
+  // is the suspected path, not an established one (this header's independent effect is unknown)
+  const type = response.headers.get('content-type')
+  if (type && /^text\/html(?:\s*;|$)/i.test(type.trim()) && !/;\s*charset\s*=/i.test(type)) {
+    response.headers.set('content-type', `${type.trim().replace(/;\s*$/, '')}; charset=utf-8`)
+  }
+  return response
 }

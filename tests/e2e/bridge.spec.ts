@@ -1395,6 +1395,15 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   // and (b) a MALFORMED raw candidate whose BODY carries the same payloads. phase (a)
   // alone could false-green (a canonical base64 body is inert before decoding), so (b)
   // is what proves the scanner masks candidate ranges from item state/macros/tags.
+  // serve the built route stylesheet with charset=windows-1252 (bytes unchanged) so that any raw
+  // UTF-8 tick emitted into the stylesheet decodes to the garbled characters seen in the owner's
+  // damaged window (2026-11-22) and fails the computed-content checks below
+  let overriddenSheets = 0
+  await page.route('**/_app/immutable/assets/*.css', async route => {
+    overriddenSheets++
+    const res = await route.fetch()
+    await route.fulfill({ response: res, contentType: 'text/css; charset=windows-1252' })
+  })
   await loadAdmin(page)
   const hostile = [
     '<<user>> q',
@@ -1698,7 +1707,8 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
       // an unticked passive child under a ticked parent: the parent's row fade applies, the box adds none
       nestedUnticked: getComputedStyle(first.querySelector('li.checkbox.checked span.task:not(.checked)')!).opacity,
       appNestedUnchecked: getComputedStyle(content.querySelector('li.checkbox.checked input[type=checkbox]:not(:checked)')!).opacity,
-      tickedMark: getComputedStyle(first.querySelector('span.task.checked')!, ':after').content,
+      tickedMark: getComputedStyle(first.querySelector('span.task.checked')!, '::after').content,
+      appTickedMark: getComputedStyle(content.querySelector('input[type=checkbox]:checked')!, '::after').content,
       markColor: getComputedStyle(first.querySelector('span.task.checked')!).color,
       // the all-task nested list: no bullets, the boxes pulled into the bullet's place as the app's
       planList: (ul => [getComputedStyle(ul).listStyleType, ul.classList.contains('checkbox')])(first.querySelectorAll('ul')[1] as HTMLElement),
@@ -1715,10 +1725,13 @@ test('inert regions render dead: valid decoded text and malformed candidates', a
   expect(layout.inputs, 'task rows carry no input').toBe(0)
   expect(layout.boxSize, 'a passive box the size of the app\'s checkbox').toEqual(layout.appBox)
   expect(layout.tickedOpacity, 'a ticked row dims like the app\'s').toBe('0.5')
-  // the mark: a text-presentation check mark in the text's own color (the owner's choice of
-  // 2026-09-15; the earlier heavy check mark could resolve to the color emoji font's tinted glyph)
-  expect(layout.tickedMark, 'a ticked box shows the app\'s mark').toContain('✓')
-  expect(layout.tickedMark, 'never the heavy check mark').not.toContain('✔')
+  // the mark: a text-presentation check mark (U+2713 U+FE0E) in the text's own color (the owner's
+  // choice of 2026-09-15; the earlier heavy check mark could resolve to the color emoji font's
+  // tinted glyph); checked for both the inert tree's passive box and the item's own checkbox under
+  // the windows-1252 stylesheet override above
+  expect(overriddenSheets, 'the built app stylesheet was served under the windows-1252 override').toBeGreaterThan(0)
+  expect(layout.tickedMark, 'a ticked box shows the check mark (U+2713 U+FE0E)').toBe('"\u2713\ufe0e"')
+  expect(layout.appTickedMark, 'a checked checkbox shows the check mark (U+2713 U+FE0E)').toBe('"\u2713\ufe0e"')
   expect(layout.markColor, 'the mark in the text\'s own color').toBe(layout.plainColor)
   expect([layout.untickedBox, layout.untickedRow], 'an unticked passive box fades like a ticked row, its text does not').toEqual(['0.5', '1'])
   expect([layout.appUnchecked, layout.appUncheckedRow], 'the app\'s own unchecked box stays a live control: no fade').toEqual(['1', '1'])

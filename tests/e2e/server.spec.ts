@@ -39,8 +39,21 @@ test.describe('ssr shell', () => {
   test('serves the app with session fields, honoring the proxy-forwarded client ip', async ({ request }) => {
     const res = await request.get('/', { headers: { 'X-Forwarded-For': '203.0.113.7', 'Accept-Encoding': 'gzip' } })
     expect(res.status()).toBe(200)
-    expect(res.headers()['content-type']).toContain('text/html')
+    // name charset=utf-8 on the page response header so the document's encoding does not depend on
+    // the parser reaching <meta charset> (a stylesheet of this app was once decoded as windows-1252
+    // on the owner's page, 2026-11-22; a Link-header preload before the tag is read is suspected,
+    // not established); a non-HTML response through the same hook (/__data.json) keeps its type
+    expect(
+      res.headers()['content-type']?.toLowerCase(),
+      'page response names charset=utf-8 in content-type',
+    ).toMatch(/^text\/html\s*;.*\bcharset=utf-8\b/)
     expect(res.headers()['content-encoding'], 'compression').toBe('gzip')
+    const dataRes = await request.get('/__data.json')
+    expect(dataRes.status(), 'kit data response is 200').toBe(200)
+    expect(
+      dataRes.headers()['content-type'],
+      'hook leaves non-HTML responses (/__data.json) unchanged',
+    ).toBe('application/json')
     const html = await res.text()
     expect(html).toMatch(/<div id="?sapper"?[ >]/) // app root (attributes may follow, or be unquoted by a minifier)
     expect(html).toContain('<title>localhost</title>') // hostname, canonicalized (see util.js)

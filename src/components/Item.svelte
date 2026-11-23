@@ -3368,8 +3368,11 @@
     font-size: 15px;
     line-height: 1;
   }
+  /* --tick is defined in src/app.html so the built stylesheet stays pure ASCII: a raw character
+     in it (what the minifier writes for CSS escapes, without @charset) has shown as garbled bytes
+     on the owner's pages */
   .item > :global(.content input[type='checkbox']:checked:after) {
-    content: '\2713\FE0E';
+    content: var(--tick);
     transform: translateY(-1px);
   }
   /* the inert tree's task rows (vault design mind_task_agents 9.6): a passive box styled like
@@ -3391,7 +3394,7 @@
     line-height: 1;
   }
   .item > :global(.content span.task.checked:after) {
-    content: '\2713\FE0E';
+    content: var(--tick);
     transform: translateY(-1px);
   }
   /* an unticked passive box fades like a ticked row does (above), the box alone, so the
