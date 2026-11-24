@@ -51,14 +51,17 @@ const LAUNCH_SECRET = secretFor(LAUNCH_USER, PHRASE)
 // the reload row's own account (the row after it), of the same make
 const RELOAD_USER: TestUser = { uid: 'tasks_reload_e2e', displayName: 'Tasks Reload', email: 'tasks_reload@e2e.test' }
 const RELOAD_SECRET = secretFor(RELOAD_USER, PHRASE)
-// the sign-out row's account (the last row): no todoer, two items
+// the sign-out row's account: no todoer, two items
 const SWITCH_USER: TestUser = { uid: 'tasks_switch_e2e', displayName: 'Tasks Switch', email: 'tasks_switch@e2e.test' }
+// the waiting-rows and bells row's own account: #todoer installed from mind.items, both widgets
+const WAITS_USER: TestUser = { uid: 'tasks_waits_e2e', displayName: 'Tasks Waits', email: 'tasks_waits@e2e.test' }
+const WAITS_SECRET = secretFor(WAITS_USER, PHRASE)
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -89,29 +92,29 @@ async function commands(): Promise<Command[]> {
 }
 
 // the bridge's store write behind the app (the app's hidden document shape, v0)
-async function writeStore(id: string, name: string, item: unknown) {
+async function writeStore(id: string, name: string, item: unknown, user = USER, secret = SECRET) {
   const { encryptWithSecret } = await import('../../src/crypto.js')
   const time = Date.now()
-  const cipher = await encryptWithSecret(JSON.stringify({ hidden: true, time, attr: null, text: JSON.stringify({ name, item }) }), SECRET)
-  await firestore().collection('items').doc(id).set({ user: USER.uid, time, hidden: true, text: null, attr: null, cipher })
+  const cipher = await encryptWithSecret(JSON.stringify({ hidden: true, time, attr: null, text: JSON.stringify({ name, item }) }), secret)
+  await firestore().collection('items').doc(id).set({ user: user.uid, time, hidden: true, text: null, attr: null, cipher })
 }
 
 // the decrypted text of a visible document as the SERVER holds it (the raw bytes, inert regions
 // included, unlike the app's grammar-view read)
-async function serverText(id: string): Promise<string | null> {
+async function serverText(id: string, secret = SECRET): Promise<string | null> {
   const { decryptWithSecret } = await import('../../src/crypto.js')
   const data = (await firestore().collection('items').doc(id).get()).data()
   if (!data?.cipher) return data?.text ?? null
-  return JSON.parse(await decryptWithSecret(data.cipher, SECRET)).text ?? null
+  return JSON.parse(await decryptWithSecret(data.cipher, secret)).text ?? null
 }
 
 // the hidden document that holds a wrapper name (to rewrite a store in place, as another tab would)
-async function storeDocId(name: string): Promise<string | null> {
+async function storeDocId(name: string, user = USER, secret = SECRET): Promise<string | null> {
   const { decryptWithSecret } = await import('../../src/crypto.js')
-  const snap = await firestore().collection('items').where('user', '==', USER.uid).where('hidden', '==', true).get()
+  const snap = await firestore().collection('items').where('user', '==', user.uid).where('hidden', '==', true).get()
   for (const doc of snap.docs) {
     try {
-      const wrapper = JSON.parse(JSON.parse(await decryptWithSecret(doc.data().cipher, SECRET)).text)
+      const wrapper = JSON.parse(JSON.parse(await decryptWithSecret(doc.data().cipher, secret)).text)
       if (wrapper.name == name) return doc.id
     } catch {}
   }
@@ -119,12 +122,12 @@ async function storeDocId(name: string): Promise<string | null> {
 }
 // the store value the server holds under a wrapper name (decrypting every hidden document of
 // the account, since names live inside the ciphertext), or null when none does
-async function serverStore(name: string): Promise<any> {
+async function serverStore(name: string, user = USER, secret = SECRET): Promise<any> {
   const { decryptWithSecret } = await import('../../src/crypto.js')
-  const snap = await firestore().collection('items').where('user', '==', USER.uid).where('hidden', '==', true).get()
+  const snap = await firestore().collection('items').where('user', '==', user.uid).where('hidden', '==', true).get()
   for (const doc of snap.docs) {
     try {
-      const plain = JSON.parse(await decryptWithSecret(doc.data().cipher, SECRET))
+      const plain = JSON.parse(await decryptWithSecret(doc.data().cipher, secret))
       const wrapper = JSON.parse(plain.text)
       if (wrapper.name == name) return wrapper.item
     } catch {} // an unrelated or differently keyed record
@@ -1942,4 +1945,302 @@ test('an Option-run releases the record that received its hold, and not a new re
   } finally {
     await firestore().collection('items').doc(QUEUED).delete()
   }
+})
+
+// WAITING ROWS AND BELLS (vault design notes/design/mind_task_agents.md 2.8, 2026-11-23): a chat
+// whose last turn is a bridge reply gets a row with a `reply` bell (cleared by the bell's click
+// without touching the chat's text, persisting across a reload); such a row dropped on the snooze
+// bin, a todo's bin, goes back with a word and nothing written; once the chat is made a todo (the
+// tag typed after its name), its row shows the start of its first user turn and its second click
+// opens the editor with that stretch selected (the chat is shaped as one the bridge created: an
+// inert body with the same words stands before the turn); a todo's own
+// bell follows `surfaced`, clears on click across a reload, and rings again at the next count; a
+// delegated todo's check-in rings `checkin` and sends one non-sticky `[checkin]` notification under
+// `/notify on checkin`.
+test('waiting reply rows, a chat-todo question and its selection, todo bells, and checkin notifications', async ({ page }) => {
+  const rowDialogs: string[] = []
+  page.on('dialog', dialog => {
+    rowDialogs.push(dialog.message())
+    void dialog.accept()
+  })
+  expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+  await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+  await signIn(page, WAITS_USER)
+  await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+  await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+  await waitForApp(page)
+  const saved = () => expect.poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 }).toBe(true)
+  const FOOTER = "<<agent('vault/default · run ab12cd34 · 1s')>>"
+  const FOOTER2 = "<<agent('vault/default · run ef56ab78 · 2s')>>"
+  const CLEAR_KEY = "1|'vault/default · run ab12cd34 · 1s'"
+  const CLEAR_KEY2 = "1|'vault/default · run ef56ab78 · 2s'"
+  // a chat with a reply from BEFORE the list begins in the account (the todoer is not installed yet)
+  const CHAT_OLD = `#waits_old/0 #_agent/vault\n<<user>> an old question\n${FOOTER}\n<!--inert-->\nThe old answer.\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), CHAT_OLD)
+  await expect.poll(() => savedId(page, '#waits_old/0'), { message: 'the old chat saved', timeout: 30_000 }).toBeTruthy()
+  const chatOldId = (await savedId(page, '#waits_old/0'))!
+  expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
+  await saved()
+  await page.reload()
+  await loaded(page)
+  await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
+  await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both todoer widgets mounted', timeout: 30_000 }).toBe(2)
+  await page.evaluate(() => void window._create('#todo waits baseline'))
+  await saved()
+  const todoerId = (await savedId(page, '#todoer'))!
+  await expect
+    .poll(async () => {
+      const store = await serverStore(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET)
+      return [store?.rows_since > 0, Object.keys(store?.rows_base ?? { none: 0 }), !!store?.bells_base]
+    }, { message: 'the todoer writes its baselines on the server: the time, a mark of the old chat\'s reply, the bells\' counts', timeout: 60_000 })
+    .toEqual([true, [String(chatOldId)], true])
+
+  const main = page.locator('.todoer-widget').first()
+  const delegated = page.locator('.todoer-widget').nth(1)
+
+  // 0. a reply from before the list began never becomes a row: not when its chat is selected, not
+  // after an unrelated edit of the chat, not after a reload (the app moves an item's time at each;
+  // review 0 of the thread notify_list); a replacement reply on it is a new one, and shows
+  const oldRow = main.locator('.list-item-container[data-waits="reply"]', { hasText: '#waits_old/0' })
+  const seenOld = () => page.evaluate(id => (window._item('#todoer') as any)?.store?.reply_seen?.[window._item('id:' + id, true)?.id ?? '']?.footer ?? null, chatOldId)
+  await expect.poll(seenOld, { message: 'this tab holds the old chat\'s reply', timeout: 30_000 }).toBe("'vault/default · run ab12cd34 · 1s'")
+  await expect(oldRow, 'a reply from before the list began has no row').toHaveCount(0)
+  await page.evaluate(() => void (window as any).MindBox.set('#waits_old/0'))
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#waits_old/0', true)?.id), { message: 'the old chat is selected', timeout: 15_000 })
+    .toBe(true)
+  await page.evaluate(text => void window._item('#waits_old/0', true)!.write(text, ''), CHAT_OLD + '\na note added later')
+  await saved()
+  await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
+  await expect(oldRow, 'selected and edited, the old chat still has no row').toHaveCount(0)
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await page.reload()
+  await loaded(page)
+  await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both widgets mounted after the old chat\'s reload', timeout: 30_000 }).toBe(2)
+  await expect.poll(seenOld, { message: 'the reloaded tab holds the old chat\'s reply', timeout: 30_000 }).toBe("'vault/default · run ab12cd34 · 1s'")
+  await expect(oldRow, 'after a reload the old chat still has no row').toHaveCount(0)
+  await page.evaluate(text => void window._item('#waits_old/0', true)!.write(text, ''), CHAT_OLD.replace(FOOTER, FOOTER2))
+  await expect(oldRow, 'a replacement reply on the old chat is a new one: it has a row').toHaveCount(1, { timeout: 30_000 })
+  await saved()
+
+  // 1. a reply's row and its clear
+  const CHAT_A = `#waits_a/0 #_agent/vault\n<<user>> what now?\n${FOOTER}\n<!--inert-->\nThe answer, see [the plan](https://example.com/plan) at https://example.com/x.\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), CHAT_A)
+  await expect.poll(() => savedId(page, '#waits_a/0'), { message: 'first chat saved', timeout: 30_000 }).toBeTruthy()
+  const chatAId = (await savedId(page, '#waits_a/0'))!
+  const replyRowA = main.locator('.list-item-container[data-waits="reply"]', { hasText: '#waits_a/0' })
+  await expect(replyRowA, 'a chat whose last turn is a bridge reply has a row in the main list').toHaveCount(1, { timeout: 30_000 })
+  await expect(replyRowA.locator('mark.waits'), 'the reply row shows a bell saying reply').toHaveText('reply')
+  await expect(replyRowA.locator('.list-item'), 'the reply\'s line is drawn as written').toContainText('see [the plan](https://example.com/plan) at https://example.com/x.')
+  await expect(replyRowA.locator('a'), 'nothing in a reply\'s line becomes a link in the list').toHaveCount(0)
+  await main.scrollIntoViewIfNeeded()
+  await replyRowA.locator('mark.waits').click()
+  await expect(replyRowA, "the bell's click removes the reply row").toHaveCount(0, { timeout: 15_000 })
+  await expect
+    .poll(async () => (await serverStore(`global_store_${chatAId}`, WAITS_USER, WAITS_SECRET))?._todoer?.cleared ?? null, {
+      message: "the bell's click records the clear in the chat's own store",
+      timeout: 30_000,
+    })
+    .toEqual([CLEAR_KEY])
+  expect(await serverText(chatAId, WAITS_SECRET), "clearing a reply leaves the chat's text unchanged").toBe(CHAT_A)
+  await saved()
+  await page.reload()
+  await loaded(page)
+  await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both widgets mounted after first reload', timeout: 30_000 }).toBe(2)
+  await expect(main.locator('.list-item-container', { hasText: 'waits baseline' }), 'baseline todo rendered after first reload').toHaveCount(1, { timeout: 30_000 })
+  await expect
+    .poll(() => page.evaluate(id => !!(window._item('#todoer') as any)?.store?.reply_seen?.[id] && !(window._item('#todoer') as any)?.store?.loading, chatAId), {
+      message: 'reloaded tab indexed the cleared chat reply',
+      timeout: 30_000,
+    })
+    .toBe(true)
+  expect(
+    await page.evaluate(id => {
+      const todoer = window._item('#todoer') as any
+      const chat = window._item('id:' + id, true) as any
+      return [todoer.store.reply_seen[chat.id].last, chat._global_store?._todoer?.cleared ?? null]
+    }, chatAId),
+    'the reloaded tab holds the chat\'s reply as its last turn, and the clear'
+  ).toEqual([true, [CLEAR_KEY]])
+  await expect(oldRow, 'after the reload the reply that was not cleared has its row').toHaveCount(1, { timeout: 30_000 })
+  await expect(replyRowA, 'after a reload the cleared reply row stays away').toHaveCount(0)
+  // a clear made on another device takes a mounted row away, with no reload
+  const oldStoreDoc = (await storeDocId(`global_store_${chatOldId}`, WAITS_USER, WAITS_SECRET)) ?? 'e2e-waits-store-old'
+  await writeStore(oldStoreDoc, `global_store_${chatOldId}`, { _todoer: { cleared: [CLEAR_KEY2] } }, WAITS_USER, WAITS_SECRET)
+  await expect(oldRow, 'a clear written by another device takes the mounted row away').toHaveCount(0, { timeout: 30_000 })
+
+  // 2. a todo's bin: a real drag of a second reply row onto the snooze bin puts it back, with a word and nothing written
+  const QUESTION = 'what is the answer to the long question asked here\nand its second line'
+  // shaped as a child chat the bridge created (the header, the creating run's attribution, its
+  // inert body), whose body holds the question's own words BEFORE the owner's turn (review 1 of
+  // the thread notify_list)
+  const CHAT_B = `#waits_b/0 #_agent/vault\n<<agent('vault/default · run cd34ef56 · 3s')>>\n<!--inert-->\n${QUESTION}\n<!--/inert-->\n<<user>> ${QUESTION}\n${FOOTER}\n<!--inert-->\nThe answer for waits_b.\n<!--/inert-->`
+  await page.evaluate(text => void window._create(text), CHAT_B)
+  await expect.poll(() => savedId(page, '#waits_b/0'), { message: 'second chat saved', timeout: 30_000 }).toBeTruthy()
+  const chatBId = (await savedId(page, '#waits_b/0'))!
+  const replyRowB = main.locator('.list-item-container[data-waits="reply"]', { hasText: '#waits_b/0' })
+  await expect(replyRowB, 'the second chat reply has a row in the main list').toHaveCount(1, { timeout: 30_000 })
+  await saved()
+  let dragging = false
+  for (let attempt = 0; attempt < 5 && !dragging; attempt++) {
+    await main.scrollIntoViewIfNeeded()
+    const row = (await replyRowB.boundingBox())!
+    await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2)
+    await page.mouse.down()
+    await page.waitForTimeout(200)
+    await page.mouse.move(row.x + row.width / 2 + 6, row.y + row.height / 2 + 5, { steps: 5 })
+    dragging = /dragging/.test((await main.getAttribute('class')) ?? '')
+    if (!dragging) {
+      await page.mouse.up()
+      await page.waitForTimeout(500)
+    }
+  }
+  expect(dragging, 'the reply row entered its dragging state').toBe(true)
+  const snoozeBin = (await main.locator('.snooze.bin').boundingBox())!
+  await page.mouse.move(snoozeBin.x + snoozeBin.width / 2, snoozeBin.y + snoozeBin.height / 2, { steps: 20 })
+  await page.waitForTimeout(200)
+  await page.mouse.up()
+  await expect
+    .poll(() => rowDialogs.filter(message => message == 'cannot snooze #waits_b/0: not a #todo item').length, { message: 'a reply row dropped on the snooze bin is refused with a word', timeout: 10_000 })
+    .toBe(1)
+  await expect(page.locator('.snooze-modal'), 'no snooze dialog opens for a reply row').toBeHidden()
+  await expect(replyRowB, 'the reply row is back in the main list').toHaveCount(1, { timeout: 15_000 })
+  expect(await serverText(chatBId, WAITS_SECRET), "the refused drop leaves the chat's text unchanged").toBe(CHAT_B)
+  expect((await serverStore(`global_store_${chatBId}`, WAITS_USER, WAITS_SECRET))?._todoer ?? null, 'and writes nothing into its store').toBeNull()
+
+  // 3. the question: the chat made a todo by hand (the tag after its name); its row's text, then select and edit on two clicks
+  await page.evaluate(text => void window._item('#waits_b/0', true)!.write(text, ''), CHAT_B.replace('#waits_b/0 ', '#waits_b/0 #todo '))
+  await saved()
+  const questionRow = main.locator('.list-item-container', { hasText: '#waits_b/0' })
+  await expect(questionRow, 'the chat-todo has a row in the main list').toHaveCount(1, { timeout: 30_000 })
+  await expect
+    .poll(async () => (await questionRow.locator('.list-item').innerText()).replace(/\u200e/g, '').replace(/\s+/g, ' ').trim(), {
+      message: 'the chat-todo row shows the start of its first user turn after its name',
+      timeout: 15_000,
+    })
+    .toBe(`#waits_b/0 #todo ${QUESTION.replace(/\s+/g, ' ')}`)
+  await main.scrollIntoViewIfNeeded()
+  const qItem = questionRow.locator('.list-item')
+  const qBox1 = (await qItem.boundingBox())!
+  await qItem.click({ position: { x: qBox1.width - 12, y: qBox1.height / 2 } })
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#waits_b/0', true)?.id), {
+      message: "the chat-todo row's first click selects the item",
+      timeout: 15_000,
+    })
+    .toBe(true)
+  await page.waitForTimeout(400) // settle past the drag-release click guard
+  await main.scrollIntoViewIfNeeded()
+  const qBox2 = (await qItem.boundingBox())!
+  await qItem.click({ position: { x: qBox2.width - 12, y: qBox2.height / 2 } })
+  // the TURN's stretch, where the turn holds it (the delimiter right before it): not the first
+  // occurrence of its words in the item, which stands in the inert body above the turn
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const area = document.querySelector('.container.target textarea') as HTMLTextAreaElement | null
+          if (!area) return null
+          const clean = (text: string) => text.replace(/\u200b/g, '')
+          return [clean(area.value.slice(area.selectionStart, area.selectionEnd)), clean(area.value.slice(0, area.selectionStart)).split('\n').at(-1)]
+        }),
+      { message: "the chat-todo row's second click opens the editor with the question selected where its turn holds it", timeout: 15_000 }
+    )
+    .toEqual([QUESTION, '<<user>> '])
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.container.target textarea'), 'Escape closes the chat-todo editor').toHaveCount(0, { timeout: 10_000 })
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+
+  // 4. a todo's bell: projection surfaced=1 rings question, click clears across reload, surfaced=2 rings again
+  await page.evaluate(() => void window._create('#waits_t/0 #todo ask me something'))
+  await expect.poll(() => savedId(page, '#waits_t/0'), { message: 'bell todo saved', timeout: 30_000 }).toBeTruthy()
+  const todoId = (await savedId(page, '#waits_t/0'))!
+  const state = (held: string, reason: string, surfaced: number, rev = surfaced + 1) => ({ held, reason, epoch: 1, rev, surfaced, updated: Date.now() })
+  const todoStoreDoc = (await storeDocId(`global_store_${todoId}`, WAITS_USER, WAITS_SECRET)) ?? 'e2e-waits-store-t'
+  await writeStore(todoStoreDoc, `global_store_${todoId}`, { _agent: { state: state('owner', 'question', 1) } }, WAITS_USER, WAITS_SECRET)
+  const bellRow = main.locator('.list-item-container', { hasText: 'ask me something' })
+  await expect(bellRow.locator('mark.waits'), 'a todo with surfaced=1 (owner question) shows a bell saying question').toHaveText('question', { timeout: 30_000 })
+  await main.scrollIntoViewIfNeeded()
+  await bellRow.locator('mark.waits').click()
+  await expect(bellRow.locator('mark.waits'), "the bell's click removes the todo's bell").toHaveCount(0, { timeout: 15_000 })
+  await expect(bellRow, "clearing a todo's bell keeps its row").toHaveCount(1)
+  await expect
+    .poll(async () => (await serverStore(`global_store_${todoId}`, WAITS_USER, WAITS_SECRET))?._todoer?.bell ?? null, {
+      message: "the todo's store holds the cleared bell count",
+      timeout: 30_000,
+    })
+    .toBe(1)
+  await saved()
+  await page.reload()
+  await loaded(page)
+  await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both widgets mounted after second reload', timeout: 30_000 }).toBe(2)
+  await expect(bellRow, 'the todo row stays listed after a reload').toHaveCount(1, { timeout: 30_000 })
+  await expect
+    .poll(() => page.evaluate(id => (store => [store?._agent?.state?.surfaced ?? null, store?._todoer?.bell ?? null])((window._item('id:' + id, true) as any)?._global_store), todoId), {
+      message: 'the reloaded tab holds the count the todo came up at and its clear',
+      timeout: 30_000,
+    })
+    .toEqual([1, 1])
+  await page.evaluate(() => (window._item('#todoer') as any).eval('_rerender_todoer_widgets()'))
+  await expect(bellRow.locator('mark.waits'), 'after a reload the cleared todo has no bell').toHaveCount(0)
+  const kept = ((await serverStore(`global_store_${todoId}`, WAITS_USER, WAITS_SECRET)) ?? {})._todoer ?? {}
+  const todoStoreDoc2 = (await storeDocId(`global_store_${todoId}`, WAITS_USER, WAITS_SECRET)) ?? todoStoreDoc
+  await writeStore(todoStoreDoc2, `global_store_${todoId}`, { _todoer: kept, _agent: { state: state('owner', 'blocked', 2) } }, WAITS_USER, WAITS_SECRET)
+  await expect(bellRow.locator('mark.waits'), 'raising the surfaced count to two rings the todo bell again').toHaveText('blocked', { timeout: 30_000 })
+
+  // 5. a check-in: /notify on checkin, delegated todo surfaced 0 -> 1 rings checkin and notifies once (non-sticky); same count later does not
+  await page.evaluate(() => {
+    const shown: any[] = ((window as any).__notified = [])
+    class Recorder {
+      static permission = 'default'
+      static async requestPermission() {
+        Recorder.permission = 'granted'
+        return 'granted'
+      }
+      closed = false
+      onclick: (() => void) | null = null
+      constructor(public title: string, public options: any) {
+        shown.push(this)
+      }
+      close() {
+        this.closed = true
+      }
+    }
+    ;(window as any).Notification = Recorder
+  })
+  expect(await command(page, '/notify on checkin'), '/notify on checkin succeeds').toBeNull()
+  await expect
+    .poll(() => rowDialogs.at(-1) ?? '', { message: '/notify on checkin enables checkin with granted permission', timeout: 10_000 })
+    .toMatch(/on for .*checkin.*this device: granted/)
+  await page.evaluate(() => void window._create('#waits_d/0 #todo do the delegated work'))
+  await expect.poll(() => savedId(page, '#waits_d/0'), { message: 'delegated todo saved', timeout: 30_000 }).toBeTruthy()
+  const workId = (await savedId(page, '#waits_d/0'))!
+  const workStoreDoc = (await storeDocId(`global_store_${workId}`, WAITS_USER, WAITS_SECRET)) ?? 'e2e-waits-store-d'
+  await writeStore(workStoreDoc, `global_store_${workId}`, { _agent: { state: state('agent', 'delegated', 0, 1) } }, WAITS_USER, WAITS_SECRET)
+  const workRow = delegated.locator('.list-item-container', { hasText: 'do the delegated work' })
+  await expect(workRow, 'the agent-held todo is listed in the delegated widget').toHaveCount(1, { timeout: 30_000 })
+  await expect
+    .poll(() => page.evaluate(id => (window._item('#todoer') as any)?.store?.notify_seen?.[window._item('id:' + id, true)?.id ?? ''] ?? null, workId), {
+      message: 'the notifier recorded the delegated todo at surfaced=0',
+      timeout: 30_000,
+    })
+    .toBe('agent:delegated:1:0|delegated')
+  const notified = () => page.evaluate(() => ((window as any).__notified as any[]).map(n => ({ title: n.title, requireInteraction: n.options.requireInteraction })))
+  expect(await notified(), 'no notification before the check-in').toEqual([])
+  await writeStore(workStoreDoc, `global_store_${workId}`, { _agent: { state: state('agent', 'delegated', 1, 2) } }, WAITS_USER, WAITS_SECRET)
+  await expect(workRow.locator('mark.waits'), 'a check-in shows a bell saying checkin in the delegated list').toHaveText('checkin', { timeout: 30_000 })
+  await expect
+    .poll(notified, { message: 'a check-in gives one non-sticky [checkin] notification', timeout: 30_000 })
+    .toEqual([{ title: '[checkin] do the delegated work', requireInteraction: false }])
+  // a later change with the SAME count that changes what the notifier records of the todo (its
+  // epoch): once the notifier has recorded it, no second notification stands
+  await writeStore(workStoreDoc, `global_store_${workId}`, { _agent: { state: { ...state('agent', 'delegated', 1, 9), epoch: 2 } } }, WAITS_USER, WAITS_SECRET)
+  await expect
+    .poll(() => page.evaluate(id => (window._item('#todoer') as any)?.store?.notify_seen?.[window._item('id:' + id, true)?.id ?? ''] ?? null, workId), {
+      message: 'the notifier recorded the later change with the same count',
+      timeout: 30_000,
+    })
+    .toBe('agent:delegated:2:1|delegated')
+  expect(await notified(), 'a later projection change with the same count gives no second notification').toHaveLength(1)
+  await expect(workRow.locator('mark.waits'), 'after a later projection change with the same count the checkin bell stays').toHaveText('checkin')
 })
