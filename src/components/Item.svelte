@@ -3617,14 +3617,34 @@
     font-size: 85%;
     line-height: normal;
   }
+  /* they stand back from what the owner wrote, at half alpha (the owner, 2026-11-23); the ones on
+     the selected path stay fully lit */
+  .item > :global(:is(.content, .child-tags) mark.child-tag:not(.selected, .secondary-selected)) {
+    opacity: 0.5;
+  }
   .item > :global(:is(.content, .child-tags) mark.child-tag.repeated),
   .item > :global(:is(.content, .child-tags) .child-tags.empty),
   .item > :global(.child-tags.empty) {
     display: none;
   }
-  /* drawn child tags on a line of their own below an item with content other than its label */
+  /* drawn child tags on a line of their own below an item with content other than its label, at
+     the right */
   .item > :global(.child-tags) {
     clear: both;
+    text-align: right;
+  }
+  /* beside a bare label: at the right end of the label's line. The label's own paragraph holds
+     the float (a flow root), so tags that wrap push what follows down: an opened log starts below
+     them and takes no click of theirs (review 5 of the thread child_tags). The float is no wider
+     than that paragraph, so one name longer than the line wraps inside the item and does not
+     leave its start past the left edge (review 6) */
+  .item > :global(.content span.child-tags) {
+    float: right;
+    max-width: 100%;
+    text-align: right;
+  }
+  .item > :global(.content p:has(> span.child-tags)) {
+    display: flow-root;
   }
   .item > :global(.content:has(> :is(ul, ol, pre, table, blockquote):last-child) + .child-tags) {
     margin-top: 2px;

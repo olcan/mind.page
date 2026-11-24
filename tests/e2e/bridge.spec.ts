@@ -4810,6 +4810,124 @@ test("a shared page, by the keyboard alone: Tab reaches a section's marker, whic
   expect(await page.evaluate(() => localStorage.getItem('mindpage_inverted')), 'tapping an inline-code command on a shared page runs nothing').toBeNull()
 })
 
+// THE LOOK OF DRAWN CHILD TAGS (the owner, 2026-11-23: "easier to distinguish from regular content and
+// maybe also a bit more subtle", "50% alpha", "right-aligned"): half alpha except on the selected
+// path, and at the right in both placements. Beside a bare name the tags stay inside the item on a
+// narrow screen: wrapped ones above an opened log, one long name broken over lines. The block of an
+// item with content stays after the content, where the app has always drawn it (below its log)
+test('drawn child tags stand back at half alpha with the selected path lit, at the right, and wrapped ones keep their taps above an open log', async ({ page }) => {
+  await loadAdmin(page)
+  const P = '#e2e_ctlook' // content: the tags in a block of their own, after the content
+  const N = '#e2e_ctbare' // a bare name and a log: the tags beside the name
+  const C = '#e2e_ctcols' // content that leaves a div open, as the owner's columns macro does, and a log
+  const L = '#e2e_ctlong' // a bare name with one child whose name is longer than a narrow line
+  const longKid = `${L}/customer_onboarding_checklist_for_the_mobile_application_release`
+  const kids = [0, 1, 2, 3, 4, 5].map(n => `${N}/wrapped_child_${n}`)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const setQuery = async (q: string) => {
+    await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), q)
+    await expect.poll(() => query().then(v => v.trim())).toBe(q)
+  }
+  await page.evaluate(
+    texts => texts.forEach(text => void window._create(text)),
+    [
+      `${P}/a child a`,
+      `${P}/b child b`,
+      `${P} Some content`,
+      ...kids.map(kid => `${kid} a child`),
+      `${N}\n\`\`\`_log\nINFO: a line\n\`\`\``,
+      `${C}/k a child`,
+      `${C}\n<div style="column-width:300px;column-rule:1px solid #222">\nordinary text\nin columns\n\n\`\`\`_log\nINFO: a line\n\`\`\``,
+      `${longKid} a child`,
+      L,
+    ],
+  )
+  for (const label of [P, N, C, L])
+    await expect.poll(() => page.evaluate(l => window._item(l, true)?.saved_id ?? null, label), { message: `${label} saved`, timeout: 30_000 }).toBeTruthy()
+  // the drawn marks that show, the box they stand in, and where they are in the item
+  const look = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item') as HTMLElement | null
+      if (!item) return null
+      const marks = ([...item.querySelectorAll('mark.child-tag')] as HTMLElement[]).filter(m => m.checkVisibility())
+      const box = item.querySelector('.child-tags') as HTMLElement | null
+      const code = item.querySelector('.content code._log') as HTMLElement | null // hidden while the log is closed
+      const log = code?.closest('pre') as HTMLElement | null
+      const name = item.querySelector('mark.label') as HTMLElement | null
+      const rect = (e: Element) => e.getBoundingClientRect()
+      // the gap between the last mark and the item's right edge, and the room left of the first
+      // one: at the right means a small gap that is not negative (a mark past the edge)
+      const gap = marks.length ? rect(item).right - Math.max(...marks.map(m => rect(m).right)) : null
+      const tap = (m: HTMLElement) => m.contains(document.elementFromPoint(rect(m).left + rect(m).width / 2, rect(m).top + rect(m).height / 2))
+      return {
+        marks: marks.map(m => [m.getAttribute('title'), getComputedStyle(m).opacity, m.classList.contains('selected')]),
+        box: box ? [box.tagName, !!box.closest('.content')] : null,
+        atRight: gap == null ? null : gap >= 0 && gap < 24 && rect(marks[0]).left - rect(item).left > 100,
+        nameLine: name && marks.length ? Math.abs(rect(name).top - rect(marks[0]).top) < 12 : null,
+        lines: new Set(marks.map(m => Math.round(rect(m).top))).size,
+        logShows: code ? code.checkVisibility() : null,
+        aboveLog: code?.checkVisibility() && log && marks.length ? Math.max(...marks.map(m => rect(m).bottom)) <= rect(log).top + 1 : null,
+        taps: marks.map(tap),
+      }
+    }, label)
+
+  await setQuery(P)
+  await expect
+    .poll(() => look(P), { message: 'content: the tags in a block of their own after it, at half alpha, at the right' })
+    .toEqual({ marks: [[`${P}/a`, '0.5', false], [`${P}/b`, '0.5', false]], box: ['DIV', false], atRight: true, nameLine: false, lines: 1, logShows: null, aboveLog: null, taps: [true, true] })
+
+  await setQuery(`${P}/a`)
+  await expect
+    .poll(() => look(P).then(l => l?.marks), { message: 'the child on the selected path is fully lit, its sibling stays at half alpha' })
+    .toEqual([[`${P}/a`, '1', true], [`${P}/b`, '0.5', false]])
+
+  await setQuery(C)
+  await expect
+    .poll(() => look(C), { message: "an open columns div in the content, and a closed log: the tags in their block after it, at the item's right edge" })
+    .toEqual({ marks: [[`${C}/k`, '0.5', false]], box: ['DIV', false], atRight: true, nameLine: false, lines: 1, logShows: false, aboveLog: null, taps: [true] })
+
+  await setQuery(N)
+  await expect
+    .poll(() => look(N), { message: 'a bare name: the tags beside it, on its line, at half alpha, at the right' })
+    .toEqual({ marks: kids.map(kid => [kid, '0.5', false]), box: ['SPAN', true], atRight: true, nameLine: true, lines: 1, logShows: false, aboveLog: null, taps: kids.map(() => true) })
+
+  // a narrow screen: the tags beside the bare name wrap, and an opened log starts below them, so
+  // each takes its own tap (review 5 of the thread child_tags: the log covered the wrapped ones)
+  await page.setViewportSize({ width: 360, height: 800 })
+  await setQuery(N)
+  const nId = await page.evaluate(l => window._item(l, true)!.id, N)
+  await expect.poll(() => look(N).then(l => (l?.lines ?? 0) > 1), { message: 'a narrow screen: the tags wrap' }).toBe(true)
+  await page.locator(`#item-${nId} .log-summary`).click()
+  await expect
+    .poll(() => look(N).then(l => [l?.logShows, l?.aboveLog, l?.taps]), { message: 'a narrow screen, the log open: the wrapped tags end above the log and each takes its own tap' })
+    .toEqual([true, true, kids.map(() => true)])
+  await page.locator(`#item-${nId} mark.child-tag[title="${kids[5]}"]`).click()
+  await expect.poll(() => query().then(v => v.trim()), { message: 'a tap on the last wrapped tag goes to that child' }).toBe(kids[5])
+
+  // one name longer than the narrow line: it breaks over lines inside the item, every piece of it
+  // between the item's edges, and takes a tap (review 6: the unbroken name's start stood past the
+  // left edge, where no scroll reaches)
+  await setQuery(L)
+  const pieces = () =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item') as HTMLElement | null
+      const mark = item?.querySelector('mark.child-tag') as HTMLElement | null
+      if (!item || !mark) return null
+      const box = item.getBoundingClientRect()
+      const rects = [...mark.getClientRects()]
+      const first = rects[0]
+      return {
+        title: mark.getAttribute('title'),
+        pieces: rects.length > 1,
+        inside: rects.every(r => r.left >= box.left - 0.5 && r.right <= box.right + 0.5),
+        tap: !!first && mark.contains(document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2)),
+      }
+    }, L)
+  await expect
+    .poll(pieces, { message: 'a narrow screen, one long name: it breaks over lines, each piece inside the item, and takes a tap' })
+    .toEqual({ title: longKid, pieces: true, inside: true, tap: true })
+})
+
 test('drawn child tags stay in sync when a native details disclosure opens and closes', async ({ page }) => {
   await loadAdmin(page)
   const P = '#e2e_ctd'
