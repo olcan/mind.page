@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { firestore, install, loadAdmin, waitForApp } from './helpers.js'
+import { firestore, install, loadAdmin, waitForApp, waitWritesSettled } from './helpers.js'
 
 // the #key_buttons item (mind.items key_buttons.js; the vault's todo of 2026-11-17): the keys
 // that navigate items as buttons on the page, for a device without a keyboard. The item sends
@@ -45,6 +45,7 @@ test.setTimeout(300_000)
 // is coarse (Chromium's touch emulation)
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 const ROOT = '#e2e_keys'
+const NAV = '#e2e_nav' // small tree for the navigation-arrow lights, desktop groups and backdrop row
 const LIST = '#e2e_keys_list' // an item with a bulleted line, for the Tab
 const FIELD = '#e2e_keys_field' // an item with a field of its own, which is no editor of the app
 const QUESTION = 'Reload and discard unsaved changes?' // the app's, where something would be lost
@@ -54,6 +55,9 @@ const TEXT = `${LIST}\n- one\n- two`
 const BAR = '[data-key-buttons="bar"]'
 const ABOVE = '[data-key-buttons="keyboard"]'
 const RELOAD = '[data-key-buttons="reload"]'
+const NAV_V = '[data-key-buttons="nav-vertical"]'
+const NAV_H = '[data-key-buttons="nav-horizontal"]'
+const BACKDROP = '[data-key-buttons="backdrop"]'
 const KEYBOARD_PX = 336 // what the simulated keyboard takes of the window's height
 // the two rows' keys, in the rows' order, named here outright: a key of the item's table that
 // is changed is then a walk, a save or a row below that fails, and nothing here reads how the
@@ -66,7 +70,19 @@ const ABOVE_NAMES = ['outdent', 'indent', 'done']
 const SPARKLE = [14, 10, 24, 24]
 // the item's table of the look (sizes, places, a color), read from the installed item on the
 // page: a number changed there is what (b) expects, with none repeated here
-type Look = { size: number; gap: number; right: number; bottom: number; color: string; above: number; edge: number }
+type Look = {
+  size: number
+  gap: number
+  right: number
+  bottom: number
+  color: string
+  valid: string
+  dim: number
+  above: number
+  edge: number
+  reload: { size: number; left: number; bottom: number; icon: number }
+  backdrop: { fill: string; blur: string; border: string; shadow: string; shadow_blur: number; merge: number }
+}
 const KEYS: Record<string, string> = { top: 'Control+Alt+ArrowUp', back: 'Control+Alt+ArrowDown', create: 'Shift+Enter', left: 'ArrowLeft', up: 'ArrowUp', down: 'ArrowDown', right: 'ArrowRight' }
 
 const query = (page: Page) => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
@@ -536,5 +552,989 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   await expect(above).toHaveCount(0)
   await expect(phone.locator(RELOAD)).toHaveCount(0)
   await expect(page.locator(`${BAR}, ${ABOVE}, ${RELOAD}`)).toHaveCount(0, { timeout: 30_000 })
+  await context.close()
+})
+
+// navigation-arrow lights (green when valid, dim when not), always-shown desktop groups around
+// reload, live updates on box and item changes, frosted-glass backdrop (split on wide desktop,
+// merged strip below 480 px and on a phone, pointer-events pass-through), and phone parity
+test('navigation arrows light green or dim live, stay in place on desktop with frosted backdrop, and match on a phone', async ({ page, browser }) => {
+  await loadAdmin(page)
+  if (await page.evaluate(() => !!window._item('#key_buttons', true))) {
+    // warm emulator: update #key_buttons from the local mind.items checkout so a rerun never tests
+    // an older copy of the item
+    let out: string | null | undefined
+    const result = page
+      .evaluate(
+        text =>
+          Promise.resolve(window._create(text, { command: true, return_alerts: true })).then(out =>
+            typeof out == 'string' ? out : null
+          ),
+        '/_update key_buttons'
+      )
+      .then(r => (out = r))
+    const settledOr = (button: string) => async () =>
+      out !== undefined || (await page.locator('.modal').getByText(button, { exact: true }).isVisible())
+    await expect.poll(settledOr('OK'), { message: '/_update key_buttons', timeout: 120_000 }).toBe(true)
+    if (out === undefined) {
+      await page.locator('.modal').getByText('OK', { exact: true }).click()
+      await expect.poll(settledOr('Skip'), { message: '/_update key_buttons after OK', timeout: 30_000 }).toBe(true)
+      if (out === undefined) await page.locator('.modal').getByText('Skip', { exact: true }).click()
+      await result
+    }
+    expect(out ?? null, '/_update key_buttons on warm emulator succeeded').toBeNull()
+  } else {
+    expect(await install(page, 'key_buttons'), '/_install key_buttons').toBeNull()
+  }
+  await waitWritesSettled(page, '#key_buttons')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          () =>
+            (window as any)._key_buttons?.disposed === false &&
+            (window as any)._key_buttons?.code === (window._item('#key_buttons', true) as any)?.deephash
+        ),
+      { message: '#key_buttons controller reconciled to current item code', timeout: 10_000 }
+    )
+    .toBe(true)
+  const navRoot = `${NAV}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  const editRoot = `${navRoot}_edit`
+  const tree = [navRoot, `${navRoot}/a`, `${navRoot}/a/0`, `${navRoot}/b`, editRoot]
+  await page.evaluate(labels => labels.forEach(label => void window._create(`${label} a nav fixture`)), tree)
+  await expect
+    .poll(() => page.evaluate(labels => labels.every(l => !!window._item(l, true)?.saved_id), ['#key_buttons', ...tree]), { message: 'nav fixtures and #key_buttons saved', timeout: 30_000 })
+    .toBe(true)
+
+  const LOOK: Look = await page.evaluate(() => (window._item('#key_buttons', true) as any).eval('KEY_BUTTONS_LOOK'))
+  await expect(page.locator(NAV_V), 'vertical desktop arrow group visible').toBeVisible()
+  await expect(page.locator(NAV_H), 'horizontal desktop arrow group visible').toBeVisible()
+  await expect(page.locator(RELOAD), 'reload button visible').toBeVisible()
+
+  // read icon state purely from computed styles (svg stroke colour + opacity), never class names
+  const arrowLooks = (target: Page, selectors: string[]) =>
+    target.evaluate(
+      ([sels, validColor, baseColor, dimOpacity]) => {
+        const rgb = (c: string) => {
+          const s = document.body.appendChild(Object.assign(document.createElement('span'), { style: `color: ${c}` }))
+          const out = getComputedStyle(s).color
+          s.remove()
+          return out
+        }
+        const [green, white] = [rgb(validColor), rgb(baseColor)]
+        const out: Record<string, string> = {}
+        for (const sel of sels) {
+          for (const btn of Array.from(document.querySelectorAll(`${sel} > button[data-key]`))) {
+            const key = (btn as HTMLElement).dataset.key!
+            if (!['left', 'up', 'down', 'right'].includes(key)) continue
+            const s = getComputedStyle(btn.querySelector('svg')!)
+            const op = Number(s.opacity)
+            out[key] =
+              s.stroke == green && op == 1
+                ? 'green'
+                : s.stroke == white && Math.abs(op - dimOpacity) < 0.01
+                  ? 'dim'
+                  : `${s.stroke}@${s.opacity}`
+          }
+        }
+        return out
+      },
+      [selectors, LOOK.valid, LOOK.color, LOOK.dim] as const
+    )
+
+  // positions of all four desktop arrows relative to the reload button (must stay fixed across states)
+  const desktopLayout = () =>
+    page.evaluate(
+      ([reloadSel, vSel, hSel]) => {
+        const r = document.querySelector(reloadSel)!.getBoundingClientRect()
+        const read = (sel: string) =>
+          Array.from(document.querySelectorAll(`${sel} > button`), b => {
+            const box = b.getBoundingClientRect()
+            return [
+              (b as HTMLElement).dataset.key,
+              !(b as HTMLElement).hidden && box.width > 0 && box.height > 0,
+              Math.round(box.x - r.x),
+              Math.round(box.y - r.y),
+              Math.round(box.width),
+              Math.round(box.height),
+            ]
+          })
+        return { vertical: read(vSel), horizontal: read(hSel) }
+      },
+      [RELOAD, NAV_V, NAV_H] as const
+    )
+
+  const step = LOOK.reload.size + LOOK.gap
+  const expectedLayout = {
+    vertical: [
+      ['up', true, 0, -2 * step, LOOK.reload.size, LOOK.reload.size],
+      ['down', true, 0, -step, LOOK.reload.size, LOOK.reload.size],
+    ],
+    horizontal: [
+      ['left', true, step, 0, LOOK.reload.size, LOOK.reload.size],
+      ['right', true, 2 * step, 0, LOOK.reload.size, LOOK.reload.size],
+    ],
+  }
+  const clickDesktop = async (arrow: string) => {
+    const sel = arrow == 'up' || arrow == 'down' ? NAV_V : NAV_H
+    const box = (await page.locator(`${sel} > button[data-key="${arrow}"]`).boundingBox())!
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
+  }
+  const expectDesktop = (expected: Record<string, string>, msg: string) =>
+    expect.poll(() => arrowLooks(page, [NAV_V, NAV_H]), { message: msg, timeout: 3_000 }).toEqual(expected)
+
+  // 1a & 1b. Desktop layout fixed + computed green/dim across empty, parent, child, grandchild
+  await page.evaluate(() => (window as any).MindBox.set(''))
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'empty box dims all four desktop arrows')
+  expect(await desktopLayout(), 'desktop arrows in place around reload when box is empty').toEqual(expectedLayout)
+
+  await name(page, navRoot)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'parent lights down green and dims the rest')
+  expect(await desktopLayout(), 'desktop arrow positions unchanged on parent').toEqual(expectedLayout)
+
+  await name(page, `${navRoot}/a`)
+  await expectDesktop({ left: 'green', up: 'green', down: 'green', right: 'green' }, 'child with sibling and grandchild lights all four green')
+  expect(await desktopLayout(), 'desktop arrow positions unchanged on child').toEqual(expectedLayout)
+
+  await name(page, `${navRoot}/a/0`)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'lone grandchild lights up green and dims the rest')
+  expect(await desktopLayout(), 'desktop arrow positions unchanged on grandchild').toEqual(expectedLayout)
+
+  // 1c. Clicking a green arrow moves as its key does; clicking a dim arrow still sends its key
+  // (both a no-op case and a case where the app moves despite the dim light: Up on root clears box)
+  await name(page, navRoot)
+  await page.keyboard.press('ArrowDown')
+  await shown(page, `${navRoot}/a`)
+  await name(page, navRoot)
+  await clickDesktop('down')
+  await shown(page, `${navRoot}/a`)
+  await clickDesktop('right')
+  await shown(page, `${navRoot}/b`)
+  await clickDesktop('left')
+  await shown(page, `${navRoot}/a`)
+  // the same with the MindBox genuinely FOCUSED (clicked via its backdrop, as a user does: an unfocused
+  // editor's textarea is visibility: hidden, so locator.focus() bypasses Editor.svelte's visibility wrapper
+  // and leaves document.activeElement on body) and its caret inside the name: there Editor.svelte stops
+  // propagation on Left and Right, so a click's key must dispatch on document.body, not on the box
+  await page.locator('.header .backdrop').first().click()
+  await expect(page.locator('#textarea-mindbox'), 'MindBox textarea holds focus before desktop Right click').toBeFocused()
+  await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).setSelectionRange(1, 1))
+  await clickDesktop('right')
+  await expect.poll(async () => (await query(page)).trim(), { message: 'clicking green Right with the MindBox focused moves to the next sibling', timeout: 5_000 }).toBe(`${navRoot}/b`)
+  await name(page, `${navRoot}/a`)
+  await clickDesktop('down')
+  await shown(page, `${navRoot}/a/0`)
+  // dim no-op: Right on lone grandchild sends ArrowRight to window while box stays on grandchild
+  await page.evaluate(() => {
+    ;(window as any).__nav_keys = []
+    ;(window as any).__nav_onkey = (e: KeyboardEvent) => (window as any).__nav_keys.push(e.code)
+    window.addEventListener('keydown', (window as any).__nav_onkey)
+  })
+  await clickDesktop('right')
+  const dimNoop = await page.evaluate(() => {
+    window.removeEventListener('keydown', (window as any).__nav_onkey)
+    return (window as any).__nav_keys as string[]
+  })
+  expect(dimNoop, 'clicking dim Right still dispatches ArrowRight').toEqual(['ArrowRight'])
+  expect((await query(page)).trim(), 'box stays on grandchild after dim Right').toBe(`${navRoot}/a/0`)
+  // green Up back to child, then to root; then dim Up on root clears the box (app moves despite dim)
+  await clickDesktop('up')
+  await shown(page, `${navRoot}/a`)
+  await clickDesktop('up')
+  await shown(page, navRoot)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'root has up dim before clicking it')
+  await clickDesktop('up')
+  await expect.poll(async () => (await query(page)).trim(), { message: 'clicking dim Up on root clears the box', timeout: 3_000 }).toBe('')
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'clearing box via dim Up dims all four')
+
+  // 1c-edit. While ANY item is open for editing (including while a save of it is in flight, where
+  // the route's ArrowUp cancellation asks no question and would discard newer typing), a real click
+  // on a desktop arrow sends nothing and keeps the editor open with focus and the newer text; once
+  // the editor closes, a click on Up works again as before. Naming the lone root `editRoot` ensures
+  // Up is dim, no parent context exists, and no `.toggle.hide` intercepts ArrowUp ahead of the
+  // window handler's `editingItems` cancellation path
+  const editId = await page.evaluate(label => window._item(label, true)!.id, editRoot)
+  const editOrig = await page.evaluate(label => window._item(label, true)!.text, editRoot)
+  const editTextB = `${editOrig} B`
+  const editTextC = `${editTextB} C`
+  const editTextarea = page.locator(`#textarea-${editId}`)
+  const editSaves = () =>
+    page.evaluate(
+      id =>
+        ((it: any) => ({
+          editing: !!it.editing,
+          text: it.text,
+          saved: it.savedText,
+          saving: !!it.saving,
+          out: (it.unackedWrites ?? []).map((w: any) => w.text),
+        }))(((window as any).__items as any[]).find(it => it.id == id)),
+      editId
+    )
+  let releaseEdit = () => {}
+  const editGate = new Promise<void>(resolve => (releaseEdit = resolve))
+  await page.route(WRITES, async route => {
+    if (route.request().method() == 'POST') await editGate
+    await route.continue()
+  })
+  try {
+    await name(page, editRoot)
+    await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'lone root dims all four arrows before opening its editor')
+    await page.keyboard.press('Enter')
+    await expect(editTextarea, 'item editor opens and takes focus before dim Up click').toBeFocused()
+    await page.evaluate(id => {
+      const ta = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    }, editId)
+    await page.keyboard.type(' B')
+    await page.keyboard.press('Control+s')
+    await expect
+      .poll(editSaves, { message: 'save of B is in flight and held at the network', timeout: 10_000 })
+      .toEqual({ editing: true, text: editTextB, saved: editOrig, saving: true, out: [editTextB] })
+    // collapse any session hide toggle so ArrowUp goes straight to the window handler's editingItems
+    // cancellation path (index.svelte:12091) rather than being absorbed by a hide toggle
+    for (let i = 0; i < 5 && (await page.locator('.toggle.hide').count()) > 0; i++) await page.locator('.toggle.hide').first().click()
+    expect(await page.locator('.toggle.hide').count(), 'no hide toggle present before clicking dim Up while editing').toBe(0)
+    await page.locator(`#super-container-${editId} .editor .backdrop`).first().click()
+    await expect(editTextarea, 'item editor regains focus via its backdrop after collapsing hide toggle').toBeFocused()
+    await page.evaluate(id => {
+      const ta = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    }, editId)
+    await page.keyboard.type(' C')
+    await expect(editTextarea, 'editor holds newer text C while save of B is still in flight').toHaveValue(editTextC)
+    await clickDesktop('up')
+    expect(
+      await page.evaluate(id => (window._item(id, true) as any).editing, editId),
+      'clicking dim Up while an item editor is open with a save in flight keeps the editor open'
+    ).toBe(true)
+    await expect(editTextarea, 'clicking dim Up while an item editor is open keeps the newer typed text').toHaveValue(editTextC)
+    await expect(editTextarea, 'clicking dim Up while an item editor is open keeps focus in the editor').toBeFocused()
+    await expect(page.locator('.modal'), 'clicking dim Up while an item editor is open shows no dialog').toBeHidden()
+  } finally {
+    releaseEdit()
+    await page.unroute(WRITES)
+  }
+  await expect
+    .poll(() => editSaves().then(s => [s.saving, s.out.length]), { message: 'held write of B settles after release', timeout: 30_000 })
+    .toEqual([false, 0])
+  await expect(editTextarea, 'editor still holds focus before saving and closing').toBeFocused()
+  await page.keyboard.press('Shift+Enter')
+  await expect
+    .poll(() => editSaves().then(s => [s.editing, s.saving, s.text]), { message: 'editor saves newer text C and closes cleanly', timeout: 30_000 })
+    .toEqual([false, false, editTextC])
+  await name(page, navRoot)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'root has up dim after editor closes')
+  await clickDesktop('up')
+  await expect.poll(async () => (await query(page)).trim(), { message: 'with no item open for editing, clicking dim Up on root still clears the box', timeout: 3_000 }).toBe('')
+
+  // 1d. Live item create/delete in this page updates down on the named leaf with no other action
+  await name(page, `${navRoot}/a/0`)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'leaf starts with down dim')
+  const leafChild = `${navRoot}/a/0/0`
+  await page.evaluate(label => void window._create(`${label} live child`), leafChild)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'green', right: 'dim' }, 'creating a child under the named leaf turns down green live')
+  await page.evaluate(label => window._item(label, true)!.delete(false), leafChild)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'deleting that child turns down dim again live')
+
+  // 1d-dangling. A solely-relative reference (#/later) to a missing child renders dangling and dims
+  // Down; creating the child turns Down green live; deleting it with the parent reference still in
+  // place turns Down dim again; an absolute tag written in full keeps Down green even with no child
+  const danglingRoot = `${navRoot}_d`
+  const absRoot = `${navRoot}_abs`
+  await page.evaluate(
+    ([d, a]) => {
+      void window._create(`${d} #/later`)
+      void window._create(`${a} ${a}/later`)
+    },
+    [danglingRoot, absRoot] as const
+  )
+  await expect
+    .poll(() => page.evaluate(labels => labels.every(l => !!window._item(l, true)?.saved_id), [danglingRoot, absRoot]), { message: 'dangling and absolute fixtures saved', timeout: 30_000 })
+    .toBe(true)
+  await name(page, danglingRoot)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'parent carrying only dangling relative reference #/later dims down')
+  const danglingChild = `${danglingRoot}/later`
+  await page.evaluate(label => void window._create(`${label} child appears`), danglingChild)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'creating the referenced child #/later turns down green live')
+  await expect
+    .poll(() => page.evaluate(l => !!window._item(l, true)?.saved_id, danglingChild), { message: 'referenced child saved before deletion', timeout: 30_000 })
+    .toBe(true)
+  await page.evaluate(label => window._item(label, true)!.delete(false), danglingChild)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'deleting the child while parent keeps #/later turns down dim again live')
+  await name(page, absRoot)
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'parent carrying absolute tag to missing child keeps down green')
+
+  // 1e. Live item create/delete FROM OUTSIDE this page (a second page of the same account, also
+  // reused below as the phone context) turns down green then dim again on page with no action there
+  await name(page, `${navRoot}/a/0`)
+  const context = await browser.newContext(PHONE)
+  const phone = await context.newPage()
+  await loadAdmin(phone)
+  await expect(phone.locator(BAR), 'phone main row visible').toBeVisible()
+  const remoteChild = `${navRoot}/a/0/remote`
+  await phone.evaluate(label => void window._create(`${label} remote child`), remoteChild)
+  await expect
+    .poll(() => phone.evaluate(l => !!window._item(l, true)?.saved_id, remoteChild), { message: 'remote child saved from second page', timeout: 15_000 })
+    .toBe(true)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'green', right: 'dim' }, 'creating a child from a second page turns down green live')
+  await phone.evaluate(label => window._item(label, true)!.delete(false), remoteChild)
+  await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'deleting that child from a second page turns down dim again live')
+
+  // 1f. Raised frosted-glass background on desktop: wide split (4 px blur, 9% white free-edge
+  // border, 12 px full-black shadow with stdDeviation 6, 12 px corners, sparkle-gated right piece),
+  // pointer-events pass-through, and narrow merge < 480 px
+  const readBackdrop = (target: Page) =>
+    target.evaluate(sel => {
+      const bg = document.querySelector(sel) as HTMLElement
+      const pane = bg.querySelector('.key-buttons-bg-pane') as HTMLElement
+      const frame = bg.querySelector('.key-buttons-bg-frame') as HTMLElement
+      const right = bg.querySelector('.key-buttons-bg-right') as HTMLElement
+      const blur = (s: CSSStyleDeclaration) => (s.backdropFilter && s.backdropFilter != 'none' ? s.backdropFilter : (s as any).webkitBackdropFilter)
+      const clip = (s: CSSStyleDeclaration) => (s.clipPath && s.clipPath != 'none' ? s.clipPath : (s as any).webkitClipPath)
+      const readSvg = (cls: string) => {
+        const svg = frame.querySelector(`.key-buttons-bg-svg.${cls}`) as SVGSVGElement
+        const s = getComputedStyle(svg)
+        const paths = Array.from(svg.querySelectorAll(':scope > path'))
+        return {
+          display: s.display,
+          width: s.width,
+          height: s.height,
+          pointerEvents: s.pointerEvents,
+          stdDev: svg.querySelector('feGaussianBlur')?.getAttribute('stdDeviation') ?? null,
+          shadowFill: paths[0]?.getAttribute('fill') ?? null,
+          borderStroke: paths[1]?.getAttribute('stroke') ?? null,
+          borderWidth: paths[1]?.getAttribute('stroke-width') ?? null,
+          borderArcs: (paths[1]?.getAttribute('d')?.match(/A 11\.5 11\.5/g) ?? []).length,
+        }
+      }
+      const ps = getComputedStyle(pane)
+      const fs = getComputedStyle(frame)
+      const rs = getComputedStyle(right)
+      return {
+        hidden: bg.hidden,
+        display: getComputedStyle(bg).display,
+        pane: {
+          width: ps.width,
+          height: ps.height,
+          blur: blur(ps),
+          clip: clip(ps),
+          clipArcs: (clip(ps).match(/A 12 12|a 12 12|12,\s*12/gi) ?? []).length,
+          borderTopWidth: ps.borderTopWidth,
+          borderTopColor: ps.borderTopColor,
+          radiusTR: ps.borderTopRightRadius,
+          radiusTL: ps.borderTopLeftRadius,
+          boxShadow: ps.boxShadow,
+          pointerEvents: ps.pointerEvents,
+        },
+        frame: {
+          display: fs.display,
+          pointerEvents: fs.pointerEvents,
+          split: readSvg('split'),
+          strip: readSvg('strip'),
+        },
+        right: {
+          display: rs.display,
+          width: rs.width,
+          height: rs.height,
+          radiusTL: rs.borderTopLeftRadius,
+          blur: blur(rs),
+          borderTopWidth: rs.borderTopWidth,
+          borderTopColor: rs.borderTopColor,
+          borderLeftWidth: rs.borderLeftWidth,
+          borderLeftColor: rs.borderLeftColor,
+          boxShadow: rs.boxShadow,
+          pointerEvents: rs.pointerEvents,
+        },
+      }
+    }, BACKDROP)
+
+  const stripH = `${LOOK.reload.size + 2 * LOOK.reload.bottom}px`
+  const colW = `${LOOK.reload.size + 2 * LOOK.reload.left}px`
+  const paneH = `${2 * LOOK.reload.size + 2 * LOOK.gap + LOOK.reload.size + 2 * LOOK.reload.bottom}px`
+  const leftRowW = `${2 * LOOK.reload.left + 3 * LOOK.reload.size + 2 * LOOK.gap}px`
+  const radius = `${LOOK.reload.size / 2}px`
+  const expectedBlur = 'blur(4px)'
+  const expectedBorder = 'rgba(255, 255, 255, 0.09)'
+  const expectedShadowCss = 'rgb(0, 0, 0) 0px 0px 12px 0px'
+
+  const wideBg = await readBackdrop(page)
+  expect(
+    {
+      hidden: wideBg.hidden,
+      pane: [wideBg.pane.width, wideBg.pane.height, wideBg.pane.blur, wideBg.pane.clipArcs, wideBg.pane.pointerEvents],
+      frameDisplay: wideBg.frame.display,
+      splitSvg: [
+        wideBg.frame.split.display,
+        wideBg.frame.split.pointerEvents,
+        wideBg.frame.split.stdDev,
+        wideBg.frame.split.shadowFill,
+        wideBg.frame.split.borderStroke,
+        wideBg.frame.split.borderWidth,
+        wideBg.frame.split.borderArcs,
+      ],
+      stripSvgDisplay: wideBg.frame.strip.display,
+      sparklePresent: await page.evaluate(() => !!document.querySelector('body > .vault-sparkle:not([hidden])')),
+      rightDisplay: wideBg.right.display,
+    },
+    'wide desktop shows single split L-pane with 4 px blur, two 12 px rounded corners, 9% edge and 12 px black shadow (stdDeviation 6), and hides right piece when no sparkle is shown'
+  ).toEqual({
+    hidden: false,
+    pane: [leftRowW, paneH, expectedBlur, 2, 'none'],
+    frameDisplay: 'block',
+    splitSvg: ['block', 'none', '6', 'rgba(0, 0, 0, 1)', expectedBorder, '1', 2],
+    stripSvgDisplay: 'none',
+    sparklePresent: false,
+    rightDisplay: 'none',
+  })
+
+  // with a visible #vault sparkle on body, the right piece shows with top-left 12 px radius, 4 px blur, 9% edge and 12 px black shadow
+  const withSparkle = await page.evaluate(sel => {
+    const sparkle = document.createElement('button')
+    sparkle.className = 'vault-sparkle'
+    document.body.appendChild(sparkle)
+    const right = document.querySelector(`${sel} > .key-buttons-bg-right`) as HTMLElement
+    const blur = (s: CSSStyleDeclaration) => (s.backdropFilter && s.backdropFilter != 'none' ? s.backdropFilter : (s as any).webkitBackdropFilter)
+    try {
+      const s = getComputedStyle(right)
+      const shownState = [
+        s.display,
+        s.width,
+        s.height,
+        s.borderTopLeftRadius,
+        blur(s),
+        s.borderTopWidth,
+        s.borderTopColor,
+        s.borderLeftWidth,
+        s.borderLeftColor,
+        s.boxShadow,
+        s.pointerEvents,
+      ]
+      sparkle.hidden = true
+      const hiddenDisplay = getComputedStyle(right).display
+      return { shownState, hiddenDisplay }
+    } finally {
+      sparkle.remove()
+    }
+  }, BACKDROP)
+  expect(withSparkle, 'right frosted piece follows visible .vault-sparkle with 12 px top-left radius, 4 px blur, 9% edge and 12 px black shadow').toEqual({
+    shownState: ['block', colW, stripH, radius, expectedBlur, '1px', expectedBorder, '1px', expectedBorder, expectedShadowCss, 'none'],
+    hiddenDisplay: 'none',
+  })
+
+  // glass click rejection on desktop: clicking between Left and Right reaches nothing of the page
+  // under that point and leaves MindBox text and focus unchanged (both unfocused and focused);
+  // clicking just outside the L-shape (in the shadow above the row, right of the column) reaches
+  // the page; wheeling with the pointer over the glass still scrolls document.body
+  const [leftBtnBox, rightBtnBox] = [
+    (await page.locator(`${NAV_H} > button[data-key="left"]`).boundingBox())!,
+    (await page.locator(`${NAV_H} > button[data-key="right"]`).boundingBox())!,
+  ]
+  const [gapX, gapY] = [(leftBtnBox.x + leftBtnBox.width + rightBtnBox.x) / 2, leftBtnBox.y + leftBtnBox.height / 2]
+  const watchTarget = (target: Page, x: number, y: number) =>
+    target.evaluate(
+      ([px, py]) => {
+        const el = document.elementFromPoint(px, py) as HTMLElement | null
+        const seen = { mousedown: 0, click: 0 }
+        const onDown = () => {
+          seen.mousedown++
+        }
+        const onClick = () => {
+          seen.click++
+        }
+        el?.addEventListener('mousedown', onDown)
+        el?.addEventListener('click', onClick)
+        ;(window as any).__glass_watch = () => {
+          el?.removeEventListener('mousedown', onDown)
+          el?.removeEventListener('click', onClick)
+          return { underPage: !!el && !el.closest('[data-key-buttons], .vault-sparkle'), ...seen }
+        }
+      },
+      [x, y] as const
+    )
+  const readWatch = (target: Page) => target.evaluate(() => (window as any).__glass_watch() as { underPage: boolean; mousedown: number; click: number })
+
+  // unfocused MindBox: click on glass between Left and Right delivers no mousedown/click to page
+  await blur(page)
+  const textBeforeUnfocused = (await query(page)).trim()
+  await watchTarget(page, gapX, gapY)
+  await page.mouse.click(gapX, gapY)
+  expect(await readWatch(page), 'click on desktop frosted glass (box unfocused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
+  expect(
+    [(await query(page)).trim(), await page.evaluate(() => document.activeElement?.id ?? '')],
+    'unfocused MindBox text and focus stay unchanged after glass click'
+  ).toEqual([textBeforeUnfocused, ''])
+
+  // focused MindBox: click on glass keeps MindBox focused and delivers no mousedown/click to page
+  await page.locator('.header .backdrop').first().click()
+  await expect(page.locator('#textarea-mindbox'), 'MindBox focused before desktop glass click').toBeFocused()
+  await watchTarget(page, gapX, gapY)
+  await page.mouse.click(gapX, gapY)
+  expect(await readWatch(page), 'click on desktop frosted glass (box focused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
+  await expect(page.locator('#textarea-mindbox'), 'MindBox keeps focus after glass click').toBeFocused()
+  expect((await query(page)).trim(), 'MindBox text unchanged after glass click').toBe(textBeforeUnfocused)
+  await blur(page)
+
+  // click just outside the L-shape (in the shadow 4 px above the row, right of the column) reaches the page
+  const origSize = page.viewportSize()!
+  const hRow = LOOK.reload.size + 2 * LOOK.reload.bottom
+  const outsideY = origSize.height - hRow - 4
+  await watchTarget(page, gapX, outsideY)
+  await page.mouse.click(gapX, outsideY)
+  expect(await readWatch(page), 'click just outside the glass above the row reaches the page underneath').toEqual({ underPage: true, mousedown: 1, click: 1 })
+
+  // press-start rejection across the 44 px desktop row's top edge: a link laid across that edge
+  // gets neither mousedown nor click when a press starts on glass 43 px above bottom and releases
+  // on the link 45 px above bottom; a press starting above the glass delivers its mousedown; and an
+  // ordinary click afterwards is delivered once
+  await page.evaluate(() => {
+    const link = document.createElement('a')
+    link.id = 'e2e-glass-edge-link'
+    link.href = '#e2e-glass-edge'
+    link.textContent = 'edge'
+    link.style.cssText = 'position:fixed;left:56px;bottom:30px;width:32px;height:30px;z-index:50;display:block'
+    const counts = { mousedown: 0, click: 0 }
+    link.addEventListener('mousedown', () => counts.mousedown++)
+    link.addEventListener('click', e => {
+      e.preventDefault()
+      counts.click++
+    })
+    document.body.appendChild(link)
+    ;(window as any).__edge_counts = () => ({ ...counts })
+    ;(window as any).__edge_reset = () => {
+      counts.mousedown = 0
+      counts.click = 0
+    }
+  })
+  try {
+    const insideEdgeY = origSize.height - (hRow - 1) // 43 px above bottom (on glass)
+    const outsideEdgeY = origSize.height - (hRow + 1) // 45 px above bottom (above glass)
+    await blur(page)
+    await page.mouse.move(70, insideEdgeY)
+    await page.mouse.down()
+    await page.mouse.move(70, outsideEdgeY)
+    await page.mouse.up()
+    expect(
+      await page.evaluate(() => (window as any).__edge_counts()),
+      'press on desktop glass 43 px above bottom released on link 45 px above bottom delivers no mousedown or click'
+    ).toEqual({ mousedown: 0, click: 0 })
+
+    // immediately after the rejected glass press, before any further mouse press, Shift+ArrowDown
+    // toggles show-more twice in a row via the route's code-dispatched Event('click') on .toggle.show
+    const hide0 = await page.evaluate(() => window.__hideIndex)
+    expect(
+      await page.evaluate(() => !!document.querySelector('.toggle.show')),
+      'show-more toggle present immediately after rejected glass press'
+    ).toBe(true)
+    await page.keyboard.press('Shift+ArrowDown')
+    await expect
+      .poll(() => page.evaluate(() => window.__hideIndex), {
+        message: 'first Shift+ArrowDown after rejected glass press advances show-more toggle',
+        timeout: 3_000,
+      })
+      .toBeGreaterThan(hide0)
+    await page.evaluate(() => (window as any)._update_dom())
+    const hide1 = await page.evaluate(() => window.__hideIndex)
+    expect(
+      await page.evaluate(() => !!document.querySelector('.toggle.show')),
+      'second show-more toggle present after first Shift+ArrowDown'
+    ).toBe(true)
+    await page.keyboard.press('Shift+ArrowDown')
+    await expect
+      .poll(() => page.evaluate(() => window.__hideIndex), {
+        message: 'second Shift+ArrowDown after rejected glass press advances show-more toggle again',
+        timeout: 3_000,
+      })
+      .toBeGreaterThan(hide1)
+
+    await page.evaluate(() => (window as any).__edge_reset())
+    await page.mouse.move(70, outsideEdgeY)
+    await page.mouse.down()
+    await page.mouse.move(70, insideEdgeY)
+    await page.mouse.up()
+    expect(
+      await page.evaluate(() => (window as any).__edge_counts()),
+      'press starting on link above glass at 45 px above bottom delivers mousedown and click'
+    ).toEqual({ mousedown: 1, click: 1 })
+
+    await page.evaluate(() => (window as any).__edge_reset())
+    await page.mouse.click(70, outsideEdgeY)
+    expect(
+      await page.evaluate(() => (window as any).__edge_counts()),
+      'ordinary click on link above glass after edge-crossing presses is delivered once'
+    ).toEqual({ mousedown: 1, click: 1 })
+  } finally {
+    await page.evaluate(() => {
+      document.getElementById('e2e-glass-edge-link')?.remove()
+      delete (window as any).__edge_counts
+      delete (window as any).__edge_reset
+    })
+  }
+
+  // wheel with pointer over the glass scrolls document.body (clear filter so the full seeded list
+  // gives ample scroll range below headerTop, where the app never auto-scrolls away)
+  await page.evaluate(() => (window as any).MindBox.set(''))
+  await expect
+    .poll(() => page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight), { timeout: 5_000 })
+    .toBeGreaterThan(400)
+  const desktopTop = await headerTop(page)
+  await page.evaluate(y => {
+    document.body.scrollTop = y
+  }, desktopTop)
+  await page.mouse.move(gapX, gapY)
+  await page.mouse.wheel(0, 200)
+  await expect.poll(() => scrollTop(page), { message: 'wheel with pointer over desktop frosted glass scrolls the page', timeout: 3_000 }).toBeGreaterThan(desktopTop + 50)
+  await page.evaluate(y => {
+    document.body.scrollTop = y
+  }, desktopTop)
+
+  // #vault sparkle overlays over frosted glass (vault.md: .vault-sparkle fixed right 14/bottom 10,
+  // 24x24, z-index 90; .vault-sparkle-backdrop fixed inset 0, z-index 89; .vault-sparkle-menu fixed
+  // right 14/bottom 42, z-index 90, direct children of body): real clicks reach each overlay while
+  // bare glass of the right piece beside the sparkle still rejects clicks
+  const clickOverlay = async (sel: string, x: number, y: number) => {
+    await page.evaluate(
+      ([s, px, py]) => {
+        const el = document.querySelector(s) as HTMLElement
+        const seen = { hit: !!el && el.contains(document.elementFromPoint(px, py)), mousedown: 0, click: 0 }
+        const onDown = (e: MouseEvent) => {
+          e.stopPropagation()
+          seen.mousedown++
+        }
+        const onClick = (e: MouseEvent) => {
+          e.stopPropagation()
+          seen.click++
+        }
+        el.addEventListener('mousedown', onDown)
+        el.addEventListener('click', onClick)
+        ;(window as any).__overlay_watch = () => {
+          el.removeEventListener('mousedown', onDown)
+          el.removeEventListener('click', onClick)
+          return seen
+        }
+      },
+      [sel, x, y] as const
+    )
+    await page.mouse.click(x, y)
+    return page.evaluate(() => (window as any).__overlay_watch() as { hit: boolean; mousedown: number; click: number })
+  }
+
+  await page.evaluate(([sRight, sBottom, sW, sH]) => {
+    const sparkle = document.createElement('button')
+    sparkle.type = 'button'
+    sparkle.className = 'vault-sparkle'
+    sparkle.style.cssText = `position:fixed;right:${sRight}px;bottom:${sBottom}px;z-index:90;display:flex;align-items:center;justify-content:center;width:${sW}px;height:${sH}px;margin:0;padding:0;border:0;border-radius:50%`
+    sparkle.innerHTML = '<svg viewBox="0 0 16 16" style="display:block;width:16px;height:16px"><rect width="16" height="16"/></svg>'
+    document.body.appendChild(sparkle)
+  }, SPARKLE)
+  try {
+    const [sparkleBox, rightBox] = [
+      (await page.locator('body > .vault-sparkle').boundingBox())!,
+      (await page.locator(`${BACKDROP} > .key-buttons-bg-right`).boundingBox())!,
+    ]
+    const [sparkleX, sparkleY] = [sparkleBox.x + sparkleBox.width / 2, sparkleBox.y + sparkleBox.height / 2]
+    expect(
+      await clickOverlay('body > .vault-sparkle', sparkleX, sparkleY),
+      'click at centre of stand-in .vault-sparkle over right frosted piece reaches it'
+    ).toEqual({ hit: true, mousedown: 1, click: 1 })
+
+    const [rightGlassX, rightGlassY] = [(rightBox.x + sparkleBox.x) / 2, sparkleY]
+    await watchTarget(page, rightGlassX, rightGlassY)
+    await page.mouse.click(rightGlassX, rightGlassY)
+    expect(
+      await readWatch(page),
+      'click on bare glass of right frosted piece beside .vault-sparkle delivers no mousedown or click to page'
+    ).toEqual({ underPage: true, mousedown: 0, click: 0 })
+
+    await page.evaluate(() => {
+      const backdrop = document.createElement('div')
+      backdrop.className = 'vault-sparkle-backdrop'
+      backdrop.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;z-index:89'
+      document.body.appendChild(backdrop)
+    })
+    expect(
+      await clickOverlay('body > .vault-sparkle-backdrop', gapX, gapY),
+      'click on stand-in .vault-sparkle-backdrop over frosted glass reaches it'
+    ).toEqual({ hit: true, mousedown: 1, click: 1 })
+  } finally {
+    await page.evaluate(() => {
+      document.querySelectorAll('body > .vault-sparkle, body > .vault-sparkle-backdrop').forEach(el => el.remove())
+    })
+  }
+
+  // narrow desktop (< 480 px): merges into one full-width strip with the left column kept (one 12 px arc, strip SVG shown, split SVG and right piece hidden)
+  await page.setViewportSize({ width: LOOK.backdrop.merge - 40, height: origSize.height })
+  await expect
+    .poll(async () => {
+      const bg = await readBackdrop(page)
+      return [bg.pane.width, bg.pane.clipArcs, bg.frame.strip.display, bg.frame.split.display, bg.frame.strip.stdDev, bg.frame.strip.borderStroke, bg.right.display]
+    }, { message: 'below 480 px desktop backdrop merges into one full-width strip', timeout: 3_000 })
+    .toEqual([`${LOOK.backdrop.merge - 40}px`, 1, 'block', 'none', '6', expectedBorder, 'none'])
+
+  // on a narrow desktop window (< 480 px), a real .vault-sparkle-menu (right 14/bottom 42, z-index 90,
+  // watch-line row up to 340 px wide) extends over the left-column frosted glass (w_col = 52, h_tot = 104);
+  // a real click on a menuitem over that glass reaches the menu button
+  await page.setViewportSize({ width: 400, height: origSize.height })
+  await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 3_000 }).toBe(400)
+  await page.evaluate(() => {
+    const backdrop = document.createElement('div')
+    backdrop.className = 'vault-sparkle-backdrop'
+    backdrop.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;z-index:89'
+    const menu = document.createElement('div')
+    menu.className = 'vault-sparkle-menu'
+    menu.setAttribute('role', 'menu')
+    menu.style.cssText =
+      'position:fixed;right:14px;bottom:42px;z-index:90;box-sizing:border-box;padding:4px;border:1px solid #444;border-radius:6px;background:#1b1b1b'
+    const item = document.createElement('button')
+    item.type = 'button'
+    item.setAttribute('role', 'menuitem')
+    item.textContent = 'Stop Watching'
+    item.style.cssText = 'display:block;width:100%;margin:0;padding:6px 12px;border:0;font:14px/1.2 sans-serif;text-align:left;white-space:nowrap'
+    const line = document.createElement('div')
+    line.textContent = 'watched: #vault'
+    line.style.cssText = 'width:340px;max-width:min(340px,calc(100vw - 54px));padding:3px 12px;font:12px/1.3 sans-serif'
+    menu.append(item, line)
+    document.body.append(backdrop, menu)
+  })
+  try {
+    const btnBox = (await page.locator('body > .vault-sparkle-menu > button').boundingBox())!
+    const wCol = LOOK.reload.size + 2 * LOOK.reload.left
+    const hTot = 2 * LOOK.reload.size + 2 * LOOK.gap + LOOK.reload.size + 2 * LOOK.reload.bottom
+    const r = LOOK.reload.size / 2
+    const [menuX, menuY] = [(btnBox.x + Math.min(btnBox.x + btnBox.width, wCol - r)) / 2, btnBox.y + btnBox.height / 2]
+    expect(
+      {
+        inGlass: menuX > btnBox.x && menuX <= wCol - r && origSize.height - menuY <= hTot,
+        ...(await clickOverlay('body > .vault-sparkle-menu > button', menuX, menuY)),
+      },
+      'click on stand-in .vault-sparkle-menu item over frosted glass reaches it'
+    ).toEqual({ inGlass: true, hit: true, mousedown: 1, click: 1 })
+  } finally {
+    await page.evaluate(() => {
+      document.querySelectorAll('body > .vault-sparkle-backdrop, body > .vault-sparkle-menu').forEach(el => el.remove())
+    })
+  }
+  await page.setViewportSize(origSize)
+
+  // 2. Phone context: row arrows green/dim by the same rule, non-arrows never dim, full-width unrounded
+  // strip shows with the main row and hides when the simulated on-screen keyboard replaces it
+  await name(phone, `${navRoot}/b`)
+  await expect
+    .poll(() => arrowLooks(phone, [BAR]), { message: `phone arrows match rule: left, up, right green and down dim on ${navRoot}/b`, timeout: 3_000 })
+    .toEqual({ left: 'green', up: 'green', down: 'dim', right: 'green' })
+  const nonArrowStates = await phone.evaluate(
+    ([barSel, baseColor]) => {
+      const probe = document.body.appendChild(Object.assign(document.createElement('span'), { style: `color: ${baseColor}` }))
+      const white = getComputedStyle(probe).color
+      probe.remove()
+      return ['top', 'back', 'create'].map(k => {
+        const s = getComputedStyle(document.querySelector(`${barSel} > button[data-key="${k}"] > svg`)!)
+        return [k, s.stroke == white, Number(s.opacity)]
+      })
+    },
+    [BAR, LOOK.color] as const
+  )
+  expect(nonArrowStates, 'non-arrow buttons on phone never dim or turn green').toEqual([
+    ['top', true, 1],
+    ['back', true, 1],
+    ['create', true, 1],
+  ])
+  const phoneBg = await readBackdrop(phone)
+  expect(
+    [
+      phoneBg.hidden,
+      phoneBg.pane.width,
+      phoneBg.pane.height,
+      phoneBg.pane.radiusTR,
+      phoneBg.pane.radiusTL,
+      phoneBg.pane.blur,
+      phoneBg.pane.borderTopWidth,
+      phoneBg.pane.borderTopColor,
+      phoneBg.pane.boxShadow,
+      phoneBg.pane.pointerEvents,
+      phoneBg.frame.display,
+      phoneBg.right.display,
+    ],
+    'phone shows full-width unrounded frosted strip with 4 px blur, 9% top edge and 12 px black shadow, and no desktop frame or right piece'
+  ).toEqual([false, `${PHONE.viewport.width}px`, `${LOOK.size + 2 * LOOK.bottom}px`, '0px', '0px', expectedBlur, '1px', expectedBorder, expectedShadowCss, 'none', 'none', 'none'])
+
+  // phone strip rejects a real tap at the midpoint of the 6 px gap between Left and Up even when
+  // Chromium touch-adjusts the target onto a neighbouring button: zero keys dispatched and query
+  // unchanged; a real tap at Left's centre then dispatches ArrowLeft and moves to the sibling
+  const [phoneLeftBox, phoneUpBox] = [
+    (await phone.locator(`${BAR} > button[data-key="left"]`).boundingBox())!,
+    (await phone.locator(`${BAR} > button[data-key="up"]`).boundingBox())!,
+  ]
+  const [phoneGapX, phoneGapY] = [(phoneLeftBox.x + phoneLeftBox.width + phoneUpBox.x) / 2, phoneLeftBox.y + phoneLeftBox.height / 2]
+  await phone.evaluate(() => {
+    ;(window as any).__phone_keys = []
+    ;(window as any).__phone_onkey = (e: KeyboardEvent) => (window as any).__phone_keys.push(e.code)
+    window.addEventListener('keydown', (window as any).__phone_onkey)
+  })
+  try {
+    await phone.touchscreen.tap(phoneGapX, phoneGapY)
+    expect(
+      await phone.evaluate(() => (window as any).__phone_keys as string[]),
+      'tap at midpoint of 6 px gap between Left and Up on phone dispatches no key'
+    ).toEqual([])
+    expect((await query(phone)).trim(), 'tap at midpoint of 6 px gap between Left and Up on phone leaves query unchanged').toBe(`${navRoot}/b`)
+
+    await phone.touchscreen.tap(phoneLeftBox.x + phoneLeftBox.width / 2, phoneLeftBox.y + phoneLeftBox.height / 2)
+    await expect
+      .poll(() => phone.evaluate(() => (window as any).__phone_keys as string[]), { message: 'tap at centre of phone Left button dispatches ArrowLeft', timeout: 3_000 })
+      .toEqual(['ArrowLeft'])
+    await expect
+      .poll(async () => (await query(phone)).trim(), { message: 'tap at centre of phone Left button moves to previous sibling', timeout: 3_000 })
+      .toBe(`${navRoot}/a`)
+  } finally {
+    await phone.evaluate(() => {
+      window.removeEventListener('keydown', (window as any).__phone_onkey)
+      delete (window as any).__phone_keys
+      delete (window as any).__phone_onkey
+    })
+  }
+
+  // phone strip beside a stand-in .vault-sparkle (24 px box at right: 14px; bottom: 10px, z-index 90):
+  // a real touchscreen tap 1 px left of the sparkle's box on its centre line delivers no click to
+  // the stand-in and nothing of the page gets one; a tap at its centre delivers exactly one click
+  await phone.evaluate(([sRight, sBottom, sW, sH]) => {
+    const sparkle = document.createElement('button')
+    sparkle.type = 'button'
+    sparkle.className = 'vault-sparkle'
+    sparkle.style.cssText = `position:fixed;right:${sRight}px;bottom:${sBottom}px;z-index:90;display:flex;align-items:center;justify-content:center;width:${sW}px;height:${sH}px;margin:0;padding:0;border:0;border-radius:50%;cursor:pointer;touch-action:manipulation`
+    sparkle.innerHTML = '<svg viewBox="0 0 16 16" style="display:block;width:16px;height:16px"><rect width="16" height="16"/></svg>'
+    document.body.appendChild(sparkle)
+  }, SPARKLE)
+  try {
+    const sparkleBox = (await phone.locator('body > .vault-sparkle').boundingBox())!
+    const [sparkleGapX, sparkleCenterY] = [sparkleBox.x - 1, sparkleBox.y + sparkleBox.height / 2]
+    const sparkleCenterX = sparkleBox.x + sparkleBox.width / 2
+    await phone.evaluate(() => {
+      const sparkle = document.querySelector('body > .vault-sparkle') as HTMLElement
+      const counts = { sparkle: 0, page: 0 }
+      const keys: string[] = []
+      const targets: { type: string; tag: string; cls: string; onSparkle: boolean; x: number | null; y: number | null }[] = []
+      const onSparkleClick = (e: MouseEvent) => {
+        e.stopPropagation()
+        counts.sparkle++
+      }
+      const onPageClick = () => {
+        counts.page++
+      }
+      const onKey = (e: KeyboardEvent) => {
+        keys.push(e.code)
+      }
+      const onCapture = (e: Event) => {
+        const el = e.target instanceof Element ? e.target : null
+        const t = (e as TouchEvent).touches?.[0] ?? (e as TouchEvent).changedTouches?.[0] ?? (e as MouseEvent)
+        targets.push({
+          type: e.type,
+          tag: el?.tagName?.toLowerCase() ?? String(e.target),
+          cls: typeof el?.className == 'string' ? el.className : el?.getAttribute?.('class') ?? '',
+          onSparkle: !!el?.closest?.('.vault-sparkle'),
+          x: typeof t?.clientX == 'number' ? Math.round(t.clientX * 10) / 10 : null,
+          y: typeof t?.clientY == 'number' ? Math.round(t.clientY * 10) / 10 : null,
+        })
+      }
+      sparkle.addEventListener('click', onSparkleClick)
+      document.addEventListener('click', onPageClick)
+      window.addEventListener('keydown', onKey)
+      for (const ev of ['pointerdown', 'touchstart', 'mousedown', 'click']) window.addEventListener(ev, onCapture, true)
+      ;(window as any).__sparkle_gap = {
+        counts: () => ({ ...counts, keys: keys.slice() }),
+        targets: () => targets.slice(),
+        reset: () => {
+          counts.sparkle = 0
+          counts.page = 0
+          keys.length = 0
+          targets.length = 0
+        },
+        cleanup: () => {
+          sparkle.removeEventListener('click', onSparkleClick)
+          document.removeEventListener('click', onPageClick)
+          window.removeEventListener('keydown', onKey)
+          for (const ev of ['pointerdown', 'touchstart', 'mousedown', 'click']) window.removeEventListener(ev, onCapture, true)
+        },
+      }
+    })
+    try {
+      await phone.touchscreen.tap(sparkleGapX, sparkleCenterY)
+      const gapTargets = await phone.evaluate(() => (window as any).__sparkle_gap.targets())
+      const gapCounts = await phone.evaluate(() => (window as any).__sparkle_gap.counts())
+      console.log(`phone sparkle-gap tap (${sparkleGapX}, ${sparkleCenterY}) targets: ${JSON.stringify(gapTargets)}`)
+      expect(
+        gapCounts,
+        'phone tap 1 px left of stand-in .vault-sparkle delivers no click to stand-in or page'
+      ).toEqual({ sparkle: 0, page: 0, keys: [] })
+
+      await phone.evaluate(() => (window as any).__sparkle_gap.reset())
+      await phone.touchscreen.tap(sparkleCenterX, sparkleCenterY)
+      expect(
+        await phone.evaluate(() => (window as any).__sparkle_gap.counts()),
+        'phone tap at centre of stand-in .vault-sparkle delivers exactly one click to stand-in'
+      ).toEqual({ sparkle: 1, page: 0, keys: [] })
+    } finally {
+      await phone.evaluate(() => {
+        ;(window as any).__sparkle_gap?.cleanup?.()
+        delete (window as any).__sparkle_gap
+      })
+    }
+  } finally {
+    await phone.evaluate(() => {
+      document.querySelector('body > .vault-sparkle')?.remove()
+    })
+  }
+
+  // open glass between reload and main row still rejects taps to the page, while a finger drag
+  // starting at that same point still scrolls document.body natively
+  const [phoneReloadBox, phoneTopBox] = [
+    (await phone.locator(RELOAD).boundingBox())!,
+    (await phone.locator(`${BAR} > button[data-key="top"]`).boundingBox())!,
+  ]
+  const [phoneStripX, phoneStripY] = [(phoneReloadBox.x + phoneReloadBox.width + phoneTopBox.x) / 2, phoneTopBox.y + phoneTopBox.height / 2]
+  await watchTarget(phone, phoneStripX, phoneStripY)
+  await phone.touchscreen.tap(phoneStripX, phoneStripY)
+  expect(await readWatch(phone), 'tap on phone frosted strip between buttons delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
+
+  await phone.evaluate(() => (window as any).MindBox.set(''))
+  await expect
+    .poll(() => phone.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight), { timeout: 5_000 })
+    .toBeGreaterThan(400)
+  const phoneTop = await headerTop(phone)
+  await phone.evaluate(y => {
+    document.body.scrollTop = y
+  }, phoneTop)
+  const cdp = await context.newCDPSession(phone)
+  try {
+    await cdp.send('Input.synthesizeScrollGesture', { x: phoneStripX, y: phoneStripY, yDistance: -300, gestureSourceType: 'touch' })
+  } finally {
+    await cdp.detach()
+  }
+  await expect.poll(() => scrollTop(phone), { message: 'finger drag starting on phone frosted strip scrolls the page', timeout: 3_000 }).toBeGreaterThan(phoneTop + 50)
+  await phone.evaluate(y => {
+    document.body.scrollTop = y
+  }, phoneTop)
+
+  // on-screen keyboard up hides the phone strip along with the main row; down brings both back
+  // (.key-buttons-bg is a zero-height container whose child .key-buttons-bg-pane paints the strip)
+  await phone.locator('.header .backdrop').first().click()
+  await expect(phone.locator('#textarea-mindbox')).toBeFocused()
+  await keyboard(phone, 'up')
+  await expect(phone.locator(BAR), 'phone main row hides when keyboard is up').toBeHidden()
+  await expect(phone.locator(ABOVE), 'keyboard row replaces main row').toBeVisible()
+  await expect
+    .poll(async () => {
+      const bg = await readBackdrop(phone)
+      return [bg.hidden, bg.display]
+    }, { message: 'phone frosted strip hides when keyboard is up', timeout: 3_000 })
+    .toEqual([true, 'none'])
+  await keyboard(phone, 'down')
+  await blur(phone)
+  await expect(phone.locator(BAR), 'phone main row returns when keyboard closes').toBeVisible()
+  await expect
+    .poll(async () => {
+      const bg = await readBackdrop(phone)
+      return [bg.hidden, bg.display, bg.pane.height]
+    }, { message: 'phone frosted strip returns with main row', timeout: 3_000 })
+    .toEqual([false, 'block', `${LOOK.size + 2 * LOOK.bottom}px`])
   await context.close()
 })
