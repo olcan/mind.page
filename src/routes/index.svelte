@@ -38,6 +38,7 @@
   import { Jumper } from 'svelte-loading-spinners'
   import Modal from '../components/Modal.svelte'
   import { eventKey } from '../event_key'
+  import { stripAttrToken } from '../item_attr'
   import { parseWikiLinksConfig, wikiLinkHtml, wikiLinkRegExp } from '../wiki_links'
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
@@ -314,6 +315,7 @@
             },
     })
     Object.defineProperty(window, '_readonly', { get: () => readonly })
+    Object.defineProperty(window, '_shared_origin', { get: () => isSharedOrigin(hostname) })
     Object.defineProperty(window, '_stack', { get: () => evalStack.slice() }) // return copy not reference
     Object.defineProperty(window, '_this', { get: () => _item(evalStack[evalStack.length - 1]) })
     Object.defineProperty(window, '_that', { get: () => _item(evalStack[0]) })
@@ -6162,6 +6164,7 @@
   }
 
   async function encryptItem(item) {
+    if (item.attr) item.attr = stripAttrToken(item.attr)
     if (anonymous) return item // do not encrypt for anonymous user
     if (item.cipher) return item // already encrypted
     if (item.attr?.shared) {
@@ -6188,12 +6191,13 @@
   }
 
   async function decryptItem(item) {
-    if (item.text) return item // already decrypted
-    if (!item.cipher) return item // nothing to decrypt
-    const decrypted = JSON.parse(await decrypt(item.cipher))
-    item.text = decrypted.text
-    item.attr = decrypted.attr
-    item.cipher = null // null until encryption
+    if (!item.text && item.cipher) {
+      const decrypted = JSON.parse(await decrypt(item.cipher))
+      item.text = decrypted.text
+      item.attr = decrypted.attr
+      item.cipher = null // null until encryption
+    }
+    if (item.attr) item.attr = stripAttrToken(item.attr)
     return item
   }
 
@@ -6427,7 +6431,8 @@
           const installed_update = `https://github.com/${attr.owner}/${attr.repo}/commit/${attr.sha}`
           const max_updates_shown = 5
           const Octokit = window['Octokit']
-          const github = attr.token ? new Octokit({ auth: attr.token }) : new Octokit()
+          const token = (!isSharedOrigin(hostname) && localStorage.getItem('mindpage_github_token')) || null
+          const github = token ? new Octokit({ auth: token }) : new Octokit()
 
           ;(async () => {
             try {
@@ -7001,7 +7006,6 @@
                     repo,
                     branch,
                     owner,
-                    token /* to authenticate for updates */,
                     embeds: null, // may be filled in below
                     shared: null, // used separately for sharing
                   }
@@ -7486,8 +7490,13 @@
     // if (!item.saving) itemToSave.text = ''
 
     // the PLAINTEXT SNAPSHOT for onSaveDone (review 93 §2.1): the encrypted payload must never
-    // be decrypted in place while an enqueue (the create history) is still ahead of it
-    const written = { time: itemToSave.time, text: itemToSave.text, attr: _.cloneDeep(itemToSave.attr) }
+    // be decrypted in place while an enqueue (the create history) is still ahead of it.
+    // give the outgoing payload its own cloned attribute map before `encryptItem` and reuse that
+    // clone for `written` so in-place mutations to live `item.attr` while the create is pending
+    // cannot reach `setDoc` or the subsequent `history` enqueue (none of `encryptItem`,
+    // `fenceV1Item`, `setDoc`, `addDoc`, or `onSaveDone` mutates the map in place)
+    itemToSave.attr = _.cloneDeep(itemToSave.attr)
+    const written = { time: itemToSave.time, text: itemToSave.text, attr: itemToSave.attr }
     // a FAILED create must SETTLE, not wedge (review 93 §2.4): the item keeps its local text,
     // its saving state clears, the failure is surfaced, and a queued saveItem rejects through
     // the createFailed marker instead of polling savedId forever
@@ -7589,6 +7598,7 @@
     let item = items[index]
     item.savedTime = savedItem.time
     item.savedAttr = _.cloneDeep(savedItem.attr) // just in case not cloned already
+    if (item.attr) item.attr = stripAttrToken(item.attr)
     item.savedText = savedItem.text
     items[index] = item // trigger dom update
   }
@@ -7904,7 +7914,7 @@
           // NOTE: using set is no longer necessary since we are no longer converting older unencrypted items, and update is desirable because it fails (with permission error) when the item has been deleted, preventing zombie items due to saves from stale tabs (especially background writes/saves that trigger without chance to reload).
           // user: user.uid, // allows us to use set() instead of update()
           time: item.time,
-          attr: _.cloneDeep(item.attr),
+          attr: stripAttrToken(_.cloneDeep(item.attr)),
           text: item.text,
         }
         if (readonly) {
@@ -9069,7 +9079,7 @@
         }
         console.debug(`installing preview dependency ${dep} for ${label} ...`)
         const dep_path = dep.slice(1) // path assumed same as tag
-        const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} ${attr.token || ''} <- ${label}`
+        const command = `/_install ${dep_path} ${repo} ${attr.branch} ${attr.owner} <- ${label}`
         const dep_item = await onEditorDone(command)
         if (!dep_item) {
           throw new Error(`failed to install preview dependency ${dep} for ${label}`)
@@ -9084,7 +9094,7 @@
       // shorter autodep ancestor local); resolution goes against github (not the local /file
       // route) because dependency installs go through github — see /_install command below
       const Octokit = window['Octokit']
-      const token = attr.token || (!isSharedOrigin(hostname) && localStorage.getItem('mindpage_github_token')) || null
+      const token = (!isSharedOrigin(hostname) && localStorage.getItem('mindpage_github_token')) || null
       const github = token ? new Octokit({ auth: token }) : new Octokit()
       const parent = await installTimeAutodepParent(
         github,

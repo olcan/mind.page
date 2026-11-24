@@ -1,7 +1,19 @@
 import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
 import { resolve } from 'path'
-import { firestore, install, loadAdmin, loadAnonymous, laneProjectId } from './helpers.js'
+import {
+  customToken,
+  firestore,
+  install,
+  interceptMindItems,
+  loadAdmin,
+  loadAnonymous,
+  laneProjectId,
+  secretFor,
+  signIn,
+  waitForApp,
+  type TestUser,
+} from './helpers.js'
 import { savedId } from './editor_helpers.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
@@ -966,4 +978,485 @@ test('a hidden parent tag places a renamed chat under its tag parent: context, a
   seen = await reloaded()
   expect(seen[`${G}/b/c/d`]).toMatchObject({ deps: [`${G}/b/c`] })
   expect(seen[`${G}/b/c`]).toMatchObject({ deps: [] })
+})
+
+test('installed items keep no GitHub token in items or history, strip legacy and in-memory tokens on save, and authenticate /_update and /_updates from the browser', async ({ page, browser }) => {
+  const FAKE_TOKEN = 'e2e-local'
+  const TOKEN_USER: TestUser = { uid: 'token_e2e', displayName: 'Token Test', email: 'token@e2e.test' }
+  const TOKEN_PHRASE = 'token e2e secret phrase'
+  const TOKEN_SECRET = secretFor(TOKEN_USER, TOKEN_PHRASE)
+  const { decryptWithSecret } = await import('../../src/crypto.js')
+
+  const cleanupUser = async () => {
+    const db = firestore()
+    for (const col of ['items', 'history']) {
+      const snap = await db.collection(col).where('user', '==', TOKEN_USER.uid).get()
+      for (const doc of snap.docs) await doc.ref.delete()
+    }
+    await db.collection('users').doc(TOKEN_USER.uid).delete()
+  }
+  await cleanupUser()
+
+  const inspectDoc = async (raw: Record<string, any>) => {
+    const rawSerialized = JSON.stringify(raw)
+    const plainSerialized = typeof raw.cipher == 'string' ? await decryptWithSecret(raw.cipher, TOKEN_SECRET) : ''
+    return { raw, rawSerialized, plainSerialized, combined: `${rawSerialized}\n${plainSerialized}` }
+  }
+  const itemRecord = async (id: string) => {
+    const snap = await firestore().collection('items').doc(id).get()
+    expect(snap.exists, `items/${id} exists`).toBe(true)
+    return inspectDoc(snap.data()!)
+  }
+  const historyRecords = async (id: string) => {
+    const snap = await firestore().collection('history').where('item', '==', id).get()
+    return Promise.all(snap.docs.map(async d => ({ id: d.id, ...(await inspectDoc(d.data())) })))
+  }
+  const readItemState = (p: typeof page, label: string) =>
+    p.evaluate(name => {
+      const raw = (window as any).__items.find((i: any) => i.labelText == name)
+      if (!raw) return null
+      return {
+        id: raw.id as string,
+        savedId: (raw.savedId ?? null) as string | null,
+        saving: !!raw.saving,
+        saveTask: !!raw.saveTask,
+        unacked: (raw.unackedWrites?.length ?? 0) as number,
+        textMatches: raw.text === raw.savedText,
+        attrMatches: !!(window as any)._.isEqual(raw.attr, raw.savedAttr),
+        hasAttrToken: !!(raw.attr && 'token' in raw.attr),
+        hasSavedAttrToken: !!(raw.savedAttr && 'token' in raw.savedAttr),
+        editing: !!raw.editing,
+      }
+    }, label)
+  const waitWritesSettled = async (p: typeof page, label: string) => {
+    await expect
+      .poll(
+        async () => {
+          const s = await readItemState(p, label)
+          return !!s && !!s.savedId && !s.saving && !s.saveTask && s.unacked === 0 && s.textMatches
+        },
+        { message: `${label} writes settled`, timeout: 30_000 }
+      )
+      .toBe(true)
+  }
+
+  const dialogs: string[] = []
+  const remoteChanges: string[] = []
+  const githubAuths: { path: string; auth: string | null }[] = []
+  let anonInstalledId: string | null = null
+  let anonCreateSnapId: string | null = null
+
+  const context = await browser.newContext()
+  try {
+    const personal = await context.newPage()
+    personal.on('dialog', dialog => {
+      const leaving = dialog.type() == 'beforeunload'
+      dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+      void (leaving ? dialog.accept() : dialog.dismiss())
+    })
+    personal.on('console', m => {
+      if (/remote change/i.test(m.text())) remoteChanges.push(m.text())
+    })
+    expect(await interceptMindItems(personal), 'mind.items local checkout required').toBe(true)
+    // registered after interceptMindItems so Playwright invokes this recorder first, then falls back
+    await personal.route('https://api.github.com/repos/olcan/mind.items/**', route => {
+      const url = new URL(route.request().url())
+      githubAuths.push({
+        path: url.pathname.replace('/repos/olcan/mind.items/', '') + url.search,
+        auth: route.request().headers()['authorization'] ?? null,
+      })
+      return route.fallback()
+    })
+    await personal.addInitScript(tok => localStorage.setItem('mindpage_github_token', tok), FAKE_TOKEN)
+    await customToken(TOKEN_USER)
+    await signIn(personal, TOKEN_USER, '/')
+    await expect(personal.getByText(/Choose a .*secret phrase/)).toBeVisible({ timeout: 60_000 })
+    await personal.fill('#modal-input', TOKEN_PHRASE)
+    await personal.locator('.modal .button.confirm', { hasText: 'Continue' }).click()
+    await expect(personal.getByText(/Confirm your new secret phrase/)).toBeVisible({ timeout: 60_000 })
+    await personal.fill('#modal-input', TOKEN_PHRASE)
+    await personal.locator('.modal .button.confirm', { hasText: 'Confirm' }).click()
+    await waitForApp(personal)
+    await expect.poll(() => personal.evaluate(() => window._server_confirmed), { timeout: 30_000 }).toBe(true)
+
+    // (a) install on an encrypted personal account: token appears nowhere in items or history
+    remoteChanges.length = 0
+    githubAuths.length = 0
+    expect(await install(personal, 'load'), '/_install load').toBeNull()
+    await waitWritesSettled(personal, '#load')
+    const loadId = (await savedId(personal, '#load'))!
+    expect(loadId, '#load saved id').toBeTruthy()
+    await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1)
+    const afterInstallItem = await itemRecord(loadId)
+    const afterInstallHistory = await historyRecords(loadId)
+    expect(typeof afterInstallItem.raw.cipher, 'installed personal item is encrypted').toBe('string')
+    expect(afterInstallItem.combined, 'install items record holds no token').not.toContain(FAKE_TOKEN)
+    for (const h of afterInstallHistory)
+      expect(h.combined, `install history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+    expect(remoteChanges, 'install write not taken for a remote change').toEqual([])
+    expect(await readItemState(personal, '#load'), 'installed item settled with no attr.token').toMatchObject({
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+
+    // (b) sharing the item (unencrypted path): token still nowhere in items or history
+    remoteChanges.length = 0
+    const histBeforeShare = afterInstallHistory.length
+    await personal.evaluate(() => window._item('#load')!.share('e2e-tok', 0))
+    await expect
+      .poll(async () => {
+        const raw = (await itemRecord(loadId)).raw
+        return raw.cipher === null && raw.attr?.shared?.keys?.includes('e2e-tok') === true
+      }, { message: '#load shared in the clear', timeout: 30_000 })
+      .toBe(true)
+    await waitWritesSettled(personal, '#load')
+    await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThan(histBeforeShare)
+    const afterShareItem = await itemRecord(loadId)
+    const afterShareHistory = await historyRecords(loadId)
+    expect(afterShareItem.rawSerialized, 'shared items record holds no token').not.toContain(FAKE_TOKEN)
+    for (const h of afterShareHistory)
+      expect(h.combined, `shared history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+    expect(remoteChanges, 'share write not taken for a remote change').toEqual([])
+    expect(await readItemState(personal, '#load'), 'shared item settled with no attr.token').toMatchObject({
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+
+    // (c) a record that already holds a token (written behind the app): reloading does not mark it
+    // changed or save it in a loop, strips the token in memory at the read boundary, and the next
+    // save removes it from both items and that save's history copy
+    await firestore()
+      .collection('items')
+      .doc(loadId)
+      .update({ attr: { ...afterShareItem.raw.attr, token: FAKE_TOKEN } })
+    expect((await itemRecord(loadId)).rawSerialized, 'legacy record seeded with token behind the app').toContain(FAKE_TOKEN)
+    await personal.reload()
+    await waitForApp(personal)
+    await expect.poll(() => personal.evaluate(() => window._server_confirmed), { timeout: 30_000 }).toBe(true)
+    await personal.waitForTimeout(500)
+    expect(await readItemState(personal, '#load'), 'legacy record enters memory without token and not changed').toMatchObject({
+      saving: false,
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+    expect((await itemRecord(loadId)).rawSerialized, 'loading a legacy record does not auto-save it').toContain(FAKE_TOKEN)
+    const histBeforeLegacySave = (await historyRecords(loadId)).length
+    remoteChanges.length = 0
+    await personal.evaluate(() => {
+      const item = window._item('#load')!
+      item.write(item.text + '\n<!-- legacy-save -->', '')
+    })
+    await waitWritesSettled(personal, '#load')
+    await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThan(histBeforeLegacySave)
+    expect((await itemRecord(loadId)).rawSerialized, 'legacy record loses token on next save (items)').not.toContain(FAKE_TOKEN)
+    const afterLegacyHistory = await historyRecords(loadId)
+    for (const h of afterLegacyHistory)
+      expect(h.combined, `legacy save history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+    expect(remoteChanges, 'legacy save not taken for a remote change').toEqual([])
+    expect(await readItemState(personal, '#load'), 'legacy item settled after save').toMatchObject({
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+
+    // (d) token put into live item.attr (as an older #updater does):
+    // first, /_backup copies live item.attr straight through encryptItem to history without
+    // saveItem — encryptItem's own strip must keep the token out of that history copy;
+    // second, saving the item while holding Write/channel so the local pending echo arrives
+    // during hasLocalIntent proves saveItem strips before `written` (isOwnPendingChange skips
+    // the echo and triggers no deferred getDocFromServer reconcile read on Listen/channel),
+    // both records hold no token, and live item.attr is cleared in onSaveDone afterward
+    await personal.evaluate(tok => {
+      ;(window._item('#load') as any).attr.token = tok
+    }, FAKE_TOKEN)
+    const histBeforeBackup = afterLegacyHistory.length
+    await personal.evaluate(() => void window._create('/_backup', { command: true, return_alerts: true }))
+    await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThan(histBeforeBackup)
+    const afterBackupHistory = await historyRecords(loadId)
+    for (const h of afterBackupHistory)
+      expect(h.combined, `/_backup history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+
+    // now save the item with live item.attr.token still set; track any single-document
+    // getDocFromServer read on Listen/channel (reconcileDeferred is its only caller for items/<id>,
+    // entered only when isOwnPendingChange misclassifies the pending echo and defers it)
+    const reconcileReads: string[] = []
+    const onRequest = (req: { url: () => string; method: () => string; postData: () => string | null }) => {
+      if (req.method() != 'POST' || !/Firestore\/Listen\/channel/.test(req.url())) return
+      let body = req.postData() ?? ''
+      try {
+        body = decodeURIComponent(body)
+      } catch {}
+      if (body.includes(`documents/items/${loadId}`)) reconcileReads.push(body.slice(0, 200))
+    }
+    personal.on('request', onRequest)
+    remoteChanges.length = 0
+    const histBeforeLiveMut = afterBackupHistory.length
+    let releaseLiveWrite!: () => void
+    const liveWriteGate = new Promise<void>(resolve => {
+      releaseLiveWrite = resolve
+    })
+    let liveWritePosted!: () => void
+    const liveWriteSeen = new Promise<void>(resolve => {
+      liveWritePosted = resolve
+    })
+    const liveWritePattern = /Firestore\/Write\/channel/
+    await personal.route(liveWritePattern, async route => {
+      if (route.request().method() == 'POST') {
+        liveWritePosted()
+        await liveWriteGate
+      }
+      await route.continue()
+    })
+    try {
+      await personal.evaluate(() => {
+        const item = window._item('#load')!
+        item.write(item.text + '\n<!-- old-updater-save -->', '')
+      })
+      // wait until updateDoc's write hits the wire and its local hasPendingWrites echo has run
+      // while savedText is still the old text (so only unackedWrites can classify it as ours)
+      await liveWriteSeen
+      await personal.waitForTimeout(250)
+      releaseLiveWrite()
+      await personal.unroute(liveWritePattern)
+      await waitWritesSettled(personal, '#load')
+      await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThan(histBeforeLiveMut)
+      // give scheduleReconcile's setTimeout(..., 0) + getDocFromServer time to fire if deferred
+      await personal.waitForTimeout(300)
+    } finally {
+      releaseLiveWrite()
+      await personal.unroute(liveWritePattern).catch(() => {})
+      personal.off('request', onRequest)
+    }
+    expect((await itemRecord(loadId)).combined, 'live attr.token mutation stripped from items record').not.toContain(FAKE_TOKEN)
+    const afterLiveMutHistory = await historyRecords(loadId)
+    for (const h of afterLiveMutHistory)
+      expect(h.combined, `live attr.token mutation stripped from history record ${h.id}`).not.toContain(FAKE_TOKEN)
+    expect(remoteChanges, 'live attr.token save not taken for a remote change').toEqual([])
+    expect(reconcileReads, 'live attr.token save recognised as own pending write (no deferred reconcile read)').toEqual([])
+    expect(await readItemState(personal, '#load'), 'live item.attr cleared and matches savedAttr after save').toMatchObject({
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+    // opening and cancelling the editor must not trigger a spurious save (discardEdits compares attr vs savedAttr)
+    const histBeforeCancel = afterLiveMutHistory.length
+    await personal.evaluate(() => void (location.hash = '#load'))
+    const loadContainer = personal.locator(`#super-container-${loadId} .container`)
+    await expect(loadContainer).toBeVisible({ timeout: 15_000 })
+    await loadContainer.click()
+    await expect.poll(async () => (await readItemState(personal, '#load'))?.editing, { timeout: 15_000 }).toBe(true)
+    await personal.keyboard.press('Escape')
+    await expect.poll(async () => (await readItemState(personal, '#load'))?.editing, { timeout: 15_000 }).toBe(false)
+    await personal.waitForTimeout(500)
+    expect((await historyRecords(loadId)).length, 'open/cancel editor triggers no spurious save').toBe(histBeforeCancel)
+
+    // (e) /_update and /_updates still authenticate using the browser's stored token; holding the
+    // Firestore write channel during /_update also checks that the dispatcher never puts a token
+    // onto live item.attr before onSaveDone runs
+    githubAuths.length = 0
+    remoteChanges.length = 0
+    const histBeforeUpdate = (await historyRecords(loadId)).length
+    let releaseWrite!: () => void
+    const writeGate = new Promise<void>(resolve => {
+      releaseWrite = resolve
+    })
+    const writePattern = /Firestore\/Write\/channel/
+    await personal.route(writePattern, async route => {
+      if (route.request().method() == 'POST') await writeGate
+      await route.continue()
+    })
+    let updateOut: string | null | undefined
+    try {
+      const updateDone = personal
+        .evaluate(() =>
+          Promise.resolve(window._create('/_update #load', { command: true, return_alerts: true })).then(out =>
+            typeof out == 'string' ? out : null
+          )
+        )
+        .then(r => (updateOut = r))
+      await expect
+        .poll(async () => updateOut !== undefined || (await personal.getByText('OK', { exact: true }).isVisible()), {
+          message: '/_update #load modal',
+          timeout: 30_000,
+        })
+        .toBe(true)
+      // while the write is still in flight (before onSaveDone), live item.attr must carry no token
+      expect((await readItemState(personal, '#load'))?.hasAttrToken, '/_update dispatcher puts no token into live item.attr').toBe(false)
+      releaseWrite()
+      await personal.unroute(writePattern)
+      if (updateOut === undefined) {
+        await personal.getByText('OK', { exact: true }).click()
+        await updateDone
+      }
+    } finally {
+      releaseWrite()
+      await personal.unroute(writePattern).catch(() => {})
+    }
+    expect(updateOut ?? null, '/_update #load succeeded without alert').toBeNull()
+    await waitWritesSettled(personal, '#load')
+    await expect.poll(async () => (await historyRecords(loadId)).length, { timeout: 30_000 }).toBeGreaterThan(histBeforeUpdate)
+    expect(githubAuths.length, '/_update called GitHub API').toBeGreaterThan(0)
+    expect(
+      githubAuths.every(r => r.auth == `token ${FAKE_TOKEN}`),
+      `/_update authenticates with browser token: ${JSON.stringify(githubAuths)}`
+    ).toBe(true)
+    expect((await itemRecord(loadId)).combined, '/_update items record holds no token').not.toContain(FAKE_TOKEN)
+    for (const h of await historyRecords(loadId))
+      expect(h.combined, `/_update history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+    expect(remoteChanges, '/_update write not taken for a remote change').toEqual([])
+    expect(await readItemState(personal, '#load'), '/_update item settled with no attr.token').toMatchObject({
+      textMatches: true,
+      attrMatches: true,
+      hasAttrToken: false,
+      hasSavedAttrToken: false,
+    })
+
+    // select #load in editingItems, then run /_updates
+    await personal.evaluate(() => void (location.hash = '#load'))
+    await expect(loadContainer).toBeVisible({ timeout: 15_000 })
+    await loadContainer.click()
+    await expect.poll(async () => (await readItemState(personal, '#load'))?.editing, { timeout: 15_000 }).toBe(true)
+    githubAuths.length = 0
+    const updatesAlert = await personal.evaluate(() =>
+      Promise.resolve(window._create('/_updates', { command: true, return_alerts: true }))
+    )
+    expect(typeof updatesAlert == 'string' ? updatesAlert : null, '/_updates returned no alert').toBeNull()
+    await expect(personal.locator('.modal')).toContainText('No updates available for load.md', { timeout: 30_000 })
+    expect(githubAuths.length, '/_updates called GitHub API').toBeGreaterThan(0)
+    expect(
+      githubAuths.every(r => r.auth == `token ${FAKE_TOKEN}`),
+      `/_updates authenticates with browser token: ${JSON.stringify(githubAuths)}`
+    ).toBe(true)
+    // dismiss modal and close editor
+    await personal.keyboard.press('Escape')
+    await expect(personal.locator('.modal')).toBeHidden({ timeout: 15_000 })
+    await personal.keyboard.press('Escape')
+    await expect.poll(async () => (await readItemState(personal, '#load'))?.editing, { timeout: 15_000 }).toBe(false)
+
+    // (f) anonymous corpus: an install on the unencrypted anonymous account leaves no token
+    await loadAdmin(page)
+    expect(await install(page, 'wiki_links'), '/_install wiki_links on anonymous').toBeNull()
+    await waitWritesSettled(page, '#wiki_links')
+    anonInstalledId = (await savedId(page, '#wiki_links'))!
+    expect(anonInstalledId, 'anonymous #wiki_links saved id').toBeTruthy()
+    await expect.poll(async () => (await historyRecords(anonInstalledId!)).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(1)
+    expect((await itemRecord(anonInstalledId)).rawSerialized, 'anonymous install items record holds no token').not.toContain(FAKE_TOKEN)
+    for (const h of await historyRecords(anonInstalledId))
+      expect(h.rawSerialized, `anonymous install history record ${h.id} holds no token`).not.toContain(FAKE_TOKEN)
+
+    // (g) pending cleartext create: the outgoing payload owns its own cloned attr map before
+    // encryptItem, so in-place mutations on live item.attr while setDoc is pending (marker +
+    // fake token) reach neither the created items doc nor its first history copy
+    const CREATE_SNAP_LABEL = '#e2e_create_snap'
+    const CREATE_SNAP_BODY = 'create-snap-payload'
+    const CREATE_SNAP_MARKER = 'mutated-while-create-pending'
+    const initialCreateAttr = {
+      source: 'https://github.com/olcan/mind.items/blob/master/load.md',
+      sha: 'sha-create-snap',
+      shared: null,
+    }
+    let releaseCreateWrite!: () => void
+    const createWriteGate = new Promise<void>(resolve => {
+      releaseCreateWrite = resolve
+    })
+    let createWritePosted!: () => void
+    const createWriteSeen = new Promise<void>(resolve => {
+      createWritePosted = resolve
+    })
+    const createWritePattern = /Firestore\/Write\/channel/
+    await page.route(createWritePattern, async route => {
+      if (route.request().method() == 'POST') {
+        let body = route.request().postData() ?? ''
+        try {
+          body = decodeURIComponent(body)
+        } catch {}
+        if (body.includes('/documents/items/') && body.includes(CREATE_SNAP_BODY)) {
+          createWritePosted()
+          await createWriteGate
+        }
+      }
+      await route.continue()
+    })
+    try {
+      await page.evaluate(
+        ({ text, attr }) => {
+          window._create(text, {}, attr)
+        },
+        { text: `${CREATE_SNAP_LABEL} ${CREATE_SNAP_BODY}`, attr: initialCreateAttr }
+      )
+      await createWriteSeen
+      expect(await readItemState(page, CREATE_SNAP_LABEL), 'create write is pending before in-place attr mutation').toMatchObject({
+        saving: true,
+        savedId: null,
+      })
+      await page.evaluate(
+        ({ label, marker, tok }) => {
+          const liveAttr = (window._item(label) as any).attr
+          liveAttr.pending_marker = marker
+          liveAttr.token = tok
+        },
+        { label: CREATE_SNAP_LABEL, marker: CREATE_SNAP_MARKER, tok: FAKE_TOKEN }
+      )
+      releaseCreateWrite()
+      await page.unroute(createWritePattern)
+      await waitWritesSettled(page, CREATE_SNAP_LABEL)
+    } finally {
+      releaseCreateWrite()
+      await page.unroute(createWritePattern).catch(() => {})
+    }
+    anonCreateSnapId = (await savedId(page, CREATE_SNAP_LABEL))!
+    expect(anonCreateSnapId, 'create snapshot item saved id').toBeTruthy()
+    await expect
+      .poll(async () => (await firestore().collection('history').where('item', '==', anonCreateSnapId!).get()).size, {
+        message: 'create snapshot history row written',
+        timeout: 30_000,
+      })
+      .toBeGreaterThanOrEqual(1)
+    const createdItem = await itemRecord(anonCreateSnapId)
+    const createdHistory = await historyRecords(anonCreateSnapId)
+    expect(createdHistory.length, 'create wrote one history copy').toBe(1)
+    expect(createdItem.raw.attr, 'created items record holds initial attributes (no pending mutation or token)').toEqual(
+      initialCreateAttr
+    )
+    expect(createdHistory[0].raw.attr, 'create history copy holds initial attributes (no pending mutation or token)').toEqual(
+      initialCreateAttr
+    )
+    expect(createdItem.rawSerialized, 'created items record holds no marker').not.toContain(CREATE_SNAP_MARKER)
+    expect(createdItem.rawSerialized, 'created items record holds no token').not.toContain(FAKE_TOKEN)
+    expect(createdHistory[0].rawSerialized, 'create history copy holds no marker').not.toContain(CREATE_SNAP_MARKER)
+    expect(createdHistory[0].rawSerialized, 'create history copy holds no token').not.toContain(FAKE_TOKEN)
+    const settledCreate = await page.evaluate(label => {
+      const raw = (window as any).__items.find((i: any) => i.labelText == label)
+      return {
+        liveMarker: raw?.attr?.pending_marker ?? null,
+        hasLiveToken: !!(raw?.attr && 'token' in raw.attr),
+        savedAttr: raw?.savedAttr ?? null,
+      }
+    }, CREATE_SNAP_LABEL)
+    expect(settledCreate, 'live item keeps its own attr (without token) while savedAttr keeps initial snapshot').toEqual({
+      liveMarker: CREATE_SNAP_MARKER,
+      hasLiveToken: false,
+      savedAttr: initialCreateAttr,
+    })
+
+    expect(dialogs, 'no unexpected dialogs or beforeunload prompts').toEqual([])
+  } finally {
+    await context.close()
+    await cleanupUser()
+    for (const id of [anonInstalledId, anonCreateSnapId]) {
+      if (!id) continue
+      const db = firestore()
+      await db.collection('items').doc(id).delete().catch(() => {})
+      const hist = await db.collection('history').where('item', '==', id).get()
+      for (const d of hist.docs) await d.ref.delete()
+    }
+  }
 })

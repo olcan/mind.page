@@ -657,6 +657,7 @@ test('a foreign shared page is served from the isolated origin, which clears app
         session: Object.keys(sessionStorage),
       }))
     ).toEqual({ local: [], session: [] })
+    expect(await page.evaluate(() => window._shared_origin), 'isolated shared origin exposes _shared_origin = true').toBe(true)
 
     // and NOTHING was taken from the visitor: their session lives on the origin they were on
     const own = await page.context().newPage()
@@ -667,6 +668,7 @@ test('a foreign shared page is served from the isolated origin, which clears app
       // then __rendered in chunks) would cost the whole initial render for nothing
       await expect.poll(() => own.evaluate(() => window._user?.uid ?? null), { timeout: 90_000 }).toBe(ALICE.uid)
       expect(await own.evaluate(() => localStorage.getItem('mindpage_secret'))).toBeTruthy()
+      expect(await own.evaluate(() => window._shared_origin), 'account origin exposes _shared_origin = false').toBe(false)
     } finally {
       await own.close()
     }

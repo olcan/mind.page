@@ -34,7 +34,7 @@ declare global {
     } | null
     _render_item: (item: unknown) => Promise<HTMLElement>
     _decrypt_bytes: (cipher: Uint8Array) => Promise<Uint8Array> // the application bytes wrapper (v0 and v1)
-    _create: (text: string, options?: object) => unknown
+    _create: (text: string, options?: object, attr?: Record<string, unknown> | null) => unknown
     _exists: (name: string) => boolean
     _autodep_parent: (opts: {
       label: string
@@ -68,6 +68,7 @@ declare global {
     _server_current: boolean // the latest items snapshot came from the server, not the cache (updated at every snapshot; see lifecycle.spec.ts)
     __rendered: boolean // initial (chunked) rendering complete, required by _render_item
     _readonly: boolean
+    _shared_origin: boolean
     firebase: {
       auth: {
         getAuth: (app: unknown) => unknown
