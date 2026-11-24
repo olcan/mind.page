@@ -1166,7 +1166,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
     ;(window as any).Notification = Recorder
   })
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply, item; this device: granted')
   const NOTIFY_STORE = 'e2e-notify-store'
   const notifyState = (reason: string, epoch: number, rev: number, more: Record<string, unknown> = {}) => ({ _agent: { state: { held: 'owner', reason, epoch, rev, updated: Date.now(), worktree: null, phase: 'idle', acked: {}, ...more } } })
   const notified = () => page.evaluate(() => ((window as any).__notified as any[]).map(n => ({ title: n.title, tag: n.options.tag, body: n.options.body, requireInteraction: n.options.requireInteraction, closed: n.closed })))
@@ -1202,7 +1202,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('question', 4, 5))
   await applied(5)
   expect(await command(page, '/notify on')).toBeNull()
-  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply; this device: granted')
+  await expect.poll(() => dialogs[dialogs.length - 1], { timeout: 10_000 }).toBe('notifications: on for question, blocked, proposal, budget, done, reply, item; this device: granted')
   await writeStore(NOTIFY_STORE, `global_store_${notifyId}`, notifyState('proposal', 5, 6))
   await expect.poll(async () => (await notified()).map(n => n.title), { timeout: 30_000 }).toEqual(['[question] answer the agent some context', '[blocked] answer the agent some context', '[blocked] answer the agent some context', '[proposal] answer the agent some context'])
   // a project's repeated check-in (2026-10-03, round 3): the bridge counts the resurfacings it
@@ -1222,6 +1222,47 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await userSet(page, '')
   await page.evaluate(() => void (window as any).__notified.at(-1).onclick())
   await expect.poll(box, { timeout: 10_000 }).toMatch(new RegExp(`^${CHATTY}/0 ?$`))
+  // AN AGENT ITEM WRITE STAMP (vault design mind_item_edit section 9): an entry in `#todoer`'s
+  // own store matching a non-todo item's hash gives one alert with its title and visible body
+  // (HTML comment skipped); delivering the same entry again gives none
+  const STAMPED = '#e2e_stamped'
+  await page.evaluate(text => void window._create(text), `${STAMPED}\n<!-- internal -->\nUpdated by the watcher.\nMore.`)
+  await expect.poll(() => savedId(page, STAMPED), { timeout: 30_000 }).toBeTruthy()
+  const stampedId = (await savedId(page, STAMPED))!
+  const stampedHash = await page.evaluate(name => String((window._item(name, true) as any).hash), STAMPED)
+  const todoerId = (await savedId(page, '#todoer'))!
+  const todoerStoreName = `global_store_${todoerId}`
+  await expect
+    .poll(async () => !!(await serverStore(todoerStoreName))?.notify?.reasons?.includes('item'), { timeout: 30_000 })
+    .toBe(true)
+  await expect
+    .poll(() => page.evaluate(() => !(window._item('#todoer', true) as any)?.saving_global_store), { timeout: 30_000 })
+    .toBe(true)
+  const todoerDoc = (await storeDocId(todoerStoreName))!
+  const todoerStore = await serverStore(todoerStoreName)
+  const stampAt = Date.now()
+  const stampsBefore = (await notified()).length
+  await writeStore(todoerDoc, todoerStoreName, {
+    ...todoerStore,
+    _agent: { ...todoerStore?._agent, wrote: { [stampedId]: { by: 'watcher', at: stampAt, hash: stampedHash } } },
+  })
+  await expect.poll(async () => (await notified()).length, { timeout: 30_000 }).toBe(stampsBefore + 1)
+  expect((await notified()).at(-1)).toMatchObject({
+    title: `[item] ${STAMPED}`,
+    body: 'Updated by the watcher.',
+    tag: `todoer:${stampedId}`,
+    requireInteraction: true,
+    closed: false,
+  })
+  await writeStore(todoerDoc, todoerStoreName, {
+    ...todoerStore,
+    _agent: { ...todoerStore?._agent, wrote: { [stampedId]: { by: 'watcher', at: stampAt, hash: stampedHash } } },
+    _e2e_touch: 1,
+  })
+  await expect
+    .poll(() => page.evaluate(() => (window._item('#todoer', true) as any)?._global_store?._e2e_touch), { timeout: 30_000 })
+    .toBe(1)
+  expect((await notified()).length, 'the same entry delivered again notifies nothing').toBe(stampsBefore + 1)
   // THE SNOOZE DIALOG'S BOX (2026-10-21): the drop on the snooze bin opens the dialog with its
   // "notify on unsnooze" box unchecked (no hint: this device's permission is granted); checked,
   // a duration's click writes the flag beside the snooze time on the todo's own store; the time
