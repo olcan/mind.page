@@ -4196,6 +4196,30 @@ test("an inert section is one line until its item is selected, the search has a 
 
 test('inert sections that follow each other are one block under one head, a line of the owner keeps them apart; a link in the head is followed without a toggle; an open block is full width', async ({ page, context }) => {
   await loadAdmin(page)
+  const clearLoading = () => expect(page.locator('#sapper > .loading')).not.toHaveClass(/visible/, { timeout: 30_000 })
+  // wait for the server-confirmed corpus and the background macro-expansion first pass over items
+  // left by earlier rows to finish before querying: while `expandMacros` runs, newly found macro
+  // errors trigger `onEditorChange`, inserting error items ahead of `foldmore` matches, raising the
+  // translucent `.loading` overlay, and scrolling upward when no editor is focused
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const w = window as any
+          const items = w.__items as any[]
+          const expanded = items.every(
+            i =>
+              i.expanded &&
+              (i.expanded.error
+                ? !!i.hasError
+                : i.expanded.deephash == i.deephash && i.expanded.version == i.version)
+          )
+          const loading = document.querySelector('#sapper > .loading')?.classList.contains('visible') ?? false
+          return !!w._server_confirmed && expanded && !loading && !w.__layoutPending
+        }),
+      { message: 'server corpus and background macro expansion settled', timeout: 60_000 }
+    )
+    .toBe(true)
   const link = new URL('/server_id', page.url()).href
   const tree = region(`agent\n- working: sorting the tools · [notes](${link})\n    - [x] empty the shelves`)
   const request = region('request\nPlease tidy the shed.\n\nKeep the red toolbox.')
@@ -4293,7 +4317,8 @@ test('inert sections that follow each other are one block under one head, a line
   // A CLICK ANYWHERE ON THE BLOCK TOGGLES IT, in an open section too, unless something inside took the click or a
   // text selection made it no tap. [state, what a toggle left] of the merged block, which the click above opened
   const merged = () => fold(page, MERGED).then(f => f?.blocks.map(b => [b.state, b.memory]))
-  const mergedBlock = page.locator(`.column:not(.hidden) .container[data-item-id="${await page.evaluate(label => (window as any)._item(label, true).id, MERGED)}"] .inert-block`)
+  const mergedId = await page.evaluate(label => (window as any)._item(label, true).id as string, MERGED)
+  const mergedBlock = page.locator(`.column:not(.hidden) .container[data-item-id="${mergedId}"] .inert-block`)
   // the window's box of a word of the open request
   const word = (text: string) =>
     page.evaluate(
@@ -4360,16 +4385,26 @@ test('inert sections that follow each other are one block under one head, a line
             await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
             tops.push(await target.evaluate(element => Math.round(element.getBoundingClientRect().top)))
           }
-          // (and no layout that a re-measure queued is still to come: a new item's first render queues one, which
-          // waits for 500 ms without a scroll)
-          return tops.every(top => top == tops[0] && top >= -1 && top < page.viewportSize()!.height) && !(await page.evaluate(() => (window as any).__layoutPending as boolean))
+          // (and no layout that a re-measure queued is still to come, nor the translucent `.loading` overlay
+          // raised while visible error/math items re-render after an `items = items` update)
+          return (
+            tops.every(top => top == tops[0] && top >= -1 && top < page.viewportSize()!.height) &&
+            !(await page.evaluate(
+              () =>
+                (window as any).__layoutPending ||
+                (document.querySelector('#sapper > .loading')?.classList.contains('visible') ?? false)
+            ))
+          )
         },
         { message: 'the element stays where the row scrolled it', timeout: 30_000 }
       )
       .toBe(true)
   const centre = () => settle(mergedBlock)
-  await centre()
+  // focus first before settling (as the tall-section step below does): focusing the editor triggers
+  // `items = items`, which can re-render error/math items, raise `.loading.visible`, or queue a
+  // layout; `centre()` waits both out and then scrolls `mergedBlock` into place
   await hold(EDITOR, 5, 9)
+  await centre()
   const editing = await held(EDITOR)
   expect({ ...editing, text: editing.text.length > 9 }, "the premise: the other item's editor has the focus, with a selection of its own").toEqual({ active: EDITOR, selected: [5, 9, 'backward'], text: true, shown: 'visible', focused: true })
   // a link in an open section is followed, and toggles nothing
@@ -4382,8 +4417,8 @@ test('inert sections that follow each other are one block under one head, a line
   expect((await held(EDITOR)).active, 'a followed link gives no focus back: the editor does not have it').not.toBe(EDITOR)
   // a drag that selects text in an open section is no tap: the text is selected and the block stays open. And the
   // drag TAKES the focus from the editor, as it always did (a copy then takes the selected text)
-  await centre()
   await hold(EDITOR, 5, 9)
+  await centre()
   expect(await held(EDITOR), 'the premise: the editor has the focus again').toEqual(editing)
   const tidy = (await word('tidy'))!
   expect(tidy.y > 0 && tidy.y < page.viewportSize()!.height, 'the premise: the word to drag over is in the window').toBe(true)
@@ -4395,28 +4430,69 @@ test('inert sections that follow each other are one block under one head, a line
   expect([await selection(), await merged()], 'a drag in an open section selects its text, and the block stays open').toEqual([['Range', 'tidy'], [['open', 'opened']]])
   expect((await held(EDITOR)).active, 'and the drag took the keyboard focus from the editor, which gets none back').toBe('BODY')
   // the click that ends that selection (beside it: the browser collapses the selection at the press) is no tap
-  // either, and the next click is one: it closes the block
+  // either, and the next click is one: it closes the block. Wait for `.loading` to clear after the drag's blur
+  // (and after the click) before raw `page.mouse.click` coordinates, which do not wait for an overlay; capture
+  // the standing selection and the element the press really landed on (precedent: editor.spec.ts) so a click
+  // that missed the block cannot clear the selection and pass silently
+  await clearLoading()
   const shed = (await word('shed'))!
+  expect(shed.y > 0 && shed.y < page.viewportSize()!.height, 'the premise: the word to end the selection is in the window').toBe(true)
+  await mergedBlock.evaluate(block => {
+    const frame = block.querySelectorAll(':scope > .vault-result')[1]
+    ;(window as any).__e2e_press = null
+    window.addEventListener(
+      'mousedown',
+      e => {
+        const sel = getSelection()!
+        const elem = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement ?? null
+        ;(window as any).__e2e_press = {
+          selection: [sel.type, sel.toString(), !!sel.anchorNode && block.contains(sel.anchorNode)],
+          item: elem?.closest('.container')?.getAttribute('data-item-id') ?? null,
+          inBlock: !!elem && block.contains(elem),
+          inFrame: !!elem && !!frame && frame.contains(elem),
+        }
+      },
+      { capture: true, once: true }
+    )
+  })
   await page.mouse.click(shed.x + shed.width / 2, shed.y)
+  expect(
+    await page.evaluate(() => (window as any).__e2e_press),
+    'the premise: the selection-ending press landed inside the open block with the selection standing in it'
+  ).toEqual({
+    selection: ['Range', 'tidy', true],
+    item: mergedId,
+    inBlock: true,
+    inFrame: true,
+  })
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
   expect([(await selection())[0] == 'Range', await merged()], 'a click that ends a selection toggles nothing').toEqual([false, [['open', 'opened']]])
-  await page.mouse.click(shed.x + shed.width / 2, shed.y)
+  await clearLoading()
+  const shedAgain = (await word('shed'))!
+  expect(shedAgain.y > 0 && shedAgain.y < page.viewportSize()!.height, 'the premise: the word to close the block is in the window').toBe(true)
+  await page.mouse.click(shedAgain.x + shedAgain.width / 2, shedAgain.y)
   await expect.poll(merged, "a click on an open section's text closes the block").toEqual([['line', 'closed']])
   expect(await page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), MERGED), 'and opens no editor').toBe(false)
   // A TAP THAT TOGGLES LEAVES THE FOCUS WHERE IT WAS: on the closed line, which it opens, and on the open
   // section's text, which it closes. The editor is the active element after each as it was before the press, with
   // its selection, its text and its look, and nothing scrolled (the block's item is where it was in the window)
   const top = () => mergedBlock.evaluate(block => Math.round(block.closest('.container')!.getBoundingClientRect().top))
-  await centre()
   await hold(EDITOR, 5, 9)
+  await centre()
   expect(await held(EDITOR), 'the premise: the editor has the focus before the tap on the closed line').toEqual(editing)
+  const headBox = (await (await headOf(page, MERGED)).boundingBox())!
+  expect(headBox.y > 0 && headBox.y < page.viewportSize()!.height, 'the premise: the head to tap is in the window').toBe(true)
   const closedTop = await top()
   await clickHead(page, MERGED)
   await expect.poll(merged, 'a tap on the closed line opens the section').toEqual([['open', 'opened']])
   expect([await held(EDITOR), await top()], 'and the focus is where it was: the editor is the active element, with its selection, and nothing scrolled').toEqual([editing, closedTop])
   await hold(EDITOR, 5, 9)
+  // `clickHead` blurred and restored focus on the editor (`items = items`), which can re-render
+  // error/math items from earlier rows and raise `.loading.visible` over raw `page.mouse.click`
+  await clearLoading()
   expect(await held(EDITOR), "the premise: the editor has the focus before the tap on the open section's text").toEqual(editing)
   const text = (await word('shed'))!
+  expect(text.y > 0 && text.y < page.viewportSize()!.height, 'the premise: the word to tap is in the window').toBe(true)
   await page.mouse.click(text.x + text.width / 2, text.y)
   await expect.poll(merged, "a tap on the open section's text closes it").toEqual([['line', 'closed']])
   expect([await held(EDITOR), await top()], 'and the focus is where it was, the same').toEqual([editing, closedTop])
@@ -4433,15 +4509,58 @@ test('inert sections that follow each other are one block under one head, a line
   // be the item's edit tap): the drag took the focus, as a drag does, and gets none back. A click that reaches the
   // block afterwards with no press of its own (a dispatched one, which nothing else hears) toggles it and leaves the
   // focus where it is: the block used to keep the editor from that press, and focused it then
-  await centre()
   await hold(EDITOR, 5, 9)
+  await centre()
   const from = (await (await headOf(page, MERGED)).boundingBox())!
   const outside = await mergedBlock.evaluate(block => (item => ({ x: item.left + 80, y: item.bottom - 18 }))(block.closest('.container')!.getBoundingClientRect()))
+  expect(
+    from.y + 8 > 0 && from.y + 8 < page.viewportSize()!.height && outside.y > 0 && outside.y < page.viewportSize()!.height,
+    'the premise: the closed head and the release point outside it are in the window'
+  ).toBe(true)
+  // capture the active editor and press target at mousedown and the release target at mouseup so a
+  // missed head press (which would never record the editor for the gesture) or a misdirected release
+  // fails here rather than passing the stale-focus check vacuously
+  await mergedBlock.evaluate(block => {
+    const head = block.querySelector(':scope > .inert-line')!
+    const container = block.closest('.container')!
+    ;(window as any).__e2e_drag = { down: null, up: null }
+    window.addEventListener(
+      'mousedown',
+      e => {
+        const elem = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement ?? null
+        ;(window as any).__e2e_drag.down = {
+          active: document.activeElement?.id || document.activeElement?.tagName,
+          item: elem?.closest('.container')?.getAttribute('data-item-id') ?? null,
+          inHead: !!elem && head.contains(elem),
+        }
+      },
+      { capture: true, once: true }
+    )
+    window.addEventListener(
+      'mouseup',
+      e => {
+        const elem = e.target instanceof Element ? e.target : (e.target as Node | null)?.parentElement ?? null
+        ;(window as any).__e2e_drag.up = {
+          item: elem?.closest('.container')?.getAttribute('data-item-id') ?? null,
+          inItem: !!elem && container.contains(elem),
+          inBlock: !!elem && block.contains(elem),
+        }
+      },
+      { capture: true, once: true }
+    )
+  })
   await page.mouse.move(from.x + 5, from.y + 8)
   await page.mouse.down()
   await page.mouse.move(outside.x, outside.y, { steps: 4 })
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 300)))
   await page.mouse.up()
+  expect(
+    await page.evaluate(() => (window as any).__e2e_drag),
+    'the premise: the press landed on the closed head with the editor focused, and the release landed outside the block on the same item'
+  ).toEqual({
+    down: { active: EDITOR, item: mergedId, inHead: true },
+    up: { item: mergedId, inItem: true, inBlock: false },
+  })
   await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)))
   await page.evaluate(() => getSelection()!.removeAllRanges())
   const mergedEditing = () => page.evaluate(label => !!(window as any)._item(label, true).elem.querySelector('.container.editing'), MERGED)
@@ -4563,9 +4682,9 @@ test('inert sections that follow each other are one block under one head, a line
   // focus that scrolled would bring it back. A CARET, not a selection: a plain focus scrolls the page to a box's
   // caret, and did not to a selection restored in the same turn, in the lanes' Chromium, so a mutant without
   // `preventScroll` passed over a selection. [the MindBox is above the window, the item's place in the window])
+  await hold('textarea-mindbox', 3, 3)
   await settle(await headOf(page, REPLY), 'start')
   const stood = () => page.evaluate(label => [document.getElementById('textarea-mindbox')!.getBoundingClientRect().bottom < 0, Math.round((window as any)._item(label, true).elem.getBoundingClientRect().top)], REPLY)
-  await hold('textarea-mindbox', 3, 3)
   const [box, stand] = [await held('textarea-mindbox'), await stood()]
   expect([box.active, box.selected.slice(0, 2), box.shown, box.focused, stand[0]], 'the premise: the MindBox has the focus, out of the window, its caret at a known place').toEqual(['textarea-mindbox', [3, 3], 'visible', true, true])
   await clickHead(page, REPLY)

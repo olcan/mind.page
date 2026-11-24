@@ -1222,6 +1222,15 @@ test('a hidden parent tag places a renamed chat under its tag parent: context, a
     await settled()
     const before = await facts()
     await loadAdmin(page) // signs in and navigates: the reload
+    // wait for a server-confirmed, currently served revision: loadAdmin returns once the initial
+    // cache snapshot has rendered, before the server snapshot reconciles a deleted duplicate that
+    // the cache briefly re-added after the navigation aborted its delete ACK
+    await expect
+      .poll(() => page.evaluate(() => window._server_confirmed && window._server_current), {
+        message: 'the reloaded page applied a server-confirmed corpus',
+        timeout: 30_000,
+      })
+      .toBe(true)
     expect(await facts(), 'the same facts after a reload').toEqual(before)
     return before
   }

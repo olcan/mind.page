@@ -1,7 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 import { focusMindbox, mindbox } from './editor_helpers.js'
-import { ALICE, firestore, loadAdmin, loadAnonymous, loadUser, secretFor, waitForApp } from './helpers.js'
+import { ALICE, firestore, laneProjectId, loadAdmin, loadAnonymous, loadUser, secretFor, waitForApp } from './helpers.js'
 import { savedId } from './editor_helpers.js'
+import { isEmulatorChannel400, timeoutWithWait } from './lifecycle_helpers.js'
 
 // the PAGE-CACHE RESTORE (see src/page_lifecycle.ts and onPageShow in index.svelte): the browser
 // fires pagehide when it parks a page in its back/forward cache (a back navigation; on iOS every
@@ -167,9 +168,10 @@ test.describe('under an iPhone UA', () => {
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.6 Mobile/15E148 Safari/604.1',
   })
 
-  test('a pagehide leaves the client dead — a write never settles, silently — and the restore brings a live one', async ({
-    page,
-  }) => {
+  test('a pagehide leaves the client dead — a write never settles, silently — and the restore brings a live one', async (
+    { page },
+    testInfo
+  ) => {
     const CONTROL = '#e2e_dead_client/control a write that settles on the live client'
     const DEAD = '#e2e_dead_client/dead a write the dead client never sends'
     const AFTER = '#e2e_dead_client/after a write that settles on the reloaded client'
@@ -201,14 +203,30 @@ test.describe('under an iPhone UA', () => {
       savedText: CONTROL,
     })
     const controlMs = Date.now() - started
-    // listening before the pagehide: an error thrown inside the SDK's handler counts too
+    // listening before the pagehide: every pageerror and every app/SDK console.error counts; let
+    // through only Chromium's exact network-resource 400 diagnostic on the configured Firestore
+    // emulator's Listen/Write WebChannel (the emulator occasionally answers 400 on an idle/closed
+    // backchannel under full-gate load, logging a browser resource error during a long wait)
+    const emulatorHost = process.env.FIRESTORE_EMULATOR_HOST ?? '127.0.0.1:8080'
+    const projectId = laneProjectId()
     const errors: string[] = []
     page.on('pageerror', e => errors.push(String(e)))
-    page.on('console', msg => void (msg.type() == 'error' && errors.push(msg.text())))
+    page.on('console', msg => {
+      if (msg.type() != 'error') return
+      const loc = msg.location()
+      if (isEmulatorChannel400({ text: msg.text(), location: loc, argsCount: msg.args().length }, { emulatorHost, projectId }))
+        return
+      errors.push(loc.url ? `${msg.text()} (${loc.url})` : msg.text())
+    })
     // the SDK's own pagehide handler runs here: the zombie mark, then (this UA) the restricted queue
     await page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })))
     await page.evaluate(text => void window._create(text), DEAD)
     const waitMs = Math.max(5_000, 5 * controlMs) // at least five times what the control needed, by construction
+    // add the derived wait to a finite configured timeout so the rest of the row keeps its original
+    // budget, and leave an unlimited timeout (0) unlimited (`controlMs` spans the awaited `_create`
+    // plus the 30 s save poll, so `waitMs` is not bounded to 150 s)
+    const nextTimeout = timeoutWithWait(testInfo.timeout, waitMs)
+    if (nextTimeout > 0) testInfo.setTimeout(nextTimeout)
     await page.waitForTimeout(waitMs)
     expect(
       await saveState(page, '#e2e_dead_client/dead'),
