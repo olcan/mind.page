@@ -6203,7 +6203,7 @@
 
   // note return value of this function is also returned to any programmatic context where commands are triggered, either directly via return value of _create, or indirectly via window._mindbox_return when triggered via MindBox using dispatched DOM events; only allowed return values are undefined, null, or _Item, w/ strings in particular reserved for alerting errors returned as a string due to return_alerts option
   // `mindbox` false: the command was dispatched by a control of the page and not from the MindBox
-  // (onEditorDone's `mindbox`, onItemPush). WHAT THAT COVERS is what a push returns: NOTHING
+  // (onEditorDone's `mindbox`, onItemPush, onCommandClick). WHAT THAT COVERS is what a push returns: NOTHING
   // (undefined) and a TEXT (the pusher's, when it finds no item by the name) leave the box's text
   // and its focus alone, where the box's own command is cleared and blurred, or given the text
   // and the focus. WHAT IT DOES NOT COVER: an error and an invalid return still show their dialog
@@ -6228,7 +6228,7 @@
     } else if (typeof obj != 'object' || !obj.text || typeof obj.text != 'string') {
       const msg = `invalid return for command ${cmd} handled in item ${item.name}`
       if (return_alerts) return msg
-      _modal(msg)
+      _modal(literalText(msg))
     } else {
       const text = obj.text
       // since we are async, we need to call onEditorDone again with run/editing set properly
@@ -6279,16 +6279,20 @@
     attr = null,
     ignore_command = false,
     return_alerts = false,
-    // false for a COMMAND THAT A CONTROL OF THE PAGE DISPATCHES (onItemPush: the push button of an
-    // item's editor, the push circle by its number): the MindBox is no part of it. its text is not
-    // replaced by the command's, and the command's return leaves the box and its focus alone
-    // (handleCommandReturn, which says for which returns: nothing and a text, as a push's are),
-    // so a draft in the box, and what is typed while the command is still at work, stay. only the
-    // commands that items handle read this (#commands/<name>, a listener's _on_command_<name>):
-    // the built-in ones write the box themselves, and none of them is dispatched this way
+    // false for a COMMAND THAT A CONTROL OF THE PAGE DISPATCHES (onItemPush, onCommandClick): the
+    // MindBox is no part of it. its text is not replaced by the command's, built-in commands skip
+    // clearing the box (including recursive /_install and /push calls and fallthrough item creation,
+    // whose deferred _on_create listeners snapshot '' at schedule time), and item-handled commands
+    // leave the box's text and focus alone for empty/string returns (handleCommandReturn; not carried
+    // into nested commands returned via { text, command: true }), so a draft in the box stays
     mindbox = true
   ) {
     if (mindbox) editorText = text // in case invoked without setting editorText
+    const clearMindbox = () => {
+      if (!mindbox) return
+      lastEditorChangeTime = 0 // disable debounce even if editor focused
+      onEditorChange('')
+    }
     const key = eventKey(e) // physical code, except a character on a remapped keycode
     window['_mindbox_event'] = e
     window['_mindbox_return'] = undefined // set on non-empty returns for MindBox.create
@@ -6341,7 +6345,7 @@
       const was_focused = document.activeElement == textArea(-1)
       if (return_alerts)
         return msg // return alert message string
-      else _modal_alert(msg, () => was_focused && textArea(-1).focus())
+      else _modal_alert(literalText(msg), () => was_focused && textArea(-1).focus())
     }
 
     if (!ignore_command) {
@@ -6409,16 +6413,14 @@
           const item = items[editingItems[0]]
           _item(item.id).editable = true // set via _Item setter
           tick().then(() => textArea(item.index)?.focus())
-          lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange('')
+          clearMindbox()
           return
         }
         case '/_unedit': {
           if (editingItems.length == 0) return alert('/_unedit: no item selected')
           const item = items[editingItems[0]]
           _item(item.id).editable = false // set via _Item setter
-          lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange('')
+          clearMindbox()
           return
         }
         case '/_updates': {
@@ -6491,8 +6493,7 @@
             }
           })()
 
-          lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange('')
+          clearMindbox()
           return
         }
         case '/_dependencies': {
@@ -6539,8 +6540,7 @@
           getDoc(doc(collection(getFirestore(firebase), 'items'), 'QbtH06q6y6GY4ONPzq8N'))
             .then(doc => _create(doc.data().text))
             .catch(console.error)
-          lastEditorChangeTime = 0
-          onEditorChange('')
+          clearMindbox()
           return
         }
         case '/_tweet': {
@@ -6574,8 +6574,7 @@
         case '/_invert': {
           inverted = !inverted
           localStorage.setItem('mindpage_inverted', inverted ? 'true' : 'false')
-          lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange('')
+          clearMindbox()
           return
         }
         case '/_green_screen': {
@@ -6584,16 +6583,16 @@
           return
         }
         default: {
-          if (text.match(/^\/\w+/)) {
+          if (text.match(commandRegex)) {
             // NOTE: text is untrimmed, so no whitespace before /
-            const cmd = text.match(/^\/\w+/)[0]
+            const cmd = text.match(commandRegex)[0]
             // the editor's textarea holds an AUGMENTED value (src/zwsp.ts: zero-width spaces inside
             // long url runs so they can wrap); every save path strips them, and so does a command's
             // argument list: `/wiki_links vscode-insiders://olcan.auto-open-obsidian/file` once
             // reached its handler with a U+200B after `olcan.`, `auto-open-` and `obsidian/`, and
             // the editor launched by that url never saw a valid extension id (2026-09-26)
             let args = removeZWSP(text)
-              .replace(/^\/\w+/, '')
+              .replace(commandRegex, '')
               .replace(/[`\\$]/g, '\\$&')
               .trim()
             // for commands we provide whitespace-split args as additional arguments
@@ -6603,20 +6602,18 @@
               // name this browser profile's device for the instances listing (the #status item):
               // kept in localStorage (shared by every tab of this origin in the profile) and sent
               // with every instance update, the next one at once; without a name, cleared
-              const device_name = text.replace(/^\/\w+/, '').trim().slice(0, 64) // the raw name, unescaped, bounded
+              const device_name = text.replace(commandRegex, '').trim().slice(0, 64) // the raw name, unescaped, bounded
               if (device_name) localStorage.setItem('mindpage_device_name', device_name)
               else localStorage.removeItem('mindpage_device_name')
               instance.device_name = device_name || null
               updateInstance()
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('') // clear the command from the editor, as /_zoom does
+              clearMindbox()
               return
             } else if (cmd == '/_zoom') {
               if (args) localStorage.setItem('mindpage_zoom', args)
               else localStorage.removeItem('mindpage_zoom')
               zoom = args // will affect next checkLayout call
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('')
+              clearMindbox()
               return
             } else if (cmd == '/_narrate') {
               narrating = !narrating
@@ -6632,8 +6629,7 @@
                 }
                 localStorage.removeItem('mindpage_narrating')
               }
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('')
+              clearMindbox()
               return
             } else if (cmd == '/_example') {
               getDocs(
@@ -6671,8 +6667,7 @@
               // manual, preview-confirmed command, run with other writing sessions quiescent.
               // the reporter's report-only contract is unchanged; this is the explicit
               // maintenance path it reserves
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('')
+              clearMindbox()
               return (window['_mindbox_return'] = (async () => {
                 // ONE liveness predicate for the whole command: the component-level `anonymous`
                 // flag IS this app's anonymous mode, and the captured principal must still be
@@ -6774,7 +6769,7 @@
               // command again: with the new tag under the old one (`#a` to `#a/b`), a second run
               // renames the items the first already changed
               // the raw arguments (`args` above is escaped for a handler's template literal)
-              const [from, to, ...more] = removeZWSP(text).replace(/^\/\w+/, '').trim().split(/\s+/)
+              const [from, to, ...more] = removeZWSP(text).replace(commandRegex, '').trim().split(/\s+/)
               if (!to || more.length) return alert(`usage: ${cmd} #tag #new_tag`)
               const invalid = [from, to].find(tag => !renamableTag(tag))
               if (invalid) return alert(`${cmd}: invalid tag '${invalid}' (expected a visible absolute tag like #tag)`)
@@ -6806,8 +6801,7 @@
                   const renamed = renameTag(items[index].text, from, to)
                   if (renamed != items[index].text) _item(id).write(renamed, '' /* whole item */, { keep_time: true })
                 }
-                lastEditorChangeTime = 0 // disable debounce even if editor focused
-                onEditorChange('')
+                clearMindbox()
               })
               return (window['_mindbox_return'] = (async () => {
                 await _modal_close() // close/cancel all modals
@@ -6860,8 +6854,7 @@
                   return alert(`${cmd}: failed to read ${file}: ` + e)
                 }
               })()
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('')
+              clearMindbox()
               return
             } else if (cmd == '/_install' || cmd == '/_update') {
               const updating = cmd == '/_update'
@@ -6879,9 +6872,9 @@
 
               // install item from specified github source
               let [path, repo, branch, owner, token] = args.split(/\s+/)
-              if (!repo) repo = 'mind.items'
+              if (!repo) repo = DEFAULT_INSTALL_REPO
               if (!branch) branch = 'master'
-              if (!owner) owner = 'olcan'
+              if (!owner) owner = DEFAULT_INSTALL_OWNER
               // NOT read on the isolated shared origin: a github token stored there by one
               // owner's page would be readable by the next owner's code (see itemStore)
               if (!token && !isSharedOrigin(hostname)) token = localStorage.getItem('mindpage_github_token')
@@ -6920,8 +6913,7 @@
               else {
                 if (installed_dependencies.has(path)) {
                   console.debug(`${cmd}: skipping already-${updating ? 'updated' : 'installed'} dependency at ${path}`)
-                  lastEditorChangeTime = 0 // disable debounce even if editor focused
-                  onEditorChange('')
+                  clearMindbox()
                   // note item label is dependency path minus default .md suffix
                   return _item('#' + path.replace(/\.md$/, '')) // return dependency
                 }
@@ -6933,8 +6925,7 @@
               const start = Date.now()
 
               // clear command and return promise for processing ...
-              lastEditorChangeTime = 0 // disable debounce even if editor focused
-              onEditorChange('')
+              clearMindbox()
               return (window['_mindbox_return'] = (async () => {
                 try {
                   // if no token, prompt for it, also mentioning rate limits
@@ -6954,7 +6945,8 @@
                   // NOTE: force-closing modals is especially important since install/update can be invoked recursively for dependencies ...
                   await _modal_close() // close/cancel all modals
                   _modal({
-                    content: (updating ? 'Updating' : 'Installing') + ` ${updating && label ? label : path} ...`,
+                    content:
+                      (updating ? 'Updating' : 'Installing') + ` ${literalText(updating && label ? label : path)} ...`,
                     background: 'block',
                   })
                   // retrieve commit sha (allows comparison to later versions)
@@ -7076,7 +7068,7 @@
                         label,
                         ...dependents,
                       ].join(' <- ')}`
-                      const dep_item = await onEditorDone(command)
+                      const dep_item = await onEditorDone(command, null, false, false, true, null, null, false, false, mindbox)
                       if (!dep_item) {
                         throw new Error(`${cmd}: failed to install dependency ${dep} for ${label}`)
                       } else if (dep_item.name.toLowerCase() != dep.toLowerCase()) {
@@ -7100,7 +7092,7 @@
                     if (!updating) {
                       await _modal_close() // close/cancel all modals
                       const replace = await _modal({
-                        content: `Replace existing ${label}?`,
+                        content: `Replace existing ${literalText(label)}?`,
                         confirm: 'Replace',
                         cancel: 'Cancel',
                         background: 'cancel',
@@ -7186,7 +7178,7 @@
                       background: 'confirm',
                     })
 
-                    if (item.pushable && _exists('#pusher')) onEditorDone('/push ' + item.name)
+                    if (item.pushable && _exists('#pusher')) onEditorDone('/push ' + item.name, null, false, false, true, null, null, false, false, mindbox)
 
                     // ask about reloading for changes to init/welcome items ...
                     const reload_items = items.filter(i => i.shouldReload).map(i => i.name)
@@ -7268,7 +7260,7 @@
                   .then(carryInput((obj: any) => handleCommandReturn(cmd, item, obj, run, editing, return_alerts, handleError, mindbox)))
                   .catch(handleError))
               }
-              return alert(`unknown command ${cmd} ${args}`)
+              return alert(`unknown command ${removeZWSP(text).trim()}`)
             }
           } else if (text.match(/^\/\s+/s)) {
             // clear /(space) as a mechanism to disable search
@@ -7399,15 +7391,17 @@
     // if editor text starts with a label (tag), keep it to maintain context for new item: the
     // label followed by a space (or ending the text), or by a NEWLINE (a child hook may put the
     // rest of the child on its own line; the box still navigates to the child)
-    const newLabel = items[0].labelText
-    const startsWithLabel =
-      !!newLabel && ((editorText + ' ').startsWith(newLabel + ' ') || editorText.startsWith(newLabel + '\n'))
-    editorText =
-      e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
-      !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
-      startsWithLabel
-        ? newLabel + ' '
-        : ''
+    if (mindbox) {
+      const newLabel = items[0].labelText
+      const startsWithLabel =
+        !!newLabel && ((editorText + ' ').startsWith(newLabel + ' ') || editorText.startsWith(newLabel + '\n'))
+      editorText =
+        e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
+        !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
+        startsWithLabel
+          ? newLabel + ' '
+          : ''
+    }
 
     // hideIndex++; // show one more item
     lastEditorChangeTime = 0 // disable debounce even if editor focused
@@ -7471,13 +7465,15 @@
       })
     }
 
-    // invoke _on_create on all _listen items
+    // invoke _on_create on all _listen items with the text settled by THIS creation (not whatever
+    // `editorText` holds when the timer runs — e.g. `_create` restores the previous draft synchronously)
+    const createText = mindbox ? editorText : ''
     setTimeout(() => {
       items.forEach(item => {
         if (!item.listen) return
         if (!itemDefinesFunction(item, '_on_create')) return
         Promise.resolve(
-          _item(item.id).eval(`_on_create(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
+          _item(item.id).eval(`_on_create(\`${createText.replace(/[`\\$]/g, '\\$&')}\`)`, {
             trigger: 'listen',
             async: item.deepasync, // run async if item is async or has async deps
             async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
@@ -8613,6 +8609,27 @@
     onEditorDone('/_update ' + items[index].label)
   }
 
+  function onCommandClick(cmd: string, _e: MouseEvent) {
+    if (fixed) return
+    const dispatch = (text: string) =>
+      onEditorDone(text, null, false, false, true, null, null, false, false, false /* mindbox */)
+    const bound = oneTapCommand(cmd, items, { preview: user?.uid === PUBLISHER_UID && !anonymous })
+    if (bound) {
+      dispatch(bound)
+      return
+    }
+    const run = carryInput(() => dispatch(cmd))
+    void (async () => {
+      const confirmed = await _modal({
+        content: confirmCommandContent(cmd),
+        confirm: 'Run',
+        cancel: 'Cancel',
+        background: 'cancel',
+      })
+      if (confirmed === true) run()
+    })()
+  }
+
   function onItemPush(index: number) {
     if (!_item('#pusher')) {
       _modal(`can not push ${items[index].name}, #pusher must be installed first`)
@@ -9156,6 +9173,7 @@
     hash_128_murmur3_x64,
     hash_128_murmur3_x86,
     hash_160_sha1,
+    commandRegex,
   } from '../util.js'
   import {
     hashSecretPhrase as hashSecretPhraseForUid,
@@ -9190,6 +9208,13 @@
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
+  import {
+    DEFAULT_INSTALL_OWNER,
+    DEFAULT_INSTALL_REPO,
+    confirmCommandContent,
+    literalText,
+    oneTapCommand,
+  } from '../command_links'
   import { forgetSearch } from '../inert_blocks'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
@@ -10344,10 +10369,10 @@
     })
   }
 
+  const PUBLISHER_UID = 'y2swh7JY2ScO5soV7mJMHVltAOX2'
+
   function isAdmin() {
-    return (
-      user?.uid == 'y2swh7JY2ScO5soV7mJMHVltAOX2' && (location.host == 'mindbox.io' || url_params.user == 'anonymous')
-    )
+    return user?.uid == PUBLISHER_UID && (location.host == 'mindbox.io' || url_params.user == 'anonymous')
   }
 
   function useAnonymousAccount() {
@@ -12990,6 +13015,7 @@
                 {onImageRendered}
                 {onPastedImage}
                 {onTagClick}
+                {onCommandClick}
                 {onLinkClick}
                 {onLogSummaryClick}
                 onPrev={onPrevItem}

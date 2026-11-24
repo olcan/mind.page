@@ -8,8 +8,18 @@
 // tag (the real /vault request shape); a second visible #agent/vault label would make
 // _item(name, true) return null on the ambiguity.
 import { expect, test } from '@playwright/test'
-import { firestore, install, loadAdmin, waitForApp } from './helpers.js'
-import { focusMindbox, mindbox, visible } from './editor_helpers.js'
+import {
+  FAKE_GITHUB_TOKEN,
+  firestore,
+  historyRecords,
+  install,
+  itemRecord,
+  loadAdmin,
+  readItemState,
+  waitForApp,
+  waitWritesSettled,
+} from './helpers.js'
+import { focusMindbox, mindbox, savedId, visible } from './editor_helpers.js'
 
 test('a canonical reply renders as inert markdown: structure, admitted links, literal grammar', async ({ page }) => {
   // design §2.2a amended 2026-09-05 (owner): the dead frame shows the decoded body as Markdown
@@ -1307,6 +1317,727 @@ test("a tag written in an inert section is a quiet link: a click fills the MindB
       }
     }, await shown(TODO))
   await expect.poll(narrow, "the closed line at a phone's width").toEqual({ width: 375, lines: 1, cut: [true, 'ellipsis'], line: true, tags: [true, true, true] })
+})
+
+test("an inline-code command in an inert section is a quiet link: one-tap /_update of an installed default-repo item runs directly; other commands confirm first without changing MindBox text or focus; drag and closed line run nothing", async ({ page }) => {
+  // the owner, 2026-11-23 (src/inert_markdown.ts COMMAND LINKS, src/command_links.ts option B):
+  // an inline-code command in an inert section shows as `code.command-link` in the tag link's look.
+  // Only `/_update` of an already-installed item from the default repo (`olcan/mind.items`, served
+  // locally by loadAdmin's interceptMindItems) runs at one tap; every other command first shows
+  // "Run this command?" with the exact literal text (no Markdown/HTML/URL interpretation), where
+  // Enter/Run runs it and Escape/Cancel runs nothing, keeping MindBox text and focus untouched.
+  await loadAdmin(page)
+  const evilRequests: string[] = []
+  const attackerRequests: string[] = []
+  const progressGate = { waiting: false, release: () => {} }
+  await page.route('https://api.github.com/repos/olcan/mind.items/commits*', async route => {
+    const file = new URL(route.request().url()).searchParams.get('path') ?? ''
+    if (file === '**prog**.md') {
+      await new Promise<void>(resolve => {
+        progressGate.waiting = true
+        progressGate.release = resolve
+      })
+      return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' })
+    }
+    return route.fallback()
+  })
+  await page.route('https://evil.example/**', route => {
+    evilRequests.push(route.request().url())
+    return route.abort()
+  })
+  await page.route('https://api.github.com/repos/attacker/**', route => {
+    attackerRequests.push(route.request().url())
+    return route.abort()
+  })
+  page.on('request', req => {
+    if (req.url().includes('evil.example')) evilRequests.push(req.url())
+    if (req.url().includes('/repos/attacker/')) attackerRequests.push(req.url())
+  })
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const TODO = '#e2e_cl/work'
+  const CMD = '#commands/e2e_cl_cmd'
+  const LISTEN = '#e2e_cl_listen'
+  const UNKNOWN = '/e2e_cl_missing $x **bold** <em id="e2e_alert_tag">hi</em>'
+  const BAD_RENAME = '/_rename **bad** _tag_'
+  const PROG_INSTALL = '/_install **prog**'
+  const COMMIT_SHA = '0123456789abcdef0123456789abcdef01234567'
+  const HOSTILE = '/e2e_cl_evil `x` ![img](https://evil.example/px.png) [lnk](https://evil.example) <b id="e2e_evil">hi</b> https://evil.example/u $`a`$'
+  const tree = [
+    'agent',
+    '- run `/_invert` or `/e2e_cl_cmd echo hi` (not `/Users/x/y` or `plain`)',
+    `- more: \`/_zoom 1.05\`, \`/_count\`, \`/e2e_cl_cmd one two\`, \`/e2e_cl_cmd create\`, \`${UNKNOWN}\`, \`${BAD_RENAME}\`, \`${PROG_INSTALL}\`, \`#e2e_cl_tag\` cldraft`,
+    `- updates: \`/_update mind_sync\`, \`/_update mind_sync mind.items preview\`, \`/_update #mind_sync\`, \`/_update mind_sync mind.items ${COMMIT_SHA}\`, \`/_update mind_sync mind.items preview attacker\``,
+    `- hostile: \`\` ${HOSTILE} \`\``,
+  ].join('\n')
+  const cmdItem = [
+    CMD,
+    '```js',
+    'function run(args, a, b) {',
+    '  window.__e2e_cl_ran = (window.__e2e_cl_ran || []).concat([[args, a, b]])',
+    "  if (a == 'echo') return 'would overwrite and focus box'",
+    "  if (a == 'create') return { text: '#e2e_cl_created_item from handler', edit: false }",
+    '}',
+    '```',
+  ].join('\n')
+  const listenItem = [
+    `${LISTEN} #_listen`,
+    '```js',
+    'function _on_create(text) {',
+    '  window.__e2e_cl_created = (window.__e2e_cl_created || []).concat([text])',
+    '}',
+    '```',
+  ].join('\n')
+  for (const text of [cmdItem, listenItem, `${TODO} clword tidy the shed\n${inert(tree)}\na line of the owner under the tree`])
+    await page.evaluate(text => void window._create(text), text)
+  for (const label of [TODO, CMD, LISTEN])
+    await expect.poll(() => page.evaluate(n => window._item(n, true)?.saved_id ?? null, label), { timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(() => {
+    ;(window as any).__e2e_cl_ran = []
+    ;(window as any).__e2e_cl_created = []
+    localStorage.removeItem('mindpage_inverted')
+    localStorage.removeItem('mindpage_zoom')
+  })
+  const select = (label: string) => page.evaluate(label => void (window as any).MindBox.set(label, { scroll: true }), label)
+  const box = () => mindbox(page).inputValue()
+  const focused = () => page.evaluate(() => document.activeElement?.id || document.activeElement?.tagName)
+  const focusBox = async () => void ((await focused()) == 'textarea-mindbox' || (await focusMindbox(page)))
+  const blurBox = () => page.evaluate(() => void (document.activeElement as HTMLElement | null)?.blur())
+  const shown = async (label: string) => `.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${await page.evaluate(label => (window as any)._item(label, true).id, label)}"]`
+  const cmdLinks = async (label: string) =>
+    page.evaluate(sel => [...document.querySelectorAll(`${sel} .vault-result code.command-link`)].map(l => [l.getAttribute('data-command-link'), (l as HTMLElement).title, l.textContent]), await shown(label))
+  const state = async (label: string) =>
+    page.evaluate(
+      sel => ({
+        editing: !!document.querySelector(`${sel}.editing, ${sel} textarea`),
+        blocks: [...document.querySelectorAll(`${sel} .inert-block`)].map(block => [block.matches('.opened, .closed'), [...block.querySelectorAll(':scope > .vault-result')].every(frame => frame.getClientRects().length > 0)]),
+      }),
+      await shown(label),
+    )
+  const inverted = () => page.evaluate(() => [localStorage.getItem('mindpage_inverted'), getComputedStyle(document.documentElement).filter == 'invert(1)'])
+  const zoomVal = () => page.evaluate(() => localStorage.getItem('mindpage_zoom'))
+  const ran = () => page.evaluate(() => ((window as any).__e2e_cl_ran as string[][]).slice())
+  const settle = () => page.evaluate(() => new Promise(r => setTimeout(r, 80)))
+  const OPEN = { editing: false, blocks: [[false, true]] }
+  const modal = page.locator('.modal')
+  const expectConfirm = async (cmd: string, reason = `command ${cmd} shows Run this command? confirmation dialog`, full = false) => {
+    await expect(modal, reason).toBeVisible({ timeout: 3000 })
+    await expect(modal, reason).toContainText('Run this command?', { timeout: 3000 })
+    if (full) {
+      const info = await page.evaluate(() => {
+        const m = document.querySelector('.modal')!
+        const body = [...m.children].filter(el => !el.classList.contains('buttons'))
+        const innerTags = body.flatMap(el => [...el.querySelectorAll('*')].map(n => n.tagName))
+        return {
+          paragraphs: body.map(el => el.tagName),
+          innerTags,
+          code: m.querySelector('code')?.textContent ?? null,
+          buttons: [...m.querySelectorAll('.buttons .button')].map(b => b.textContent?.trim()),
+        }
+      })
+      expect(info, `confirmation dialog renders exact literal text for ${cmd} with Run/Cancel buttons`).toEqual({
+        paragraphs: ['P', 'P'],
+        innerTags: ['CODE'],
+        code: cmd,
+        buttons: ['Cancel', 'Run'],
+      })
+    } else {
+      await expect(modal.locator('code'), `confirmation dialog shows exact text for ${cmd}`).toHaveText(cmd)
+    }
+  }
+
+  // RENDERING & LOOK: all inline-code commands render as `code.command-link` elements (path and plain
+  // span stay ordinary code, the tag code span stays `code.tag-link`, no mark), styled like `code.tag-link`
+  await select(TODO)
+  const todo = await shown(TODO)
+  await expect(page.locator(`${todo} .vault-result[data-inert-rendered]`)).toBeVisible({ timeout: 15_000 })
+  expect(await cmdLinks(TODO), 'all inline-code commands render as command links').toEqual([
+    ['/_invert', '/_invert', '/_invert'],
+    ['/e2e_cl_cmd echo hi', '/e2e_cl_cmd echo hi', '/e2e_cl_cmd echo hi'],
+    ['/_zoom 1.05', '/_zoom 1.05', '/_zoom 1.05'],
+    ['/_count', '/_count', '/_count'],
+    ['/e2e_cl_cmd one two', '/e2e_cl_cmd one two', '/e2e_cl_cmd one two'],
+    ['/e2e_cl_cmd create', '/e2e_cl_cmd create', '/e2e_cl_cmd create'],
+    [UNKNOWN, UNKNOWN, UNKNOWN],
+    [BAD_RENAME, BAD_RENAME, BAD_RENAME],
+    [PROG_INSTALL, PROG_INSTALL, PROG_INSTALL],
+    ['/_update mind_sync', '/_update mind_sync', '/_update mind_sync'],
+    ['/_update mind_sync mind.items preview', '/_update mind_sync mind.items preview', '/_update mind_sync mind.items preview'],
+    ['/_update #mind_sync', '/_update #mind_sync', '/_update #mind_sync'],
+    [`/_update mind_sync mind.items ${COMMIT_SHA}`, `/_update mind_sync mind.items ${COMMIT_SHA}`, `/_update mind_sync mind.items ${COMMIT_SHA}`],
+    ['/_update mind_sync mind.items preview attacker', '/_update mind_sync mind.items preview attacker', '/_update mind_sync mind.items preview attacker'],
+    [HOSTILE, HOSTILE, HOSTILE],
+  ])
+  const looks = await page.evaluate(sel => {
+    const frame = document.querySelector(`${sel} .vault-result`)!
+    const style = (e: Element) => {
+      const s = getComputedStyle(e)
+      return { font: [s.fontFamily, s.fontSize, s.fontWeight, s.lineHeight].join(' | '), box: [s.padding, s.borderRadius, s.borderStyle].join(' | '), color: s.color, background: s.backgroundColor, line: s.textDecorationLine, cursor: s.cursor }
+    }
+    return {
+      marks: frame.querySelectorAll('mark').length,
+      tags: [...frame.querySelectorAll('code.tag-link')].map(c => c.textContent),
+      plain: [...frame.querySelectorAll('code:not(.tag-link):not(.command-link)')].map(c => c.textContent),
+      cmd: style(frame.querySelector('code.command-link')!),
+      tag: style(frame.querySelector('code.tag-link')!),
+      code: style(frame.querySelector('code:not(.tag-link):not(.command-link)')!),
+    }
+  }, todo)
+  expect([looks.marks, looks.tags, looks.plain]).toEqual([0, ['#e2e_cl_tag'], ['/Users/x/y', 'plain']])
+  expect(looks.cmd, 'a command link has the exact look of a tag link').toEqual(looks.tag)
+  expect([looks.cmd.line, looks.cmd.cursor]).toEqual(['none', 'pointer'])
+  expect(looks.cmd.color).not.toBe(looks.code.color)
+
+  // CLOSED LINE: plain inline code look (no tint, no pointer); clicking it opens the section and runs nothing
+  await page.evaluate(() => void (window as any).MindBox.set('clword'))
+  const closed = async () =>
+    page.evaluate(sel => {
+      const block = document.querySelector(`${sel} .inert-block`) as HTMLElement
+      const status = block.querySelector(':scope > .inert-line > .inert-status')!
+      const style = getComputedStyle(block)
+      const look = (e: Element) => [getComputedStyle(e).color, getComputedStyle(e).backgroundColor, getComputedStyle(e).cursor].join(' ')
+      const cmds = [...status.querySelectorAll('code.command-link')]
+      const span = status.appendChild(document.createElement('code'))
+      span.textContent = 'x'
+      const plainLook = look(span)
+      span.remove()
+      return {
+        shown: [status.getClientRects().length > 0, [...block.querySelectorAll(':scope > .vault-result')].some(frame => frame.getClientRects().length > 0)],
+        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        cmds: cmds.map(c => [c.tagName, c.className, c.getAttribute('title'), c.textContent]),
+        looks: { cmds: cmds.map(look), plain: plainLook, open: look(block.querySelector('.vault-result code.command-link')!) },
+      }
+    }, await shown(TODO))
+  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line and holds its command links').toEqual({
+    shown: [true, false],
+    lines: 1,
+    cmds: [
+      ['CODE', 'command-link', '/_invert', '/_invert'],
+      ['CODE', 'command-link', '/e2e_cl_cmd echo hi', '/e2e_cl_cmd echo hi'],
+    ],
+    looks: 0,
+  })
+  const closedLooks = (await closed()).looks
+  expect(closedLooks.cmds, 'in the closed line a command has the plain inline code look').toEqual([closedLooks.plain, closedLooks.plain])
+  expect(closedLooks.open, 'which is not the tinted link look in the open frame').not.toBe(closedLooks.plain)
+  await page.locator(`${await shown(TODO)} .inert-block > .inert-line > .inert-status code.command-link`).first().click()
+  await expect.poll(() => state(TODO), 'clicking the closed line opens the section').toEqual({ editing: false, blocks: [[true, true]] })
+  expect([await box(), await inverted(), await ran()], 'the closed line click runs nothing and leaves MindBox alone').toEqual(['clword', [null, false], []])
+  await expect(modal).toBeHidden()
+
+  // record what the window hears on command links (capture vs bubble)
+  await page.evaluate(() => {
+    const w = window as any
+    w.__cmd_link_events = []
+    for (const type of ['mousedown', 'click'])
+      for (const capture of [true, false])
+        window.addEventListener(type, e => (e.target as Element).closest?.('code.command-link') && w.__cmd_link_events.push(`${capture ? 'capture' : 'bubble'}:${type}:${(e as MouseEvent).button}`), capture)
+  })
+  const events = () => page.evaluate(() => ((window as any).__cmd_link_events as string[]).splice(0))
+  const CLICK = ['capture:mousedown:0', 'bubble:mousedown:0', 'capture:click:0']
+  const cmdAt = async (cmd: string) => {
+    const attr = cmd.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+    const link = page.locator(`${await shown(TODO)} .vault-result code.command-link[data-command-link="${attr}"]`)
+    await expect(link).toBeVisible()
+    await link.scrollIntoViewIfNeeded()
+    let last = ''
+    await expect.poll(async () => last == (last = JSON.stringify(await link.boundingBox())), { intervals: [100] }).toBe(true)
+    await events()
+    return link
+  }
+
+  // UNFOCUSED MINDBOX: non-one-tap commands ask first ("Run this command?"); Escape and Cancel run
+  // nothing, Enter runs the command; MindBox text and focus stay untouched in every case
+  await select(TODO)
+  await expect.poll(() => state(TODO)).toEqual(OPEN)
+  await blurBox()
+  expect(await focused(), 'premise: MindBox is unfocused').not.toBe('textarea-mindbox')
+
+  await (await cmdAt('/_invert')).click()
+  await expectConfirm('/_invert', 'non-one-tap /_invert asks first instead of running at one tap', true)
+  expect(await events(), 'press reached the page; click stopped in the frame').toEqual(CLICK)
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+  await settle()
+  expect(await inverted(), 'Escape in confirmation dialog runs nothing').toEqual([null, false])
+  expect(await box(), 'Escape keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'Escape does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+
+  await (await cmdAt('/_invert')).click()
+  await expectConfirm('/_invert')
+  await modal.locator('.button.cancel').click()
+  await expect(modal).toBeHidden()
+  await settle()
+  expect(await inverted(), 'Cancel button in confirmation dialog runs nothing').toEqual([null, false])
+  expect(await box(), 'Cancel button keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'Cancel button does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+
+  await (await cmdAt('/_invert')).click()
+  await expectConfirm('/_invert')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect.poll(inverted, { message: 'Enter in confirmation dialog runs /_invert', timeout: 3000 }).toEqual(['true', true])
+  expect(await box(), 'confirmed /_invert keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'confirmed /_invert does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+  expect(await state(TODO), 'no toggle, no editor').toEqual(OPEN)
+
+  await (await cmdAt('/e2e_cl_cmd echo hi')).click()
+  await expectConfirm('/e2e_cl_cmd echo hi')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect.poll(ran, 'confirmed /e2e_cl_cmd runs the #commands item').toEqual([['echo hi', 'echo', 'hi']])
+  await settle()
+  expect(await box(), 'item command returning a string keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'item command returning a string does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+
+  // confirmed unknown command carries `$`, emphasis, and HTML: dispatcher alert shows original command
+  // as plain literal text (no backslash-escaped `$`, no `code` wrapper, no strong/em/HTML element)
+  await (await cmdAt(UNKNOWN)).click()
+  await expectConfirm(UNKNOWN)
+  await page.keyboard.press('Enter')
+  await expect(modal, 'unknown command alert renders original command as literal text').toContainText(`unknown command ${UNKNOWN}`)
+  expect(
+    await page.evaluate(() => ({
+      strong: document.querySelectorAll('.modal strong').length,
+      em: document.querySelectorAll('.modal em').length,
+      code: document.querySelectorAll('.modal code').length,
+      alertTag: !!document.querySelector('#e2e_alert_tag'),
+    })),
+    'unknown command alert renders command as plain literal text (no strong, em, code, or html element)',
+  ).toEqual({ strong: 0, em: 0, code: 0, alertTag: false })
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+  expect(await box(), 'unknown command alert keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'dismissing the alert does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+
+  // confirmed `/_rename` with invalid Markdown-formatted argument: refusal alert renders punctuation literally
+  await (await cmdAt(BAD_RENAME)).click()
+  await expectConfirm(BAD_RENAME)
+  await page.keyboard.press('Enter')
+  await expect(modal, 'invalid /_rename alert renders emphasis punctuation as literal text').toContainText(
+    "/_rename: invalid tag '**bad**' (expected a visible absolute tag like #tag)",
+  )
+  expect(
+    await page.evaluate(() => ({
+      strong: document.querySelectorAll('.modal strong').length,
+      em: document.querySelectorAll('.modal em').length,
+    })),
+    'invalid /_rename alert creates no strong or em elements',
+  ).toEqual({ strong: 0, em: 0 })
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+
+  // confirmed `/_install **prog**`: progress dialog renders path as literal text (no strong element)
+  progressGate.waiting = false
+  await (await cmdAt(PROG_INSTALL)).click()
+  await expectConfirm(PROG_INSTALL)
+  await page.keyboard.press('Enter')
+  try {
+    await expect.poll(() => progressGate.waiting, { message: 'install progress request intercepted', timeout: 10_000 }).toBe(true)
+    await expect(modal, 'install progress modal renders path as literal text').toContainText('Installing **prog**.md ...')
+    expect(
+      await page.evaluate(() => document.querySelectorAll('.modal strong').length),
+      'install progress modal creates no strong element from path',
+    ).toBe(0)
+  } finally {
+    progressGate.release()
+    progressGate.waiting = false
+  }
+  await page.evaluate(() => (window as any)._mindbox_return)
+  await expect(modal).toBeHidden()
+
+  // HOSTILE COMMAND: backticks, image, link, raw HTML, naked URL, `$` render as literal text only
+  // inside the confirmation dialog — zero img/a/b elements, zero network requests to evil.example
+  await (await cmdAt(HOSTILE)).click()
+  await expectConfirm(HOSTILE, 'hostile command dialog renders exact text only with no Markdown, HTML, image, or link', true)
+  expect(
+    await page.evaluate(() => ({
+      imgs: document.querySelectorAll('.modal img').length,
+      links: document.querySelectorAll('.modal a').length,
+      evilEl: !!document.querySelector('#e2e_evil'),
+    })),
+    'hostile command dialog creates no image, link, or injected element',
+  ).toEqual({ imgs: 0, links: 0, evilEl: false })
+  expect(evilRequests, 'hostile command dialog triggers no request to evil.example').toEqual([])
+  await modal.locator('.button.cancel').click()
+  await expect(modal).toBeHidden()
+  await settle()
+  expect(await box()).toBe(TODO)
+  expect(await focused()).not.toBe('textarea-mindbox')
+
+  // ONE-TAP `/_update` ON AN INSTALLED DEFAULT-REPO ITEM (`olcan/mind.items`, served locally), on the
+  // writable ANONYMOUS notebook that `loadAdmin` opens with the publisher's fixture account: install
+  // `mind_sync` (plain prose, no deps or _init), mark it stale, then tap `/_update mind_sync` (no
+  // branch, so `master`; unfocused): it runs directly with NO "Run this command?" dialog, restores
+  // the text, and leaves the MindBox unfocused and untouched. A `preview` update asks first here and
+  // the row cancels it (one tap for `preview` is the publisher's own notebook only: the unit table
+  // holds that option), and an owner argument (`attacker`) asks first too.
+  expect(await install(page, 'mind_sync')).toBeNull()
+  const origMindSync = await page.evaluate(() => {
+    const it = window._item('#mind_sync') as any
+    const orig = it.text as string
+    it.write('#mind_sync stale', '')
+    it.pushable = false
+    return orig
+  })
+  await expect.poll(() => page.evaluate(() => window._item('#mind_sync', true)?.text)).toBe('#mind_sync stale')
+  await select(TODO)
+  await expect.poll(() => state(TODO)).toEqual(OPEN)
+  await blurBox()
+  await page.evaluate(() => {
+    const w = window as any
+    w.__e2e_cl_modals = []
+    const m = document.querySelector('.modal')!
+    const obs = new MutationObserver(() => {
+      if (m.closest('.background.visible')) w.__e2e_cl_modals.push(m.textContent ?? '')
+    })
+    obs.observe(m, { childList: true, subtree: true, characterData: true })
+    w.__e2e_cl_obs = obs
+  })
+
+  const dismissUpdated = async (reason: string) => {
+    await expect(modal, reason).toContainText('Updated #mind_sync', { timeout: 15_000 })
+    await modal.locator('.button.confirm', { hasText: 'OK' }).click()
+    const skip = modal.locator('.button.cancel', { hasText: 'Skip' })
+    await expect.poll(async () => (await modal.isHidden()) || (await skip.isVisible()), { timeout: 10_000 }).toBe(true)
+    if (await skip.isVisible()) await skip.click()
+    await expect(modal).toBeHidden()
+  }
+
+  // no-branch `/_update mind_sync` runs at one tap on the anonymous notebook (defaults to `master`),
+  // leaving no GitHub token in live item attributes (checked while the write is still in flight,
+  // before onSaveDone strips it) or in the saved `items` / newest `history` records
+  await waitWritesSettled(page, '#mind_sync')
+  const mindSyncId = (await savedId(page, '#mind_sync'))!
+  expect(mindSyncId, 'installed #mind_sync has a saved id').toBeTruthy()
+  await expect
+    .poll(async () => (await historyRecords(mindSyncId)).length, {
+      message: '#mind_sync pre-update history copies written',
+      timeout: 30_000,
+    })
+    .toBeGreaterThanOrEqual(2)
+  const histIdsBeforeUpdate = new Set((await historyRecords(mindSyncId)).map(h => h.id))
+
+  let releaseWrite!: () => void
+  const writeGate = new Promise<void>(resolve => {
+    releaseWrite = resolve
+  })
+  const writePattern = /Firestore\/Write\/channel/
+  await page.route(writePattern, async route => {
+    if (route.request().method() == 'POST') await writeGate
+    await route.continue()
+  })
+  try {
+    await (await cmdAt('/_update mind_sync')).click()
+    await expect(modal, 'one-tap /_update completes directly without confirmation').toContainText('Updated #mind_sync', {
+      timeout: 15_000,
+    })
+    expect(
+      (await readItemState(page, '#mind_sync'))?.hasAttrToken,
+      'one-tap /_update live item attributes hold no token',
+    ).toBe(false)
+    releaseWrite()
+    await page.unroute(writePattern)
+    await dismissUpdated('one-tap /_update completes directly without confirmation')
+  } finally {
+    releaseWrite()
+    await page.unroute(writePattern).catch(() => {})
+  }
+  await waitWritesSettled(page, '#mind_sync')
+  await expect
+    .poll(async () => (await historyRecords(mindSyncId)).some(h => !histIdsBeforeUpdate.has(h.id)), {
+      message: 'one-tap /_update wrote a new history copy',
+      timeout: 30_000,
+    })
+    .toBe(true)
+  const updatedItemRecord = await itemRecord(mindSyncId)
+  const newestHistory = (await historyRecords(mindSyncId))
+    .filter(h => !histIdsBeforeUpdate.has(h.id))
+    .sort((a, b) => (b.raw.time ?? 0) - (a.raw.time ?? 0))[0]
+  expect(
+    newestHistory.raw.text,
+    'one-tap /_update newest history copy carries updated text',
+  ).toBe(origMindSync)
+  expect(
+    updatedItemRecord.rawSerialized,
+    'one-tap /_update serialized items record holds no GitHub token',
+  ).not.toContain(FAKE_GITHUB_TOKEN)
+  expect(
+    newestHistory.rawSerialized,
+    'one-tap /_update newest history copy holds no GitHub token',
+  ).not.toContain(FAKE_GITHUB_TOKEN)
+  expect(
+    await readItemState(page, '#mind_sync'),
+    'one-tap /_update settled live item attributes hold no token',
+  ).toMatchObject({
+    textMatches: true,
+    attrMatches: true,
+    hasAttrToken: false,
+    hasSavedAttrToken: false,
+  })
+  expect(
+    await page.evaluate(() => ((window as any).__e2e_cl_modals as string[]).some(t => t.includes('Run this command?'))),
+    'one-tap /_update never showed Run this command? dialog',
+  ).toBe(false)
+  expect(await page.evaluate(() => [(window._item('#mind_sync', true) as any)?.text, (window._item('#mind_sync', true) as any)?.attr?.branch])).toEqual([origMindSync, 'master'])
+  expect(await box(), 'one-tap /_update keeps unfocused MindBox text').toBe(TODO)
+  expect(await focused(), 'one-tap /_update does not focus unfocused MindBox').not.toBe('textarea-mindbox')
+
+  // one-tap label-binding refusal: relabel the installed item to `#e2e_cl_renamed` (its attr.path
+  // stays `mind_sync.md`) and create a second plain note labeled `#mind_sync`. Tapping the PATH-form
+  // link dispatches by `#e2e_cl_renamed`, so the dispatcher refuses the label mismatch (logs to
+  // console.error; the app's own `finally` cancels the alert modal for any failed root update),
+  // shows no "Updated" dialog, and leaves BOTH notes untouched (with the raw path dispatched
+  // instead, the plain note would be overwritten with install attributes).
+  await page.evaluate(() => {
+    const it = window._item('#mind_sync') as any
+    it.write('#e2e_cl_renamed local copy', '')
+    it.pushable = false
+    window._create('#mind_sync plain note untouched')
+  })
+  await expect.poll(() => page.evaluate(() => window._item('#mind_sync', true)?.saved_id ?? null), { timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => page.evaluate(() => [window._item('#e2e_cl_renamed', true)?.text, window._item('#mind_sync', true)?.text])).toEqual([
+    '#e2e_cl_renamed local copy',
+    '#mind_sync plain note untouched',
+  ])
+  await select(TODO)
+  await expect.poll(() => state(TODO)).toEqual(OPEN)
+  await blurBox()
+  const labelMismatchErrors: string[] = []
+  const onConsoleError = (msg: { type: () => string; text: () => string }) => {
+    if (msg.type() === 'error') labelMismatchErrors.push(msg.text())
+  }
+  page.on('console', onConsoleError)
+  const modalCountBeforeRefusal = await page.evaluate(() => ((window as any).__e2e_cl_modals as string[]).length)
+  try {
+    await (await cmdAt('/_update mind_sync')).click()
+    let refusalOutcome = 'pending'
+    await expect
+      .poll(
+        async () => {
+          const updated = await page.evaluate(
+            n => ((window as any).__e2e_cl_modals as string[]).slice(n).some(t => t.includes('Updated')),
+            modalCountBeforeRefusal,
+          )
+          if (updated) refusalOutcome = 'updated'
+          else if (labelMismatchErrors.some(t => t.includes('does not match specified label')))
+            refusalOutcome = 'refused'
+          return refusalOutcome
+        },
+        { message: 'one-tap path update settles to refusal or update', timeout: 15_000 },
+      )
+      .not.toBe('pending')
+    expect(
+      refusalOutcome,
+      'one-tap path update bound to item label refuses label mismatch rather than updating plain note',
+    ).toBe('refused')
+  } finally {
+    page.off('console', onConsoleError)
+  }
+  await page.evaluate(() => (window as any)._mindbox_return)
+  await expect(modal, 'failed root /_update leaves no modal open').toBeHidden()
+  expect(
+    await page.evaluate(
+      n => ((window as any).__e2e_cl_modals as string[]).slice(n).some(t => t.includes('Updated')),
+      modalCountBeforeRefusal,
+    ),
+    'label-mismatch refusal showed no Updated dialog',
+  ).toBe(false)
+  expect(
+    labelMismatchErrors.some(t => t.includes('does not match specified label')),
+    'label-mismatch refusal logged dispatcher mismatch error to console',
+  ).toBe(true)
+  expect(
+    await page.evaluate(() => {
+      const plain = window._item('#mind_sync', true) as any
+      return {
+        renamed: window._item('#e2e_cl_renamed', true)?.text,
+        plain: plain?.text,
+        installAttrs: [plain?.attr?.owner ?? null, plain?.attr?.repo ?? null, plain?.attr?.path ?? null, plain?.attr?.branch ?? null],
+      }
+    }),
+    'label-mismatch refusal leaves both renamed installed item and plain note (and its lack of install attrs) untouched',
+  ).toEqual({
+    renamed: '#e2e_cl_renamed local copy',
+    plain: '#mind_sync plain note untouched',
+    installAttrs: [null, null, null, null],
+  })
+  await page.evaluate(() => {
+    window._item('#mind_sync', true)?.delete(false)
+    const it = window._item('#e2e_cl_renamed') as any
+    it.write('#mind_sync stale2', '')
+    it.pushable = false
+  })
+  await expect.poll(() => page.evaluate(() => window._item('#mind_sync', true)?.text)).toBe('#mind_sync stale2')
+
+  // on the anonymous notebook (loadAdmin, not the publisher's own notebook), `preview` asks first
+  await (await cmdAt('/_update mind_sync mind.items preview')).click()
+  await expectConfirm('/_update mind_sync mind.items preview', 'preview branch asks first on anonymous notebook (not publisher own notebook)')
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+  expect(await page.evaluate(() => window._item('#mind_sync', true)?.text)).toBe('#mind_sync stale2')
+
+  // a 40-hex commit id as the branch is NOT one tap — must ask first
+  await (await cmdAt(`/_update mind_sync mind.items ${COMMIT_SHA}`)).click()
+  await expectConfirm(`/_update mind_sync mind.items ${COMMIT_SHA}`, '40-hex commit id branch asks first and is not one tap')
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+
+  // owner argument on `/_update` is NEVER one tap — must show the confirmation dialog
+  await (await cmdAt('/_update mind_sync mind.items preview attacker')).click()
+  await expectConfirm('/_update mind_sync mind.items preview attacker', '/_update with an owner argument asks first and is not one tap')
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+  expect(attackerRequests, 'cancelled /_update with owner made no request to attacker').toEqual([])
+  expect(await box()).toBe(TODO)
+  expect(await focused()).not.toBe('textarea-mindbox')
+
+  // FOCUSED MINDBOX WITH A DRAFT: Escape, Enter, Run button, item commands (undefined and
+  // `{ text, edit: false }`), fall-through `/_count`, and one-tap `/_update #mind_sync` all
+  // preserve BOTH the draft AND MindBox focus
+  await page.evaluate(() => void (window as any).MindBox.set('clword'))
+  await expect.poll(() => state(TODO)).toEqual({ editing: false, blocks: [[false, false]] })
+  await focusBox()
+  await mindbox(page).fill('cldraft')
+  await expect(page.locator(`${await shown(TODO)} .vault-result code.command-link`).first()).toBeVisible({ timeout: 15_000 })
+  await expect.poll(() => state(TODO)).toEqual(OPEN)
+  expect([await box(), await focused()], 'premise: MindBox holds the draft and has focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  await (await cmdAt('/_invert')).click()
+  await expectConfirm('/_invert')
+  await page.keyboard.press('Escape')
+  await expect(modal).toBeHidden()
+  expect(await inverted(), 'Escape with draft runs nothing').toEqual(['true', true])
+  expect([await box(), await focused()], 'Escape keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  await (await cmdAt('/_invert')).click()
+  await expectConfirm('/_invert')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect.poll(inverted, { message: 'Enter toggles inversion off', timeout: 3000 }).toEqual(['false', false])
+  expect([await box(), await focused()], 'confirmed /_invert keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  await (await cmdAt('/_zoom 1.05')).click()
+  await expectConfirm('/_zoom 1.05')
+  await modal.locator('.button.confirm').click()
+  await expect(modal).toBeHidden()
+  await expect.poll(zoomVal, { message: 'Run button ran /_zoom 1.05', timeout: 3000 }).toBe('1.05')
+  expect([await box(), await focused()], 'Run button keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  await (await cmdAt('/e2e_cl_cmd one two')).click()
+  await expectConfirm('/e2e_cl_cmd one two')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect.poll(ran, 'confirmed item command ran with its args').toEqual([
+    ['echo hi', 'echo', 'hi'],
+    ['one two', 'one', 'two'],
+  ])
+  expect([await box(), await focused()], 'item command returning undefined keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  // confirmed `/_count` falls through to item creation while a draft sits in MindBox:
+  // creates its item, passes '' (not the draft) to `_on_create` listeners, and keeps the draft & focus
+  await page.evaluate(() => {
+    ;(window as any).__e2e_cl_created = []
+  })
+  await (await cmdAt('/_count')).click()
+  await expectConfirm('/_count')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__items as any[]).find(i => /^\d+ items are selected$/.test(i.text))?.id ?? null), { timeout: 10_000 })
+    .toBeTruthy()
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__e2e_cl_created as string[]).slice()), {
+      message: 'confirmed /_count passes empty string to _on_create listeners instead of MindBox draft',
+      timeout: 5000,
+    })
+    .toEqual([''])
+  expect([await box(), await focused()], 'confirmed /_count keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+  await page.evaluate(() => {
+    const created = ((window as any).__items as any[]).find(i => /^\d+ items are selected$/.test(i.text))
+    if (created) window._item(created.id, true)?.delete(false)
+  })
+
+  // confirmed item command returning `{ text, edit: false }` (as `/todo` does) while a draft sits
+  // in MindBox: creates the item, passes '' (not the restored draft) to `_on_create`, keeps draft & focus
+  await page.evaluate(() => {
+    ;(window as any).__e2e_cl_created = []
+  })
+  await (await cmdAt('/e2e_cl_cmd create')).click()
+  await expectConfirm('/e2e_cl_cmd create')
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeHidden()
+  await expect
+    .poll(() => page.evaluate(() => window._item('#e2e_cl_created_item', true)?.text ?? null), {
+      message: 'confirmed handler returning { text, edit: false } creates its item',
+      timeout: 10_000,
+    })
+    .toBe('#e2e_cl_created_item from handler')
+  await expect
+    .poll(() => page.evaluate(() => ((window as any).__e2e_cl_created as string[]).slice()), {
+      message: 'confirmed handler returning { text, edit: false } passes empty string to _on_create listeners instead of MindBox draft',
+      timeout: 5000,
+    })
+    .toEqual([''])
+  expect([await box(), await focused()], 'confirmed handler creation keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+  await page.evaluate(() => window._item('#e2e_cl_created_item', true)?.delete(false))
+
+  // one-tap `/_update #mind_sync` while MindBox is focused with a draft
+  await page.evaluate(() => {
+    ;(window as any).__e2e_cl_modals = []
+  })
+  await (await cmdAt('/_update #mind_sync')).click()
+  await dismissUpdated('one-tap /_update #label completes without confirmation')
+  await settle()
+  expect(
+    await page.evaluate(() => ((window as any).__e2e_cl_modals as string[]).some(t => t.includes('Run this command?'))),
+    'one-tap /_update #label never showed Run this command? dialog',
+  ).toBe(false)
+  expect(await page.evaluate(() => [(window._item('#mind_sync', true) as any)?.text, (window._item('#mind_sync', true) as any)?.attr?.branch])).toEqual([origMindSync, 'master'])
+  expect([await box(), await focused()], 'one-tap /_update #label keeps draft and focus').toEqual(['cldraft', 'textarea-mindbox'])
+
+  // DRAG, SELECTION-ENDING CLICK, AND SECONDARY PRESS: none opens a dialog, runs a command, or toggles the block
+  await blurBox()
+  await select(TODO)
+  await expect.poll(() => state(TODO)).toEqual(OPEN)
+  await page.evaluate(() => getSelection()!.removeAllRanges())
+  const inv = await cmdAt('/_invert')
+  await expect
+    .poll(() => inv.evaluate(el => {
+      const r = el.getBoundingClientRect()
+      return el.contains(document.elementFromPoint(r.left + 6, r.top + r.height / 2))
+    }))
+    .toBe(true)
+  const at = (await inv.boundingBox())!
+  await page.mouse.move(at.x + 6, at.y + at.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(at.x + at.width - 6, at.y + at.height / 2, { steps: 5 })
+  await page.mouse.up()
+  const sel = await page.evaluate(() => [getSelection()!.type, getSelection()!.toString()])
+  expect([sel[0], sel[1].length > 2 && '/_invert'.includes(sel[1])], `drag selected part of /_invert: ${sel[1]}`).toEqual(['Range', true])
+  expect(await events(), 'drag press bubbled and its click stopped in the frame').toEqual(CLICK)
+  expect([await inverted(), await state(TODO)], 'drag ran nothing and toggled nothing').toEqual([['false', false], OPEN])
+  await expect(modal).toBeHidden()
+
+  // a click on another command link while the selection stands ends the selection and runs nothing
+  await (await cmdAt('/e2e_cl_cmd one two')).click()
+  expect(await page.evaluate(() => getSelection()!.type == 'Range'), 'selection ended').toBe(false)
+  expect([(await ran()).length, await state(TODO)], 'selection-ending click ran nothing and toggled nothing').toEqual([3, OPEN])
+  await expect(modal).toBeHidden()
+
+  // secondary press and non-primary click run nothing
+  await (await cmdAt('/_invert')).click({ button: 'right' })
+  expect(await events()).toEqual(['capture:mousedown:2', 'bubble:mousedown:2'])
+  await (await cmdAt('/_invert')).evaluate(el => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 2 })))
+  expect(await events()).toEqual(['capture:click:2'])
+  expect([await inverted(), await state(TODO)], 'secondary press and non-primary click ran nothing').toEqual([['false', false], OPEN])
+  await expect(modal).toBeHidden()
+
+  // clean up installed #mind_sync, listener, and observer
+  await page.evaluate(() => {
+    ;(window as any).__e2e_cl_obs?.disconnect()
+    window._item('#mind_sync', true)?.delete(false)
+    window._item('#e2e_cl_listen', true)?.delete(false)
+  })
 })
 
 test('a deleted child that held macro expansions turns its tags missing (dangling for the frame\'s relative marks): the marks in the frame and plain tags alike', async ({ page }) => {
@@ -3195,7 +3926,7 @@ test("a shared page, by the keyboard alone: Tab reaches a section's marker, whic
   const LABEL = '#e2e_fold_keys'
   const KEY = 'e2e_fold_keys'
   const [first, second] = ['first', 'second'].map(name => new URL(`/server_id?${name}`, page.url()).href)
-  await page.evaluate(text => void window._create(text), `${LABEL} shared with a section\n${region(`The plan is [here](${first}).\nThe notes are [there](${second}).`)}`)
+  await page.evaluate(text => void window._create(text), `${LABEL} shared with a section\n${region(`The plan is [here](${first}).\nThe notes are [there](${second}) with \`/_invert\` and \`plain\`.`)}`)
   const saved = () => page.evaluate(label => (window as any)._item(label, true)?.saved_id ?? null, LABEL)
   await expect.poll(saved, { timeout: 30_000 }).toBeTruthy()
   await page.evaluate(([label, key]) => void (window as any)._item(label).share(key, 0), [LABEL, KEY] as const) // indexed: shown on the page
@@ -3240,4 +3971,25 @@ test("a shared page, by the keyboard alone: Tab reaches a section's marker, whic
   expect((await read())!.focus, "open: the next stop is the section's first link").toBe('section ' + first)
   await page.keyboard.press('Tab')
   expect((await read())!.focus, "then the link on the section's second line").toBe('section ' + second)
+
+  // on a shared page an inline-code command has the plain inline-code look (no tint, no pointer);
+  // tapping it opens no dialog, runs nothing, and still toggles the section
+  await page.evaluate(() => localStorage.removeItem('mindpage_inverted'))
+  const sharedLook = await page.evaluate(() => {
+    const frame = document.querySelector('.inert-block .vault-result')!
+    const style = (e: Element) => {
+      const s = getComputedStyle(e)
+      return [s.color, s.backgroundColor, s.cursor]
+    }
+    return {
+      cmd: style(frame.querySelector('code.command-link')!),
+      plain: style(frame.querySelector('code:not(.command-link):not(.tag-link)')!),
+    }
+  })
+  expect(sharedLook.cmd, 'on a shared page an inline-code command has the plain inline-code look').toEqual(sharedLook.plain)
+  await page.locator('.inert-block .vault-result code.command-link').click()
+  await page.evaluate(() => new Promise(r => setTimeout(r, 80)))
+  expect((await read())!.open, 'tapping an inline-code command on a shared page still toggles the section').toBe(false)
+  await expect(page.locator('.modal'), 'tapping an inline-code command on a shared page opens no dialog').toBeHidden()
+  expect(await page.evaluate(() => localStorage.getItem('mindpage_inverted')), 'tapping an inline-code command on a shared page runs nothing').toBeNull()
 })

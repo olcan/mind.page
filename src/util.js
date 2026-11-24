@@ -203,6 +203,10 @@ export function exclusionRegExp(exclusions, regex, flags) {
 // this is done automatically in replaceTags below, but other functions can use tagRegexDelimiter
 export const tagRegex = /^#[^#\s<>&\?!,.;:"'`(){}\[\]]+$/
 
+// a MindBox command's prefix: a slash followed by word characters (used by index.svelte's
+// onEditorDone and inert_markdown.ts's command links)
+export const commandRegex = /^\/\w+/
+
 // regex alternation string of "exclusions" (e.g. ex1|ex2|...) to be used as prefix <exclusions>|<tag_regex>
 // filter out exclusions by using capture groups and checking if first group (e.g. pfx) is undefined
 // this particular set of exclusions should be consistent w/ parseTags below

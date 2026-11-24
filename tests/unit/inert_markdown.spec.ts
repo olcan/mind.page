@@ -478,3 +478,95 @@ test("tag links in a reply: a child tag stays the item's mark, what the child ta
   expect(hostile.replace(/<\/?(?:div|p|code)\b[^<>]*>/g, '')).toMatch(/^[A-Za-z0-9 &#;]*$/) // no other element, no raw character
   expect(bareText(html(odd + ' `' + odd + '`'))).toMatch(/^[A-Za-z0-9 ]*$/)
 })
+
+// COMMAND LINKS (the owner, 2026-11-23): an inline-code command in an inert section becomes a quiet
+// link (`code.command-link`, with `title` and `data-command-link` holding the exact command text).
+// A command outside an inert section is the owner's text and never reaches this renderer.
+const cmdLinks = (h: string) =>
+  [...h.matchAll(/<code class="command-link" title="([^"]*)" data-command-link="\1">([^<]*)<\/code>/g)].map(m => [decoded(m[1]), decoded(m[2])])
+const cmdLink = (cmd: string) => `<code class="command-link" title="${grammarRefs(cmd)}" data-command-link="${grammarRefs(cmd)}">${grammarRefs(cmd)}</code>`
+
+test("command links: an inline-code command is a quiet link by the app's own rule; paths, multi-line, non-ASCII, over-length, and excluded spans stay plain", () => {
+  // the owner's example, a bare command name, double-backtick and single-space padding, and arguments with a tag
+  const owner = '/_update key_buttons mind.items preview'
+  expect(html('run `' + owner + '` now'), 'command-link rule links inline-code commands').toBe(
+    wrapped('run ' + cmdLink(owner) + ' now'),
+  )
+  expect(html('`/_invert`'), 'command-link rule links a bare command name').toBe(wrapped(cmdLink('/_invert')))
+  expect(
+    cmdLinks(html('``/_push`` and ` /_zoom ` and `/_rename #old #new`')),
+    'command-link rule handles double backticks, single-space padding, and tag arguments',
+  ).toEqual([
+    ['/_push', '/_push'],
+    ['/_zoom', '/_zoom'],
+    ['/_rename #old #new', '/_rename #old #new'],
+  ])
+  expect(html('`/_rename #old #new`'), 'command with tag argument is not a tag-link').not.toContain('tag-link')
+  // exact length boundary: 200 characters allowed, 201 rejected
+  const max200 = '/_cmd ' + 'a'.repeat(194)
+  const over201 = '/_cmd ' + 'a'.repeat(195)
+  expect(max200.length).toBe(200)
+  expect(cmdLinks(html('`' + max200 + '` and `' + over201 + '`')), 'command-link length cap allows 200 and rejects 201').toEqual([
+    [max200, max200],
+  ])
+  expect(html('`' + over201 + '`'), 'over-length command span renders as plain code').toBe(
+    wrapped('<code>' + grammarRefs(over201) + '</code>'),
+  )
+  // bare prose (not a code span) and fenced code blocks are never command links
+  expect(html(owner), 'bare prose command is never linked').not.toContain('command-link')
+  expect(html('```\n' + owner + '\n```'), 'fenced code command is never linked').not.toContain('command-link')
+  // kept out: paths, punctuation right after the name, empty/leading/trailing space, two lines
+  for (const span of [
+    '/Users/x/y',
+    '/a/b',
+    '/foo.bar',
+    '/foo-bar',
+    '//foo',
+    '/',
+    '/ foo',
+    '/_invert ',
+    '/_invert   ',
+    '/_update\nkey_buttons',
+    '/_update\r\nkey_buttons',
+  ])
+    expect(html('`' + span + '`'), `syntax/line exclusion rejects ${JSON.stringify(span)}`).not.toContain('command-link')
+  expect(html('`  /_invert  `'), 'leading/trailing spaces beyond single-space padding rejected').not.toContain('command-link')
+  // kept out by the printable-ASCII bound: non-ASCII (accents, look-alikes, ZWSP, bidi) and control chars (tab, bell)
+  for (const span of [
+    '/_update café',
+    '/_update \u0430',
+    '/_update foo\u200bbar',
+    '/_update \u202ebar',
+    '/_update\tfoo',
+    '/_update foo\u0007bar',
+  ])
+    expect(html('`' + span + '`'), `printable-ASCII bound rejects ${JSON.stringify(span)}`).not.toContain('command-link')
+  // same exclusions as a tag code span: followed Markdown link label (not an unfollowed link),
+  // raw html blocks, raw-text elements, Marked raw blocks, image alt, macros, eval macros, 4-space lines
+  expect(html('[`/_update a`](https://example.org) and [**`/_update b`**](https://example.org) then `/_yes`')).not.toContain('command-link" title="&#47;&#95;update')
+  expect(cmdLinks(html('[`/_update a`](https://example.org) then `/_yes`'))).toEqual([['/_yes', '/_yes']])
+  expect(cmdLinks(html('[`/_ok`](#dest)'))).toEqual([['/_ok', '/_ok']])
+  for (const body of [
+    '<div>\n`/_no`\n</div>\n\nthen `/_yes`',
+    'a <script> `/_no` </script> then `/_yes`',
+    'a <style> `/_no` </style> then `/_yes`',
+    'a <pre> `/_no` </pre> then `/_yes`',
+    'a <textarea> `/_no` </textarea> then `/_yes`',
+    'a <title> `/_no` </title> then `/_yes`',
+    'a <code> `/_no` **`/_no`** </code> then `/_yes`',
+    'a <kbd>`/_no`</kbd> then `/_yes`',
+    '![`/_no`](https://e.org/i.png) then `/_yes`',
+    '<<m `/_no` *see `/_no`*>> then `/_yes`',
+    '@{ `/_no` }@ then `/_yes`',
+    'a line\n     four spaces: `/_no`\nthen `/_yes`',
+  ])
+    expect(cmdLinks(html(body)), body).toEqual([['/_yes', '/_yes']])
+  // a tag's code span is still a tag link (never a command link), and inertChildTags is untouched
+  expect(html('`#todo/alpha` and `/_invert`')).toBe(wrapped(link('#todo/alpha') + ' and ' + cmdLink('/_invert')))
+  expect(inertChildTags('see #/kid and `/_update a`')).toEqual(['#/kid'])
+  // security: HTML-special printable ASCII characters stay encoded via grammarRefs (no raw markup)
+  const special = `/_cmd "a" <img src=x onerror=alert(1)> & 'b'`
+  const rendered = html('`' + special + '`')
+  expect(cmdLinks(rendered)).toEqual([[special, special]])
+  expect(rendered.replace(/<\/?(?:div|p|code)\b[^<>]*>/g, '')).toMatch(/^[A-Za-z0-9 &#;]*$/)
+})

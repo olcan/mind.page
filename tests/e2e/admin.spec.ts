@@ -2,16 +2,21 @@ import { createHash } from 'crypto'
 import { expect, test } from '@playwright/test'
 import { resolve } from 'path'
 import {
+  FAKE_GITHUB_TOKEN,
   customToken,
   firestore,
+  historyRecords as readHistoryRecords,
   install,
   interceptMindItems,
+  itemRecord as readItemRecord,
   loadAdmin,
   loadAnonymous,
   laneProjectId,
+  readItemState,
   secretFor,
   signIn,
   waitForApp,
+  waitWritesSettled,
   type TestUser,
 } from './helpers.js'
 import { savedId } from './editor_helpers.js'
@@ -981,11 +986,10 @@ test('a hidden parent tag places a renamed chat under its tag parent: context, a
 })
 
 test('installed items keep no GitHub token in items or history, strip legacy and in-memory tokens on save, and authenticate /_update and /_updates from the browser', async ({ page, browser }) => {
-  const FAKE_TOKEN = 'e2e-local'
+  const FAKE_TOKEN = FAKE_GITHUB_TOKEN
   const TOKEN_USER: TestUser = { uid: 'token_e2e', displayName: 'Token Test', email: 'token@e2e.test' }
   const TOKEN_PHRASE = 'token e2e secret phrase'
   const TOKEN_SECRET = secretFor(TOKEN_USER, TOKEN_PHRASE)
-  const { decryptWithSecret } = await import('../../src/crypto.js')
 
   const cleanupUser = async () => {
     const db = firestore()
@@ -997,48 +1001,8 @@ test('installed items keep no GitHub token in items or history, strip legacy and
   }
   await cleanupUser()
 
-  const inspectDoc = async (raw: Record<string, any>) => {
-    const rawSerialized = JSON.stringify(raw)
-    const plainSerialized = typeof raw.cipher == 'string' ? await decryptWithSecret(raw.cipher, TOKEN_SECRET) : ''
-    return { raw, rawSerialized, plainSerialized, combined: `${rawSerialized}\n${plainSerialized}` }
-  }
-  const itemRecord = async (id: string) => {
-    const snap = await firestore().collection('items').doc(id).get()
-    expect(snap.exists, `items/${id} exists`).toBe(true)
-    return inspectDoc(snap.data()!)
-  }
-  const historyRecords = async (id: string) => {
-    const snap = await firestore().collection('history').where('item', '==', id).get()
-    return Promise.all(snap.docs.map(async d => ({ id: d.id, ...(await inspectDoc(d.data())) })))
-  }
-  const readItemState = (p: typeof page, label: string) =>
-    p.evaluate(name => {
-      const raw = (window as any).__items.find((i: any) => i.labelText == name)
-      if (!raw) return null
-      return {
-        id: raw.id as string,
-        savedId: (raw.savedId ?? null) as string | null,
-        saving: !!raw.saving,
-        saveTask: !!raw.saveTask,
-        unacked: (raw.unackedWrites?.length ?? 0) as number,
-        textMatches: raw.text === raw.savedText,
-        attrMatches: !!(window as any)._.isEqual(raw.attr, raw.savedAttr),
-        hasAttrToken: !!(raw.attr && 'token' in raw.attr),
-        hasSavedAttrToken: !!(raw.savedAttr && 'token' in raw.savedAttr),
-        editing: !!raw.editing,
-      }
-    }, label)
-  const waitWritesSettled = async (p: typeof page, label: string) => {
-    await expect
-      .poll(
-        async () => {
-          const s = await readItemState(p, label)
-          return !!s && !!s.savedId && !s.saving && !s.saveTask && s.unacked === 0 && s.textMatches
-        },
-        { message: `${label} writes settled`, timeout: 30_000 }
-      )
-      .toBe(true)
-  }
+  const itemRecord = (id: string) => readItemRecord(id, TOKEN_SECRET)
+  const historyRecords = (id: string) => readHistoryRecords(id, TOKEN_SECRET)
 
   const dialogs: string[] = []
   const remoteChanges: string[] = []

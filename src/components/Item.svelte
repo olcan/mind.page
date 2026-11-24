@@ -42,6 +42,9 @@
   // else pressed: a finger that was down while a mouse pressed elsewhere had its later mousedown
   // taken for the mouse's, and pushed. the review of 2026-11-19)
   let mousePress: EventTarget = null
+  // what had focus at a primary press on a command link, so a tap gives it back without focusing an
+  // unfocused MindBox (same single-gesture pattern as `note` in src/inert_blocks.ts)
+  let commandFocus: { elem: Element; had: Element | null; over: AbortController } | null = null
   if (typeof window != 'undefined') {
     window.addEventListener('pointerdown', e => void (mousePress = e.pointerType == 'mouse' && e.button == 0 ? e.target : null), { capture: true })
     for (const type of ['pointerup', 'pointercancel'] as const)
@@ -481,6 +484,7 @@
   }
 
   export let onTagClick = (id: string, tag: string, reltag: string, e: MouseEvent) => {}
+  export let onCommandClick = (cmd: string, e: MouseEvent) => {}
   if (!window['_handleTagClick'])
     window['_handleTagClick'] = (id: string, tag: string, reltag: string, e: MouseEvent) => {
       tag = _.unescape(tag)
@@ -1704,22 +1708,34 @@
         elem.setAttribute('data-inert-rendered', marker + '|' + danglingKey(elem))
         if (!elem.hasAttribute('data-child-tags-wired')) {
           elem.setAttribute('data-child-tags-wired', '')
-          // (a TAG LINK, `code[data-tag-link]`, is a tag written in any inert section: no tag of the item's and
-          // no mark, src/inert_markdown.ts. it acts on a completed primary CLICK that is a tap by the section's
-          // own test (src/inert_blocks.ts: no selection made by the gesture, none that stood in the block at its
-          // press), with the whole tag: the handler is given no text to map the click by. its PRESS is the
-          // browser's: it can begin a selection or open the context menu, and it navigates nothing. its click
-          // stops here, tap or not: it toggles no block and opens no editor)
-          let selection = false // a selection stood in the frame's block at a tag link's press
+          // (a TAG LINK, `code[data-tag-link]`, is a tag written in any inert section; a COMMAND LINK,
+          // `code[data-command-link]`, is an inline-code command written there, src/inert_markdown.ts: no tag
+          // of the item's and no mark. both act on a completed primary CLICK that is a tap by the section's
+          // own test (src/inert_blocks.ts: no selection made by the gesture, none that stood in the block at
+          // its press); their PRESS is the browser's (a drag selects text, a secondary press opens the context
+          // menu) and their click stops here, tap or not (no toggle, no editor). a command link also notes
+          // what had focus at its primary press and gives it back on a tap before running the command, so a
+          // focused MindBox keeps focus across the press while an unfocused one gets none)
+          let selection = false // a selection stood in the frame's block at a tag or command link's press
           const childMark = (e: Event) => {
-            const mark = (e.target as Element | null)?.closest?.('mark[data-tag], code[data-tag-link]')
+            const mark = (e.target as Element | null)?.closest?.('mark[data-tag], code[data-tag-link], code[data-command-link]')
             return mark && elem.contains(mark) ? mark : null
           }
           elem.addEventListener(
             'mousedown',
             (e: MouseEvent) => {
               const mark = childMark(e)
-              if (mark?.hasAttribute('data-tag-link')) selection = selectedIn(elem.closest('.inert-block') ?? elem)
+              if (mark?.hasAttribute('data-tag-link') || mark?.hasAttribute('data-command-link')) {
+                selection = selectedIn(elem.closest('.inert-block') ?? elem)
+                if (!fixed && mark.hasAttribute('data-command-link') && e.button == 0) {
+                  commandFocus?.over.abort()
+                  const pressed = (commandFocus = { elem, had: document.activeElement, over: new AbortController() })
+                  const end = (ev: Event) =>
+                    void ((ev.type != 'blur' || ev.target === window) && (pressed.over.abort(), setTimeout(() => void (commandFocus === pressed && (commandFocus = null)))))
+                  for (const type of ['mouseup', 'dragend', 'pointercancel', 'blur'])
+                    window.addEventListener(type, end, { capture: true, signal: pressed.over.signal })
+                }
+              }
               // a dangling mark (a relative tag no item carries) navigates nowhere; its click is still cancelled
               // below, so one inside a link does not fire the anchor either
               else if (mark && !mark.classList.contains('dangling')) window['_handleTagClick'](id, mark.getAttribute('data-tag')!, mark.getAttribute('data-reltag')!, e)
@@ -1731,12 +1747,26 @@
             (e: MouseEvent) => {
               const tap = !selection && !selectedIn(e.target as Node)
               selection = false
+              const had = commandFocus?.elem === elem ? commandFocus.had : null
+              if (commandFocus?.elem === elem) {
+                commandFocus.over.abort()
+                commandFocus = null
+              }
               const mark = childMark(e)
               if (!mark) return
-              e.preventDefault()
-              e.stopPropagation()
+              const cmd = mark.getAttribute('data-command-link')
+              // on a shared (fixed) page a command span is inert plain code and must not block block toggles
+              if (!cmd || !fixed) {
+                e.preventDefault()
+                e.stopPropagation()
+              }
               const link = mark.getAttribute('data-tag-link')
               if (link && tap && e.button == 0) window['_handleTagClick'](id, link, '', e)
+              if (cmd && tap && e.button == 0) {
+                if (!fixed && had instanceof HTMLElement && had.isConnected && had !== document.activeElement)
+                  had.focus({ preventScroll: true })
+                onCommandClick(cmd, e)
+              }
             },
             true
           )
@@ -2653,7 +2683,7 @@
         {/if}
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal>
+      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal class:fixed>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(
           text || placeholder,
@@ -3546,15 +3576,16 @@
      frame alone: an element of that class in the owner's own text is the owner's, and the closed
      line's copy of one (src/inert_blocks.ts, statusLine) is no link there and has no tint, which
      "would suggest a click would follow the link" (the owner): the plain inline code look */
-  .item > :global(.content .vault-result code.tag-link) {
+  .item > :global(.content .vault-result code.tag-link),
+  .item:not(.fixed) > :global(.content .vault-result code.command-link) {
     color: #9bf;
     background: rgba(102, 153, 255, 0.15);
     cursor: pointer;
   }
-  /* in the closed line a tag link is a piece of that one line: it does not wrap (inline code may, and
-     the line would spill out of its block), and it takes no height of its own (no vertical padding, its
-     own font's line), so the line and its text stand exactly where they stand without a tag */
-  .item > :global(.content .inert-status code.tag-link) {
+  /* in the closed line a tag or command link is a piece of that one line: it does not wrap (inline code
+     may, and the line would spill out of its block), and it takes no height of its own (no vertical
+     padding, its own font's line), so the line and its text stand exactly where they stand without it */
+  .item > :global(.content .inert-status code:is(.tag-link, .command-link)) {
     white-space: nowrap;
     line-height: normal;
     padding-top: 0;

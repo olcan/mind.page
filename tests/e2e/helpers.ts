@@ -244,11 +244,69 @@ export async function install(page: Page, path: string): Promise<string | null> 
   return out ?? null
 }
 
+// fake token seeded by loadAdmin for intercepted local olcan/mind.items requests (never a real token)
+export const FAKE_GITHUB_TOKEN = 'e2e-local'
+
 // /_install prompts for a github personal access token (see index.svelte) unless one is stored, so
 // loadAdmin seeds the fake one, which works because that repository route is always intercepted;
 // parameterless and private -- a real token must never be copied into a traced browser context
 async function useGithubToken(page: Page) {
-  await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+  await page.addInitScript(tok => localStorage.setItem('mindpage_github_token', tok), FAKE_GITHUB_TOKEN)
+}
+
+async function inspectDoc(raw: Record<string, any>, secret?: string) {
+  const rawSerialized = JSON.stringify(raw)
+  const plainSerialized =
+    secret && typeof raw.cipher == 'string'
+      ? await (await import('../../src/crypto.js')).decryptWithSecret(raw.cipher, secret)
+      : ''
+  return { raw, rawSerialized, plainSerialized, combined: `${rawSerialized}\n${plainSerialized}` }
+}
+
+// reads a Firestore `items/<id>` document behind the app, serializing the raw record and (when
+// `secret` is given for an encrypted personal item) its decrypted payload
+export async function itemRecord(id: string, secret?: string) {
+  const snap = await firestore().collection('items').doc(id).get()
+  expect(snap.exists, `items/${id} exists`).toBe(true)
+  return inspectDoc(snap.data()!, secret)
+}
+
+// reads all Firestore `history` copies for `items/<id>` behind the app
+export async function historyRecords(id: string, secret?: string) {
+  const snap = await firestore().collection('history').where('item', '==', id).get()
+  return Promise.all(snap.docs.map(async d => ({ id: d.id, ...(await inspectDoc(d.data(), secret)) })))
+}
+
+// live and saved write-settlement and token-attribute flags for an item in the page
+export function readItemState(page: Page, label: string) {
+  return page.evaluate(name => {
+    const raw = (window as any).__items.find((i: any) => i.labelText == name)
+    if (!raw) return null
+    return {
+      id: raw.id as string,
+      savedId: (raw.savedId ?? null) as string | null,
+      saving: !!raw.saving,
+      saveTask: !!raw.saveTask,
+      unacked: (raw.unackedWrites?.length ?? 0) as number,
+      textMatches: raw.text === raw.savedText,
+      attrMatches: !!(window as any)._.isEqual(raw.attr, raw.savedAttr),
+      hasAttrToken: !!(raw.attr && 'token' in raw.attr),
+      hasSavedAttrToken: !!(raw.savedAttr && 'token' in raw.savedAttr),
+      editing: !!raw.editing,
+    }
+  }, label)
+}
+
+export async function waitWritesSettled(page: Page, label: string) {
+  await expect
+    .poll(
+      async () => {
+        const s = await readItemState(page, label)
+        return !!s && !!s.savedId && !s.saving && !s.saveTask && s.unacked === 0 && s.textMatches
+      },
+      { message: `${label} writes settled`, timeout: 30_000 }
+    )
+    .toBe(true)
 }
 
 // serves github api requests for olcan/mind.items from a local checkout (default ../mind.items,

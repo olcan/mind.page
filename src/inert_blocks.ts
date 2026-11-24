@@ -151,16 +151,16 @@ function takeName(frame: Element, name: string): HTMLElement | null {
 }
 
 // a node of the status line as text and links alone (an anchor keeps its attributes, so it is
-// followed as in the section; a TAG LINK, src/inert_markdown.ts, keeps its own too, so the closed
-// line shows it in the plain inline code look: there it is the line's, no link, and a click on it opens the
-// block; anything else is its text: no math span, no mark and no box of the frame is repeated
-// outside the frame, where the app's own passes would take it for the owner's)
+// followed as in the section; a TAG LINK or COMMAND LINK, src/inert_markdown.ts, keeps its own too,
+// so the closed line shows it in the plain inline code look: there it is the line's, no link, and a
+// click on it opens the block; anything else is its text: no math span, no mark and no box of the
+// frame is repeated outside the frame, where the app's own passes would take it for the owner's)
 function flat(node: Node, into: Node) {
   if (node.nodeType == 3) return void into.appendChild(into.ownerDocument!.createTextNode(node.nodeValue ?? ''))
   if (node.nodeType != 1) return
   const elem = node as Element
   if (elem.tagName == 'BR') return void into.appendChild(into.ownerDocument!.createTextNode(' '))
-  if ((elem.tagName == 'A' && elem.hasAttribute('href')) || elem.matches('code.tag-link')) {
+  if ((elem.tagName == 'A' && elem.hasAttribute('href')) || elem.matches('code.tag-link, code.command-link')) {
     const anchor = elem.cloneNode(false) as Element
     anchor.textContent = elem.textContent
     return void into.appendChild(anchor)
