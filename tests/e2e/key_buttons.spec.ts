@@ -26,8 +26,9 @@ import { firestore, install, loadAdmin, waitForApp, waitWritesSettled } from './
 // item, and a textarea of an item's own markup in a box of class `editor`) hides the main row
 // and the reload button and is offered no row: the field keeps its focus and what was typed (a
 // Shift+Space there is the field's own key), the MindBox its contents, and no item is made; (g) the reload
-// button, on the desktop page and on the phone: at the lower left, the mirror of the #vault
-// item's sparkle (no sparkle is drawn in this lane), clear of the main row, hidden while the
+// button, on the desktop page and on the phone: beside the #vault item's sparkle at the lower right
+// on a desktop, and at the lower left on a phone (the sparkle's mirror; no sparkle is drawn in this
+// lane), clear of the main row, hidden while the
 // keyboard is up; a tap reloads the page at once while nothing would be lost; with text typed
 // into an item's editor it asks first, in the app's dialog: cancelled, the page and the typed
 // text stay, and confirmed, the page reloads once with no question of the browser's on top; on
@@ -45,7 +46,7 @@ test.setTimeout(300_000)
 // is coarse (Chromium's touch emulation)
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }
 const ROOT = '#e2e_keys'
-const NAV = '#e2e_nav' // small tree for the navigation-arrow lights, desktop groups and backdrop row
+const NAV = '#e2e_nav' // small tree for the navigation-arrow lights, desktop strip and backdrop row
 const LIST = '#e2e_keys_list' // an item with a bulleted line, for the Tab
 const FIELD = '#e2e_keys_field' // an item with a field of its own, which is no editor of the app
 const QUESTION = 'Reload and discard unsaved changes?' // the app's, where something would be lost
@@ -55,6 +56,7 @@ const TEXT = `${LIST}\n- one\n- two`
 const BAR = '[data-key-buttons="bar"]'
 const ABOVE = '[data-key-buttons="keyboard"]'
 const RELOAD = '[data-key-buttons="reload"]'
+const NAV_STRIP = '[data-key-buttons="nav-strip"]'
 const NAV_V = '[data-key-buttons="nav-vertical"]'
 const NAV_H = '[data-key-buttons="nav-horizontal"]'
 const BACKDROP = '[data-key-buttons="backdrop"]'
@@ -63,6 +65,16 @@ const KEYBOARD_PX = 336 // what the simulated keyboard takes of the window's hei
 // is changed is then a walk, a save or a row below that fails, and nothing here reads how the
 // item's code is spelled
 const NAMES = ['top', 'back', 'create', 'left', 'up', 'down', 'right']
+const STRIP_NAMES = ['top', 'back', 'left', 'up', 'down', 'right', 'create']
+const STRIP_KEYS: [string, string][] = [
+  ['top', 'Ctrl+Alt+Up'],
+  ['back', 'Ctrl+Alt+Down'],
+  ['left', 'Left'],
+  ['up', 'Up'],
+  ['down', 'Down'],
+  ['right', 'Right'],
+  ['create', 'Shift+Enter'],
+]
 const ABOVE_NAMES = ['outdent', 'indent', 'done']
 // the #vault item's sparkle: 14 px from the right edge, 10 px from the bottom, 24 px wide and
 // high (the reload button is its mirror at the left). The numbers are its rule's in vault.md;
@@ -73,6 +85,7 @@ const SPARKLE = [14, 10, 24, 24]
 type Look = {
   size: number
   gap: number
+  group: number
   right: number
   bottom: number
   color: string
@@ -381,10 +394,11 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   await expect(page.locator('#textarea-mindbox')).toHaveValue('x ')
   await page.evaluate(() => (window as any).MindBox.set(''))
 
-  // (g) the reload button: the mirror of the sparkle's box, on the desktop page and on the phone
+  // (g) the reload button: beside the sparkle on a desktop, and the mirror of the sparkle's box on a phone
   const reloadBox = (target: Page) => target.evaluate(selector => (box => [box.x, window.innerHeight - box.bottom, box.width, box.height])(document.querySelector(selector)!.getBoundingClientRect()), RELOAD)
+  const desktopReloadBox = (target: Page) => target.evaluate(selector => (box => [window.innerWidth - box.right, window.innerHeight - box.bottom, box.width, box.height])(document.querySelector(selector)!.getBoundingClientRect()), RELOAD)
   await expect(page.locator(RELOAD), 'on a desktop too').toBeVisible()
-  expect(await reloadBox(page)).toEqual(SPARKLE)
+  expect(await desktopReloadBox(page), 'desktop reload button sits a group gap left of the sparkle').toEqual([SPARKLE[0] + SPARKLE[2] + LOOK.group, SPARKLE[1], SPARKLE[2], SPARKLE[3]])
   await expect(phone.locator(RELOAD)).toBeVisible()
   expect(await reloadBox(phone)).toEqual(SPARKLE)
   expect(await phone.evaluate(selector => getComputedStyle(document.querySelector(selector)!).color, RELOAD), 'dim, as the idle sparkle is').toBe('rgba(255, 255, 255, 0.45)')
@@ -555,9 +569,10 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   await context.close()
 })
 
-// navigation-arrow lights (green when valid, dim when not), always-shown desktop groups around
-// reload, live updates on box and item changes, frosted-glass backdrop (split on wide desktop,
-// merged strip below 480 px and on a phone, pointer-events pass-through), and phone parity
+// navigation-arrow lights (green when valid, dim when not), always-shown desktop strip at the
+// lower right (three groups + reload beside the sparkle), tooltips, strip clicks and editing
+// guard, live updates on box and item changes, frosted-glass backdrop (one rounded right piece on
+// wide desktop, full strip below 480 px and on a phone, pointer-events pass-through), and phone parity
 test('navigation arrows light green or dim live, stay in place on desktop with frosted backdrop, and match on a phone', async ({ page, browser }) => {
   await loadAdmin(page)
   if (await page.evaluate(() => !!window._item('#key_buttons', true))) {
@@ -607,8 +622,9 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     .toBe(true)
 
   const LOOK: Look = await page.evaluate(() => (window._item('#key_buttons', true) as any).eval('KEY_BUTTONS_LOOK'))
-  await expect(page.locator(NAV_V), 'vertical desktop arrow group visible').toBeVisible()
-  await expect(page.locator(NAV_H), 'horizontal desktop arrow group visible').toBeVisible()
+  await expect(page.locator(NAV_STRIP), 'desktop nav strip visible').toBeVisible()
+  await expect(page.locator(NAV_V), 'no old vertical desktop group on the page').toHaveCount(0)
+  await expect(page.locator(NAV_H), 'no old horizontal desktop group on the page').toHaveCount(0)
   await expect(page.locator(RELOAD), 'reload button visible').toBeVisible()
 
   // read icon state purely from computed styles (svg stroke colour + opacity), never class names
@@ -642,63 +658,112 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
       [selectors, LOOK.valid, LOOK.color, LOOK.dim] as const
     )
 
-  // positions of all four desktop arrows relative to the reload button (must stay fixed across states)
-  const desktopLayout = () =>
-    page.evaluate(
-      ([reloadSel, vSel, hSel]) => {
-        const r = document.querySelector(reloadSel)!.getBoundingClientRect()
-        const read = (sel: string) =>
-          Array.from(document.querySelectorAll(`${sel} > button`), b => {
-            const box = b.getBoundingClientRect()
-            return [
-              (b as HTMLElement).dataset.key,
-              !(b as HTMLElement).hidden && box.width > 0 && box.height > 0,
-              Math.round(box.x - r.x),
-              Math.round(box.y - r.y),
-              Math.round(box.width),
-              Math.round(box.height),
-            ]
-          })
-        return { vertical: read(vSel), horizontal: read(hSel) }
+  const nonArrowLooks = (target: Page, rowSel: string) =>
+    target.evaluate(
+      ([sel, baseColor]) => {
+        const probe = document.body.appendChild(Object.assign(document.createElement('span'), { style: `color: ${baseColor}` }))
+        const white = getComputedStyle(probe).color
+        probe.remove()
+        return ['top', 'back', 'create'].map(k => {
+          const s = getComputedStyle(document.querySelector(`${sel} > button[data-key="${k}"] > svg`)!)
+          return [k, s.stroke == white, Number(s.opacity)]
+        })
       },
-      [RELOAD, NAV_V, NAV_H] as const
+      [rowSel, LOOK.color] as const
     )
 
-  const step = LOOK.reload.size + LOOK.gap
-  const expectedLayout = {
-    vertical: [
-      ['up', true, 0, -2 * step, LOOK.reload.size, LOOK.reload.size],
-      ['down', true, 0, -step, LOOK.reload.size, LOOK.reload.size],
-    ],
-    horizontal: [
-      ['left', true, step, 0, LOOK.reload.size, LOOK.reload.size],
-      ['right', true, 2 * step, 0, LOOK.reload.size, LOOK.reload.size],
-    ],
+  // positions and gaps of the seven-button desktop strip and the reload button beside the sparkle
+  const desktopLayout = () =>
+    page.evaluate(
+      ([reloadSel, stripSel]) => {
+        const r = document.querySelector(reloadSel)!.getBoundingClientRect()
+        const btns = Array.from(document.querySelectorAll(`${stripSel} > button`)) as HTMLElement[]
+        const boxes = btns.map(b => b.getBoundingClientRect())
+        const gaps: number[] = []
+        for (let i = 1; i < boxes.length; i++) gaps.push(Math.round(boxes[i].x - (boxes[i - 1].x + boxes[i - 1].width)))
+        gaps.push(Math.round(r.x - (boxes[boxes.length - 1].x + boxes[boxes.length - 1].width)))
+        return {
+          names: btns.map(b => b.dataset.key ?? ''),
+          sameRowAndSize: boxes.every(
+            box =>
+              box.width > 0 &&
+              box.height > 0 &&
+              Math.round(box.y - r.y) === 0 &&
+              Math.round(box.width) === Math.round(r.width) &&
+              Math.round(box.height) === Math.round(r.height)
+          ),
+          reloadRight: Math.round(window.innerWidth - r.right),
+          reloadBottom: Math.round(window.innerHeight - r.bottom),
+          reloadSize: [Math.round(r.width), Math.round(r.height)],
+          gaps,
+        }
+      },
+      [RELOAD, NAV_STRIP] as const
+    )
+
+  const expectedReloadRight = SPARKLE[0] + SPARKLE[2] + LOOK.group
+  const expectedGaps = [LOOK.gap, LOOK.group, LOOK.gap, LOOK.gap, LOOK.gap, LOOK.group, LOOK.group]
+  const expectDesktopLayout = async (stage: string) => {
+    const layout = await desktopLayout()
+    expect(layout.names, `desktop strip has seven buttons in order top, back, left, up, down, right, create (${stage})`).toEqual(STRIP_NAMES)
+    expect(
+      [layout.reloadRight, layout.reloadBottom, layout.reloadSize],
+      `desktop reload button sits a group gap left of the sparkle at the lower right (${stage})`
+    ).toEqual([expectedReloadRight, SPARKLE[1], [SPARKLE[2], SPARKLE[3]]])
+    expect(layout.sameRowAndSize, `desktop strip buttons share one row and circle size with reload (${stage})`).toBe(true)
+    expect(
+      layout.gaps,
+      `desktop strip gaps: button gap inside groups, group gap between groups and before reload (${stage})`
+    ).toEqual(expectedGaps)
   }
-  const clickDesktop = async (arrow: string) => {
-    const sel = arrow == 'up' || arrow == 'down' ? NAV_V : NAV_H
-    const box = (await page.locator(`${sel} > button[data-key="${arrow}"]`).boundingBox())!
+
+  const clickDesktop = async (btn: string) => {
+    const box = (await page.locator(`${NAV_STRIP} > button[data-key="${btn}"]`).boundingBox())!
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
   }
   const expectDesktop = (expected: Record<string, string>, msg: string) =>
-    expect.poll(() => arrowLooks(page, [NAV_V, NAV_H]), { message: msg, timeout: 3_000 }).toEqual(expected)
+    expect.poll(() => arrowLooks(page, [NAV_STRIP]), { message: msg, timeout: 3_000 }).toEqual(expected)
 
-  // 1a & 1b. Desktop layout fixed + computed green/dim across empty, parent, child, grandchild
+  // tooltips on the desktop strip: every button names its key, and back says "Scroll back down (Ctrl+Alt+Down)"
+  const stripTitles = await page.evaluate(sel => {
+    const out: Record<string, string> = {}
+    for (const btn of Array.from(document.querySelectorAll(`${sel} > button[data-key]`)) as HTMLElement[]) {
+      out[btn.dataset.key!] = btn.title
+    }
+    return out
+  }, NAV_STRIP)
+  expect(stripTitles.back, 'back button tooltip is Scroll back down (Ctrl+Alt+Down)').toBe('Scroll back down (Ctrl+Alt+Down)')
+  expect(
+    STRIP_NAMES.map(k => [k, /\(([^)]+)\)$/.exec(stripTitles[k] ?? '')?.[1] ?? '']),
+    'each desktop strip button tooltip names its key'
+  ).toEqual(STRIP_KEYS)
+
+  // 1a & 1b. Desktop strip layout fixed + computed green/dim across empty, parent, child, grandchild
   await page.evaluate(() => (window as any).MindBox.set(''))
   await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'empty box dims all four desktop arrows')
-  expect(await desktopLayout(), 'desktop arrows in place around reload when box is empty').toEqual(expectedLayout)
+  await expectDesktopLayout('empty box')
+  expect(await nonArrowLooks(page, NAV_STRIP), 'non-arrow buttons in desktop strip never dim when box is empty').toEqual([
+    ['top', true, 1],
+    ['back', true, 1],
+    ['create', true, 1],
+  ])
 
   await name(page, navRoot)
   await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'parent lights down green and dims the rest')
-  expect(await desktopLayout(), 'desktop arrow positions unchanged on parent').toEqual(expectedLayout)
+  await expectDesktopLayout('parent')
 
   await name(page, `${navRoot}/a`)
   await expectDesktop({ left: 'green', up: 'green', down: 'green', right: 'green' }, 'child with sibling and grandchild lights all four green')
-  expect(await desktopLayout(), 'desktop arrow positions unchanged on child').toEqual(expectedLayout)
+  await expectDesktopLayout('child')
+  expect(await nonArrowLooks(page, NAV_STRIP), 'non-arrow buttons in desktop strip never turn green on child').toEqual([
+    ['top', true, 1],
+    ['back', true, 1],
+    ['create', true, 1],
+  ])
 
   await name(page, `${navRoot}/a/0`)
   await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'lone grandchild lights up green and dims the rest')
-  expect(await desktopLayout(), 'desktop arrow positions unchanged on grandchild').toEqual(expectedLayout)
+  await expectDesktopLayout('grandchild')
 
   // 1c. Clicking a green arrow moves as its key does; clicking a dim arrow still sends its key
   // (both a no-op case and a case where the app moves despite the dim light: Up on root clears box)
@@ -802,14 +867,34 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     }, editId)
     await page.keyboard.type(' C')
     await expect(editTextarea, 'editor holds newer text C while save of B is still in flight').toHaveValue(editTextC)
-    await clickDesktop('up')
+    await page.evaluate(() => {
+      ;(window as any).__edit_keys = []
+      ;(window as any).__edit_onkey = (e: KeyboardEvent) => (window as any).__edit_keys.push(e.code)
+      window.addEventListener('keydown', (window as any).__edit_onkey)
+    })
+    let editKeys: string[] = []
+    try {
+      for (const btn of STRIP_NAMES) await clickDesktop(btn)
+    } finally {
+      editKeys = await page.evaluate(() => {
+        window.removeEventListener('keydown', (window as any).__edit_onkey)
+        const out = (window as any).__edit_keys as string[]
+        delete (window as any).__edit_keys
+        delete (window as any).__edit_onkey
+        return out
+      })
+    }
+    expect(
+      editKeys,
+      'clicking none of the seven desktop strip buttons dispatches any key while an item is open for editing'
+    ).toEqual([])
     expect(
       await page.evaluate(id => (window._item(id, true) as any).editing, editId),
-      'clicking dim Up while an item editor is open with a save in flight keeps the editor open'
+      'clicking all seven strip buttons while an item editor is open with a save in flight keeps the editor open'
     ).toBe(true)
-    await expect(editTextarea, 'clicking dim Up while an item editor is open keeps the newer typed text').toHaveValue(editTextC)
-    await expect(editTextarea, 'clicking dim Up while an item editor is open keeps focus in the editor').toBeFocused()
-    await expect(page.locator('.modal'), 'clicking dim Up while an item editor is open shows no dialog').toBeHidden()
+    await expect(editTextarea, 'clicking all seven strip buttons while an item editor is open keeps the newer typed text').toHaveValue(editTextC)
+    await expect(editTextarea, 'clicking all seven strip buttons while an item editor is open keeps focus in the editor').toBeFocused()
+    await expect(page.locator('.modal'), 'clicking all seven strip buttons while an item editor is open shows no dialog').toBeHidden()
   } finally {
     releaseEdit()
     await page.unroute(WRITES)
@@ -826,6 +911,30 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
   await expectDesktop({ left: 'dim', up: 'dim', down: 'green', right: 'dim' }, 'root has up dim after editor closes')
   await clickDesktop('up')
   await expect.poll(async () => (await query(page)).trim(), { message: 'with no item open for editing, clicking dim Up on root still clears the box', timeout: 3_000 }).toBe('')
+
+  // 1c-strip. Clicking top, back and create on the desktop strip each act as their key does:
+  // top and back scroll to the top and back down with the history entry, and create opens a new
+  // child item under the named item with its editor focused
+  await expect
+    .poll(
+      () => page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight),
+      { message: 'full list is tall enough to test desktop top and back clicks', timeout: 5_000 }
+    )
+    .toBeGreaterThan(400)
+  await scrolls(page, clickDesktop)
+
+  await name(page, editRoot)
+  await clickDesktop('create')
+  const createdChild = `${editRoot}/0`
+  await expect
+    .poll(() => query(page), { message: 'clicking desktop create opens a new child under the named item', timeout: 5_000 })
+    .toBe(`${createdChild} `)
+  const createdId = await page.evaluate(label => window._item(label, true)!.id, createdChild)
+  await expect(page.locator(`#textarea-${createdId}`), 'clicking desktop create opens and focuses the new child editor').toBeFocused()
+  await page.keyboard.press('Shift+Enter')
+  await expect
+    .poll(() => page.evaluate(label => (window._item(label, true) as any)?.editing, createdChild), { message: 'new child created by desktop create saves and closes cleanly', timeout: 30_000 })
+    .toBe(false)
 
   // 1d. Live item create/delete in this page updates down on the named leaf with no other action
   await name(page, `${navRoot}/a/0`)
@@ -880,9 +989,11 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
   await phone.evaluate(label => window._item(label, true)!.delete(false), remoteChild)
   await expectDesktop({ left: 'dim', up: 'green', down: 'dim', right: 'dim' }, 'deleting that child from a second page turns down dim again live')
 
-  // 1f. Raised frosted-glass background on desktop: wide split (4 px blur, 9% white free-edge
-  // border, 12 px full-black shadow with stdDeviation 6, 12 px corners, sparkle-gated right piece),
-  // pointer-events pass-through, and narrow merge < 480 px
+  // 1f. Raised frosted-glass background on desktop: one piece at the lower right reaching the
+  // window's right edge (4 px blur, 9% white free-edge border, 12 px full-black shadow with
+  // stdDeviation 6, one 12 px top-left corner, unused .key-buttons-bg-right always hidden),
+  // press rejection on bare glass between groups, old lower-left open to clicks, stand-in sparkle
+  // admitted by rect and target on that same piece, pointer-events pass-through, and full strip < 480 px
   const readBackdrop = (target: Page) =>
     target.evaluate(sel => {
       const bg = document.querySelector(sel) as HTMLElement
@@ -908,6 +1019,7 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
         }
       }
       const ps = getComputedStyle(pane)
+      const pr = pane.getBoundingClientRect()
       const fs = getComputedStyle(frame)
       const rs = getComputedStyle(right)
       return {
@@ -916,6 +1028,8 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
         pane: {
           width: ps.width,
           height: ps.height,
+          rightEdge: Math.round(window.innerWidth - pr.right),
+          bottomEdge: Math.round(window.innerHeight - pr.bottom),
           blur: blur(ps),
           clip: clip(ps),
           clipArcs: (clip(ps).match(/A 12 12|a 12 12|12,\s*12/gi) ?? []).length,
@@ -934,25 +1048,13 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
         },
         right: {
           display: rs.display,
-          width: rs.width,
-          height: rs.height,
-          radiusTL: rs.borderTopLeftRadius,
-          blur: blur(rs),
-          borderTopWidth: rs.borderTopWidth,
-          borderTopColor: rs.borderTopColor,
-          borderLeftWidth: rs.borderLeftWidth,
-          borderLeftColor: rs.borderLeftColor,
-          boxShadow: rs.boxShadow,
-          pointerEvents: rs.pointerEvents,
         },
       }
     }, BACKDROP)
 
-  const stripH = `${LOOK.reload.size + 2 * LOOK.reload.bottom}px`
-  const colW = `${LOOK.reload.size + 2 * LOOK.reload.left}px`
-  const paneH = `${2 * LOOK.reload.size + 2 * LOOK.gap + LOOK.reload.size + 2 * LOOK.reload.bottom}px`
-  const leftRowW = `${2 * LOOK.reload.left + 3 * LOOK.reload.size + 2 * LOOK.gap}px`
-  const radius = `${LOOK.reload.size / 2}px`
+  const hRow = LOOK.reload.size + 2 * LOOK.reload.bottom
+  const stripH = `${hRow}px`
+  const pieceW = 2 * LOOK.reload.left + 9 * LOOK.reload.size + 4 * LOOK.gap + 4 * LOOK.group
   const expectedBlur = 'blur(4px)'
   const expectedBorder = 'rgba(255, 255, 255, 0.09)'
   const expectedShadowCss = 'rgb(0, 0, 0) 0px 0px 12px 0px'
@@ -961,7 +1063,15 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
   expect(
     {
       hidden: wideBg.hidden,
-      pane: [wideBg.pane.width, wideBg.pane.height, wideBg.pane.blur, wideBg.pane.clipArcs, wideBg.pane.pointerEvents],
+      pane: [
+        wideBg.pane.width,
+        wideBg.pane.height,
+        wideBg.pane.rightEdge,
+        wideBg.pane.bottomEdge,
+        wideBg.pane.blur,
+        wideBg.pane.clipArcs,
+        wideBg.pane.pointerEvents,
+      ],
       frameDisplay: wideBg.frame.display,
       splitSvg: [
         wideBg.frame.split.display,
@@ -973,63 +1083,27 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
         wideBg.frame.split.borderArcs,
       ],
       stripSvgDisplay: wideBg.frame.strip.display,
-      sparklePresent: await page.evaluate(() => !!document.querySelector('body > .vault-sparkle:not([hidden])')),
       rightDisplay: wideBg.right.display,
     },
-    'wide desktop shows single split L-pane with 4 px blur, two 12 px rounded corners, 9% edge and 12 px black shadow (stdDeviation 6), and hides right piece when no sparkle is shown'
+    'wide desktop shows one right frosted piece reaching the window right edge with 4 px blur, one 12 px top-left corner, 9% edge and 12 px black shadow (stdDeviation 6), and keeps .key-buttons-bg-right hidden'
   ).toEqual({
     hidden: false,
-    pane: [leftRowW, paneH, expectedBlur, 2, 'none'],
+    pane: [`${pieceW}px`, stripH, 0, 0, expectedBlur, 1, 'none'],
     frameDisplay: 'block',
-    splitSvg: ['block', 'none', '6', 'rgba(0, 0, 0, 1)', expectedBorder, '1', 2],
+    splitSvg: ['block', 'none', '6', 'rgba(0, 0, 0, 1)', expectedBorder, '1', 1],
     stripSvgDisplay: 'none',
-    sparklePresent: false,
     rightDisplay: 'none',
   })
 
-  // with a visible #vault sparkle on body, the right piece shows with top-left 12 px radius, 4 px blur, 9% edge and 12 px black shadow
-  const withSparkle = await page.evaluate(sel => {
-    const sparkle = document.createElement('button')
-    sparkle.className = 'vault-sparkle'
-    document.body.appendChild(sparkle)
-    const right = document.querySelector(`${sel} > .key-buttons-bg-right`) as HTMLElement
-    const blur = (s: CSSStyleDeclaration) => (s.backdropFilter && s.backdropFilter != 'none' ? s.backdropFilter : (s as any).webkitBackdropFilter)
-    try {
-      const s = getComputedStyle(right)
-      const shownState = [
-        s.display,
-        s.width,
-        s.height,
-        s.borderTopLeftRadius,
-        blur(s),
-        s.borderTopWidth,
-        s.borderTopColor,
-        s.borderLeftWidth,
-        s.borderLeftColor,
-        s.boxShadow,
-        s.pointerEvents,
-      ]
-      sparkle.hidden = true
-      const hiddenDisplay = getComputedStyle(right).display
-      return { shownState, hiddenDisplay }
-    } finally {
-      sparkle.remove()
-    }
-  }, BACKDROP)
-  expect(withSparkle, 'right frosted piece follows visible .vault-sparkle with 12 px top-left radius, 4 px blur, 9% edge and 12 px black shadow').toEqual({
-    shownState: ['block', colW, stripH, radius, expectedBlur, '1px', expectedBorder, '1px', expectedBorder, expectedShadowCss, 'none'],
-    hiddenDisplay: 'none',
-  })
-
-  // glass click rejection on desktop: clicking between Left and Right reaches nothing of the page
-  // under that point and leaves MindBox text and focus unchanged (both unfocused and focused);
-  // clicking just outside the L-shape (in the shadow above the row, right of the column) reaches
-  // the page; wheeling with the pointer over the glass still scrolls document.body
-  const [leftBtnBox, rightBtnBox] = [
-    (await page.locator(`${NAV_H} > button[data-key="left"]`).boundingBox())!,
-    (await page.locator(`${NAV_H} > button[data-key="right"]`).boundingBox())!,
+  // glass click rejection on desktop: clicking on bare glass between two groups (back and left)
+  // reaches nothing of the page and leaves MindBox text and focus unchanged (unfocused and focused);
+  // the old lower-left place and points outside the right piece reach the page; wheeling over the
+  // glass still scrolls document.body
+  const [backBtnBox, leftBtnBox] = [
+    (await page.locator(`${NAV_STRIP} > button[data-key="back"]`).boundingBox())!,
+    (await page.locator(`${NAV_STRIP} > button[data-key="left"]`).boundingBox())!,
   ]
-  const [gapX, gapY] = [(leftBtnBox.x + leftBtnBox.width + rightBtnBox.x) / 2, leftBtnBox.y + leftBtnBox.height / 2]
+  const [gapX, gapY] = [(backBtnBox.x + backBtnBox.width + leftBtnBox.x) / 2, backBtnBox.y + backBtnBox.height / 2]
   const watchTarget = (target: Page, x: number, y: number) =>
     target.evaluate(
       ([px, py]) => {
@@ -1053,45 +1127,72 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     )
   const readWatch = (target: Page) => target.evaluate(() => (window as any).__glass_watch() as { underPage: boolean; mousedown: number; click: number })
 
-  // unfocused MindBox: click on glass between Left and Right delivers no mousedown/click to page
+  // unfocused MindBox: click on bare glass between two groups (back and left) delivers no mousedown/click to page
   await blur(page)
   const textBeforeUnfocused = (await query(page)).trim()
   await watchTarget(page, gapX, gapY)
   await page.mouse.click(gapX, gapY)
-  expect(await readWatch(page), 'click on desktop frosted glass (box unfocused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
+  expect(await readWatch(page), 'click on bare frosted glass between two strip groups (box unfocused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
   expect(
     [(await query(page)).trim(), await page.evaluate(() => document.activeElement?.id ?? '')],
     'unfocused MindBox text and focus stay unchanged after glass click'
   ).toEqual([textBeforeUnfocused, ''])
 
-  // focused MindBox: click on glass keeps MindBox focused and delivers no mousedown/click to page
+  // focused MindBox: click on bare glass between two groups keeps MindBox focused and delivers no mousedown/click to page
   await page.locator('.header .backdrop').first().click()
   await expect(page.locator('#textarea-mindbox'), 'MindBox focused before desktop glass click').toBeFocused()
   await watchTarget(page, gapX, gapY)
   await page.mouse.click(gapX, gapY)
-  expect(await readWatch(page), 'click on desktop frosted glass (box focused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
+  expect(await readWatch(page), 'click on bare frosted glass between two strip groups (box focused) delivers no mousedown or click to page').toEqual({ underPage: true, mousedown: 0, click: 0 })
   await expect(page.locator('#textarea-mindbox'), 'MindBox keeps focus after glass click').toBeFocused()
   expect((await query(page)).trim(), 'MindBox text unchanged after glass click').toBe(textBeforeUnfocused)
   await blur(page)
 
-  // click just outside the L-shape (in the shadow 4 px above the row, right of the column) reaches the page
+  // the three presses outside the glass go to a cover of the test's own, laid over the page and
+  // under the buttons and their glass: the seeded items at those points are live (timers, a frame,
+  // links). In one full gate the press at the old lower-left place opened one of them for editing
+  // and the page scrolled by 434 px between the watch of the point left of the piece and its press
+  // (the kept trace, as the code reviewer read it), so the element watched got nothing
+  await page.evaluate(() => {
+    const cover = document.createElement('div')
+    cover.id = 'e2e-page-cover'
+    cover.style.cssText = `position:fixed;inset:0;z-index:${Number(getComputedStyle(document.querySelector('.key-buttons-bg')!).zIndex) - 1}`
+    document.body.append(cover)
+  })
+  const coverAt = (x: number, y: number) => page.evaluate(([px, py]) => document.elementFromPoint(px, py)?.id ?? '', [x, y] as const)
+
+  // old lower-left place takes a click as any page point does (no glass there now)
   const origSize = page.viewportSize()!
-  const hRow = LOOK.reload.size + 2 * LOOK.reload.bottom
+  const [oldLeftX, oldLeftY] = [LOOK.reload.left + LOOK.reload.size / 2, origSize.height - LOOK.reload.bottom - LOOK.reload.size / 2]
+  expect(await coverAt(oldLeftX, oldLeftY), 'the cover is the page at the old lower-left place').toBe('e2e-page-cover')
+  await watchTarget(page, oldLeftX, oldLeftY)
+  await page.mouse.click(oldLeftX, oldLeftY)
+  expect(await readWatch(page), 'click at old lower-left place reaches the page underneath (no glass there now)').toEqual({ underPage: true, mousedown: 1, click: 1 })
+
+  // clicks just outside the right piece (above the row and left of the piece) reach the page
   const outsideY = origSize.height - hRow - 4
+  expect(await coverAt(gapX, outsideY), 'the cover is the page above the row').toBe('e2e-page-cover')
   await watchTarget(page, gapX, outsideY)
   await page.mouse.click(gapX, outsideY)
   expect(await readWatch(page), 'click just outside the glass above the row reaches the page underneath').toEqual({ underPage: true, mousedown: 1, click: 1 })
+  const outsideLeftX = origSize.width - pieceW - 6
+  expect(await coverAt(outsideLeftX, gapY), 'the cover is the page left of the piece').toBe('e2e-page-cover')
+  await watchTarget(page, outsideLeftX, gapY)
+  await page.mouse.click(outsideLeftX, gapY)
+  expect(await readWatch(page), 'click just left of the right glass piece reaches the page underneath').toEqual({ underPage: true, mousedown: 1, click: 1 })
+  await page.evaluate(() => document.getElementById('e2e-page-cover')!.remove())
 
-  // press-start rejection across the 44 px desktop row's top edge: a link laid across that edge
-  // gets neither mousedown nor click when a press starts on glass 43 px above bottom and releases
-  // on the link 45 px above bottom; a press starting above the glass delivers its mousedown; and an
-  // ordinary click afterwards is delivered once
-  await page.evaluate(() => {
+  // press-start rejection across the 44 px desktop row's top edge at gapX: a link laid across that
+  // edge gets neither mousedown nor click when a press starts on glass 43 px above bottom and
+  // releases on the link 45 px above bottom; a press starting above the glass delivers its
+  // mousedown; and an ordinary click afterwards is delivered once
+  const edgeLinkLeft = Math.round(gapX - 16)
+  await page.evaluate(leftPx => {
     const link = document.createElement('a')
     link.id = 'e2e-glass-edge-link'
     link.href = '#e2e-glass-edge'
     link.textContent = 'edge'
-    link.style.cssText = 'position:fixed;left:56px;bottom:30px;width:32px;height:30px;z-index:50;display:block'
+    link.style.cssText = `position:fixed;left:${leftPx}px;bottom:30px;width:32px;height:30px;z-index:50;display:block`
     const counts = { mousedown: 0, click: 0 }
     link.addEventListener('mousedown', () => counts.mousedown++)
     link.addEventListener('click', e => {
@@ -1104,14 +1205,14 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
       counts.mousedown = 0
       counts.click = 0
     }
-  })
+  }, edgeLinkLeft)
   try {
     const insideEdgeY = origSize.height - (hRow - 1) // 43 px above bottom (on glass)
     const outsideEdgeY = origSize.height - (hRow + 1) // 45 px above bottom (above glass)
     await blur(page)
-    await page.mouse.move(70, insideEdgeY)
+    await page.mouse.move(gapX, insideEdgeY)
     await page.mouse.down()
-    await page.mouse.move(70, outsideEdgeY)
+    await page.mouse.move(gapX, outsideEdgeY)
     await page.mouse.up()
     expect(
       await page.evaluate(() => (window as any).__edge_counts()),
@@ -1147,9 +1248,9 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
       .toBeGreaterThan(hide1)
 
     await page.evaluate(() => (window as any).__edge_reset())
-    await page.mouse.move(70, outsideEdgeY)
+    await page.mouse.move(gapX, outsideEdgeY)
     await page.mouse.down()
-    await page.mouse.move(70, insideEdgeY)
+    await page.mouse.move(gapX, insideEdgeY)
     await page.mouse.up()
     expect(
       await page.evaluate(() => (window as any).__edge_counts()),
@@ -1157,7 +1258,7 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     ).toEqual({ mousedown: 1, click: 1 })
 
     await page.evaluate(() => (window as any).__edge_reset())
-    await page.mouse.click(70, outsideEdgeY)
+    await page.mouse.click(gapX, outsideEdgeY)
     expect(
       await page.evaluate(() => (window as any).__edge_counts()),
       'ordinary click on link above glass after edge-crossing presses is delivered once'
@@ -1170,8 +1271,8 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     })
   }
 
-  // wheel with pointer over the glass scrolls document.body (clear filter so the full seeded list
-  // gives ample scroll range below headerTop, where the app never auto-scrolls away)
+  // wheel with pointer over the right glass piece scrolls document.body (clear filter so the full
+  // seeded list gives ample scroll range below headerTop, where the app never auto-scrolls away)
   await page.evaluate(() => (window as any).MindBox.set(''))
   await expect
     .poll(() => page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight), { timeout: 5_000 })
@@ -1187,10 +1288,12 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     document.body.scrollTop = y
   }, desktopTop)
 
-  // #vault sparkle overlays over frosted glass (vault.md: .vault-sparkle fixed right 14/bottom 10,
-  // 24x24, z-index 90; .vault-sparkle-backdrop fixed inset 0, z-index 89; .vault-sparkle-menu fixed
-  // right 14/bottom 42, z-index 90, direct children of body): real clicks reach each overlay while
-  // bare glass of the right piece beside the sparkle still rejects clicks
+  // #vault sparkle overlays on that same right glass piece (vault.md: .vault-sparkle fixed right
+  // 14/bottom 10, 24x24, z-index 90; .vault-sparkle-backdrop fixed inset 0, z-index 89;
+  // .vault-sparkle-menu fixed right 14/bottom 42, z-index 90, direct children of body): .key-buttons-bg-right
+  // stays hidden; the stand-in sparkle stands on the one right piece and is admitted by its
+  // rectangle AND its target, while bare glass beside it and a corner of its square box outside its
+  // circle reject clicks; backdrop and menu are admitted by target
   const clickOverlay = async (sel: string, x: number, y: number) => {
     await page.evaluate(
       ([s, px, py]) => {
@@ -1227,91 +1330,123 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     document.body.appendChild(sparkle)
   }, SPARKLE)
   try {
-    const [sparkleBox, rightBox] = [
+    expect((await readBackdrop(page)).right.display, '.key-buttons-bg-right stays hidden even when .vault-sparkle is visible').toBe('none')
+    const [sparkleBox, paneBox, reloadBoxNow] = [
       (await page.locator('body > .vault-sparkle').boundingBox())!,
-      (await page.locator(`${BACKDROP} > .key-buttons-bg-right`).boundingBox())!,
+      (await page.locator(`${BACKDROP} > .key-buttons-bg-pane`).boundingBox())!,
+      (await page.locator(RELOAD).boundingBox())!,
     ]
+    expect(
+      sparkleBox.x >= paneBox.x &&
+        sparkleBox.x + sparkleBox.width <= paneBox.x + paneBox.width &&
+        sparkleBox.y >= paneBox.y &&
+        sparkleBox.y + sparkleBox.height <= paneBox.y + paneBox.height,
+      'stand-in .vault-sparkle stands on the one right frosted piece'
+    ).toBe(true)
     const [sparkleX, sparkleY] = [sparkleBox.x + sparkleBox.width / 2, sparkleBox.y + sparkleBox.height / 2]
     expect(
       await clickOverlay('body > .vault-sparkle', sparkleX, sparkleY),
       'click at centre of stand-in .vault-sparkle over right frosted piece reaches it'
     ).toEqual({ hit: true, mousedown: 1, click: 1 })
 
-    const [rightGlassX, rightGlassY] = [(rightBox.x + sparkleBox.x) / 2, sparkleY]
+    // corner of .vault-sparkle's square bounding box outside its border-radius: 50% circle hits the page underneath:
+    // coordinates are inside sparkle's rect, target is not sparkle -> rejected as glass
+    const [sparkleCornerX, sparkleCornerY] = [sparkleBox.x + 1, sparkleBox.y + 1]
+    await watchTarget(page, sparkleCornerX, sparkleCornerY)
+    await page.mouse.click(sparkleCornerX, sparkleCornerY)
+    expect(
+      await readWatch(page),
+      'click inside stand-in .vault-sparkle bounding rect whose target is the page is rejected as glass'
+    ).toEqual({ underPage: true, mousedown: 0, click: 0 })
+
+    const [rightGlassX, rightGlassY] = [(reloadBoxNow.x + reloadBoxNow.width + sparkleBox.x) / 2, sparkleY]
     await watchTarget(page, rightGlassX, rightGlassY)
     await page.mouse.click(rightGlassX, rightGlassY)
     expect(
       await readWatch(page),
-      'click on bare glass of right frosted piece beside .vault-sparkle delivers no mousedown or click to page'
+      'click on bare glass of right frosted piece between reload and .vault-sparkle delivers no mousedown or click to page'
     ).toEqual({ underPage: true, mousedown: 0, click: 0 })
 
     await page.evaluate(() => {
       const backdrop = document.createElement('div')
       backdrop.className = 'vault-sparkle-backdrop'
       backdrop.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;z-index:89'
-      document.body.appendChild(backdrop)
+      const menu = document.createElement('div')
+      menu.className = 'vault-sparkle-menu'
+      menu.setAttribute('role', 'menu')
+      menu.style.cssText =
+        'position:fixed;right:14px;bottom:42px;z-index:90;box-sizing:border-box;padding:4px;border:1px solid #444;border-radius:6px;background:#1b1b1b'
+      const item = document.createElement('button')
+      item.type = 'button'
+      item.setAttribute('role', 'menuitem')
+      item.textContent = 'Stop Watching'
+      item.style.cssText = 'display:block;width:100%;margin:0;padding:6px 12px;border:0;font:14px/1.2 sans-serif;text-align:left;white-space:nowrap'
+      menu.append(item)
+      document.body.append(backdrop, menu)
     })
     expect(
       await clickOverlay('body > .vault-sparkle-backdrop', gapX, gapY),
       'click on stand-in .vault-sparkle-backdrop over frosted glass reaches it'
     ).toEqual({ hit: true, mousedown: 1, click: 1 })
+    const menuBox = (await page.locator('body > .vault-sparkle-menu').boundingBox())!
+    const [menuX, menuY] = [menuBox.x + menuBox.width - 20, menuBox.y + menuBox.height - 1]
+    expect(
+      {
+        inGlass: origSize.height - menuY <= hRow && origSize.width - menuX <= pieceW,
+        ...(await clickOverlay('body > .vault-sparkle-menu', menuX, menuY)),
+      },
+      'click on stand-in .vault-sparkle-menu overlapping the top of the right frosted piece reaches it'
+    ).toEqual({ inGlass: true, hit: true, mousedown: 1, click: 1 })
   } finally {
     await page.evaluate(() => {
-      document.querySelectorAll('body > .vault-sparkle, body > .vault-sparkle-backdrop').forEach(el => el.remove())
+      document.querySelectorAll('body > .vault-sparkle, body > .vault-sparkle-backdrop, body > .vault-sparkle-menu').forEach(el => el.remove())
     })
   }
 
-  // narrow desktop (< 480 px): merges into one full-width strip with the left column kept (one 12 px arc, strip SVG shown, split SVG and right piece hidden)
+  // narrow desktop (< 480 px): becomes one full-width unrounded strip (0 arcs, strip SVG shown, split SVG and bg-right hidden)
   await page.setViewportSize({ width: LOOK.backdrop.merge - 40, height: origSize.height })
   await expect
     .poll(async () => {
       const bg = await readBackdrop(page)
-      return [bg.pane.width, bg.pane.clipArcs, bg.frame.strip.display, bg.frame.split.display, bg.frame.strip.stdDev, bg.frame.strip.borderStroke, bg.right.display]
-    }, { message: 'below 480 px desktop backdrop merges into one full-width strip', timeout: 3_000 })
-    .toEqual([`${LOOK.backdrop.merge - 40}px`, 1, 'block', 'none', '6', expectedBorder, 'none'])
+      return [
+        bg.pane.width,
+        bg.pane.height,
+        bg.pane.clipArcs,
+        bg.frame.strip.display,
+        bg.frame.split.display,
+        bg.frame.strip.stdDev,
+        bg.frame.strip.borderStroke,
+        bg.frame.strip.borderArcs,
+        bg.right.display,
+      ]
+    }, { message: 'below 480 px desktop backdrop becomes one full-width strip', timeout: 3_000 })
+    .toEqual([`${LOOK.backdrop.merge - 40}px`, stripH, 0, 'block', 'none', '6', expectedBorder, 0, 'none'])
 
-  // on a narrow desktop window (< 480 px), a real .vault-sparkle-menu (right 14/bottom 42, z-index 90,
-  // watch-line row up to 340 px wide) extends over the left-column frosted glass (w_col = 52, h_tot = 104);
-  // a real click on a menuitem over that glass reaches the menu button
-  await page.setViewportSize({ width: 400, height: origSize.height })
-  await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 3_000 }).toBe(400)
-  await page.evaluate(() => {
-    const backdrop = document.createElement('div')
-    backdrop.className = 'vault-sparkle-backdrop'
-    backdrop.style.cssText = 'position:fixed;top:0;right:0;bottom:0;left:0;z-index:89'
-    const menu = document.createElement('div')
-    menu.className = 'vault-sparkle-menu'
-    menu.setAttribute('role', 'menu')
-    menu.style.cssText =
-      'position:fixed;right:14px;bottom:42px;z-index:90;box-sizing:border-box;padding:4px;border:1px solid #444;border-radius:6px;background:#1b1b1b'
-    const item = document.createElement('button')
-    item.type = 'button'
-    item.setAttribute('role', 'menuitem')
-    item.textContent = 'Stop Watching'
-    item.style.cssText = 'display:block;width:100%;margin:0;padding:6px 12px;border:0;font:14px/1.2 sans-serif;text-align:left;white-space:nowrap'
-    const line = document.createElement('div')
-    line.textContent = 'watched: #vault'
-    line.style.cssText = 'width:340px;max-width:min(340px,calc(100vw - 54px));padding:3px 12px;font:12px/1.3 sans-serif'
-    menu.append(item, line)
-    document.body.append(backdrop, menu)
-  })
-  try {
-    const btnBox = (await page.locator('body > .vault-sparkle-menu > button').boundingBox())!
-    const wCol = LOOK.reload.size + 2 * LOOK.reload.left
-    const hTot = 2 * LOOK.reload.size + 2 * LOOK.gap + LOOK.reload.size + 2 * LOOK.reload.bottom
-    const r = LOOK.reload.size / 2
-    const [menuX, menuY] = [(btnBox.x + Math.min(btnBox.x + btnBox.width, wCol - r)) / 2, btnBox.y + btnBox.height / 2]
-    expect(
-      {
-        inGlass: menuX > btnBox.x && menuX <= wCol - r && origSize.height - menuY <= hTot,
-        ...(await clickOverlay('body > .vault-sparkle-menu > button', menuX, menuY)),
-      },
-      'click on stand-in .vault-sparkle-menu item over frosted glass reaches it'
-    ).toEqual({ inGlass: true, hit: true, mousedown: 1, click: 1 })
-  } finally {
-    await page.evaluate(() => {
-      document.querySelectorAll('body > .vault-sparkle-backdrop, body > .vault-sparkle-menu').forEach(el => el.remove())
-    })
+  // a very narrow window on a device with a keyboard: the gaps between the groups shrink, so that
+  // no control of the strip is cut off (review 3 of the thread nav_arrows: at 320 px the first
+  // button began 6 px left of the window, at 300 px it was out of reach)
+  for (const narrowWidth of [320, 300]) {
+    await page.setViewportSize({ width: narrowWidth, height: origSize.height })
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ([strip, reload]) => {
+              const buttons = [...document.querySelectorAll(`${strip} > button`), document.querySelector(reload)!] as HTMLElement[]
+              const top = document.querySelector(`${strip} > button[data-key="top"]`) as HTMLElement
+              const box = top.getBoundingClientRect()
+              return {
+                width: window.innerWidth,
+                count: buttons.length,
+                inside: buttons.every(b => b.getBoundingClientRect().left >= 0 && b.getBoundingClientRect().right <= window.innerWidth),
+                topHit: top.contains(document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)),
+              }
+            },
+            [NAV_STRIP, RELOAD] as const
+          ),
+        { message: `at ${narrowWidth} px every control of the strip is inside the window and the top button takes a press at its centre`, timeout: 3_000 }
+      )
+      .toEqual({ width: narrowWidth, count: 8, inside: true, topHit: true })
   }
   await page.setViewportSize(origSize)
 
