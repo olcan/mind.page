@@ -99,6 +99,7 @@
   import Editor from './Editor.svelte'
   import { collectItemErrorSources, logItemErrors } from '../item_errors'
   import { renderInertMarkdown } from '../inert_markdown'
+  import { insertInlineChildTags, isMarkVisible, isNameOnlyContent, renderChildMarks } from '../child_tags'
   import { forgetSelection, inertBlocks, sayExpanded } from '../inert_blocks'
   import { typesetInertMath } from '../inert_math'
   export let editable = true
@@ -157,6 +158,9 @@
   export let danglingTags: any // the resolved relative tags no item carries (index.svelte updateMissingTags)
   export let matchingTerms: any
   export let matchingTermsSecondary: any
+  export let childrenString = ''
+  export let childHighlightSelected = ''
+  export let childHighlightSecondary = ''
   export let matching: boolean
   export let time: number
   export let timeString: string
@@ -549,7 +553,8 @@
     matchingTermsSecondary: any, // space-separated string converted to Set
     depsString: string,
     dependentsString: string,
-    version: number
+    version: number,
+    childrenString: string
   ) {
     // bridge reviews 177-188: candidate BYTES never enter macro expansion or the block
     // transforms below -- only opaque markers do, and a surviving marker (an enclosing
@@ -1338,6 +1343,18 @@
           .replace(/<pre><code class="_log">(?:(?!<\/pre>).)*<\/code><\/pre>$/s, m => (keep.push(m), ''))
       } while (content.length < length) // keep trying until content length is unchanged
       if (keep.length) content += '\n' + keep.join(' ') + '\n'
+      // draw every direct tree child as a real tag mark: inline right after the label when the item
+      // shows nothing besides its label, else in a block of their own in `footer` (inserted after
+      // `.content` as a separate fragment so unclosed HTML in `.content` cannot swallow them).
+      // Any child already shown visibly by another mark (written prose or an open agent inert section)
+      // is hidden post-render by `syncRepeatedChildTags` using the browser's own visibility test.
+      // Shown only: never part of the item's tags, text, deps or search matches
+      const children = childrenString ? childrenString.split(' ').filter(Boolean) : []
+      if (children.length && label && labelUnique && !fixed) {
+        const marksHtml = renderChildMarks(id, label, children)
+        if (!isMenu && isNameOnlyContent(content)) content = insertInlineChildTags(content, marksHtml)
+        else footer = `<div class="child-tags">${marksHtml}</div>` + (footer ? '\n' + footer : '')
+      }
       text = `<div class="content${isMenu ? ' menu' : ''}">` + content
     }
 
@@ -1456,6 +1473,59 @@
   // summaries; empty for an item without dependencies, dependents or log lines): afterUpdate
   // inserts it after the body, as a fragment of its own (see the wrapper in toHTML)
   let footerHTML = ''
+
+  // hide any drawn `mark.child-tag` whose tag another visible mark of this item already shows
+  // (written prose or an open agent inert section), using the browser's own box-visibility test
+  // (`isMarkVisible`) for supported hiding cases (`<!--hidden-->`, `[hidden]`, closed `<details>`,
+  // folded `.inert-block` frames, closed `#template` toggles, `mark.hidden`, `.repeated`; not
+  // `visibility: hidden` or owner CSS inside a reply). Runs on the item's update, an inert block's
+  // toggle, a capturing native `toggle` inside the item, and the `#template` toggle's resize hook;
+  // touches only items that have drawn marks and never re-enters Svelte's afterUpdate
+  function syncRepeatedChildTags() {
+    if (!itemdiv) return
+    const drawn = itemdiv.querySelectorAll('mark.child-tag')
+    if (!drawn.length) return
+    const shown = new Set<string>()
+    itemdiv.querySelectorAll('mark:not(.child-tag, .label, .deps-and-dependents *)').forEach(mark => {
+      if (!isMarkVisible(mark)) return
+      const title = mark.getAttribute('title')
+      if (title) shown.add(title.toLowerCase())
+    })
+    let visibleCount = 0
+    drawn.forEach(mark => {
+      const repeated = shown.has((mark.getAttribute('title') ?? '').toLowerCase())
+      mark.classList.toggle('repeated', repeated)
+      if (!repeated) visibleCount++
+    })
+    itemdiv.querySelectorAll('.child-tags').forEach(box => {
+      box.classList.toggle('empty', visibleCount == 0)
+    })
+  }
+
+  // light or unlight drawn `mark.child-tag` marks for the active path from root without running
+  // the full afterUpdate pass (which wraps custom link onclick handlers and sets up DOM controls)
+  function syncChildHighlights() {
+    if (!itemdiv) return
+    const drawn = itemdiv.querySelectorAll('mark.child-tag')
+    if (!drawn.length) return
+    const matchingTermSet = matchingTerms ? new Set<string>(matchingTerms.split(' ').filter(Boolean)) : null
+    const matchingTermSecondarySet = matchingTermsSecondary
+      ? new Set<string>(matchingTermsSecondary.split(' ').filter(Boolean))
+      : null
+    const childSelectedSet = childHighlightSelected
+      ? new Set<string>(childHighlightSelected.split(' ').filter(Boolean))
+      : null
+    const childSecondarySet = childHighlightSecondary
+      ? new Set<string>(childHighlightSecondary.split(' ').filter(Boolean))
+      : null
+    drawn.forEach(mark => {
+      const title = (mark.getAttribute('title') ?? '').toLowerCase()
+      const selected = !!matchingTermSet?.has(title) || !!childSelectedSet?.has(title)
+      const secondary = !selected && (!!matchingTermSecondarySet?.has(title) || !!childSecondarySet?.has(title))
+      mark.classList.toggle('selected', selected)
+      mark.classList.toggle('secondary-selected', secondary)
+    })
+  }
 
   function cacheElems() {
     // cache/restore elements with attribute _cache_key to/from window[_cache][_cache_key]
@@ -1799,6 +1869,7 @@
         terms: matchingTerms + ' ' + matchingTermsSecondary, // the highlighter's terms, below
         selected: () => target,
         selecting: selectedIn,
+        onStateChange: () => syncRepeatedChildTags(),
         resized: () => onResized(id, container, 'inert toggle'),
       })
     // and what each block's marker says of it (aria-expanded): after a population, and when the
@@ -1871,6 +1942,10 @@
 
     // we highlight both primary and secondary matching terms
     const highlightTerms = matchingTerms + ' ' + matchingTermsSecondary
+    const childHighlightKey =
+      childHighlightSelected || childHighlightSecondary
+        ? `${childHighlightSelected}|${childHighlightSecondary}`
+        : ''
 
     // skip afterUpdate if hash, version, and highlightTerms are unchanged
     // note without version, highlights break after item.invalidate_elem_cache()
@@ -1879,12 +1954,21 @@
       version.toString() == itemdiv.firstElementChild.getAttribute('_version') &&
       highlightTerms == itemdiv.firstElementChild.getAttribute('_highlightTerms')
     ) {
+      // child-only changes stay out of the full pass (which wraps link onclick handlers and sets up
+      // DOM elements): only re-check repeated marks when selection flipped or inert frames populated,
+      // and only toggle drawn highlight classes when childHighlightKey changed
+      if (turned || framesPopulated) syncRepeatedChildTags()
+      if (childHighlightKey != (itemdiv.firstElementChild.getAttribute('_childHighlight') ?? '')) {
+        itemdiv.firstElementChild.setAttribute('_childHighlight', childHighlightKey)
+        syncChildHighlights()
+      }
       // console.debug("afterUpdate skipped");
       return
     }
     itemdiv.firstElementChild.setAttribute('_hash', hash)
     itemdiv.firstElementChild.setAttribute('_version', version.toString())
     itemdiv.firstElementChild.setAttribute('_highlightTerms', highlightTerms)
+    itemdiv.firstElementChild.setAttribute('_childHighlight', childHighlightKey)
     // console.debug("afterUpdate", name);
 
     // cache/restore any cached elements with _cache_key (invoked again later for elements with scripts)
@@ -1893,12 +1977,15 @@
     // highlight matching tags using selected/secondary-selected classes
     const matchingTermSet = new Set<string>(matchingTerms.split(' ').filter(t => t))
     const matchingTermSecondarySet = new Set<string>(matchingTermsSecondary.split(' ').filter(t => t))
-    itemdiv.querySelectorAll('mark').forEach(mark => {
-      const selected = matchingTermSet.has(mark.title.toLowerCase())
-      const secondary_selected = !selected && matchingTermSecondarySet.has(mark.title.toLowerCase())
+    itemdiv.querySelectorAll('mark:not(.child-tag)').forEach(mark => {
+      const title = (mark.getAttribute('title') ?? '').toLowerCase()
+      const selected = matchingTermSet.has(title)
+      const secondary_selected = !selected && matchingTermSecondarySet.has(title)
       mark.classList.toggle('selected', selected)
       mark.classList.toggle('secondary-selected', secondary_selected)
     })
+    syncRepeatedChildTags()
+    syncChildHighlights()
 
     // highlight matching terms in item text
     const mindboxModifiedAtDispatch = window['_mindboxLastModified']
@@ -2472,7 +2559,10 @@
   // misattribute measurements, caching and invalidations to it; instead they route through this
   // registry by the PASSED item's id
   const itemHooks = {
-    resize: (trigger: string) => onResized(id, container, trigger),
+    resize: (trigger: string) => {
+      if (trigger == 'toggle') syncRepeatedChildTags()
+      onResized(id, container, trigger)
+    },
     render_images: (elems: NodeListOf<Element>) => renderImages(id, elems),
     running_mark: showOnRunningMark, // the item's status and its run's progress have changed (index.svelte, itemShowStatus)
   }
@@ -2683,7 +2773,8 @@
         {/if}
       </div>
       <!-- NOTE: id for .item can be used to style specific items using #$id selector -->
-      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal class:fixed>
+      <!-- capturing `toggle` listener (native `toggle` does not bubble) re-syncs drawn child tags when a `<details>` inside the item opens or closes -->
+      <div id={'item-' + id} class="item {styleDepsString}" bind:this={itemdiv} class:saving class:headerMinimal class:fixed on:toggle|capture={syncRepeatedChildTags}>
         <!-- NOTE: arguments to toHTML (e.g. deephash) determine dependencies for (re)rendering -->
         {@html toHTML(
           text || placeholder,
@@ -2697,7 +2788,8 @@
           matchingTermsSecondary,
           depsString,
           dependentsString,
-          version
+          version,
+          childrenString
         )}
       </div>
     {/if}
@@ -3510,7 +3602,7 @@
     hyphens: auto; /* url links can get long and cause undesirable wrapping */
     hyphenate-character: '-'; /* '' is same as word-break:all */
   }
-  .item > :global(:is(.content, .deps-and-dependents) mark) {
+  .item > :global(:is(.content, .child-tags, .deps-and-dependents) mark) {
     color: black;
     background: #999;
     font-weight: 600;
@@ -3518,6 +3610,24 @@
     margin: 0;
     border-radius: 4px;
     cursor: pointer;
+  }
+  /* drawn child tags: 85% of a written tag's size, inline beside a bare label or in a block below;
+     line-height: normal keeps the smaller inline box inside the 30px strut so the name's line does not grow */
+  .item > :global(:is(.content, .child-tags) mark.child-tag) {
+    font-size: 85%;
+    line-height: normal;
+  }
+  .item > :global(:is(.content, .child-tags) mark.child-tag.repeated),
+  .item > :global(:is(.content, .child-tags) .child-tags.empty),
+  .item > :global(.child-tags.empty) {
+    display: none;
+  }
+  /* drawn child tags on a line of their own below an item with content other than its label */
+  .item > :global(.child-tags) {
+    clear: both;
+  }
+  .item > :global(.content:has(> :is(ul, ol, pre, table, blockquote):last-child) + .child-tags) {
+    margin-top: 2px;
   }
 
   /* .menu styling: paragraphs become flex boxes */
@@ -3527,13 +3637,13 @@
     width: 96%; /* align right side while leaving space for item number and tapping for editing */
   }
   .item > :global(.menu a),
-  .item > :global(.menu mark:not(.hidden)) {
+  .item > :global(.menu mark:not(.hidden, .child-tag)) {
     padding: 4px;
     font-size: 110%;
     font-weight: 600;
   }
   .item > :global(.menu p a),
-  .item > :global(.menu p mark:not(.hidden)) {
+  .item > :global(.menu p mark:not(.hidden, .child-tag)) {
     flex: 1 1 auto;
     display: flex;
     justify-content: center;
@@ -3591,10 +3701,10 @@
     padding-top: 0;
     padding-bottom: 0;
   }
-  .item > :global(:is(.content, .deps-and-dependents) mark.selected) {
+  .item > :global(:is(.content, .child-tags, .deps-and-dependents) mark.selected) {
     background: #9f9;
   }
-  .item > :global(:is(.content, .deps-and-dependents) mark.secondary-selected) {
+  .item > :global(:is(.content, .child-tags, .deps-and-dependents) mark.secondary-selected) {
     background: #9b9;
   }
 
@@ -3650,7 +3760,7 @@
     font-weight: 700; /* match weight of mark.label.unique */
   }
 
-  .item > :global(:is(.content, .deps-and-dependents) mark span.highlight) {
+  .item > :global(:is(.content, .child-tags, .deps-and-dependents) mark span.highlight) {
     color: black;
     background: #9b9;
     border: 0;

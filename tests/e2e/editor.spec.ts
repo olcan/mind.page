@@ -1627,7 +1627,7 @@ test('escape in the MindBox keeps a query set by a tag click: the editor passed 
   await expect.poll(() => page.evaluate(() => location.hash), { timeout: 10_000 }).toBe('#e2e_esc')
   await expect.poll(() => page.evaluate(() => !!window._item('#e2e_esc')!.elem)).toBe(true)
   const id = await page.evaluate(() => window._item('#e2e_esc')!.id)
-  await page.locator(`#item-${id} mark[title="#e2e_esc/sub"]`).click()
+  await page.locator(`#item-${id} mark[title="#e2e_esc/sub"]:not(.child-tag)`).click() // written tag, not hidden repeated drawn mark
   await expect(mindbox(page)).toHaveValue('#e2e_esc/sub ') // tag searches get a trailing space
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('#e2e_esc/sub')
   // the owner's position: the MindBox focused on the clicked query (focused here whatever the click left)
@@ -2202,7 +2202,9 @@ test('time rows: the arrows navigate through a query change, which regroups noth
   const ROOT = '#e2e_trn'
   const ITEM = `${ROOT}/0`
   const CHILD = `${ITEM}/0`
-  for (const text of [`${ROOT} root`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
+  // `#/0` makes ROOT match ITEM so the final plain click on ROOT's index button is an explicit touch (since 2026-11-18 a
+  // non-matching number selects instead, which passed only while 1-line ROOT stayed in view; drawn #/0 made ROOT taller)
+  for (const text of [`${ROOT} root #/0`, `${ITEM} the item being read`, `${CHILD} its child`]) await page.evaluate(text => void window._create(text), text)
   await userSet(page, ROOT, { scroll: true })
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_trn ?$/)

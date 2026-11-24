@@ -589,7 +589,7 @@ test('a _context parent: Down enters the smallest integer child and Right/Left e
   await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), PARENT)
   const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
   await expect.poll(query).toMatch(/^#e2e_icx ?$/)
-  await expect.poll(() => page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('mark[title]') ?? [])].map(m => m.getAttribute('title')).filter(t => t?.startsWith(label + '/')), PARENT)).toEqual(['#e2e_icx/10', '#e2e_icx/b'])
+  await expect.poll(() => page.evaluate(label => [...(window._item(label, true)?.elem?.querySelectorAll('mark[title]:not(.child-tag)') ?? [])].map(m => m.getAttribute('title')).filter(t => t?.startsWith(label + '/')), PARENT)).toEqual(['#e2e_icx/10', '#e2e_icx/b'])
   await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
   await page.keyboard.press('ArrowDown')
   await expect.poll(query).toBe('#e2e_icx/1 ')
@@ -628,6 +628,822 @@ test('Down takes an immediate integer child, not one a parent tag moved deeper i
     await firestore().collection('items').doc((await savedId('#chat'))!).delete()
     await expect.poll(() => savedId('#chat'), { timeout: 30_000 }).toBeNull()
   }
+})
+
+test('parents draw their direct tree children as real tag marks: order, placement, no repetition, path highlight, arrows, click, live remote updates, and shown-only', async ({ page, browser }) => {
+  await loadAdmin(page)
+  const P = '#e2e_ct'
+  const D = '#e2e_ct_desc'
+  const L = '#e2e_ct_list'
+  const M = '#e2e_ct_menu'
+  const I = '#e2e_ct_inert'
+  const OTHER = '#e2e_ct_other'
+  const savedId = (label: string, target: typeof page = page) =>
+    target.evaluate(label => window._item(label, true)?.saved_id ?? null, label)
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const setQuery = async (q: string) => {
+    await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), q)
+    await expect.poll(() => query().then(v => v.trim())).toBe(q.trim())
+  }
+  const blur = () => page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  const pressArrow = async (key: string, expected: string) => {
+    await blur()
+    await page.keyboard.press(key)
+    await expect.poll(query, { message: `${key} navigates to ${expected}` }).toBe(expected)
+  }
+  const drawn = (label: string) =>
+    page.evaluate(label => {
+      const elem = window._item(label, true)?.elem
+      if (!elem) return null
+      return [...elem.querySelectorAll('mark.child-tag:not(.repeated)')]
+        .filter(m => m.checkVisibility())
+        .map(m => [
+          m.getAttribute('title'),
+          m.textContent,
+          m.classList.contains('selected'),
+          m.classList.contains('secondary-selected'),
+        ])
+    }, label)
+  const drawnTitles = (label: string) => drawn(label).then(rows => rows?.map(r => r[0]) ?? null)
+
+  // create a #chat stub if absent so the tag-parent override (#e2e_ct_desc/moved -> /branch) is accepted
+  const hadChat = !!(await savedId('#chat'))
+  const ctx2 = await browser.newContext()
+  try {
+    if (!hadChat) await page.evaluate(text => void window._create(text), '#chat #_autodep\nconfig')
+    await expect.poll(() => savedId('#chat'), { timeout: 30_000 }).toBeTruthy()
+
+    // create the tree in scrambled order so numeric and alphabetical ordering are witnessed
+    for (const text of [
+      `${OTHER} #_pin bystander item`,
+      `${P} #_pin`,
+      `${P}/b child b`,
+      `${P}/10 child ten`,
+      `${P}/uniqchild unique child`,
+      `${P}/a child a`,
+      `${P}/2 child two`,
+      `${D} Overview with #/z and #_/hidden_kid`,
+      `${D}/z child z`,
+      `${D}/10 desc ten`,
+      `${D}/a desc a`,
+      `${D}/a/deep grandchild`,
+      `${D}/2 desc two`,
+      `${D}/hidden_kid hidden dep child`,
+      `${D}/branch #_chat a chat branch`,
+      `${D}/moved #_${D.slice(1)}/branch moved under branch`,
+      `${L}\n- one\n- two`,
+      `${L}/y list y`,
+      `${L}/x list x`,
+      `${M} #_menu`,
+      `${M}/sub menu child`,
+      `${I} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nsee #/listed and ${I}/abs_only\n<!--/inert-->`,
+      `${I}/listed listed in reply`,
+      `${I}/abs_only absolute tag link in reply`,
+      `${I}/unlisted not in reply`,
+    ]) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    await expect.poll(() => savedId(`${I}/unlisted`), { timeout: 30_000 }).toBeTruthy()
+    await expect
+      .poll(() => page.evaluate(label => (window._item(label, true) as any)?.ancestors ?? null, `${D}/moved`), {
+        timeout: 15_000,
+      })
+      .toEqual([`${D}/branch`, D])
+
+    // 1. Name-only parent (#e2e_ct #_pin): drawn inline beside the label, numbered first then by name
+    await setQuery(P)
+    await expect
+      .poll(() => drawn(P), { message: 'name-only parent draws direct children in numeric-then-name order' })
+      .toEqual([
+        [`${P}/2`, '2', false, false],
+        [`${P}/10`, '10', false, false],
+        [`${P}/a`, 'a', false, false],
+        [`${P}/b`, 'b', false, false],
+        [`${P}/uniqchild`, 'uniqchild', false, false],
+      ])
+    const nameOnlyLayout = await page.evaluate(
+      ([label, other]) => {
+        const item = window._item(label, true)!.elem!.querySelector('.item')!
+        const lblEl = item.querySelector('mark.label') as HTMLElement
+        const childEl = item.querySelector('mark.child-tag') as HTMLElement
+        const lbl = lblEl.getBoundingClientRect()
+        const firstChild = childEl.getBoundingClientRect()
+        const pHeight = item.querySelector('.content p')!.getBoundingClientRect().height
+        const otherPHeight = window._item(other, true)!.elem!.querySelector('.item .content p')!.getBoundingClientRect().height
+        // exact baseline alignment via 0x0 inline-block probes removed immediately
+        const probe = () => {
+          const s = document.createElement('span')
+          s.style.cssText = 'display:inline-block;width:0;height:0;overflow:hidden'
+          return s
+        }
+        const pl = probe()
+        const pc = probe()
+        let baselineDiff = Infinity
+        try {
+          lblEl.appendChild(pl)
+          childEl.appendChild(pc)
+          baselineDiff = Math.abs(pc.getBoundingClientRect().bottom - pl.getBoundingClientRect().bottom)
+        } finally {
+          pl.remove()
+          pc.remove()
+        }
+        const labelFontSize = parseFloat(getComputedStyle(lblEl).fontSize)
+        const childFontSize = parseFloat(getComputedStyle(childEl).fontSize)
+        return {
+          inlineContainer: !!item.querySelector('.content p > .child-tags'),
+          blockContainer: !!item.querySelector(':scope > .child-tags'),
+          sameLine: Math.abs(firstChild.top - lbl.top) <= 4 && firstChild.left > lbl.right,
+          sameBaseline: baselineDiff <= 0.5,
+          sameLineHeight: Math.abs(pHeight - otherPHeight) <= 0.5,
+          sizeRatio: Math.round((childFontSize / labelFontSize) * 100) / 100,
+        }
+      },
+      [P, OTHER] as const,
+    )
+    expect(
+      nameOnlyLayout,
+      'name-only parent places children inline at 85% size on the same baseline with no line-height shift',
+    ).toEqual({
+      inlineContainer: true,
+      blockContainer: false,
+      sameLine: true,
+      sameBaseline: true,
+      sameLineHeight: true,
+      sizeRatio: 0.85,
+    })
+
+    // 2. Content parent (#e2e_ct_desc): below content, no repetition of written #/z, hidden tag does
+    // not suppress #/hidden_kid, grandchild /a/deep and tag-moved /moved are excluded from #e2e_ct_desc
+    await setQuery(D)
+    await expect
+      .poll(() => drawnTitles(D), { message: 'content parent draws unshown direct children only' })
+      .toEqual([`${D}/2`, `${D}/10`, `${D}/a`, `${D}/branch`, `${D}/hidden_kid`])
+    const descFacts = await page.evaluate(label => {
+      const item = window._item(label, true)!.elem!.querySelector('.item')!
+      const firstLine = item.querySelector('.content p')!.getBoundingClientRect()
+      const writtenEl = item.querySelector(`mark[title="${label}/z"]:not(.child-tag)`) as HTMLElement
+      const childEl = item.querySelector(':scope > .child-tags mark.child-tag') as HTMLElement
+      const firstChild = childEl.getBoundingClientRect()
+      const lblFont = parseFloat(getComputedStyle(item.querySelector('mark.label')!).fontSize)
+      const writtenFont = parseFloat(getComputedStyle(writtenEl).fontSize)
+      const drawnFont = parseFloat(getComputedStyle(childEl).fontSize)
+      return {
+        inlineContainer: !!item.querySelector('.content .child-tags'),
+        blockContainer: !!item.querySelector(':scope > .child-tags'),
+        belowContent: firstChild.top >= firstLine.bottom - 2,
+        zCount: [...item.querySelectorAll(`mark[title="${label}/z"]`)].filter(m => m.checkVisibility()).length,
+        zDrawnRepeated: !!item.querySelector(`mark.child-tag.repeated[title="${label}/z"]`),
+        writtenMatchesLabel: Math.abs(writtenFont - lblFont) <= 0.1,
+        drawnToWrittenRatio: Math.round((drawnFont / writtenFont) * 100) / 100,
+      }
+    }, D)
+    expect(descFacts, 'content parent places children below at 85% of written tag size and does not repeat #/z').toEqual({
+      inlineContainer: false,
+      blockContainer: true,
+      belowContent: true,
+      zCount: 1,
+      zDrawnRepeated: true,
+      writtenMatchesLabel: true,
+      drawnToWrittenRatio: 0.85,
+    })
+
+    // Moved child sits under its tag parent (#e2e_ct_desc/branch) instead
+    await setQuery(`${D}/branch`)
+    await expect
+      .poll(() => drawnTitles(`${D}/branch`), { message: 'tag parent draws its moved tag child' })
+      .toEqual([`${D}/moved`])
+
+    // List parent (#e2e_ct_list): children sit below the list
+    await setQuery(L)
+    await expect.poll(() => drawnTitles(L)).toEqual([`${L}/x`, `${L}/y`])
+    const listBelow = await page.evaluate(label => {
+      const item = window._item(label, true)!.elem!.querySelector('.item')!
+      const ul = item.querySelector('.content ul')!.getBoundingClientRect()
+      const firstChild = item.querySelector(':scope > .child-tags mark.child-tag')!.getBoundingClientRect()
+      return firstChild.top >= ul.bottom - 2
+    }, L)
+    expect(listBelow, 'list parent places children below the list').toBe(true)
+
+    // 3. Shown only: drawn children do NOT enter item's tags, text, deps, dependents, or search matches
+    const state = await page.evaluate(label => {
+      const raw = (window as any).__items.find((i: any) => i.label == label)!
+      const api = window._item(label, true) as any
+      return {
+        text: raw.text,
+        tags: [...raw.tags].sort(),
+        tagsVisible: [...raw.tagsVisible].sort(),
+        deps: api.dependencies.map((id: string) => (window._item(id, true) as any).label),
+        dependents: api.dependents,
+      }
+    }, P)
+    expect(state, 'drawn children never enter item tags, text, deps or dependents').toEqual({
+      text: `${P} #_pin`,
+      tags: [P, '#pin'],
+      tagsVisible: [P],
+      deps: ['#features/_pin'],
+      dependents: [],
+    })
+    await setQuery('uniqchild')
+    const searchMatch = await page.evaluate(
+      ([p, c]) => ({
+        parentMatching: (window as any).__items.find((i: any) => i.label == p)!.matching,
+        parentTerms: (window as any).__items.find((i: any) => i.label == p)!.matchingTerms,
+        childMatching: (window as any).__items.find((i: any) => i.label == c)!.matching,
+      }),
+      [P, `${P}/uniqchild`] as const,
+    )
+    expect(searchMatch, 'search for a child name matches the child, never the parent through drawn marks').toEqual({
+      parentMatching: false,
+      parentTerms: [],
+      childMatching: true,
+    })
+
+    // 4. Click a drawn child mark -> navigates to child, highlights it on parent; grandparent gets secondary-selected
+    await setQuery(P)
+    await expect.poll(() => drawnTitles(P)).toContain(`${P}/10`)
+    const parentId = await page.evaluate(label => window._item(label, true)!.id, P)
+    await page.locator(`#item-${parentId} mark.child-tag[title="${P}/10"]`).click()
+    await expect.poll(query, { message: 'click on drawn mark navigates to child' }).toBe(`${P}/10 `)
+    await expect
+      .poll(() => drawn(P), { message: 'parent highlights the active child on the path' })
+      .toEqual([
+        [`${P}/2`, '2', false, false],
+        [`${P}/10`, '10', true, false],
+        [`${P}/a`, 'a', false, false],
+        [`${P}/b`, 'b', false, false],
+        [`${P}/uniqchild`, 'uniqchild', false, false],
+      ])
+
+    await setQuery(`${D}/a/deep`)
+    await expect
+      .poll(() => drawn(D), { message: 'grandparent highlights path child as secondary-selected' })
+      .toEqual([
+        [`${D}/2`, '2', false, false],
+        [`${D}/10`, '10', false, false],
+        [`${D}/a`, 'a', false, true],
+        [`${D}/branch`, 'branch', false, false],
+        [`${D}/hidden_kid`, 'hidden_kid', false, false],
+      ])
+    await expect
+      .poll(() => drawn(`${D}/a`), { message: 'parent highlights named grandchild as selected' })
+      .toEqual([[`${D}/a/deep`, 'deep', true, false]])
+
+    // 5. Arrow keys walk drawn children in exact shown order on a parent with NO written tags
+    await setQuery(P)
+    const shownOrder = (await drawnTitles(P))!
+    await pressArrow('ArrowDown', `${shownOrder[0]} `)
+    const walked = [shownOrder[0]]
+    for (let i = 1; i < shownOrder.length; i++) {
+      await pressArrow('ArrowRight', `${shownOrder[i]} `)
+      walked.push(shownOrder[i])
+      // highlight moves to each sibling in turn on the parent shown above
+      const active = (await drawn(P))!.filter(r => r[2]).map(r => r[0])
+      expect(active, `parent highlights ${shownOrder[i]} during Right walk`).toEqual([shownOrder[i]])
+    }
+    expect(walked, 'Right walks drawn children in exact shown order').toEqual(shownOrder)
+    await pressArrow('ArrowRight', `${shownOrder[0]} `) // wraps to first
+    await pressArrow('ArrowLeft', `${shownOrder[shownOrder.length - 1]} `) // Left wraps back
+    await pressArrow('ArrowUp', `${P} `)
+
+    // 6. Mixed list and Rule 7: with written #/z above drawn children, numbered children still come
+    // first (app rule for numbered children), then written #/z in its place, then remaining drawn children;
+    // removing the written list walks all drawn children in lineage order
+    await setQuery(D)
+    await blur()
+    await page.keyboard.press('ArrowDown')
+    await expect
+      .poll(query, {
+        message: 'mixed list: Down enters lowest numbered child first even when written #/z stands above drawn numbers',
+      })
+      .toBe(`${D}/2 `)
+    for (const next of [`${D}/10 `, `${D}/z `, `${D}/a `, `${D}/branch `, `${D}/hidden_kid `, `${D}/2 `]) {
+      await blur()
+      await page.keyboard.press('ArrowRight')
+      await expect
+        .poll(query, {
+          message: `mixed list: Right follows numbered-first then written #/z then remaining drawn children -> ${next}`,
+        })
+        .toBe(next)
+    }
+    // drop the written tags from #e2e_ct_desc so only its one-line description remains (like #map)
+    await page.evaluate(label => (window._item(label, true) as any).write(`${label} Overview`, ''), D)
+    await setQuery(D)
+    const descDrawnOrder = [`${D}/2`, `${D}/10`, `${D}/a`, `${D}/branch`, `${D}/hidden_kid`, `${D}/z`]
+    await expect
+      .poll(() => drawnTitles(D), { message: 'after dropping written list, all children draw below description' })
+      .toEqual(descDrawnOrder)
+    await pressArrow('ArrowDown', `${descDrawnOrder[0]} `)
+    for (const next of [...descDrawnOrder.slice(1), descDrawnOrder[0]]) {
+      await pressArrow('ArrowRight', `${next} `)
+    }
+    await pressArrow('ArrowLeft', `${descDrawnOrder[descDrawnOrder.length - 1]} `)
+    await expect
+      .poll(() => drawn(D).then(rows => rows!.filter(r => r[2]).map(r => r[0])), {
+        message: 'path highlight works on parent whose written list was removed',
+      })
+      .toEqual([`${D}/z`])
+
+    // 7. Live updates: create, rename, delete — locally and from a second page, redrawing ONLY parent
+    await setQuery(P)
+    await expect.poll(() => page.evaluate(o => !!window._item(o, true)?.elem?.querySelector('.content'), OTHER)).toBe(true)
+    await page.evaluate(o => {
+      ;(window._item(o, true)!.elem!.querySelector('.content') as HTMLElement).dataset.bystander = 'kept'
+    }, OTHER)
+    const bystanderKept = () =>
+      page.evaluate(o => (window._item(o, true)!.elem!.querySelector('.content') as HTMLElement).dataset.bystander, OTHER)
+
+    // local create, rename, delete
+    await page.evaluate(text => void window._create(text), `${P}/0 local zero`)
+    await expect.poll(() => drawnTitles(P), { message: 'local create adds child live' }).toEqual([
+      `${P}/0`,
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on local child create').toBe('kept')
+
+    await page.evaluate(([a, b]) => (window._item(a, true) as any).write(`${b} renamed`, ''), [`${P}/0`, `${P}/mid`] as const)
+    await expect.poll(() => drawnTitles(P), { message: 'local rename updates parent live' }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/mid`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on local child rename').toBe('kept')
+
+    await page.evaluate(label => window._item(label, true)!.delete(false), `${P}/mid`)
+    await expect.poll(() => drawnTitles(P), { message: 'local delete removes child live' }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on local child delete').toBe('kept')
+
+    // remote create, rename, delete from a second page of the same account
+    const page2 = await ctx2.newPage()
+    await loadAdmin(page2)
+    await page2.evaluate(text => void window._create(text), `${P}/1 remote one`)
+    await expect.poll(() => savedId(`${P}/1`, page2), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => drawnTitles(P), { message: 'remote create redraws parent live', timeout: 20_000 }).toEqual([
+      `${P}/1`,
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on remote child create').toBe('kept')
+
+    await page2.evaluate(([a, b]) => (window._item(a, true) as any).write(`${b} remote renamed`, ''), [`${P}/1`, `${P}/c`] as const)
+    await expect.poll(() => drawnTitles(P), { message: 'remote rename redraws parent live', timeout: 20_000 }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/c`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on remote child rename').toBe('kept')
+
+    await page2.evaluate(label => window._item(label, true)!.delete(false), `${P}/c`)
+    await expect.poll(() => drawnTitles(P), { message: 'remote delete redraws parent live', timeout: 20_000 }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+    expect(await bystanderKept(), 'bystander not redrawn on remote child delete').toBe('kept')
+
+    // 8. Not drawn while editing, and not drawn when parent label is duplicated
+    const pElem = await page.evaluate(label => window._item(label, true)!.id, P)
+    await blur()
+    await page.keyboard.press('Enter')
+    await expect(page.locator(`#textarea-${pElem}`)).toBeFocused()
+    expect(await page.locator(`#super-container-${pElem} mark.child-tag`).count(), 'no drawn marks while editing').toBe(0)
+    expect(await page.locator(`#textarea-${pElem}`).inputValue(), 'editor holds raw text without drawn children').toBe(`${P} #_pin`)
+    await page.keyboard.press('Escape')
+    await expect.poll(() => drawnTitles(P), { message: 'drawn marks return after closing editor' }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+
+    // duplicate parent label suppresses drawn children on both copies; resolve each record by id
+    // through window._item (raw __items entries have no .elem getter), require both rendered containers,
+    // and check ArrowRight from a child while the parent label is duplicated
+    await page.evaluate(text => void window._create(text), `${P} #_pin duplicate parent`)
+    await setQuery(P)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            label =>
+              (window as any).__items
+                .filter((i: any) => i.label == label)
+                .map((i: any) => {
+                  const elem = window._item(i.id, true)?.elem
+                  const container = elem?.querySelector('.container')
+                  return {
+                    rendered: !!container,
+                    drawn: container ? container.querySelectorAll('mark.child-tag:not(.repeated)').length : -1,
+                  }
+                }),
+            P,
+          ),
+        { message: 'duplicated parent renders both containers and draws no children on either item' },
+      )
+      .toEqual([
+        { rendered: true, drawn: 0 },
+        { rendered: true, drawn: 0 },
+      ])
+    await setQuery(`${P}/2`)
+    await blur()
+    await page.keyboard.press('ArrowRight')
+    await page.waitForTimeout(200)
+    expect((await query()).trim(), 'duplicated parent provides no nesting context for ArrowRight').toBe(`${P}/2`)
+    const dupId = await page.evaluate(
+      label => (window as any).__items.find((i: any) => i.label == label && i.text.includes('duplicate'))!.id,
+      P,
+    )
+    await page.evaluate(id => window._item(id, true)!.delete(false), dupId)
+    await setQuery(P)
+    await expect.poll(() => drawnTitles(P), { message: 'unique parent draws children again after duplicate removed' }).toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+
+    // 9. Menu item (#_menu): never inline inside .content.menu flex paragraph; drawn in block below at 85%
+    await setQuery(M)
+    await expect.poll(() => drawnTitles(M), { message: 'menu item draws children in footer block' }).toEqual([`${M}/sub`])
+    const menuFacts = await page.evaluate(label => {
+      const item = window._item(label, true)!.elem!.querySelector('.item')!
+      const childEl = item.querySelector(':scope > .child-tags mark.child-tag') as HTMLElement
+      const baseFont = parseFloat(getComputedStyle(item).fontSize)
+      const childFont = parseFloat(getComputedStyle(childEl).fontSize)
+      return {
+        insideMenu: !!item.querySelector('.content.menu mark.child-tag'),
+        inFooterBlock: !!childEl,
+        childDisplay: getComputedStyle(childEl).display,
+        sizeRatio: Math.round((childFont / baseFont) * 100) / 100,
+      }
+    }, M)
+    expect(menuFacts, 'menu item places drawn child tags below .content.menu at 85% inline size').toEqual({
+      insideMenu: false,
+      inFooterBlock: true,
+      childDisplay: 'inline',
+      sizeRatio: 0.85,
+    })
+
+    // 10. Agent's inert section listing a child: never draws inside .vault-result; omits relative #/child
+    // already rendered as mark[data-tag] in the reply, while drawing other children (and absolute tag-links)
+    await setQuery(I)
+    await expect
+      .poll(() =>
+        page.evaluate(
+          label => !!window._item(label, true)?.elem?.querySelector(`.vault-result mark[data-tag="${label}/listed"]`),
+          I,
+        ),
+      )
+      .toBe(true)
+    const inertFacts = await page.evaluate(label => {
+      const item = window._item(label, true)!.elem!.querySelector('.item')!
+      return {
+        drawnInsideInert: item.querySelectorAll('.vault-result mark.child-tag').length,
+        replyMarkCount: [...item.querySelectorAll(`.vault-result mark[data-tag="${label}/listed"]`)].filter(m =>
+          m.checkVisibility(),
+        ).length,
+        totalListedMarks: [...item.querySelectorAll(`mark[title="${label}/listed"]`)].filter(m => m.checkVisibility())
+          .length,
+        absTagLinkInReply: !!item.querySelector(`.vault-result code[data-tag-link="${label}/abs_only"]`),
+        drawnBelow: [...item.querySelectorAll(':scope > .child-tags mark.child-tag:not(.repeated)')]
+          .filter(m => m.checkVisibility())
+          .map(m => m.getAttribute('title')),
+      }
+    }, I)
+    expect(
+      inertFacts,
+      'agent inert section keeps drawn tags outside .vault-result and omits child already shown as mark[data-tag]',
+    ).toEqual({
+      drawnInsideInert: 0,
+      replyMarkCount: 1,
+      totalListedMarks: 1,
+      absTagLinkInReply: true,
+      drawnBelow: [`${I}/abs_only`, `${I}/unlisted`],
+    })
+
+    // 11. Undrawn non-unique (duplicated) direct child labels under a unique parent: not drawn on P,
+    // so ArrowRight walks them through onKeyDown's `_labels(...).sort()` list in alphabetical order
+    for (const text of [`${P}/dup_z first`, `${P}/dup_z second`, `${P}/dup_a first`, `${P}/dup_a second`]) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            label => (window as any).__items.filter((i: any) => i.label == label && i.savedId).length,
+            `${P}/dup_a`,
+          ),
+        { timeout: 30_000 },
+      )
+      .toBe(2)
+    await setQuery(`${P}/uniqchild`)
+    expect(await drawnTitles(P), 'duplicated child labels are not drawn on parent').toEqual([
+      `${P}/2`,
+      `${P}/10`,
+      `${P}/a`,
+      `${P}/b`,
+      `${P}/uniqchild`,
+    ])
+    await pressArrow('ArrowRight', `${P}/dup_a `)
+    await pressArrow('ArrowRight', `${P}/dup_z `)
+    await pressArrow('ArrowRight', `${P}/2 `)
+  } finally {
+    await ctx2.close()
+    if (!hadChat) {
+      const chatDoc = await savedId('#chat')
+      if (chatDoc) {
+        await firestore().collection('items').doc(chatDoc).delete()
+        await expect.poll(() => savedId('#chat'), { timeout: 30_000 }).toBeNull()
+      }
+    }
+  }
+})
+
+test('drawn child tags follow visibility across folded replies, hidden sections, and child-only highlight changes leave link handlers unwrapped', async ({ page }) => {
+  await loadAdmin(page)
+  const R = '#e2e_ctv_r'
+  const H = '#e2e_ctv_h'
+  const D = '#e2e_ctv_d'
+  const L = '#e2e_ctv_l'
+  const W = '#e2e_ctv_w'
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const setQuery = async (q: string) => {
+    await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), q)
+    await expect.poll(() => query().then(v => v.trim())).toBe(q.trim())
+  }
+  const blur = () => page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  const pressArrow = async (key: string, expected: string, message?: string) => {
+    await blur()
+    await page.keyboard.press(key)
+    await expect.poll(query, { message: message ?? `${key} navigates to ${expected}` }).toBe(expected)
+  }
+  // visible non-label marks outside .deps-and-dependents as [title, isDrawnChild, isSelected]
+  const visibleMarks = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      if (!item) return null
+      return [...item.querySelectorAll('mark:not(.label,.deps-and-dependents *)')]
+        .filter(m => m.checkVisibility())
+        .map(m => [m.getAttribute('title'), m.classList.contains('child-tag'), m.classList.contains('selected')])
+    }, label)
+  const replyFrameVisible = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      const frame = item?.querySelector('.inert-block > .vault-result')
+      return frame ? frame.checkVisibility() : null
+    }, label)
+
+  for (const text of [
+    `${R} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nIntro line before the child tag.\n\nSecond line mentions #/listed here.\n<!--/inert-->`,
+    `${R}/listed listed in reply`,
+    `${R}/other other child`,
+    `${H} Overview\n<!--hidden-->\n#/b\n<!--/hidden-->`,
+    `${H}/z child z`,
+    `${H}/b child b`,
+    `${H}/a child a`,
+    `${D} Overview\n<div hidden>\n#/b\n</div>`,
+    `${D}/z child z`,
+    `${D}/b child b`,
+    `${D}/a child a`,
+    `${L} Overview <a id="e2e-ctv-link" href="https://example.invalid/review" onclick="window.__ctvOwnClicks = (window.__ctvOwnClicks || 0) + 1; event.stopPropagation(); event.preventDefault();">review</a>`,
+    `${L}/one sibling one`,
+    `${L}/two sibling two`,
+    `${W} chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nIntro line before the listed children.\n\nSecond line lists #/b and #/a here.\n<!--/inert-->`,
+    `${W}/a child a`,
+    `${W}/b child b`,
+    `${W}/c child c`,
+  ]) {
+    await page.evaluate(text => void window._create(text), text)
+  }
+  await expect.poll(() => page.evaluate(l => window._item(l, true)?.saved_id ?? null, `${W}/c`), { timeout: 30_000 }).toBeTruthy()
+
+  // 1. Agent reply listing #/listed on its SECOND line:
+  // (a) parent named (reply open): one visible mark for each child (listed in reply, other drawn), no repeat
+  await setQuery(R)
+  await expect
+    .poll(() => visibleMarks(R), { message: 'open reply shows listed in frame and other drawn, with no repeat' })
+    .toEqual([
+      [`${R}/listed`, false, false],
+      [`${R}/other`, true, false],
+    ])
+
+  // (b) other named (parent as context, reply folded to line 1): one visible clickable mark for each child
+  await setQuery(`${R}/other`)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(label => {
+          const item = window._item(label, true)?.elem?.querySelector('.item')
+          const frame = item?.querySelector('.inert-block > .vault-result')
+          return frame ? frame.checkVisibility() : null
+        }, R),
+      { message: 'reply is folded while parent is context for other child' },
+    )
+    .toBe(false)
+  await expect
+    .poll(() => visibleMarks(R), {
+      message: 'folded reply shows drawn marks for both listed and other (no child lost)',
+    })
+    .toEqual([
+      [`${R}/listed`, true, false],
+      [`${R}/other`, true, true],
+    ])
+  const rId = await page.evaluate(l => window._item(l, true)!.id, R)
+  await page.locator(`#item-${rId} mark.child-tag[title="${R}/listed"]`).click()
+  await expect.poll(query, { message: 'drawn mark revealed by folded reply is clickable' }).toBe(`${R}/listed `)
+
+  // (c) manual block toggle both ways while parent is context for other: one visible mark per child each way
+  await setQuery(`${R}/other`)
+  await expect.poll(() => visibleMarks(R)).toEqual([
+    [`${R}/listed`, true, false],
+    [`${R}/other`, true, true],
+  ])
+  await page.locator(`#item-${rId} .inert-block .inert-line`).click()
+  await expect
+    .poll(() => visibleMarks(R), {
+      message: 'toggling folded reply open hides repeated drawn mark immediately (no repeat)',
+    })
+    .toEqual([
+      [`${R}/listed`, false, false],
+      [`${R}/other`, true, true],
+    ])
+  // when an unnamed reply is open its empty .inert-line has zero height; clicking its first line toggles it closed
+  await page.locator(`#item-${rId} .inert-block .vault-result p`).first().click()
+  await expect
+    .poll(() => visibleMarks(R), {
+      message: 'toggling reply closed again restores drawn mark immediately (no missing child)',
+    })
+    .toEqual([
+      [`${R}/listed`, true, false],
+      [`${R}/other`, true, true],
+    ])
+
+  // 2. Parent with <!--hidden--> holding #/b: drawn a, b, z and Down then Right walk a, b, z
+  await setQuery(H)
+  await expect
+    .poll(() => visibleMarks(H), { message: '<!--hidden--> mark does not suppress drawn b' })
+    .toEqual([
+      [`${H}/a`, true, false],
+      [`${H}/b`, true, false],
+      [`${H}/z`, true, false],
+    ])
+  await pressArrow('ArrowDown', `${H}/a `, 'Down skips invisible mark inside <!--hidden--> and enters a')
+  await pressArrow('ArrowRight', `${H}/b `, 'Right from a steps to visible b (not skipping past hidden copy)')
+  await pressArrow('ArrowRight', `${H}/z `, 'Right from b steps to z')
+  await pressArrow('ArrowRight', `${H}/a `, 'Right from z wraps to a')
+
+  // 3. Parent with owner <div hidden> around #/b: drawn a, b, z and Down then Right walk a, b, z
+  await setQuery(D)
+  await expect
+    .poll(() => visibleMarks(D), { message: '<div hidden> mark does not suppress drawn b' })
+    .toEqual([
+      [`${D}/a`, true, false],
+      [`${D}/b`, true, false],
+      [`${D}/z`, true, false],
+    ])
+  await pressArrow('ArrowDown', `${D}/a `, 'Down skips invisible mark inside <div hidden> and enters a')
+  await pressArrow('ArrowRight', `${D}/b `, 'Right from a steps to b')
+  await pressArrow('ArrowRight', `${D}/z `, 'Right from b steps to z')
+  await pressArrow('ArrowRight', `${D}/a `, 'Right from z wraps to a')
+
+  // 4. Child-only highlight changes between drawn siblings leave parent's custom-onclick link unwrapped
+  await setQuery(`${L}/one`)
+  await expect.poll(() => visibleMarks(L)).toEqual([
+    [`${L}/one`, true, true],
+    [`${L}/two`, true, false],
+  ])
+  const lId = await page.evaluate(l => window._item(l, true)!.id, L)
+  await page.evaluate(id => {
+    const w = window as any
+    w.__ctvOwnClicks = 0
+    w.__ctvLinkCalls = 0
+    w.__ctvOrigHandleLinkClick = w._handleLinkClick
+    w._handleLinkClick = function (itemId: string, href: string, e: Event) {
+      if (itemId == id) w.__ctvLinkCalls++
+      return w.__ctvOrigHandleLinkClick.call(this, itemId, href, e)
+    }
+  }, lId)
+  try {
+    for (const [target, lit] of [
+      [`${L}/two `, `${L}/two`],
+      [`${L}/one `, `${L}/one`],
+      [`${L}/two `, `${L}/two`],
+      [`${L}/one `, `${L}/one`],
+    ] as const) {
+      await pressArrow('ArrowRight', target)
+      await expect
+        .poll(() => visibleMarks(L).then(rows => rows?.filter(r => r[2]).map(r => r[0])), {
+          message: `lit drawn mark moved to ${lit}`,
+        })
+        .toEqual([lit])
+    }
+    await page.locator('#e2e-ctv-link').click()
+    const counts = await page.evaluate(() => ({
+      ownClicks: (window as any).__ctvOwnClicks,
+      linkHandlerCalls: (window as any).__ctvLinkCalls,
+    }))
+    expect(counts, 'link onclick and _handleLinkClick each fire once after 4 sibling moves').toEqual({
+      ownClicks: 1,
+      linkHandlerCalls: 1,
+    })
+  } finally {
+    await page.evaluate(() => {
+      const w = window as any
+      if (w.__ctvOrigHandleLinkClick) {
+        w._handleLinkClick = w.__ctvOrigHandleLinkClick
+        delete w.__ctvOrigHandleLinkClick
+      }
+    })
+  }
+
+  // 5. Arrow-key walk stays in one cyclic order across a folded/opened reply transition:
+  // parent has children a, b, c and a reply listing #/b then #/a on its second line (c not listed).
+  // Down enters b, Right walks b -> a -> c -> b, Left walks c -> a -> b, while the reply folds on c
+  // (where drawn marks show a b c) and re-opens automatically on b and a.
+  await setQuery(W)
+  await expect.poll(() => replyFrameVisible(W), { message: 'walk reply is open while parent is target' }).toBe(true)
+  await expect
+    .poll(() => visibleMarks(W), { message: 'open walk reply shows listed b and a in frame and c drawn' })
+    .toEqual([
+      [`${W}/b`, false, false],
+      [`${W}/a`, false, false],
+      [`${W}/c`, true, false],
+    ])
+  await pressArrow('ArrowDown', `${W}/b `, 'Down from parent enters first reply child b')
+  await expect.poll(() => replyFrameVisible(W), { message: 'walk reply stays open on listed child b' }).toBe(true)
+
+  const rightVisited: string[] = [await query()]
+  await pressArrow('ArrowRight', `${W}/a `, 'Right from b steps to listed child a')
+  await expect.poll(() => replyFrameVisible(W), { message: 'walk reply stays open on listed child a' }).toBe(true)
+  rightVisited.push(await query())
+  await pressArrow('ArrowRight', `${W}/c `, 'Right from a steps to unlisted child c')
+  await expect.poll(() => replyFrameVisible(W), { message: 'walk reply folds when reaching unlisted child c' }).toBe(false)
+  await expect
+    .poll(() => visibleMarks(W), { message: 'while walk reply is folded on c, drawn marks show a b c' })
+    .toEqual([
+      [`${W}/a`, true, false],
+      [`${W}/b`, true, false],
+      [`${W}/c`, true, true],
+    ])
+  rightVisited.push(await query())
+  expect(rightVisited, 'Right round visits each child exactly once in order b, a, c').toEqual([
+    `${W}/b `,
+    `${W}/a `,
+    `${W}/c `,
+  ])
+  await pressArrow('ArrowRight', `${W}/b `, 'Right from c while reply is folded wraps to b (keeps reply order)')
+  await expect
+    .poll(() => replyFrameVisible(W), { message: 'walk reply re-opens when Right wraps from folded c to b' })
+    .toBe(true)
+
+  const leftVisited: string[] = []
+  await pressArrow('ArrowLeft', `${W}/c `, 'Left from b wraps back to unlisted child c')
+  await expect
+    .poll(() => replyFrameVisible(W), { message: 'walk reply folds again when Left reaches unlisted child c' })
+    .toBe(false)
+  await expect
+    .poll(() => visibleMarks(W), { message: 'while walk reply is folded on c during Left round, drawn marks show a b c' })
+    .toEqual([
+      [`${W}/a`, true, false],
+      [`${W}/b`, true, false],
+      [`${W}/c`, true, true],
+    ])
+  leftVisited.push(await query())
+  await pressArrow('ArrowLeft', `${W}/a `, 'Left from c while reply is folded steps to a (keeps reply order)')
+  await expect
+    .poll(() => replyFrameVisible(W), { message: 'walk reply re-opens when Left steps from folded c to a' })
+    .toBe(true)
+  leftVisited.push(await query())
+  await pressArrow('ArrowLeft', `${W}/b `, 'Left from a steps back to b')
+  await expect.poll(() => replyFrameVisible(W), { message: 'walk reply stays open on b at end of Left round' }).toBe(true)
+  leftVisited.push(await query())
+  expect(leftVisited, 'Left round visits each child exactly once in reverse order c, a, b').toEqual([
+    `${W}/c `,
+    `${W}/a `,
+    `${W}/b `,
+  ])
 })
 
 test("a reply's math present before MathJax's startup completes is typeset by the frame's own parser, never by a startup scan", async ({ page }) => {
@@ -3992,4 +4808,270 @@ test("a shared page, by the keyboard alone: Tab reaches a section's marker, whic
   expect((await read())!.open, 'tapping an inline-code command on a shared page still toggles the section').toBe(false)
   await expect(page.locator('.modal'), 'tapping an inline-code command on a shared page opens no dialog').toBeHidden()
   expect(await page.evaluate(() => localStorage.getItem('mindpage_inverted')), 'tapping an inline-code command on a shared page runs nothing').toBeNull()
+})
+
+test('drawn child tags stay in sync when a native details disclosure opens and closes', async ({ page }) => {
+  await loadAdmin(page)
+  const P = '#e2e_ctd'
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const visibleMarks = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      if (!item) return null
+      return [...item.querySelectorAll('mark:not(.label,.deps-and-dependents *)')]
+        .filter(m => m.checkVisibility())
+        .map(m => [m.getAttribute('title'), m.classList.contains('child-tag')])
+    }, label)
+
+  await page.evaluate(
+    ([parent, child]) => {
+      void window._create(child)
+      void window._create(parent)
+    },
+    [
+      `${P} Overview\n<details open>\n<summary onclick="event.stopPropagation()">Children</summary>\n#/b\n</details>`,
+      `${P}/b child b`,
+    ] as const,
+  )
+  await expect.poll(() => page.evaluate(l => window._item(l, true)?.saved_id ?? null, P), { message: 'parent item saved', timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), P)
+  await expect.poll(() => query().then(v => v.trim()), { message: 'query held on parent' }).toBe(P)
+
+  await expect
+    .poll(() => visibleMarks(P), { message: 'initially open native <details> shows written child tag and hides drawn copy' })
+    .toEqual([[`${P}/b`, false]])
+
+  const pId = await page.evaluate(l => window._item(l, true)!.id, P)
+  // stamp the rendered <details> node so we also confirm full afterUpdate never replaced the DOM
+  await page.evaluate(id => {
+    const details = document.querySelector(`#item-${id} details`) as any
+    details.__ctdKept = true
+  }, pId)
+
+  const summary = page.locator(`#item-${pId} details > summary`)
+  for (const round of [1, 2]) {
+    await summary.click()
+    await expect
+      .poll(() => visibleMarks(P), {
+        message: `round ${round} close: closing native <details> reveals drawn child tag (exactly one visible mark)`,
+      })
+      .toEqual([[`${P}/b`, true]])
+    expect(await query().then(v => v.trim()), `round ${round} close: query stays on parent`).toBe(P)
+    expect(
+      await page.evaluate(id => ({
+        open: (document.querySelector(`#item-${id} details`) as HTMLDetailsElement | null)?.open ?? null,
+        kept: !!(document.querySelector(`#item-${id} details`) as any)?.__ctdKept,
+        editing: !!document.querySelector(`[data-item-id="${id}"].editing`),
+      }), pId),
+      `round ${round} close: <details> closed in place without editing or re-rendering`,
+    ).toEqual({ open: false, kept: true, editing: false })
+
+    await summary.click()
+    await expect
+      .poll(() => visibleMarks(P), {
+        message: `round ${round} open: opening native <details> hides repeated drawn child tag (exactly one visible mark)`,
+      })
+      .toEqual([[`${P}/b`, false]])
+    expect(await query().then(v => v.trim()), `round ${round} open: query stays on parent`).toBe(P)
+    expect(
+      await page.evaluate(id => ({
+        open: (document.querySelector(`#item-${id} details`) as HTMLDetailsElement | null)?.open ?? null,
+        kept: !!(document.querySelector(`#item-${id} details`) as any)?.__ctdKept,
+        editing: !!document.querySelector(`[data-item-id="${id}"].editing`),
+      }), pId),
+      `round ${round} open: <details> opened in place without editing or re-rendering`,
+    ).toEqual({ open: true, kept: true, editing: false })
+  }
+})
+
+test('_context parent with no numbered children deduplicates folded reply and drawn child tags case-insensitively', async ({ page }) => {
+  await loadAdmin(page)
+  const P = '#e2e_ctc'
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const setQuery = async (q: string) => {
+    await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), q)
+    await expect.poll(() => query().then(v => v.trim()), { message: `query set to ${q}` }).toBe(q.trim())
+  }
+  const pressArrow = async (key: string, expected: string, message: string) => {
+    await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+    await page.keyboard.press(key)
+    await expect.poll(query, { message }).toBe(expected)
+  }
+  const visibleMarks = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      if (!item) return null
+      return [...item.querySelectorAll('mark:not(.label,.deps-and-dependents *)')]
+        .filter(m => m.checkVisibility())
+        .map(m => [m.getAttribute('title'), m.classList.contains('child-tag'), m.classList.contains('selected')])
+    }, label)
+  const replyFrameVisible = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      const frame = item?.querySelector('.inert-block > .vault-result')
+      return frame ? frame.checkVisibility() : null
+    }, label)
+
+  for (const text of [
+    `${P} #_context chat\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nOrdinary first paragraph before the child tag.\n\nTry #/b.\n<!--/inert-->`,
+    `${P}/a child a`,
+    `${P}/B child B`,
+    `${P}/c child c`,
+  ]) {
+    await page.evaluate(t => void window._create(t), text)
+  }
+  await expect.poll(() => page.evaluate(l => window._item(l, true)?.saved_id ?? null, `${P}/c`), { message: 'children saved', timeout: 30_000 }).toBeTruthy()
+
+  // start on #p/a with reply folded: stable deduplicated order is reply's #/b, then drawn a, c
+  await setQuery(`${P}/a`)
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply is folded while parent is context for a' }).toBe(false)
+  await expect
+    .poll(() => visibleMarks(P), { message: 'folded reply shows drawn marks a (selected), B, c' })
+    .toEqual([
+      [`${P}/a`, true, true],
+      [`${P}/B`, true, false],
+      [`${P}/c`, true, false],
+    ])
+
+  // without case-insensitive uniqBy, Right from a steps to drawn B (opening reply), then loops back to a and never reaches c
+  await pressArrow('ArrowRight', `${P}/c `, 'Right from a deduplicates #/b vs #/B and reaches c')
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply stays folded on c' }).toBe(false)
+  // _context without numbered children is bounded at the ends (does not wrap)
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowRight')
+  await page.waitForTimeout(200)
+  expect(await query(), 'Right at last _context stop stays on c').toBe(`${P}/c `)
+
+  // full Left walk across all three stops: c -> a -> b (preserving reply position and spelling)
+  const leftVisited: string[] = [await query()]
+  await pressArrow('ArrowLeft', `${P}/a `, 'Left from c returns to a')
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply stays folded on a during Left walk' }).toBe(false)
+  leftVisited.push(await query())
+  await pressArrow('ArrowLeft', `${P}/b `, 'Left from a reaches b with reply spelling')
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply opens when Left reaches b' }).toBe(true)
+  await expect
+    .poll(() => visibleMarks(P), { message: 'open reply on b hides drawn B as repeated' })
+    .toEqual([
+      [`${P}/b`, false, true],
+      [`${P}/a`, true, false],
+      [`${P}/c`, true, false],
+    ])
+  leftVisited.push(await query())
+  await page.evaluate(() => (document.activeElement as HTMLElement)?.blur?.())
+  await page.keyboard.press('ArrowLeft')
+  await page.waitForTimeout(200)
+  expect(await query(), 'Left at first _context stop stays on b').toBe(`${P}/b `)
+  expect(leftVisited, 'Left walk visits each child once in reverse order c, a, b').toEqual([
+    `${P}/c `,
+    `${P}/a `,
+    `${P}/b `,
+  ])
+
+  // full Right walk across all three stops: b -> a -> c
+  const rightVisited: string[] = [await query()]
+  await pressArrow('ArrowRight', `${P}/a `, 'Right from b steps to a')
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply folds when Right leaves b for a' }).toBe(false)
+  rightVisited.push(await query())
+  await pressArrow('ArrowRight', `${P}/c `, 'Right from a reaches c on full forward walk')
+  await expect.poll(() => replyFrameVisible(P), { message: 'reply stays folded on c on full forward walk' }).toBe(false)
+  rightVisited.push(await query())
+  expect(rightVisited, 'Right walk visits each child once in order b, a, c').toEqual([
+    `${P}/b `,
+    `${P}/a `,
+    `${P}/c `,
+  ])
+})
+
+test('drawn child tags stay in sync when a #template toggle opens and closes', async ({ page }) => {
+  await loadAdmin(page)
+  const P = '#e2e_ctt'
+  if (!(await page.evaluate(() => !!window._item('#template', true)))) {
+    expect(await install(page, 'template'), '/_install template').toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => ((window as any).__items as any[]).every(i => i.savedId && !i.saving)), {
+        message: 'installed #template items finished saving before reload',
+        timeout: 30_000,
+      })
+      .toBe(true)
+    await page.reload()
+    await waitForApp(page)
+  }
+
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const visibleMarks = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true)?.elem?.querySelector('.item')
+      if (!item) return null
+      return [...item.querySelectorAll('mark:not(.label,.deps-and-dependents *)')]
+        .filter(m => m.checkVisibility())
+        .map(m => [m.getAttribute('title'), m.classList.contains('child-tag')])
+    }, label)
+
+  await page.evaluate(
+    ([parent, child]) => {
+      void window._create(child)
+      void window._create(parent)
+    },
+    [`${P} #_template\n<<toggle('See #/b','More','More')>>`, `${P}/b child b`] as const,
+  )
+  await expect.poll(() => page.evaluate(l => window._item(l, true)?.saved_id ?? null, P), { message: 'template parent saved', timeout: 30_000 }).toBeTruthy()
+  await page.evaluate(q => (window as any).MindBox.set(q, { scroll: true }), P)
+  await expect.poll(() => query().then(v => v.trim()), { message: 'query held on template parent' }).toBe(P)
+
+  const pId = await page.evaluate(l => window._item(l, true)!.id, P)
+  await expect
+    .poll(() => visibleMarks(P), { message: 'initially closed #template toggle shows drawn child tag only' })
+    .toEqual([[`${P}/b`, true]])
+  expect(
+    await page.evaluate(id => ({
+      spanVisible: !!document.querySelector(`#item-${id} span.template_toggle`)?.checkVisibility(),
+      divVisible: !!document.querySelector(`#item-${id} div.template_toggle`)?.checkVisibility(),
+    }), pId),
+    'initially closed #template toggle shows label span and hides content div',
+  ).toEqual({ spanVisible: true, divVisible: false })
+
+  // stamp the rendered toggle div so we also confirm full afterUpdate never replaced the DOM
+  await page.evaluate(id => {
+    const div = document.querySelector(`#item-${id} div.template_toggle`) as any
+    div.__cttKept = true
+  }, pId)
+
+  const openTrigger = page.locator(`#item-${pId} span.template_toggle`)
+  const closeTrigger = page.locator(`#item-${pId} div.template_toggle`)
+  for (const round of [1, 2]) {
+    await openTrigger.click()
+    await expect
+      .poll(() => visibleMarks(P), {
+        message: `round ${round} open: opening #template toggle hides repeated drawn child tag (exactly one visible mark)`,
+      })
+      .toEqual([[`${P}/b`, false]])
+    expect(await query().then(v => v.trim()), `round ${round} open: query stays on template parent`).toBe(P)
+    expect(
+      await page.evaluate(id => ({
+        spanVisible: !!document.querySelector(`#item-${id} span.template_toggle`)?.checkVisibility(),
+        divVisible: !!document.querySelector(`#item-${id} div.template_toggle`)?.checkVisibility(),
+        kept: !!(document.querySelector(`#item-${id} div.template_toggle`) as any)?.__cttKept,
+        editing: !!document.querySelector(`[data-item-id="${id}"].editing`),
+      }), pId),
+      `round ${round} open: #template toggle opened in place without editing or re-rendering`,
+    ).toEqual({ spanVisible: false, divVisible: true, kept: true, editing: false })
+
+    // click in the div's padding (not on the <mark> inside) to close the toggle
+    await closeTrigger.click({ position: { x: 4, y: 4 } })
+    await expect
+      .poll(() => visibleMarks(P), {
+        message: `round ${round} close: closing #template toggle restores drawn child tag (exactly one visible mark)`,
+      })
+      .toEqual([[`${P}/b`, true]])
+    expect(await query().then(v => v.trim()), `round ${round} close: query stays on template parent`).toBe(P)
+    expect(
+      await page.evaluate(id => ({
+        spanVisible: !!document.querySelector(`#item-${id} span.template_toggle`)?.checkVisibility(),
+        divVisible: !!document.querySelector(`#item-${id} div.template_toggle`)?.checkVisibility(),
+        kept: !!(document.querySelector(`#item-${id} div.template_toggle`) as any)?.__cttKept,
+        editing: !!document.querySelector(`[data-item-id="${id}"].editing`),
+      }), pId),
+      `round ${round} close: #template toggle closed in place without editing or re-rendering`,
+    ).toEqual({ spanVisible: true, divVisible: false, kept: true, editing: false })
+  }
 })

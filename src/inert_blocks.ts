@@ -205,13 +205,22 @@ export function sayExpanded(root: Element, selected: boolean): void {
   root.querySelectorAll('.inert-block').forEach(block => says(block, selected))
 }
 
+// optional per-block listener run when a block's open/closed state changes (manual toggle or
+// forgotten toggle in unmark): lets Item.svelte re-sync repeated drawn child tags without re-entering
+// its full update pass
+const onBlockStateChange = new WeakMap<Element, () => void>()
+
 // the blocks under `root` that carry a forgotten toggle's class lose it, and their markers say
 // what shows then (one query, nothing of the layout)
 function unmark(root: ParentNode) {
+  const changed = new Set<() => void>()
   root.querySelectorAll('.inert-block:is(.opened, .closed)').forEach(block => {
     block.classList.remove('opened', 'closed')
     says(block, !!block.closest('.container.target'))
+    const cb = onBlockStateChange.get(block)
+    if (cb) changed.add(cb)
   })
+  changed.forEach(cb => cb())
 }
 
 // AN ITEM'S SELECTION, told by its component when that is new and when the selection changed
@@ -254,7 +263,21 @@ export const focusNoted = () => note
 export function inertBlocks(
   root: Element,
   body: (frame: Element) => string,
-  { id, terms, selected, selecting, resized }: { id: string; terms: string; selected: () => boolean; selecting: (node: Node) => boolean; resized: () => void },
+  {
+    id,
+    terms,
+    selected,
+    selecting,
+    resized,
+    onStateChange,
+  }: {
+    id: string
+    terms: string
+    selected: () => boolean
+    selecting: (node: Node) => boolean
+    resized: () => void
+    onStateChange?: () => void
+  },
 ): void {
   // every filled frame of the item in its order, with its section's name and key
   const all = [...root.querySelectorAll('.vault-result[data-inert-rendered]')]
@@ -324,12 +347,14 @@ export function inertBlocks(
     }
     block.classList.toggle('matched', matched)
     show()
+    if (onStateChange) onBlockStateChange.set(block, onStateChange)
     // a manual toggle, by a click or by a key: remembered for every section of the block
     const flip = () => {
       const next = toggled(left(), matched, selected(), ++turn)
       members.forEach(key => toggles.set(key, next))
       show()
       says(block, selected())
+      onStateChange?.()
       resized()
     }
     // A BLOCK INSIDE A LINK OF THE OWNER'S (a region in a link's label) is no part of that link, be it

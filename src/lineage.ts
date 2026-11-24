@@ -39,6 +39,22 @@ export type Derived = {
 export const rootOf = (label: string) => (label.includes('/') ? label.slice(0, label.indexOf('/')) : label)
 export const prefixOf = (label: string) => (label.includes('/') ? label.slice(0, label.lastIndexOf('/')) : '')
 
+// the integer a direct child label carries right under its parent (`#x/12` under `#x`: 12), else null
+export function integerSuffix(label: string, parentLabel: string): number | null {
+  const prefix = parentLabel + '/'
+  if (!label.startsWith(prefix)) return null
+  const suffix = label.slice(prefix.length)
+  return /^\d+$/.test(suffix) ? parseInt(suffix, 10) : null
+}
+
+// deterministic code-unit label comparison
+export const compareLabels = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
+
+// shared comparator for direct integer-named children of `parentLabel` (numeric ascending, breaking
+// equal numbers such as `#p/01` vs `#p/1` by label so lineage and arrow keys agree in any creation order)
+export const compareIntegerChildren = (parentLabel: string) => (a: string, b: string): number =>
+  integerSuffix(a, parentLabel)! - integerSuffix(b, parentLabel)! || compareLabels(a, b)
+
 // a tag resolved relative to an item's label (the runtime's resolveTag): #/x nests under the label, #//x
 // replaces its last segment, #///x its last two; undefined when the label is too short for the form
 export function resolveTag(label: string, tag: string): string | undefined {
@@ -63,6 +79,7 @@ export class Lineage {
   private comp = new Map<string, number>()
   private memo = new Map<string, unknown>()
   private busy = new Set<string>()
+  private childrenByParent = new Map<string, string[]>()
   private chatPrefix: string[] | null | undefined
   private chatPrefixBusy = false
 
@@ -79,6 +96,44 @@ export class Lineage {
     // every item evaluated once, a component after the components it reaches (Tarjan numbers them
     // so), so a long chain of renames costs no deep recursion whatever the input order
     for (const id of ids.slice().sort((a, b) => this.comp.get(a)! - this.comp.get(b)!)) this.get(id)
+    // direct children of every uniquely labeled item, built in one linear pass and ordered once:
+    // numbered nested children (<parent>/<integer>) in numeric order, then the other direct nested
+    // children by label, then tag children by label (the order the arrow keys walk)
+    const nested = new Map<string, string[]>()
+    const tagged = new Map<string, string[]>()
+    for (const [id, f] of this.facts) {
+      if (!f.label || this.unique(f.label) != id) continue
+      const ov = this.override(id)
+      if (ov !== null) {
+        const list = tagged.get(ov)
+        if (list) list.push(id)
+        else tagged.set(ov, [id])
+      } else {
+        const parent = this.unique(prefixOf(f.label))
+        if (parent !== undefined && parent != id) {
+          const list = nested.get(parent)
+          if (list) list.push(id)
+          else nested.set(parent, [id])
+        }
+      }
+    }
+    const byLabel = (a: string, b: string) => compareLabels(this.facts.get(a)!.label, this.facts.get(b)!.label)
+    const parents = new Set([...nested.keys(), ...tagged.keys()])
+    for (const parent of parents) {
+      const parentLabel = this.facts.get(parent)!.label
+      const kids = nested.get(parent) ?? []
+      const numbered: string[] = []
+      const named: string[] = []
+      for (const id of kids) {
+        if (integerSuffix(this.facts.get(id)!.label, parentLabel) !== null) numbered.push(id)
+        else named.push(id)
+      }
+      const cmpInt = compareIntegerChildren(parentLabel)
+      numbered.sort((a, b) => cmpInt(this.facts.get(a)!.label, this.facts.get(b)!.label))
+      named.sort(byLabel)
+      const tagKids = (tagged.get(parent) ?? []).sort(byLabel)
+      this.childrenByParent.set(parent, numbered.concat(named, tagKids))
+    }
   }
 
   // the unique item of a label, if any (a label held by two items resolves nowhere)
@@ -102,27 +157,13 @@ export class Lineage {
     }
   }
 
-  // the tree's children of an item: the unique labels one segment below its label whose items take no
-  // override (an overridden child sits under its tag parent), then the items whose tag parent it is, each
-  // group in label order (the corpus keeps no creation time)
+  // the tree's direct children of a uniquely labeled item: numbered nested children in numeric order,
+  // then the other unique labels one segment below its label whose items take no override, then the
+  // items whose tag parent it is, each group in label order (an item whose label is missing or not
+  // unique has none)
   children(id: string): string[] {
-    const label = this.facts.get(id)!.label
-    if (!label) return []
-    const nested: string[] = []
-    const tagged: string[] = []
-    for (const [other, f] of this.facts) {
-      if (other == id) continue
-      if (this.override(other) == id) tagged.push(other)
-      else if (
-        f.label.startsWith(label + '/') &&
-        !f.label.includes('/', label.length + 1) &&
-        this.unique(f.label) == other &&
-        this.override(other) === null
-      )
-        nested.push(other)
-    }
-    const byLabel = (a: string, b: string) => (this.facts.get(a)!.label < this.facts.get(b)!.label ? -1 : 1)
-    return nested.sort(byLabel).concat(tagged.sort(byLabel))
+    if (!this.facts.has(id)) throw new Error(`lineage: unknown item ${id}`)
+    return (this.childrenByParent.get(id) ?? []).slice()
   }
 
   // the levels above a LABEL (a query's, which may name no item or two): the textual levels with the

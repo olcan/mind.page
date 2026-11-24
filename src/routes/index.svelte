@@ -3316,6 +3316,10 @@
 
     // parse regex terms
     const regexTerms = terms.filter(t => t.match(/^regex:\S+/)).map(t => new RegExp(t.substring(6)))
+    // active query/context tag sets for highlighting drawn child marks on the path from root
+    // without touching item.matching, item.matchingTerms or ranking
+    const tagTermSet = new Set(terms.filter(t => t[0] == '#'))
+    const ctxTagTermSet = new Set(termsContext.filter(t => t[0] == '#'))
 
     items.forEach((item, index) => {
       textLength += item.text.length
@@ -3425,12 +3429,27 @@
         item.target = item.listing || idMatchTerms.length > 0
         item.target_context = !item.target && context.includes(item.uniqueLabel)
         if (item.target) target = item
+        if (item.childLabels?.length) {
+          const sel: string[] = []
+          const sec: string[] = []
+          for (const child of item.childLabels) {
+            if (tagTermSet.has(child)) sel.push(child)
+            else if (!item.listing && ctxTagTermSet.has(child)) sec.push(child)
+          }
+          item.childHighlightSelected = sel.join(' ')
+          item.childHighlightSecondary = sec.join(' ')
+        } else {
+          item.childHighlightSelected = ''
+          item.childHighlightSecondary = ''
+        }
       } else {
         item.matchingTerms = []
         item.matchingTermsSecondary = []
         item.matching = false
         item.target = false
         item.target_context = false
+        item.childHighlightSelected = ''
+        item.childHighlightSecondary = ''
       }
 
       // compute nesting level (-depth) of item name under target name: the query label among the
@@ -4910,7 +4929,13 @@
   // leaves them alone (a text edit) derives nothing
   let lineage: Lineage = null
   function lineageKey(item) {
-    return [item.label ?? '', (item.tagsHiddenAlt ?? []).join(' '), (item.tagsHidden ?? []).join(' '), !!item.tagsRaw?.includes('#_autodep')].join('\n')
+    return [
+      item.label ?? '',
+      item.labelText ?? '',
+      (item.tagsHiddenAlt ?? []).join(' '),
+      (item.tagsHidden ?? []).join(' '),
+      !!item.tagsRaw?.includes('#_autodep'),
+    ].join('\n')
   }
   function deriveLineage() {
     lineage = new Lineage(
@@ -4922,14 +4947,22 @@
         carrier: !!item.tagsRaw?.includes('#_autodep'),
       }))
     )
+    const byId = new Map(items.map(item => [item.id, item]))
     items.forEach(item => {
       const derived = lineage.get(item.id)
+      const childIds = fixed ? [] : lineage.children(item.id)
       item.lineageKey = lineageKey(item)
       item.tagParent = derived.tagParent // an item id, or null
       item.ancestors = derived.ancestors // labels, nearest first
       item.autodep = derived.adopts
       item.parentId = derived.parent
       item.derivedDeps = derived.deps
+      item.childLabels = childIds.map(id => byId.get(id)!.label)
+      // each child by its cased tag at the tag's own boundary (labelTextOf): a label whose lowercase
+      // is longer (`İ`) has a labelText that runs past its tag, a quirk of the app's reading that
+      // the reading corpus pins and the vault's reader shares, and which here drew the letters
+      // after such a label as a child of their own
+      item.childrenString = childIds.map(id => labelTextOf(byId.get(id)!.labelText, byId.get(id)!.label)).join(' ')
     })
   }
 
@@ -4942,18 +4975,11 @@
     if (ids?.length == 1) return __item(ids[0]).ancestors ?? []
     return lineage?.ancestorsOfLabel(label) ?? []
   }
-  // the integer a child label carries right under its parent (`#x/12` under `#x`: 12), else null
-  function integerSuffix(label: string, parentLabel: string): number | null {
-    const prefix = parentLabel + '/'
-    if (!label.startsWith(prefix)) return null
-    const suffix = label.slice(prefix.length)
-    return /^\d+$/.test(suffix) ? parseInt(suffix) : null
-  }
   // the parent's IMMEDIATE tree children named `<parent>/<integer>` (unique labels whose nearest
   // ancestor is the parent: a child moved deeper by a parent tag is not one, review 0 B2), in numeric order
   function integerChildLabels(parentLabel: string): string[] {
     return _labels((label, ids) => ids.length == 1 && integerSuffix(label, parentLabel) !== null && labelLevels(label)[0] == parentLabel).sort(
-      (a, b) => integerSuffix(a, parentLabel)! - integerSuffix(b, parentLabel)!
+      compareIntegerChildren(parentLabel)
     )
   }
   // the labels with the parent's integer-named children first, in numeric order (1 before 10), the
@@ -4961,7 +4987,7 @@
   // enumerate them (a chat's turns and replies are its integer-named children)
   function integerChildrenFirst(labels: string[], parentLabel: string): string[] {
     const numbered = labels.filter(label => integerSuffix(label, parentLabel) !== null)
-    numbered.sort((a, b) => integerSuffix(a, parentLabel)! - integerSuffix(b, parentLabel)!)
+    numbered.sort(compareIntegerChildren(parentLabel))
     return numbered.concat(labels.filter(label => integerSuffix(label, parentLabel) === null))
   }
   // the tree's parent label of a label (lowercase): the unique item's tag parent when it has one,
@@ -9200,7 +9226,8 @@
   } from '../host.js'
   import { applyRestoringWitness, reconcileDeferred, supersedingApplier } from '../reconcile'
   import { autodepParent } from '../install_deps'
-  import { Lineage, levelsMatch } from '../lineage'
+  import { Lineage, compareIntegerChildren, integerSuffix, levelsMatch } from '../lineage'
+  import { isMarkWalkable, labelTextOf } from '../child_tags'
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
@@ -9939,6 +9966,10 @@
     item.contextLabel = ''
     item.matchingTerms = []
     item.matchingTermsSecondary = []
+    item.childLabels = []
+    item.childrenString = ''
+    item.childHighlightSelected = ''
+    item.childHighlightSecondary = ''
     item.missingTags = []
     item.danglingTags = []
     item.hasError = false
@@ -11879,7 +11910,7 @@
     if ((key == 'ArrowLeft' || key == 'ArrowRight') && !modified) {
       // pick "most recently interacted context that contains selected tag"; this is usually the parent context immediately above target but does not have to be, and this approach keeps the prev/next navigation context stable while still allowing additional context to appear below/above and also allowing switching navigation context by interacting with those other context items if desired
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
-        .filter(e => e.querySelector('mark.selected:not(.deps-and-dependents *)'))
+        .filter(e => Array.from(e.querySelectorAll('mark.selected:not(.deps-and-dependents *)')).some(isMarkWalkable))
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
 
       // if no context/target but query is a tag, then take it as target and its parent as context
@@ -11893,10 +11924,13 @@
       if (lastContext) {
         const contextLabel = (lastContext.querySelector('mark.label') as any)?.title.toLowerCase()
         const prefix = contextLabel + '/'
-        let visibleTags = Array.from(lastContext.querySelectorAll('mark:not(.hidden,.label,.deps-and-dependents *)'))
+        let visibleTags = Array.from(
+          lastContext.querySelectorAll('mark:not(.hidden,.label,.repeated,.deps-and-dependents *)')
+        ).filter(isMarkWalkable)
 
-        // drop duplicates to avoid ambiguities/cycles
-        visibleTags = _.uniqBy(visibleTags, (t: any) => t.title)
+        // drop duplicates case-insensitively (matching tag identity) to avoid ambiguities/cycles,
+        // keeping the first written position and shown spelling
+        visibleTags = _.uniqBy(visibleTags, (t: any) => (t.title ?? '').toLowerCase())
 
         // drop non-parsed tags that are dynamically generated via macros, html/dom manipulation, etc
         // const parsedVisibleTags = item(lastContext.getAttribute('data-item-id')).tagsVisible
@@ -11933,7 +11967,7 @@
                     label.startsWith(prefix) &&
                     label.indexOf('/', prefix.length) < 0 &&
                     labelLevels(label)[0] == contextLabel
-                ),
+                ).sort(),
                 tagChildLabels(contextLabel)
               )
             )
@@ -12007,18 +12041,21 @@
         // we require nested children unless target is marked _context, because otherwise going "down" into non-nested children gets confusing since the target would not appear as context; note however target may not be treated as context if there are multiple nested children with the same label
         let child
         if (item(_item(targetLabel).id).context) {
-          // allow arbitrary child tag
-          child = document.querySelector(
-            '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
-          )
+          // allow arbitrary child tag (walkable marks only: visible, plus folded reply marks whose block shows)
+          child = Array.from(
+            document.querySelectorAll(
+              '.container.target mark:not(.hidden,.label,.repeated,.secondary-selected,.deps-and-dependents *)'
+            )
+          ).find(isMarkWalkable)
         } else {
-          // filter to children w/ nested labels: the tree's descendants (a tag naming a renamed
-          // child qualifies, a nested label renamed away does not)
+          // filter to walkable marks naming tree descendants (a tag naming a renamed child qualifies,
+          // a nested label renamed away does not; marks hidden outside folded replies are excluded
+          // before taking the first)
           const childTags = Array.from(
             document.querySelectorAll(
-              '.container.target mark:not(.hidden,.label,.secondary-selected,.deps-and-dependents *)'
+              '.container.target mark:not(.hidden,.label,.repeated,.secondary-selected,.deps-and-dependents *)'
             )
-          ).filter(t => labelLevels(t['title']?.toLowerCase() ?? '').includes(targetLabel))
+          ).filter(t => isMarkWalkable(t) && labelLevels(t['title']?.toLowerCase() ?? '').includes(targetLabel))
           child = childTags[0]
         }
 
@@ -12083,7 +12120,7 @@
       }
       // see comments above about lastContext
       let lastContext = Array.from(document.querySelectorAll('.container.target_context'))
-        .filter(e => e.querySelector('mark.selected:not(.deps-and-dependents *)'))
+        .filter(e => Array.from(e.querySelectorAll('mark.selected:not(.deps-and-dependents *)')).some(isMarkWalkable))
         .sort((a, b) => item(b.getAttribute('data-item-id')).time - item(a.getAttribute('data-item-id')).time)[0]
       if (!lastContext && editorText.trim().match(/^#[^#\s]+$/)) {
         const targetLabel = editorText.trim().toLowerCase()
@@ -13058,6 +13095,9 @@
                 danglingTags={(item.danglingTags ?? []).join(' ')}
                 matchingTerms={item.matchingTerms.join(' ')}
                 matchingTermsSecondary={item.matchingTermsSecondary.join(' ')}
+                childrenString={item.childrenString ?? ''}
+                childHighlightSelected={item.childHighlightSelected ?? ''}
+                childHighlightSecondary={item.childHighlightSecondary ?? ''}
                 matching={item.matching}
                 target={item.target}
                 target_context={item.target_context}
