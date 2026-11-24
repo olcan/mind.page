@@ -2033,6 +2033,15 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   await expect(replyRowA.locator('mark.waits'), 'the reply row shows a bell saying reply').toHaveText('reply')
   await expect(replyRowA.locator('.list-item'), 'the reply\'s line is drawn as written').toContainText('see [the plan](https://example.com/plan) at https://example.com/x.')
   await expect(replyRowA.locator('a'), 'nothing in a reply\'s line becomes a link in the list').toHaveCount(0)
+  // the box names the chat while no row is marked: its row is marked as a todo's is (the owner's
+  // report of 2026-11-24: only a todo's name rendered the list again, so a reply's row stayed
+  // unmarked until something else rendered it)
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await expect(main.locator('.list-item-container.selected'), 'the premise: no row is marked').toHaveCount(0)
+  await page.evaluate(() => void (window as any).MindBox.set('#waits_a/0'))
+  await expect(replyRowA, 'the box names the chat: its reply row is marked').toHaveClass(/(^| )selected( |$)/, { timeout: 5_000 })
+  await page.evaluate(() => void (window as any).MindBox.set(''))
+  await expect(main.locator('.list-item-container.selected'), 'the box names nothing again: no row is marked').toHaveCount(0)
   await main.scrollIntoViewIfNeeded()
   await replyRowA.locator('mark.waits').click()
   await expect(replyRowA, "the bell's click removes the reply row").toHaveCount(0, { timeout: 15_000 })
