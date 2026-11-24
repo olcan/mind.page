@@ -172,8 +172,9 @@ test('a role header asks before it truncates the chat below it', async ({ page }
   // this transcript) are named in the dialog and deleted with it; Cancel leaves everything, OK
   // truncates and deletes, and a header with nothing below it only says so
   await loadAdmin(page)
-  // the replies carry a name, as the bridge's do (a bare `<<agent>>` is the value, not the macro)
-  const text = "#chat/vault/1 #_agent/vault\n<<user>> first\n<<agent('e2e')>>\nreply\n<<user>> second\n<<agent('e2e')>>\nlater\n"
+  // the replies carry a name, as the bridge's do (a bare `<<agent>>` is the value, not the macro);
+  // visible text on the name line keeps the first user header shown so the click below can reach it
+  const text = "#chat/vault/1 topic #_agent/vault\n<<user>> first\n<<agent('e2e')>>\nreply\n<<user>> second\n<<agent('e2e')>>\nlater\n"
   await page.evaluate(text => void window._create(text), text)
   const item = () => page.evaluate(() => window._item('#chat/vault/1', true)?.text ?? '')
   await expect.poll(item, { message: 'the chat item' }).toContain('<<user>> second')
@@ -198,14 +199,302 @@ test('a role header asks before it truncates the chat below it', async ({ page }
   await labels.nth(1).click()
   await expect(modal).toContainText(asked)
   await modal.locator('.button.confirm').click()
-  await expect.poll(item, { message: 'OK: the messages below are gone' }).toBe('#chat/vault/1 #_agent/vault\n<<user>> first')
+  await expect.poll(item, { message: 'OK: the messages below are gone' }).toBe('#chat/vault/1 topic #_agent/vault\n<<user>> first')
   await expect.poll(() => page.evaluate(() => window._exists('#chat/vault/1/0')), { message: 'OK: the continuation is deleted' }).toBe(false)
   await expect(labels).toHaveCount(1)
   await labels.first().click() // a user header with nothing below it
   await expect(modal).toContainText('nothing to remove below this message')
   await page.locator('.background.visible').click({ position: { x: 4, y: 4 } }) // an alert has no buttons: its background closes it
   await expect(modal).toBeHidden()
-  expect(await item()).toBe('#chat/vault/1 #_agent/vault\n<<user>> first')
+  expect(await item()).toBe('#chat/vault/1 topic #_agent/vault\n<<user>> first')
+})
+
+test('#chat own page is whole, hides the first user row only when bare, and scopes the trial look to inert chats', async ({
+  page,
+}) => {
+  // covers the #chat item's own rendering (would have caught the 2026-11-23 unescaped macro
+  // opener in embedded code/comments), the hidden first user row (bare name + hidden tags vs
+  // visible text on the name line or a line of its own), and the inert-chat trial styling
+  const chatConsoleErrors: string[] = []
+  page.on('console', m => {
+    if (m.type() !== 'error') return
+    const text = m.text()
+    if (/^(?:(?:code_)?macro error in item #chat:|\[#chat\])/.test(text)) chatConsoleErrors.push(text.slice(0, 200))
+  })
+
+  await loadAdmin(page)
+  // standalone support: install #chat (and transitive deps incl. #agent/vault) when run alone
+  if (!(await page.evaluate(() => window._exists('#chat')))) {
+    expect(await install(page, 'chat'), '/_install chat').toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId || item.saving).length), {
+        timeout: 120_000,
+        message: '#chat install saves settled',
+      })
+      .toBe(0)
+  }
+
+  // 1. #chat's own page is whole: no macro/console error, code blocks closed, no code spilled
+  await page.evaluate(() => void (location.hash = '#chat'))
+  await expect
+    .poll(
+      () => page.evaluate(() => !!window._item('#chat', true)?.elem?.querySelector('.content .core_js_table.ready')),
+      { timeout: 15_000, message: '#chat own page rendered its js_table' }
+    )
+    .toBe(true)
+
+  const chatPage = await page.evaluate(() => {
+    const item = window._item('#chat', true)!
+    const raw = (window as any).__items.find((i: any) => i.id == item.id)
+    const elem = item.elem!
+    const content = elem.querySelector('.content')!
+    const children = [...content.children]
+    const spilled = children
+      .filter((el, idx) => {
+        if (idx === 0 && el.tagName === 'P') return false // help paragraph
+        if (el.classList.contains('core_js_table')) return false
+        if (el.matches('mark.hidden')) return false
+        return true
+      })
+      .map(el => `${el.tagName}:${el.className}:${(el.textContent ?? '').trim().slice(0, 80)}`)
+    const helpText = children[0]?.textContent ?? ''
+    return {
+      hasErrorClass: !!(elem.matches('.error') || elem.querySelector(':scope > .container.error')),
+      macroErrorCount: content.querySelectorAll('.macro-error').length,
+      expandedError: raw?.expanded?.error ? String(raw.expanded.error) : null,
+      hasExpandedText: typeof raw?.expanded?.text === 'string' && raw.expanded.text.length > 0,
+      preCount: content.querySelectorAll('pre').length,
+      messageCount: content.querySelectorAll('.message').length,
+      hasFence: (content.textContent ?? '').includes('```'),
+      helpLooksClean: helpText.includes('chat defines utilities') && !/const _delimiter|\.dep_chat|```/.test(helpText),
+      spilled,
+    }
+  })
+
+  expect(chatConsoleErrors, '#chat own page: no console error naming #chat').toEqual([])
+  expect(chatPage.hasErrorClass, '#chat own page: item container has no error class').toBe(false)
+  expect(chatPage.macroErrorCount, '#chat own page: no .macro-error elements').toBe(0)
+  expect(chatPage.expandedError, '#chat own page: macro expansion recorded no error').toBeNull()
+  expect(chatPage.hasExpandedText, '#chat own page: macro expansion succeeded').toBe(true)
+  expect(chatPage.preCount, '#chat own page: code blocks closed (no spilled <pre> blocks)').toBe(0)
+  expect(chatPage.messageCount, '#chat own page: no spilled .message blocks').toBe(0)
+  expect(chatPage.hasFence, '#chat own page: no unclosed code fences in rendered text').toBe(false)
+  expect(chatPage.helpLooksClean, '#chat own page: help text contains no spilled code').toBe(true)
+  expect(chatPage.spilled, '#chat own page: no code spilled as text outside help and js_table').toEqual([])
+
+  expect(await page.evaluate(() => window._exists('#agent/vault')), '#agent/vault exists for hidden tag').toBe(true)
+
+  const createAndShow = async (label: string, text: string, expectedMessages: number) => {
+    await page.evaluate(t => void window._create(t), text)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            name => window._item(name, true)?.dependencies?.includes(window._item('#chat', true)!.id) ?? false,
+            label
+          ),
+        { timeout: 15_000, message: `${label} depends on #chat` }
+      )
+      .toBe(true)
+    await page.evaluate(name => void (location.hash = name), label)
+    await expect
+      .poll(
+        () => page.evaluate(name => window._item(name, true)?.elem?.querySelectorAll('.content > .message').length ?? 0, label),
+        { timeout: 15_000, message: `${label} rendered ${expectedMessages} message rows` }
+      )
+      .toBe(expectedMessages)
+  }
+
+  const inspectFirstUserRow = (label: string) =>
+    page.evaluate(name => {
+      const content = window._item(name, true)!.elem!.querySelector('.content')!
+      const nameMark = content.querySelector('p:first-child mark:not(.hidden)') as HTMLElement
+      const userRow = content.querySelector(':scope > div.message.user') as HTMLElement
+      const msgP = userRow.nextElementSibling as HTMLElement
+      const range = document.createRange()
+      range.selectNodeContents(msgP)
+      const msgLine = range.getClientRects()[0] ?? msgP.getBoundingClientRect()
+      const nameRect = nameMark.getBoundingClientRect()
+      const rowRect = userRow.getBoundingClientRect()
+      return {
+        hasClass: userRow.classList.contains('hideFirstUserRow'),
+        display: getComputedStyle(userRow).display,
+        rowWidth: rowRect.width,
+        rowHeight: rowRect.height,
+        rowRects: userRow.getClientRects().length,
+        nameTop: nameRect.top,
+        nameRight: nameRect.right,
+        msgTop: msgLine.top,
+        msgLeft: msgLine.left,
+        rowBottom: rowRect.bottom,
+      }
+    }, label)
+
+  // 2. First user row is hidden when name + hidden tag precedes the user row
+  const hiddenLabel = '#chat/e2e_fur_hidden'
+  await createAndShow(hiddenLabel, `${hiddenLabel} #_agent/vault\n<<user>> first message beside name\n`, 1)
+  const hidden = await inspectFirstUserRow(hiddenLabel)
+  expect(hidden.hasClass, 'first user row hidden (name + hidden tag): row has hideFirstUserRow class').toBe(true)
+  expect(hidden.display, 'first user row hidden: display is none').toBe('none')
+  expect(
+    { width: hidden.rowWidth, height: hidden.rowHeight, rects: hidden.rowRects },
+    'first user row hidden: row takes no room'
+  ).toEqual({ width: 0, height: 0, rects: 0 })
+  expect(
+    Math.abs(hidden.msgTop - hidden.nameTop),
+    'first user row hidden: message first line starts on the name tag line'
+  ).toBeLessThan(6)
+  expect(
+    hidden.msgLeft,
+    'first user row hidden: message first line starts beside the name tag'
+  ).toBeGreaterThan(hidden.nameRight)
+
+  // 3. First user row stays when visible text stands between name and user row
+  const sameLineLabel = '#chat/e2e_fur_same_line'
+  await createAndShow(sameLineLabel, `${sameLineLabel} note on name line\n<<user>> stays below header\n`, 1)
+  const sameLine = await inspectFirstUserRow(sameLineLabel)
+  expect(sameLine.hasClass, 'first user row stays (text on name line): no hideFirstUserRow class').toBe(false)
+  expect(sameLine.display, 'first user row stays (text on name line): row is displayed').not.toBe('none')
+  expect(sameLine.rowHeight, 'first user row stays (text on name line): row takes vertical room').toBeGreaterThan(0)
+  expect(sameLine.msgTop, 'first user row stays (text on name line): message starts below user row').toBeGreaterThanOrEqual(
+    sameLine.rowBottom - 1
+  )
+
+  const betweenLineLabel = '#chat/e2e_fur_between_line'
+  await createAndShow(betweenLineLabel, `${betweenLineLabel}\nintro line\n<<user>> stays below header\n`, 1)
+  const betweenLine = await inspectFirstUserRow(betweenLineLabel)
+  expect(betweenLine.hasClass, 'first user row stays (line between): no hideFirstUserRow class').toBe(false)
+  expect(betweenLine.display, 'first user row stays (line between): row is displayed').not.toBe('none')
+  expect(betweenLine.rowHeight, 'first user row stays (line between): row takes vertical room').toBeGreaterThan(0)
+  expect(betweenLine.msgTop, 'first user row stays (line between): message starts below user row').toBeGreaterThanOrEqual(
+    betweenLine.rowBottom - 1
+  )
+
+  // a hidden tag on a line of its own after a line of four spaces is no tag to the app (it reads
+  // that line as indented code): the text is drawn as it stands, in a paragraph of its own, so the
+  // regular user row stays (reviews 0 and 1 of the thread first_user_row: the row was hidden, and
+  // that paragraph with it). Hidden tags count on the name's line alone
+  const spacedLabel = '#chat/e2e_fur_spaced'
+  await createAndShow(spacedLabel, `${spacedLabel}\n    \n#_chat\n\n<<user>> stays below header\n`, 1)
+  const spaced = await inspectFirstUserRow(spacedLabel)
+  expect(spaced.hasClass, 'first user row stays (a tag after a line of spaces): no hideFirstUserRow class').toBe(false)
+  expect(spaced.display, 'first user row stays (a tag after a line of spaces): row is displayed').not.toBe('none')
+  expect(spaced.rowHeight, 'first user row stays (a tag after a line of spaces): row takes vertical room').toBeGreaterThan(0)
+  const spacedText = await page.evaluate(name => {
+    const content = window._item(name, true)!.elem!.querySelector('.content')!
+    const p = [...content.querySelectorAll(':scope > p:not(:first-child)')].find(el => el.textContent!.includes('#_chat'))
+    if (!p) return null
+    return { text: p.textContent!.trim(), display: getComputedStyle(p).display, height: p.getBoundingClientRect().height }
+  }, spacedLabel)
+  expect(spacedText?.text, 'first user row stays (a tag after a line of spaces): the tag is drawn as text').toBe('#_chat')
+  expect(spacedText?.display, 'first user row stays (a tag after a line of spaces): its paragraph is displayed').not.toBe('none')
+  expect(spacedText?.height, 'first user row stays (a tag after a line of spaces): its paragraph takes vertical room').toBeGreaterThan(0)
+
+  // 4. Trial look applies only in a chat holding an agent's inert section (.vault-result)
+  const inspectTrialLook = (label: string) =>
+    page.evaluate(name => {
+      const content = window._item(name, true)!.elem!.querySelector('.content')!
+      const userRows = [...content.querySelectorAll(':scope > div.message.user')] as HTMLElement[]
+      const agentRows = [...content.querySelectorAll(':scope > div.message.agent')] as HTMLElement[]
+      const visibleUser = userRows[1]
+      const earlierAgent = agentRows[0]
+      const lastAgent = agentRows[agentRows.length - 1]
+      const parseRgb = (css: string) => (css.match(/\d+/g) ?? []).slice(0, 3).map(Number)
+      const hrs = [earlierAgent, visibleUser, lastAgent].flatMap(row =>
+        [...row.querySelectorAll('hr')].map(hr => ({
+          cls: hr.className,
+          visibility: getComputedStyle(hr).visibility,
+          display: getComputedStyle(hr).display,
+          width: hr.getBoundingClientRect().width,
+        }))
+      )
+      const userLeftHr = visibleUser.querySelector('hr.left') as HTMLElement
+      const userRightHr = visibleUser.querySelector('hr.right') as HTMLElement
+      const userLabel = visibleUser.querySelector('.label') as HTMLElement
+      const userRowRect = visibleUser.getBoundingClientRect()
+      const userLabelRect = userLabel.getBoundingClientRect()
+      const earlierAgentColor = getComputedStyle(earlierAgent.querySelector('.label')!).color
+      const lastAgentColor = getComputedStyle(lastAgent.querySelector('.label')!).color
+      return {
+        hasVaultResult: !!content.querySelector('.vault-result'),
+        hrs,
+        earlierAgentColor,
+        earlierAgentRgb: parseRgb(earlierAgentColor),
+        lastAgentColor,
+        lastAgentRgb: parseRgb(lastAgentColor),
+        userLeftHrDisplay: getComputedStyle(userLeftHr).display,
+        userLeftHrWidth: userLeftHr.getBoundingClientRect().width,
+        userRightHrWidth: userRightHr.getBoundingClientRect().width,
+        userLabelMarginLeft: getComputedStyle(userLabel).marginLeft,
+        userLabelLeftOffset: userLabelRect.left - userRowRect.left,
+        userLabelRightOffset: userRowRect.right - userLabelRect.right,
+      }
+    }, label)
+
+  const plainLabel = '#chat/e2e_fur_plain'
+  await createAndShow(
+    plainLabel,
+    `${plainLabel}\n<<user>> first q\n<<agent('e2e')>>\nfirst reply\n<<user>> second q\n<<agent('e2e')>>\nsecond reply\n`,
+    4
+  )
+  const plain = await inspectTrialLook(plainLabel)
+  expect(plain.hasVaultResult, 'released look (no inert section): chat has no .vault-result').toBe(false)
+  expect(
+    plain.hrs.every(h => h.visibility === 'visible' && h.display !== 'none' && h.width > 0),
+    'released look (no inert section): lines beside role names are visible'
+  ).toBe(true)
+  const [er, eg, eb] = plain.earlierAgentRgb
+  const [lr, lg, lb] = plain.lastAgentRgb
+  expect(er === eg && eg === eb, 'released look (no inert section): earlier agent row name is neutral').toBe(true)
+  expect(lb > lr && lb > lg, 'released look (no inert section): last agent row name is blue').toBe(true)
+  expect(plain.lastAgentColor, 'released look (no inert section): last agent row differs from earlier agent row').not.toBe(
+    plain.earlierAgentColor
+  )
+  expect(plain.userLeftHrDisplay, 'released look (no inert section): user row left line is displayed').not.toBe('none')
+  expect(plain.userLeftHrWidth, 'released look (no inert section): user row left line is wider than right line').toBeGreaterThan(
+    plain.userRightHrWidth
+  )
+  expect(plain.userLabelLeftOffset, 'released look (no inert section): user row name sits toward the right').toBeGreaterThan(
+    plain.userLabelRightOffset
+  )
+
+  const inertLabel = '#chat/e2e_fur_inert'
+  await createAndShow(
+    inertLabel,
+    `${inertLabel}\n<<user>> first q\n<<agent('vault/default')>>\n<!--inert-->\nfirst reply\n<!--/inert-->\n<<user>> second q\n<<agent('vault/default')>>\n<!--inert-->\nsecond reply\n<!--/inert-->\n`,
+    4
+  )
+  await expect
+    .poll(
+      () => page.evaluate(name => window._item(name, true)?.elem?.querySelectorAll('.content .vault-result').length ?? 0, inertLabel),
+      { timeout: 15_000, message: `${inertLabel} populated inert sections` }
+    )
+    .toBe(2)
+  const inert = await inspectTrialLook(inertLabel)
+  expect(inert.hasVaultResult, 'trial look (with inert section): chat holds .vault-result').toBe(true)
+  expect(
+    inert.hrs.every(h => h.visibility === 'hidden'),
+    'trial look (with inert section): lines beside role names are not visible'
+  ).toBe(true)
+  const [ilr, ilg, ilb] = inert.lastAgentRgb
+  expect(ilb <= ilr && ilb <= ilg, 'trial look (with inert section): last agent row name is not blue').toBe(true)
+  expect(inert.lastAgentColor, 'trial look (with inert section): last agent row name matches non-last agent row color').toBe(
+    plain.earlierAgentColor
+  )
+  expect(inert.lastAgentColor, 'trial look (with inert section): last agent row name differs from released blue').not.toBe(
+    plain.lastAgentColor
+  )
+  expect(inert.userLeftHrDisplay, 'trial look (with inert section): user row left line is display none').toBe('none')
+  expect(inert.userLabelMarginLeft, 'trial look (with inert section): user row name has zero left margin').toBe('0px')
+  expect(inert.userLabelLeftOffset, 'trial look (with inert section): user row name stands at the left').toBeLessThanOrEqual(2)
+  expect(inert.userLabelLeftOffset, 'trial look (with inert section): user row name is left of released position').toBeLessThan(
+    plain.userLabelLeftOffset / 2
+  )
+
+  // leave no writes in flight for the next row in this serial lane
+  for (const label of [hiddenLabel, sameLineLabel, betweenLineLabel, spacedLabel, plainLabel, inertLabel]) {
+    await waitWritesSettled(page, label)
+  }
 })
 
 test('an autodep parent absent from every text tag is installed and joins the runtime graph', async ({ page }) => {
