@@ -4855,14 +4855,24 @@ test('drawn child tags stand back at half alpha with the selected path lit, at t
       const log = code?.closest('pre') as HTMLElement | null
       const name = item.querySelector('mark.label') as HTMLElement | null
       const rect = (e: Element) => e.getBoundingClientRect()
-      // the gap between the last mark and the item's right edge, and the room left of the first
-      // one: at the right means a small gap that is not negative (a mark past the edge)
-      const gap = marks.length ? rect(item).right - Math.max(...marks.map(m => rect(m).right)) : null
+      // the gap between the last mark and the right edge it can reach (the item's own, or beside
+      // a bare name the digits of the item's number, where the name's line ends), and the room
+      // left of the first one: at the right means a small gap that is not negative (a mark past
+      // the edge)
+      const index = item.parentElement?.querySelector('.item-menu > .index') as HTMLElement | null
+      const digits = index ? rect(index).left + parseFloat(getComputedStyle(index).paddingLeft) : null
+      const inline = !!box?.closest('.content')
+      const last = marks.length ? Math.max(...marks.map(m => rect(m).right)) : null
+      const gap = last == null ? null : (inline && digits != null ? digits : rect(item).right) - last
       const tap = (m: HTMLElement) => m.contains(document.elementFromPoint(rect(m).left + rect(m).width / 2, rect(m).top + rect(m).height / 2))
       return {
         marks: marks.map(m => [m.getAttribute('title'), getComputedStyle(m).opacity, m.classList.contains('selected')]),
         box: box ? [box.tagName, !!box.closest('.content')] : null,
         atRight: gap == null ? null : gap >= 0 && gap < 24 && rect(marks[0]).left - rect(item).left > 100,
+        // beside a bare name the tags stand off the item's number as the label stands off the
+        // item's left edge (the owner, 2026-11-24: "about as much as the margin to the left of
+        // the name tag"): the two spaces, to within 3 px
+        offNumber: inline && gap != null && name ? Math.abs(gap - (rect(name).left - rect(item).left)) <= 3 : null,
         nameLine: name && marks.length ? Math.abs(rect(name).top - rect(marks[0]).top) < 12 : null,
         lines: new Set(marks.map(m => Math.round(rect(m).top))).size,
         logShows: code ? code.checkVisibility() : null,
@@ -4874,7 +4884,7 @@ test('drawn child tags stand back at half alpha with the selected path lit, at t
   await setQuery(P)
   await expect
     .poll(() => look(P), { message: 'content: the tags in a block of their own after it, at half alpha, at the right' })
-    .toEqual({ marks: [[`${P}/a`, '0.5', false], [`${P}/b`, '0.5', false]], box: ['DIV', false], atRight: true, nameLine: false, lines: 1, logShows: null, aboveLog: null, taps: [true, true] })
+    .toEqual({ marks: [[`${P}/a`, '0.5', false], [`${P}/b`, '0.5', false]], box: ['DIV', false], atRight: true, offNumber: null, nameLine: false, lines: 1, logShows: null, aboveLog: null, taps: [true, true] })
 
   await setQuery(`${P}/a`)
   await expect
@@ -4884,12 +4894,12 @@ test('drawn child tags stand back at half alpha with the selected path lit, at t
   await setQuery(C)
   await expect
     .poll(() => look(C), { message: "an open columns div in the content, and a closed log: the tags in their block after it, at the item's right edge" })
-    .toEqual({ marks: [[`${C}/k`, '0.5', false]], box: ['DIV', false], atRight: true, nameLine: false, lines: 1, logShows: false, aboveLog: null, taps: [true] })
+    .toEqual({ marks: [[`${C}/k`, '0.5', false]], box: ['DIV', false], atRight: true, offNumber: null, nameLine: false, lines: 1, logShows: false, aboveLog: null, taps: [true] })
 
   await setQuery(N)
   await expect
-    .poll(() => look(N), { message: 'a bare name: the tags beside it, on its line, at half alpha, at the right' })
-    .toEqual({ marks: kids.map(kid => [kid, '0.5', false]), box: ['SPAN', true], atRight: true, nameLine: true, lines: 1, logShows: false, aboveLog: null, taps: kids.map(() => true) })
+    .poll(() => look(N), { message: "a bare name: the tags beside it, on its line, at half alpha, at the right, off the item's number by the label's own margin" })
+    .toEqual({ marks: kids.map(kid => [kid, '0.5', false]), box: ['SPAN', true], atRight: true, offNumber: true, nameLine: true, lines: 1, logShows: false, aboveLog: null, taps: kids.map(() => true) })
 
   // a narrow screen: the tags beside the bare name wrap, and an opened log starts below them, so
   // each takes its own tap (review 5 of the thread child_tags: the log covered the wrapped ones)
@@ -4906,13 +4916,15 @@ test('drawn child tags stand back at half alpha with the selected path lit, at t
 
   // one name longer than the narrow line: it breaks over lines inside the item, every piece of it
   // between the item's edges, and takes a tap (review 6: the unbroken name's start stood past the
-  // left edge, where no scroll reaches)
+  // left edge, where no scroll reaches); no piece starts left of the label either, in the item's
+  // padding (the room the tags keep before the number comes out of their width, not on top of it)
   await setQuery(L)
   const pieces = () =>
     page.evaluate(label => {
       const item = window._item(label, true)?.elem?.querySelector('.item') as HTMLElement | null
       const mark = item?.querySelector('mark.child-tag') as HTMLElement | null
-      if (!item || !mark) return null
+      const name = item?.querySelector('mark.label') as HTMLElement | null
+      if (!item || !mark || !name) return null
       const box = item.getBoundingClientRect()
       const rects = [...mark.getClientRects()]
       const first = rects[0]
@@ -4920,12 +4932,13 @@ test('drawn child tags stand back at half alpha with the selected path lit, at t
         title: mark.getAttribute('title'),
         pieces: rects.length > 1,
         inside: rects.every(r => r.left >= box.left - 0.5 && r.right <= box.right + 0.5),
+        padded: rects.every(r => r.left >= name.getBoundingClientRect().left - 0.5),
         tap: !!first && mark.contains(document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2)),
       }
     }, L)
   await expect
-    .poll(pieces, { message: 'a narrow screen, one long name: it breaks over lines, each piece inside the item, and takes a tap' })
-    .toEqual({ title: longKid, pieces: true, inside: true, tap: true })
+    .poll(pieces, { message: "a narrow screen, one long name: it breaks over lines, each piece inside the item and its padding, and takes a tap" })
+    .toEqual({ title: longKid, pieces: true, inside: true, padded: true, tap: true })
 })
 
 test('drawn child tags stay in sync when a native details disclosure opens and closes', async ({ page }) => {

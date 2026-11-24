@@ -3637,10 +3637,13 @@
      the float (a flow root), so tags that wrap push what follows down: an opened log starts below
      them and takes no click of theirs (review 5 of the thread child_tags). The float is no wider
      than that paragraph, so one name longer than the line wraps inside the item and does not
-     leave its start past the left edge (review 6) */
+     leave its start past the left edge (review 6). That line ends at the item's number, so the
+     tags stand off it by the item's own padding, as the label stands off the left edge (the
+     owner, 2026-11-24); the margin comes out of the float's width, not on top of it */
   .item > :global(.content span.child-tags) {
     float: right;
-    max-width: 100%;
+    margin-right: 10px;
+    max-width: calc(100% - 10px);
     text-align: right;
   }
   .item > :global(.content p:has(> span.child-tags)) {
