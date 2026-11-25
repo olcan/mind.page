@@ -33,11 +33,15 @@ export function numberClick(e: ClickModifiers | null | undefined, matching: bool
 // - Any other item by its id reference, in the form that outlives the tab: `id:<saved id>`, the id of its
 //   document, as soon as the creation is acknowledged (`savedId`; the copy shortcut names an item the same
 //   way). Until then a select names the item by the tab's own id (`id`), for this tab only: its address and
-//   history entry name nothing after a reload or in another tab, the acknowledgement leaves such an entry as
-//   written, and a slow or an offline write keeps that window open as long as it lasts. (A limit left as it
-//   is, not a necessity: the creation reserves its document's id before the write; naming an item by it
-//   before the acknowledgement would be a navigation decision of its own.) For an item the tab loaded, the
-//   two ids are one.
+//   history entry name nothing after a reload or in another tab, and a slow or an offline write keeps that
+//   window open as long as it lasts. At the acknowledgement, index.svelte's onEditorDone updates the CURRENT
+//   history entry to `id:<saved id>` when the creation wrote `id:<id>` into the box (`createdBoxId`) and the
+//   box holds that exact text then — including a later entry written meanwhile by a fresh select of the same
+//   item (the creation's own earlier entry then keeps the tab's id); any other entry written before the
+//   acknowledgement (not current then, or for a creation that did not place `id:<id>` in the box) stays as
+//   written. (A limit left as it is, not a necessity: the creation reserves its document's id before the
+//   write; naming an item by it before the acknowledgement would be a navigation decision of its own.) For an
+//   item the tab loaded, the two ids are one.
 export type Selectable = { id: string; savedId?: string | null; labelUnique?: boolean; labelText?: string | null }
 const labeled = (item: Selectable): boolean => !!item.labelUnique && !!item.labelText
 export const selectName = (item: Selectable): string =>

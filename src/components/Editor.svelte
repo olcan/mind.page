@@ -1069,7 +1069,7 @@
   function onCreate(e) {
     e.stopPropagation()
     e.preventDefault()
-    onDone(editorText, { code: 'Enter' })
+    onDone((editorText = textarea.value), { code: 'Enter' })
   }
 
   function onClear(e) {

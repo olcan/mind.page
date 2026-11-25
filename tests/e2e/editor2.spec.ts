@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mindbox, focusMindbox, focusMindboxInPlace, savedId, itemText, visible } from './editor_helpers.js'
-import { firestore, loadAdmin } from './helpers.js'
+import { mindbox, focusMindbox, focusMindboxInPlace, savedId, itemText, visible, asUser, entries, settled } from './editor_helpers.js'
+import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
 // the editor lane's longest rows, on their own lane (playwright.config.ts: `editor2`) so the two
 // editor lanes finish in about the same time; each row is self-contained (its own items, its own
@@ -1390,6 +1390,461 @@ test('the create key seeds non-collapsed page text selected outside editable fie
     await verifyOpenMacroQuote('> .content .vault-result p:last-of-type', 2, 'inert region')
   } finally {
     await deleteNamed()
+  }
+})
+
+async function deleteBoxAfterCreation() {
+  const docs = await firestore().collection('items').where('user', '==', 'anonymous').get()
+  for (const doc of docs.docs) if (/^\s*#?e2e_bc/.test(doc.data().text ?? '')) await doc.ref.delete()
+}
+
+const findBcItem = (page: Page, text: string) =>
+  page.evaluate(t => {
+    const it = ((window as any).__items as any[]).find(i => i.text === t)
+    return it
+      ? { id: it.id as string, savedId: (it.savedId ?? null) as string | null, target: !!it.target, editing: !!it.editing }
+      : null
+  }, text)
+
+async function waitPendingBc(
+  page: Page,
+  text: string,
+  expected: { editing?: boolean; target?: boolean } = { target: true },
+  message = 'unnamed item created locally and selected'
+): Promise<string> {
+  let tabId = ''
+  await expect
+    .poll(
+      async () => {
+        const found = await findBcItem(page, text)
+        if (found) tabId = found.id
+        return found
+      },
+      { message, timeout: 10_000 }
+    )
+    .toMatchObject({ savedId: null, ...expected })
+  expect(tabId, 'premise: tab id exists').toBeTruthy()
+  return tabId
+}
+
+const waitNoBcSaves = (page: Page) =>
+  expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          ((window as any).__items as any[]).every(
+            it => it.savedId && !it.saving && !it.saveTask && !it.unackedWrites?.length
+          )
+        ),
+      { message: 'all writes acknowledged and settled', timeout: 30_000 }
+    )
+    .toBe(true)
+
+test('unnamed creation selects the new item by its tab id, upgrades the box to its saved id in place on save without moving focus, caret, or history, and survives reload', async ({ page }) => {
+  await deleteBoxAfterCreation()
+  await loadAdmin(page)
+  const errors: string[] = []
+  const consoleErrors: string[] = []
+  // filter the known app-load localStorage SecurityError triggered on page reload (docs/mind_page_bridge_worker.md)
+  page.on('pageerror', error => {
+    if (!String(error).includes('localStorage')) errors.push(String(error))
+  })
+  page.on('console', msg => {
+    if (msg.type() == 'error') consoleErrors.push(msg.text())
+  })
+  const PRIOR = '#e2e_bc_prior'
+  const PLAIN = 'e2e_bc plain note'
+  const NOEDIT = 'e2e_bc noedit note'
+  const RESELECT = 'e2e_bc reselect note'
+  const FAIL_VIEW = 'e2e_bc fail view note'
+  try {
+    await page.evaluate(text => void window._create(text), `${PRIOR} prior target`)
+    await saved(page, [PRIOR])
+    await asUser(page, label => (window._item(label) as any).select(), PRIOR)
+    await expect(mindbox(page)).toHaveValue(PRIOR)
+    const [priorLen, priorIndex] = await entries(page)
+
+    // go offline so the create write stays pending and we can observe the tab-id state directly
+    await page.context().setOffline(true)
+    await focusMindbox(page)
+    await mindbox(page).fill(PLAIN)
+    await page.keyboard.press('Shift+Enter')
+
+    // before save: box holds id:<tabId>, item is selected, editor focused, one history entry pushed
+    const tabId = await waitPendingBc(page, PLAIN, { target: true, editing: true })
+    await expect(mindbox(page), 'before save: MindBox holds id:<tabId>').toHaveValue(`id:${tabId}`)
+    expect(await page.evaluate(() => location.hash), 'before save: url hash holds #<tabId>').toBe(`#${tabId}`)
+    const [createdLen, createdIndex] = await entries(page)
+    expect([createdLen, createdIndex], 'creation pushed one entry after prior final view').toEqual([priorLen + 1, priorIndex + 1])
+    expect(await page.evaluate(() => history.state?.editorText), 'before save: history entry holds id:<tabId>').toBe(`id:${tabId}`)
+
+    const itemEditor = page.locator(`#textarea-${tabId}`)
+    await expect(itemEditor, 'new item editor is focused').toBeFocused()
+    await page.evaluate(id => (document.getElementById(`textarea-${id}`) as HTMLTextAreaElement).setSelectionRange(5, 5), tabId)
+
+    // come back online so the create write confirms
+    await page.context().setOffline(false)
+    const [persistedId] = await saved(page, [tabId])
+    expect(persistedId, 'saved id differs from tab id').not.toBe(tabId)
+
+    // after save: box upgraded to id:<savedId>, item still selected, history updated in place, focus & caret untouched
+    await expect(mindbox(page), 'after save: MindBox upgraded to id:<savedId>').toHaveValue(`id:${persistedId}`)
+    expect(
+      await page.evaluate(localId => {
+        const it = ((window as any).__items as any[]).find(i => i.id === localId)
+        return { target: !!it?.target, hash: location.hash, stateText: history.state?.editorText, index: history.state?.index }
+      }, tabId),
+      'after save: item stays target, hash and history.state updated in place'
+    ).toEqual({ target: true, hash: `#${persistedId}`, stateText: `id:${persistedId}`, index: createdIndex })
+    expect(await entries(page), 'after save: no history entry added').toEqual([createdLen, createdIndex])
+    expect(
+      await page.evaluate(localId => {
+        const ta = document.getElementById(`textarea-${localId}`) as HTMLTextAreaElement
+        return { activeId: document.activeElement?.id ?? null, start: ta.selectionStart, end: ta.selectionEnd }
+      }, tabId),
+      'after save: item editor kept focus and caret'
+    ).toEqual({ activeId: `textarea-${tabId}`, start: 5, end: 5 })
+
+    // close editor, verify Back/Forward, reload, and Back after reload
+    await page.keyboard.press('Shift+Enter')
+    await expect(itemEditor).toBeHidden()
+    await waitNoBcSaves(page)
+    await page.goBack()
+    await expect(mindbox(page), 'Back returns to prior view in one step').toHaveValue(PRIOR)
+    await page.goForward()
+    await expect(mindbox(page), 'Forward returns to id:<savedId>').toHaveValue(`id:${persistedId}`)
+
+    await page.reload()
+    await waitForApp(page)
+    await expect(mindbox(page), 'after reload: MindBox keeps id:<savedId>').toHaveValue(`id:${persistedId} `)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(docId => {
+            const it = ((window as any).__items as any[]).find(i => i.id === docId || i.savedId === docId)
+            return it ? { text: it.text as string, target: !!it.target } : null
+          }, persistedId),
+        { message: 'after reload: persisted item is selected (target)', timeout: 15_000 }
+      )
+      .toEqual({ text: PLAIN, target: true })
+    await page.goBack()
+    await expect(mindbox(page), 'after reload: Back still reaches prior view in one step').toHaveValue(PRIOR)
+
+    // non-editing creation (Control+Alt+S leaves focus in MindBox): MindBox keeps focus, mapped end, and backward
+    // selection across save upgrade; clicking header Create without typing reads the visible id (naming dialog, no dup)
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await expect(mindbox(page)).toBeFocused()
+    await mindbox(page).fill(NOEDIT)
+    await page.keyboard.press('Control+Alt+s')
+    const tabId2 = await waitPendingBc(page, NOEDIT, { editing: false, target: true }, 'non-editing unnamed item created locally')
+    await expect(mindbox(page), 'non-editing before save: MindBox holds id:<tabId2>').toHaveValue(`id:${tabId2}`)
+    await expect(mindbox(page), 'non-editing before save: MindBox kept focus').toBeFocused()
+    await page.evaluate(() => {
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.setSelectionRange(3, box.value.length, 'backward')
+    })
+    await page.context().setOffline(false)
+    const [savedId2] = await saved(page, [tabId2])
+    expect(savedId2.length, 'premise: saved id length differs from tab id length').not.toBe(tabId2.length)
+    await expect(mindbox(page), 'non-editing after save: MindBox upgraded to id:<savedId2>').toHaveValue(`id:${savedId2}`)
+    await settled(page)
+    expect(
+      await page.evaluate(() => {
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        return { activeId: document.activeElement?.id ?? null, start: box.selectionStart, end: box.selectionEnd, dir: box.selectionDirection }
+      }),
+      'non-editing after save: MindBox kept focus, mapped end, and backward selection direction'
+    ).toEqual({ activeId: 'textarea-mindbox', start: 3, end: `id:${savedId2}`.length, dir: 'backward' })
+
+    await page.locator('.header .button.create').click()
+    await expect.poll(() => dialog(page), { message: 'create button on visible id opens naming dialog', timeout: 5_000 }).toEqual([NAME_PROMPT])
+    expect(await nameInput(page), 'naming dialog offers a name').toBeTruthy()
+    expect(
+      await page.evaluate(text => ((window as any).__items as any[]).filter(i => i.text === text).length, NOEDIT),
+      'create button did not duplicate the note'
+    ).toBe(1)
+    await page.locator('.modal .button.cancel', { hasText: 'Cancel' }).click()
+    await expect(page.locator('.modal')).toBeHidden()
+    await expect(mindbox(page), 'cancelling naming dialog keeps id:<savedId2>').toHaveValue(`id:${savedId2}`)
+
+    // leave and reselect while offline: create A -> select B -> Shift+click A's number -> reconnect;
+    // the later current entry gets the saved id while the creation's own earlier entry keeps the tab id
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill(RESELECT)
+    await page.keyboard.press('Control+Alt+s')
+    const tabIdA = await waitPendingBc(page, RESELECT, { editing: false, target: true }, 'reselect item created locally')
+    await expect(mindbox(page)).toHaveValue(`id:${tabIdA}`)
+    const [, idxA] = await entries(page)
+
+    await asUser(page, label => (window._item(label) as any).select(), PRIOR)
+    await expect(mindbox(page)).toHaveValue(PRIOR)
+    const [, idxB] = await entries(page)
+    expect(idxB, 'selecting B pushed an entry after A').toBe(idxA + 1)
+
+    const numberA = page.locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${tabIdA}"] .item-menu > .index`)
+    if (!(await numberA.count())) await page.locator('.toggle.show').first().click()
+    await expect(numberA).toBeVisible()
+    await numberA.click({ modifiers: ['Shift'] })
+    await expect(mindbox(page), 'Shift+click selects pending A by its tab id').toHaveValue(`id:${tabIdA}`)
+    const [lenReselect, idxReselect] = await entries(page)
+    expect(idxReselect, 'Shift+click pushed a fresh history entry').toBe(idxB + 1)
+
+    await page.context().setOffline(false)
+    const [savedIdA] = await saved(page, [tabIdA])
+    await expect(mindbox(page), 'reselected entry after save: MindBox upgraded to id:<savedIdA>').toHaveValue(`id:${savedIdA}`)
+    expect(
+      await page.evaluate(() => ({ hash: location.hash, stateText: history.state?.editorText, index: history.state?.index })),
+      'reselected entry updated in place with saved id'
+    ).toEqual({ hash: `#${savedIdA}`, stateText: `id:${savedIdA}`, index: idxReselect })
+    expect(await entries(page), 'reselected entry upgrade added no history step').toEqual([lenReselect, idxReselect])
+    await page.goBack()
+    await expect(mindbox(page), 'first Back from reselected A returns to B').toHaveValue(PRIOR)
+    await page.goBack()
+    await expect(mindbox(page), 'second Back reaches creation entry, which kept the tab id').toHaveValue(`id:${tabIdA}`)
+    expect(
+      await page.evaluate(() => ({ hash: location.hash, stateText: history.state?.editorText, index: history.state?.index })),
+      'creation entry still holds id:<tabIdA>'
+    ).toEqual({ hash: `#${tabIdA}`, stateText: `id:${tabIdA}`, index: idxA })
+
+    // view-update failure at acknowledgement must not skip save bookkeeping or creation history, and must report the error
+    const INJECTED_ERR = 'e2e_bc injected replaceState failure'
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill(FAIL_VIEW)
+    await page.keyboard.press('Control+Alt+s')
+    const failTabId = await waitPendingBc(page, FAIL_VIEW, { editing: false, target: true }, 'fail-view item created locally')
+    await expect(mindbox(page)).toHaveValue(`id:${failTabId}`)
+    await page.evaluate(
+      ([tab, msg]) => {
+        const orig = history.replaceState.bind(history)
+        let tripped = false
+        history.replaceState = (...args: Parameters<History['replaceState']>) => {
+          const text = (args[0] as any)?.editorText
+          if (!tripped && typeof text === 'string' && text.startsWith('id:') && text !== `id:${tab}`) {
+            tripped = true
+            history.replaceState = orig
+            throw new Error(msg)
+          }
+          return orig(...args)
+        }
+        ;(window as any).__bc_restore_replace = () => {
+          history.replaceState = orig
+        }
+      },
+      [failTabId, INJECTED_ERR] as const
+    )
+    consoleErrors.length = 0
+    await page.context().setOffline(false)
+    const [failSavedId] = await saved(page, [failTabId])
+    await expect
+      .poll(
+        () =>
+          page.evaluate(localId => {
+            const it = ((window as any).__items as any[]).find(i => i.id === localId)
+            return it
+              ? { savedId: (it.savedId ?? null) as string | null, saving: !!it.saving, savingText: it.savingText ?? null, savedText: it.savedText ?? '' }
+              : null
+          }, failTabId),
+        { message: 'item ends saved and not saving despite view-update error', timeout: 10_000 }
+      )
+      .toEqual({ savedId: failSavedId, saving: false, savingText: null, savedText: FAIL_VIEW })
+    await expect
+      .poll(
+        async () => (await firestore().collection('history').where('item', '==', failSavedId).get()).docs.map(d => d.data().text),
+        { message: 'creation history recorded despite view-update error', timeout: 10_000 }
+      )
+      .toContain(FAIL_VIEW)
+    expect(
+      consoleErrors.some(msg => msg.includes(INJECTED_ERR)),
+      'view-update error was reported via console.error'
+    ).toBe(true)
+
+    await waitNoBcSaves(page)
+    expect(errors, 'no page errors').toEqual([])
+  } finally {
+    await page.evaluate(() => (window as any).__bc_restore_replace?.()).catch(() => {})
+    await page.context().setOffline(false)
+    await deleteBoxAfterCreation()
+  }
+})
+
+test('unnamed creation leaves a changed box alone on save, keeps named, child, command and _create behavior as today, and handles concurrent pending saves and pre-save deletion', async ({ page }) => {
+  await deleteBoxAfterCreation()
+  await loadAdmin(page)
+  const errors: string[] = []
+  page.on('pageerror', error => {
+    if (!String(error).includes('localStorage')) errors.push(String(error))
+  })
+  const focusBox = async () => {
+    await focusMindboxInPlace(page)
+    await expect(mindbox(page)).toBeFocused()
+  }
+  try {
+    // (a) box changed before save: save leaves the owner's box alone
+    const CHANGED = 'e2e_bc changed before save'
+    const OWNER_TYPED = 'e2e_bc owner query'
+    await page.context().setOffline(true)
+    await focusBox()
+    await mindbox(page).fill(CHANGED)
+    await page.keyboard.press('Shift+Enter')
+    const changedId = await waitPendingBc(page, CHANGED)
+    await expect(mindbox(page)).toHaveValue(`id:${changedId}`)
+    await focusBox()
+    await mindbox(page).fill(OWNER_TYPED)
+    await page.context().setOffline(false)
+    await saved(page, [changedId])
+    await settled(page)
+    await expect(mindbox(page), 'box changed before save is left alone').toHaveValue(OWNER_TYPED)
+    await page.evaluate(id => (document.getElementById(`textarea-${id}`) as HTMLTextAreaElement | null)?.focus(), changedId)
+    await page.keyboard.press('Shift+Enter')
+
+    // (b) named creation, duplicate-tag creation, and whitespace-prefixed unique label
+    const NAMED = '#e2e_bc_named'
+    await focusBox()
+    await mindbox(page).fill(`${NAMED} named item`)
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(l => window._exists(l), NAMED)).toBe(true)
+    await expect(mindbox(page), 'named creation keeps label + space').toHaveValue(`${NAMED} `)
+    await saved(page, [NAMED])
+    await expect(mindbox(page), 'named creation still holds label + space after save').toHaveValue(`${NAMED} `)
+    await page.keyboard.press('Shift+Enter')
+
+    const DUP = '#e2e_bc_dup'
+    await page.evaluate(t => void window._create(t), `${DUP} first`)
+    await expect.poll(() => page.evaluate(l => window._items(l).length, DUP)).toBe(1)
+    await focusBox()
+    await mindbox(page).fill(`${DUP} second`)
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(l => window._items(l).length, DUP)).toBe(2)
+    await expect(mindbox(page), 'duplicate leading tag still keeps tag + space').toHaveValue(`${DUP} `)
+    await page.keyboard.press('Shift+Enter')
+
+    const WS_NAMED = '#e2e_bc_ws'
+    await focusBox()
+    await mindbox(page).fill(`  ${WS_NAMED} leading whitespace`)
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(l => window._exists(l), WS_NAMED)).toBe(true)
+    await expect(mindbox(page), 'whitespace-prefixed unique label selects by label (not id)').toHaveValue(WS_NAMED)
+    await saved(page, [WS_NAMED])
+    await expect(mindbox(page), 'whitespace-prefixed unique label keeps label after save').toHaveValue(WS_NAMED)
+    await page.keyboard.press('Shift+Enter')
+
+    // (c) child creation stays as today
+    await asUser(page, l => (window._item(l) as any).select(), NAMED)
+    await expect(mindbox(page)).toHaveValue(NAMED)
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(l => window._exists(l), `${NAMED}/0`)).toBe(true)
+    await expect(mindbox(page), 'child creation keeps child label + space').toHaveValue(`${NAMED}/0 `)
+    await saved(page, [`${NAMED}/0`])
+    await expect(mindbox(page), 'child creation still holds child label + space after save').toHaveValue(`${NAMED}/0 `)
+    await page.keyboard.press('Shift+Enter')
+
+    // (d) other box creation triggers on unnamed text: Ctrl+S, Create button, Run key (Ctrl/Cmd+Enter)
+    for (const [label, text, trigger] of [
+      ['Ctrl+S', 'e2e_bc created via ctrl+s', () => page.keyboard.press('Control+s')],
+      ['create button', 'e2e_bc created via create button', () => page.locator('.header .button.create').click()],
+    ] as const) {
+      await focusBox()
+      await mindbox(page).fill(text)
+      await trigger()
+      let id = ''
+      await expect.poll(async () => {
+        const it = await findBcItem(page, text)
+        if (it) id = it.id
+        return it?.target ?? false
+      }).toBe(true)
+      const [docId] = await saved(page, [id])
+      await expect(mindbox(page), `${label} unnamed creation upgrades box to id:<savedId>`).toHaveValue(`id:${docId}`)
+      await page.keyboard.press('Shift+Enter')
+    }
+
+    const RUN = 'e2e_bc run unnamed\n```js_input\n20 + 22\n```'
+    await focusBox()
+    await mindbox(page).fill(RUN)
+    await page.keyboard.press('ControlOrMeta+Enter')
+    let runId = ''
+    await expect
+      .poll(async () => {
+        const it = await page.evaluate(() =>
+          ((window as any).__items as any[]).find(i => i.text.startsWith('e2e_bc run unnamed') && i.text.includes('42'))
+        )
+        if (it) runId = it.id
+        return it ? { target: !!it.target, hasOutput: it.text.includes('42') } : null
+      })
+      .toEqual({ target: true, hasOutput: true })
+    const [runSaved] = await saved(page, [runId])
+    await expect(mindbox(page), 'run-key unnamed creation upgrades box to id:<savedId>').toHaveValue(`id:${runSaved}`)
+    await page.keyboard.press('Shift+Enter')
+
+    // (e) synthetic window._create keeps box untouched, and fall-through /_undelete stays cleared
+    await asUser(page, l => (window._item(l) as any).select(), NAMED)
+    await expect(mindbox(page)).toHaveValue(NAMED)
+    await page.evaluate(() => void window._create('e2e_bc synthetic create'))
+    await expect.poll(async () => !!(await findBcItem(page, 'e2e_bc synthetic create'))?.savedId, { timeout: 30_000 }).toBe(true)
+    await expect(mindbox(page), 'synthetic window._create leaves MindBox alone').toHaveValue(NAMED)
+
+    await page.evaluate(l => void window._item(l)!.delete(false), NAMED)
+    await expect.poll(() => page.evaluate(l => window._exists(l), NAMED)).toBe(false)
+    await focusBox()
+    await mindbox(page).fill('/_undelete')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(l => window._exists(l), NAMED)).toBe(true)
+    await saved(page, [NAMED])
+    await expect(mindbox(page), '/_undelete clears box as today (never selects named item by id)').toHaveValue('')
+
+    // (f) second creation while first save is pending: first save never clobbers the second
+    const FIRST = 'e2e_bc pending first'
+    const SECOND = 'e2e_bc pending second'
+    await page.context().setOffline(true)
+    await focusBox()
+    await mindbox(page).fill(FIRST)
+    await page.keyboard.press('Shift+Enter')
+    const firstId = await waitPendingBc(page, FIRST)
+    await expect(mindbox(page)).toHaveValue(`id:${firstId}`)
+
+    await focusBox()
+    await mindbox(page).fill(SECOND)
+    await page.keyboard.press('Shift+Enter')
+    const secondId = await waitPendingBc(page, SECOND)
+    await expect(mindbox(page)).toHaveValue(`id:${secondId}`)
+
+    await page.context().setOffline(false)
+    const [firstSaved, secondSaved] = await saved(page, [firstId, secondId])
+    expect(firstSaved).not.toBe(secondSaved)
+    await expect(mindbox(page), 'after both saves confirm, box holds the second item id').toHaveValue(`id:${secondSaved}`)
+    await page.keyboard.press('Shift+Enter')
+
+    // (g) item deleted before its save confirms: box clears on delete and stays clear after online reconnect
+    const DELETED = 'e2e_bc deleted before save'
+    await page.context().setOffline(true)
+    await focusBox()
+    await mindbox(page).fill(DELETED)
+    await page.keyboard.press('Shift+Enter')
+    const deletedId = await waitPendingBc(page, DELETED)
+    await expect(mindbox(page)).toHaveValue(`id:${deletedId}`)
+    await page.evaluate(id => void window._item(id)!.delete(false), deletedId)
+    await expect(mindbox(page), 'deleting pending item clears MindBox').toHaveValue('')
+    await page.context().setOffline(false)
+    const SENTINEL = 'e2e_bc sentinel after delete'
+    await page.evaluate(t => void window._create(t), SENTINEL)
+    await expect.poll(async () => !!(await findBcItem(page, SENTINEL))?.savedId, { timeout: 30_000 }).toBe(true)
+    await settled(page)
+    await expect(mindbox(page), 'after reconnect, deleted item save does not write a dead id into MindBox').toHaveValue('')
+    await expect
+      .poll(
+        async () => {
+          const remaining = await firestore().collection('items').where('user', '==', 'anonymous').get()
+          return remaining.docs.filter(d => d.data().text === DELETED).length
+        },
+        { message: 'deleted-before-save item was also removed from Firestore', timeout: 15_000 }
+      )
+      .toBe(0)
+    expect(errors, 'no page errors').toEqual([])
+  } finally {
+    await page.context().setOffline(false)
+    await deleteBoxAfterCreation()
   }
 })
 

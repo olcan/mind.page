@@ -7453,17 +7453,29 @@
 
     // if editor text starts with a label (tag), keep it to maintain context for new item: the
     // label followed by a space (or ending the text), or by a NEWLINE (a child hook may put the
-    // rest of the child on its own line; the box still navigates to the child)
+    // rest of the child on its own line; the box still navigates to the child). otherwise (the
+    // branch that previously cleared the box), for a direct box creation (not a synthetic call or
+    // a command that replaced the text), select the new item via `selectName` (`id:<tab id>`, or
+    // its unique label when one follows leading whitespace/HTML) and upgrade that exact tab-local
+    // id to `id:<savedId>` once the create write is acknowledged
+    let createdBoxId: string | null = null
     if (mindbox) {
       const newLabel = items[0].labelText
       const startsWithLabel =
         !!newLabel && ((editorText + ' ').startsWith(newLabel + ' ') || editorText.startsWith(newLabel + '\n'))
-      editorText =
+      if (
         e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
         !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
         startsWithLabel
-          ? newLabel + ' '
-          : ''
+      ) {
+        editorText = newLabel + ' '
+      } else if (e && !clearLabel && !text_modified && !ignoreEditorChanges) {
+        const next = selectName(item)
+        editorText = next
+        if (next == 'id:' + item.id) createdBoxId = next
+      } else {
+        editorText = ''
+      }
     }
 
     // hideIndex++; // show one more item
@@ -7607,6 +7619,40 @@
               return
             }
             item.savedId = doc.id
+
+            // upgrade the tab-local id placed in the MindBox by this creation to the persisted
+            // document id so a reload keeps the selection: only when the box holds that exact
+            // text at acknowledgement (updates the current history entry in place — including a
+            // later entry written meanwhile by a fresh select of the same item — without adding a
+            // step or moving focus/caret). guarded so a view/history error is reported without
+            // skipping the save bookkeeping below
+            if (createdBoxId && doc.id !== item.id && editorText === createdBoxId) {
+              try {
+                const savedQuery = 'id:' + doc.id
+                const box = textArea(-1)
+                const selection =
+                  box && document.activeElement === box
+                    ? { start: box.selectionStart, end: box.selectionEnd, dir: box.selectionDirection }
+                    : null
+                replaceStateOnEditorChange = true // update current entry in place, no new history step
+                lastEditorChangeTime = 0 // apply immediately even if MindBox is focused
+                onEditorChange(savedQuery)
+                if (selection) {
+                  const map = (offset: number) =>
+                    offset >= createdBoxId.length ? savedQuery.length : Math.min(offset, savedQuery.length)
+                  tick().then(() => {
+                    const el = textArea(-1)
+                    if (el && document.activeElement === el && el.value === savedQuery) {
+                      el.setSelectionRange(map(selection.start), map(selection.end), selection.dir)
+                    }
+                  })
+                }
+              } catch (err) {
+                console.error(err)
+              } finally {
+                replaceStateOnEditorChange = false
+              }
+            }
 
             // if saving is disabled, we stop here after creating item and setting its permanent id (item.savedId)
             // if editing, item contents are considered unsaved, and a cancel/discard will empty-out & delete item
@@ -8625,11 +8671,19 @@
   //   this tab and selected BEFORE that acknowledgement is selected by the tab's own id; that view works in
   //   this tab, and its address and its history entry name nothing after a reload or in another tab (a
   //   reload reads the documents' ids). The window lasts as long as the write does: a slow or an offline one
-  //   keeps it open for the whole outage. What writes such an entry meanwhile is a FRESH selection of the
-  //   item by its id (from a number, a todo's row or item code): an item with a unique label is selected by
-  //   the label, which works throughout, and a select of a selection already shown and settled adds no
-  //   entry. The acknowledgement leaves such an entry as written (so does a select of the same view
-  //   afterwards; one from another view uses the saved id). A LIMIT LEFT AS IT IS, not a necessity: the
+  //   keeps it open for the whole outage. What writes such an entry meanwhile is a box creation whose text
+  //   left `id:<tab id>` in the box (onEditorDone, `createdBoxId`) or a FRESH selection of the item by its
+  //   id (from a number, a todo's row or item code): an item with a unique label is selected by the label,
+  //   which works throughout, and a select of a selection already shown and settled adds no entry. WHICH
+  //   ENTRY FOLLOWS: when a creation wrote `id:<tab id>` into the box (`createdBoxId`), its acknowledgement
+  //   updates the CURRENT history entry in place to `id:<saved id>` whenever the box holds that exact text
+  //   at acknowledgement time — whether that is the creation's own entry or a later entry written meanwhile
+  //   by a fresh select of the same item (create A offline, select B, Shift+click A's number, come back
+  //   online: the later current entry gets `id:<saved id>` and the creation's own earlier entry keeps
+  //   `id:<tab id>`). Every other entry written before the acknowledgement — one no longer current then, or
+  //   any entry for a creation that did not write `id:<tab id>` into the box — is left as written (so is a
+  //   select of the same view afterwards; one from another view uses the saved id). A LIMIT LEFT AS IT IS,
+  //   not a necessity: the
   //   creation already reserves its document's id before the write (onEditorDone maps it to the tab's id
   //   and issues setDoc on it) and publishes it as `savedId` at the acknowledgement; naming an item by the
   //   reserved id earlier would be a navigation decision of its own, which this change does not take. What
