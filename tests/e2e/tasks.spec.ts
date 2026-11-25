@@ -1,6 +1,7 @@
-import { expect, test, type BrowserContext, type Page } from '@playwright/test'
+import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
+import { OFFLINE_BROWSER_ARGS } from '../../src/e2e_lanes.js'
 import { focusMindbox, mindbox, userSet } from './editor_helpers.js'
 import { customToken, firestore, install, interceptMindItems, loadAnonymous, secretFor, signIn, waitForApp, type TestUser } from './helpers.js'
 
@@ -56,12 +57,15 @@ const SWITCH_USER: TestUser = { uid: 'tasks_switch_e2e', displayName: 'Tasks Swi
 // the waiting-rows and bells row's own account: #todoer installed from mind.items, both widgets
 const WAITS_USER: TestUser = { uid: 'tasks_waits_e2e', displayName: 'Tasks Waits', email: 'tasks_waits@e2e.test' }
 const WAITS_SECRET = secretFor(WAITS_USER, PHRASE)
+// the service-worker notifications row's own account: real notification permission + active SW
+const NOTIFY_SW_USER: TestUser = { uid: 'tasks_notify_sw_e2e', displayName: 'Tasks Notify SW', email: 'tasks_notify_sw@e2e.test' }
+const NOTIFY_SW_SECRET = secretFor(NOTIFY_SW_USER, PHRASE)
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -2298,4 +2302,341 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
     .toBe('agent:delegated:2:1|delegated')
   expect(await notified(), 'a later projection change with the same count gives no second notification').toHaveLength(1)
   await expect(workRow.locator('mark.waits'), 'after a later projection change with the same count the checkin bell stays').toHaveText('checkin')
+})
+
+// SERVICE-WORKER DESKTOP NOTIFICATIONS (protocol v2: hello handshake; outlive page reload;
+// kept-until-received when clicked while reloading before welcome; cold-open stores click addressed
+// to the opened window's real clientId; sign-out clears outgoing cards and stored clicks).
+// Launches Chrome for Testing (`channel: 'chromium'`, --headless=new) because Playwright's default
+// headless shell hardcodes Notification.permission to 'denied' even after granting `notifications`
+// permission on the context.
+test('a worker notification survives reload, holds clicks across startup and cold open until received, and clears on sign-out', async ({ context: laneContext }, testInfo) => {
+  const swBrowser = await chromium.launch({ channel: 'chromium', args: OFFLINE_BROWSER_ARGS })
+  try {
+    const context = await swBrowser.newContext({
+      baseURL: testInfo.project.use.baseURL,
+      storageState: await laneContext.storageState(),
+      permissions: ['notifications'],
+    })
+    const page = await context.newPage()
+    const rowDialogs: string[] = []
+    page.on('dialog', dialog => {
+      rowDialogs.push(dialog.message())
+      void dialog.accept()
+    })
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, NOTIFY_SW_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    const saved = (p: Page = page) =>
+      expect.poll(() => p.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 }).toBe(true)
+
+    expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
+    await saved()
+    await page.reload()
+    await loaded(page)
+    await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
+    await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both todoer widgets mounted', timeout: 30_000 }).toBe(2)
+    await saved()
+
+    // confirm the production/test build registered `/service-worker.js`, granted real permission,
+    // and the active worker answered the protocol v2 `hello` handshake setting the page mark
+    expect(await page.evaluate(() => Notification.permission), 'context granted real Notification.permission').toBe('granted')
+    const regInfo = await page.evaluate(async () => {
+      const reg = await navigator.serviceWorker.ready
+      return { active: !!reg.active, scriptURL: reg.active?.scriptURL ?? null }
+    })
+    expect(regInfo.active, 'the test build registers an active service worker').toBe(true)
+    expect(regInfo.scriptURL).toMatch(/\/service-worker\.js$/)
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { _notification_click_relay?: string })._notification_click_relay ?? null), {
+        message: 'active worker answered hello and page set _notification_click_relay',
+        timeout: 10_000,
+      })
+      .toBe('mindpage:notificationclick')
+
+    // enable notifications (no window.Notification stub: real browser permission + real worker)
+    expect(await command(page, '/notify on'), '/notify on succeeds').toBeNull()
+    await expect
+      .poll(() => rowDialogs.at(-1) ?? '', { message: '/notify on reports granted permission', timeout: 10_000 })
+      .toBe('notifications: on for question, blocked, proposal, budget, done, reply, item; this device: granted')
+
+    const SW_TODO = '#e2e_sw_notify'
+    await page.evaluate(text => void window._create(text), `${SW_TODO}\n#todo survive page reload`)
+    await expect.poll(() => savedId(page, SW_TODO), { message: 'todo saved', timeout: 30_000 }).toBeTruthy()
+    const todoId = (await savedId(page, SW_TODO))!
+    await saved()
+    await expect
+      .poll(() => page.evaluate(id => (window._item('#todoer') as any)?.store?.notify_seen?.[window._item('id:' + id, true)?.id ?? ''] ?? null, todoId), {
+        message: 'notifier recorded initial todo state',
+        timeout: 30_000,
+      })
+      .toBe('|main')
+
+    const sw = context.serviceWorkers().find(w => w.url().endsWith('/service-worker.js')) ?? (await context.waitForEvent('serviceworker'))
+    const box = (p: Page = page) => p.evaluate(() => (window as any).MindBox.get())
+    const swNotifications = (tag?: string) =>
+      sw.evaluate(async t => {
+        const g = globalThis as any
+        const list = await g.registration.getNotifications(t ? { tag: t } : undefined)
+        return list.map((n: any) => ({ title: n.title, tag: n.tag, body: n.body, requireInteraction: n.requireInteraction, data: n.data }))
+      }, tag)
+    const dispatchClick = (tag: string) =>
+      sw.evaluate(async t => {
+        const g = globalThis as any
+        const list = await g.registration.getNotifications({ tag: t })
+        if (list.length !== 1) return { count: list.length }
+        g.dispatchEvent(new g.NotificationEvent('notificationclick', { notification: list[0] }))
+        return { count: list.length }
+      }, tag)
+    const pendingRows = () =>
+      sw.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>((resolve, reject) => {
+          const req = indexedDB.open('mindpage-notification-clicks', 1)
+          req.onupgradeneeded = () => {
+            if (!req.result.objectStoreNames.contains('pending')) req.result.createObjectStore('pending', { keyPath: 'seq', autoIncrement: true })
+          }
+          req.onsuccess = () => resolve(req.result)
+          req.onerror = () => reject(req.error)
+        })
+        try {
+          return await new Promise<Array<{ id: string; clientId: string | null; tag: string; item: unknown }>>((resolve, reject) => {
+            const tx = db.transaction('pending', 'readonly')
+            const req = tx.objectStore('pending').getAll()
+            req.onsuccess = () =>
+              resolve(
+                (req.result as any[]).map(r => ({
+                  id: r.id,
+                  clientId: r.clientId,
+                  tag: r.message?.tag ?? '',
+                  item: r.message?.data?.item ?? null,
+                }))
+              )
+            tx.onerror = () => reject(tx.error)
+          })
+        } finally {
+          db.close()
+        }
+      })
+    const windowClientIds = () =>
+      sw.evaluate(async () => {
+        const g = globalThis as any
+        const wins = await g.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        return wins.map((w: any) => w.id as string)
+      })
+    // Hold Firestore's Listen channel on `p` so a reload initializes from its persistent cache
+    // while `settleCorpusForWelcome()` stays paused (welcome and `_start_notifier` have not run).
+    const LISTEN = /Firestore\/Listen\/channel/
+    const holdListen = async (p: Page) => {
+      let release!: () => void
+      const gate = new Promise<void>(resolve => {
+        release = resolve
+      })
+      await p.route(LISTEN, async route => {
+        await gate
+        await route.continue().catch(() => {})
+      })
+      return async () => {
+        release()
+        await p.unroute(LISTEN).catch(() => {})
+      }
+    }
+
+    const state = (reason: string, epoch: number, rev: number, surfaced: number) => ({
+      _agent: { state: { held: 'owner', reason, epoch, rev, surfaced, updated: Date.now(), worktree: null, phase: 'idle', acked: {} } },
+    })
+
+    // 1. Hand-back triggers a worker notification (read back via registration.getNotifications)
+    await writeStore('e2e-sw-notify-store', `global_store_${todoId}`, state('question', 1, 1, 1), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+    const expectedNote = [{ title: '[question] survive page reload', tag: `todoer:${todoId}`, body: SW_TODO, requireInteraction: true, data: { source: 'todoer', item: todoId } }]
+    await expect
+      .poll(() => swNotifications(`todoer:${todoId}`), { message: 'todoer notification shown through the service worker', timeout: 30_000 })
+      .toEqual(expectedNote)
+
+    // 2. RELOAD THE PAGE: notification survives ordinary same-account reload; worker delivers click
+    //    once the reloaded page is ready, deletes stored click on `received`, and preserves Back
+    await page.reload()
+    await loaded(page)
+    await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'widgets mounted after reload', timeout: 30_000 }).toBe(2)
+    await expect
+      .poll(() => page.evaluate(id => !!(window._item('#todoer') as any)?.store?.notify_seen?.[id], todoId), {
+        message: 'reloaded tab ran _start_notifier and attached its worker message listener',
+        timeout: 30_000,
+      })
+      .toBe(true)
+    expect(await swNotifications(`todoer:${todoId}`), 'worker notification survives a page reload').toEqual(expectedNote)
+
+    expect(await box(), 'MindBox starts empty after reload').toBe('')
+    expect(await dispatchClick(`todoer:${todoId}`), 'worker located the surviving notification and dispatched notificationclick').toEqual({ count: 1 })
+    await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed the clicked notification', timeout: 10_000 }).toEqual([])
+    await expect.poll(() => box(), { message: 'reloaded page received click message and selected the todo', timeout: 15_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
+    expect(
+      await page.evaluate(id => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('id:' + id, true)?.id, todoId),
+      'selected item is the page target'
+    ).toBe(true)
+    await expect.poll(() => pendingRows(), { message: 'worker deleted stored click after received', timeout: 10_000 }).toEqual([])
+    await page.goBack()
+    await expect.poll(() => box(), { message: 'Back returns to the view from before the worker notification click', timeout: 10_000 }).toBe('')
+
+    // 3. CLICK DELIVERED WHILE THE RELOADED PAGE HAS NOT YET REACHED ITS WELCOME:
+    //    hold Firestore's Listen channel across reload so the page loads from cache but pauses
+    //    inside settleCorpusForWelcome (todoer click listener not attached yet); the worker probes,
+    //    gets no `received`, keeps the click stored addressed to that window, and delivers it once
+    //    welcome finishes and todoer posts `ready`.
+    const storeDoc = (await storeDocId(`global_store_${todoId}`, NOTIFY_SW_USER, NOTIFY_SW_SECRET)) ?? 'e2e-sw-notify-store'
+    await writeStore(storeDoc, `global_store_${todoId}`, state('blocked', 2, 2, 2), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+    await expect
+      .poll(() => swNotifications(`todoer:${todoId}`), { message: 'second worker notification shown', timeout: 30_000 })
+      .toEqual([{ title: '[blocked] survive page reload', tag: `todoer:${todoId}`, body: SW_TODO, requireInteraction: true, data: { source: 'todoer', item: todoId } }])
+
+    let releaseReload = await holdListen(page)
+    try {
+      await page.reload()
+      await expect.poll(() => page.evaluate(() => (window._init_time ?? 0) > 0 && (window.__items?.length ?? 0) > 0), {
+        message: 'reloaded page hydrated from persistent cache while welcome is held',
+        timeout: 30_000,
+      }).toBe(true)
+      expect(
+        await page.evaluate(() => ({
+          confirmed: !!(window as any)._server_confirmed,
+          notifierStarted: !!(window._item('#todoer') as any)?.store?.notify_seen,
+        })),
+        'welcome has not yet run (todoer listener not attached)'
+      ).toEqual({ confirmed: false, notifierStarted: false })
+      expect(await swNotifications(`todoer:${todoId}`), 'notification survived held reload').toHaveLength(1)
+
+      const reloadingClientIds = await windowClientIds()
+      expect(reloadingClientIds, 'one reloading window client exists').toHaveLength(1)
+      expect(await dispatchClick(`todoer:${todoId}`), 'dispatched click while welcome is held').toEqual({ count: 1 })
+      await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed clicked notification during held reload', timeout: 10_000 }).toEqual([])
+      await expect
+        .poll(() => pendingRows(), { message: 'worker kept unacknowledged click in IndexedDB unassigned', timeout: 10_000 })
+        .toEqual([{ id: expect.any(String), clientId: null, tag: `todoer:${todoId}`, item: todoId }])
+      expect(await box(), 'page has not handled the click before welcome').toBe('')
+    } finally {
+      await releaseReload()
+    }
+    await expect.poll(() => box(), { message: 'after welcome released, reloaded page received held click and selected the todo', timeout: 30_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
+    expect(
+      await page.evaluate(id => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('id:' + id, true)?.id, todoId),
+      'selected item is the page target after held-welcome delivery'
+    ).toBe(true)
+    await expect.poll(() => pendingRows(), { message: 'worker deleted held click after received', timeout: 10_000 }).toEqual([])
+    await page.goBack()
+    await expect.poll(() => box(), { message: 'Back returns after held-welcome click', timeout: 10_000 }).toBe('')
+
+    // 4. COLD OPEN: store the click as the worker REALLY does (no hand-inserted IDB row).
+    //    Close every window, bridge clients.openWindow inside the worker to Playwright's context.newPage()
+    //    (synthetic NotificationEvent lacks native OS activation for openWindow), dispatch a real
+    //    notificationclick on the worker, verify the worker persists the click addressed to the opened
+    //    window's real clientId, and confirm the opened window drains and acknowledges it on ready.
+    await writeStore(storeDoc, `global_store_${todoId}`, state('proposal', 3, 3, 3), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+    await expect
+      .poll(() => swNotifications(`todoer:${todoId}`), { message: 'third worker notification shown for cold open', timeout: 30_000 })
+      .toEqual([{ title: '[proposal] survive page reload', tag: `todoer:${todoId}`, body: SW_TODO, requireInteraction: true, data: { source: 'todoer', item: todoId } }])
+
+    await page.close()
+    await expect.poll(() => windowClientIds(), { message: 'all windows closed before cold open', timeout: 15_000 }).toEqual([])
+
+    let page2: Page | null = null
+    let releasePage2: (() => Promise<void>) | null = null
+    await sw.evaluate(() => {
+      const g = globalThis as any
+      g.__origOpenWindow = g.clients.openWindow.bind(g.clients)
+      g.__openRequestedUrl = null
+      g.__resolveOpen = null
+      g.clients.openWindow = (url: string) => {
+        g.__openRequestedUrl = url
+        return new Promise(resolve => {
+          g.__resolveOpen = resolve
+        })
+      }
+    })
+    try {
+      expect(await dispatchClick(`todoer:${todoId}`), 'worker dispatched cold-open notificationclick').toEqual({ count: 1 })
+      await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed cold-open notification', timeout: 10_000 }).toEqual([])
+      await expect
+        .poll(() => sw.evaluate(() => (globalThis as any).__openRequestedUrl as string | null), {
+          message: 'worker called clients.openWindow with registration.scope',
+          timeout: 10_000,
+        })
+        .toBe(`${testInfo.project.use.baseURL}/`)
+
+      page2 = await context.newPage()
+      releasePage2 = await holdListen(page2)
+      await page2.goto(`${testInfo.project.use.baseURL}/`)
+      await expect.poll(() => windowClientIds(), { message: 'newly opened tab appeared as a window client', timeout: 15_000 }).toHaveLength(1)
+      const [page2ClientId] = await windowClientIds()
+      // Resolve openWindow with page2's real WindowClient so the worker runs assignUnassigned with its real clientId
+      await sw.evaluate(async id => {
+        const g = globalThis as any
+        const wins = await g.clients.matchAll({ type: 'window', includeUncontrolled: true })
+        const win = wins.find((w: any) => w.id === id) ?? null
+        g.__resolveOpen?.(win)
+      }, page2ClientId)
+
+      await expect
+        .poll(() => pendingRows(), { message: 'worker stored cold-open click addressed to the opened window real clientId', timeout: 10_000 })
+        .toEqual([{ id: expect.any(String), clientId: page2ClientId, tag: `todoer:${todoId}`, item: todoId }])
+
+      await releasePage2()
+      releasePage2 = null
+      await loaded(page2)
+      await expect.poll(() => box(page2!), { message: 'cold-opened window drained its click once ready and selected the todo', timeout: 30_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
+      expect(
+        await page2.evaluate(id => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('id:' + id, true)?.id, todoId),
+        'cold-opened window targeted the item'
+      ).toBe(true)
+      await expect.poll(() => pendingRows(), { message: 'worker deleted cold-open click after received', timeout: 10_000 }).toEqual([])
+
+      // 5. SIGN-OUT CLEARS OUTGOING WORKER NOTIFICATIONS AND STORED CLICKS:
+      //    seed one active worker notification (`/notify test`) and one real worker-stored click
+      //    (clicked during a held-welcome reload), then run `/_signout`; both must be gone after sign-out.
+      const page2Dialogs: string[] = []
+      page2.on('dialog', dialog => {
+        page2Dialogs.push(dialog.message())
+        void dialog.accept()
+      })
+      await writeStore(storeDoc, `global_store_${todoId}`, state('budget', 4, 4, 4), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+      await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'fourth worker notification shown before sign-out check', timeout: 30_000 }).toHaveLength(1)
+      expect(await command(page2, '/notify test'), '/notify test shows second worker card').toBeNull()
+      await expect.poll(() => swNotifications('todoer:test'), { message: 'test notification active on worker', timeout: 15_000 }).toHaveLength(1)
+
+      releasePage2 = await holdListen(page2)
+      await page2.reload()
+      await expect.poll(() => page2!.evaluate(() => (window._init_time ?? 0) > 0 && (window.__items?.length ?? 0) > 0), {
+        message: 'page2 hydrated from cache before sign-out',
+        timeout: 30_000,
+      }).toBe(true)
+      expect(await dispatchClick(`todoer:${todoId}`), 'clicked one card during held reload so IDB holds a real pending click').toEqual({ count: 1 })
+      await expect.poll(() => pendingRows(), { message: 'one real worker-stored click pending before sign-out', timeout: 10_000 }).toHaveLength(1)
+      expect(await swNotifications('todoer:test'), 'other worker card still active before sign-out').toHaveLength(1)
+
+      await page2.evaluate(() => void window._create('/_signout', { command: true }))
+      await releasePage2()
+      releasePage2 = null
+      await expect.poll(() => page2!.evaluate(() => (window as any)._readonly === true && (window._init_time ?? 0) > 0).catch(() => false), {
+        message: 'page2 completed sign-out reload',
+        timeout: 60_000,
+      }).toBe(true)
+      await expect.poll(() => swNotifications(), { message: 'sign-out closed outgoing worker notifications', timeout: 10_000 }).toEqual([])
+      await expect.poll(() => pendingRows(), { message: 'sign-out dropped outgoing stored pending clicks', timeout: 10_000 }).toEqual([])
+    } finally {
+      if (releasePage2) await releasePage2()
+      await sw
+        .evaluate(() => {
+          const g = globalThis as any
+          if (g.__origOpenWindow) g.clients.openWindow = g.__origOpenWindow
+          delete g.__origOpenWindow
+          delete g.__openRequestedUrl
+          delete g.__resolveOpen
+        })
+        .catch(() => {})
+      if (page2) await page2.close().catch(() => {})
+    }
+  } finally {
+    await swBrowser.close()
+  }
 })

@@ -6,6 +6,7 @@ import {
   getHostDir,
   isProxyRequestAllowed,
   isLoopbackAddress,
+  durableNotificationRelay,
   isSharedOrigin,
   sharedOriginRedirect,
   // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
@@ -80,6 +81,12 @@ test('isSharedOrigin covers BOTH isolated origins, and no near miss', () => {
     undefined,
   ])
     expect(isSharedOrigin(host as any), String(host)).toBe(false)
+})
+
+test('durableNotificationRelay is disabled on both isolated shared origins and enabled on account origins', () => {
+  for (const host of [SHARED_HOST, SHARED_LOCAL_HOST]) expect(durableNotificationRelay(host), host).toBe(false)
+  for (const host of ['mind.page', 'localhost', 'local.dev', '127.0.0.1', 'olcan.com'])
+    expect(durableNotificationRelay(host), host).toBe(true)
 })
 
 test('a page that is not shared at all is untouched', () => {

@@ -3037,7 +3037,8 @@
   // is the user's by its ORIGIN alone, never by what it asks for (a new query, a forced entry). The origin: a
   // trusted event of a key, a pointer, a touch or typed text that the page is handling (inputActive: noted at
   // the window before any handler of the page's sees it, each for as long as its dispatch lasts; and the event
-  // a callback of this window is handling, which takes in a notification's click, whose target is no node), or
+  // a callback of this window is handling, which takes in a notification's click, whose target is no node, or a
+  // service worker's relayed notificationclick message), or
   // a CARRY of one (carryInput: the intent captured AT the action that starts a wait of the app's own and
   // handed to the one delayed write or run that continues it, never a flag held over the wait: a snapshot, a
   // preview's fetch or a save's echo that lands meanwhile stays passive). Item code carries its own waits the
@@ -3045,10 +3046,25 @@
   // WHAT THIS ESTABLISHES, and no more (review 0 of phantom_steps): an event's phase is reset when its
   // dispatch ends, so a noted event is not active afterwards; a script can dispatch a noted event again (it is
   // untrusted then, and not counted); a trusted `submit` can come from a script's requestSubmit(); promise
-  // callbacks that are settled while a dispatch lasts run within it. The rows ran in Chromium alone
+  // callbacks that are settled while a dispatch lasts run within it. For a service worker's relayed click
+  // message (`notificationClickActive`), a trusted `message` event establishes browser delivery, NOT proof of
+  // a physical click (the worker's IndexedDB store shares the origin with page code, and this check inspects
+  // target and message type rather than the sending worker): treat it as an application history convention
+  // among cooperating code; browser focus and `openWindow` still enforce their own activation rules. The rows
+  // ran in Chromium alone
   let inputEvents: Event[] = []
   let inputCarried = false
-  const userInput = () => inputCarried || inputEvents.some(inputActive) || inputActive(window.event)
+  const notificationClickActive = (e: Event | null | undefined): boolean =>
+    !!e &&
+    e.isTrusted === true &&
+    e.type === 'message' &&
+    e.eventPhase !== 0 &&
+    typeof navigator !== 'undefined' &&
+    !!navigator.serviceWorker &&
+    e.target === navigator.serviceWorker &&
+    (e as MessageEvent).data?.type === NOTIFICATION_CLICK_TYPE
+  const eventInputActive = (e: Event | null | undefined): boolean => inputActive(e) || notificationClickActive(e)
+  const userInput = () => inputCarried || inputEvents.some(eventInputActive) || eventInputActive(window.event)
   const carryInput = <A extends unknown[], R>(f: (...args: A) => R) => {
     const carried = userInput()
     return (...args: A): R => {
@@ -3063,7 +3079,18 @@
   }
   if (isClient) {
     for (const type of INPUT_EVENTS)
-      window.addEventListener(type, e => void (inputActive(e) && (inputEvents = [...inputEvents.filter(inputActive), e])), { capture: true })
+      window.addEventListener(type, e => void (eventInputActive(e) && (inputEvents = [...inputEvents.filter(eventInputActive), e])), { capture: true })
+    navigator.serviceWorker?.addEventListener(
+      'message',
+      e => void (notificationClickActive(e) && (inputEvents = [...inputEvents.filter(eventInputActive), e]))
+    )
+    // Strict handshake with the active service worker (protocol v2, src/notification_click.ts):
+    // accepts `relay` ONLY from the exact worker asked, sets `window._notification_click_relay`
+    // and `window._notification_click_worker`, and notifies item code on each newly confirmed
+    // worker. Never asks on isolated shared-page origins.
+    if (navigator.serviceWorker && durableNotificationRelay(location.hostname)) {
+      attachNotificationRelayHandshake(navigator.serviceWorker, window as unknown as RelayWindowLike)
+    }
     for (const type of ['keydown', 'pointerdown', 'mousedown']) window.addEventListener(type, () => void (toggleResized = false), { capture: true }) // (see toggleResized)
     window['_carry_input'] = carryInput
   }
@@ -4775,6 +4802,10 @@
       return false
     }
   }
+  // (`wanted`: whether the clear is still due when its deferred post comes, see clearNotificationRelay)
+  function clearRelay(wanted: () => boolean) {
+    return clearNotificationRelay(typeof navigator !== 'undefined' ? navigator.serviceWorker : null, undefined, wanted)
+  }
   function signOut() {
     if (window.sessionStorage.getItem('mindpage_signin_pending')) console.warn('signing out while signin pending ...')
     signingOut = true
@@ -4787,6 +4818,12 @@
     // in-flight derivation (review 85 §2.5) — SYNCHRONOUSLY, before firebase signOut, so the
     // clearing happens even if the network sign-out fails
     clearAllKeyState('sign-out')
+    // mark this document left, remove the origin-shared notification account record, and ask the
+    // service worker to close outgoing notifications and drop stored clicks (ordinary same-account
+    // reloads keep all three)
+    markNotificationAccountLeft(window as unknown as RelayWindowLike)
+    clearNotificationRelayAccount(localStorage)
+    const clearedRelay = clearRelay(() => notificationRelayAccountIs(localStorage, null))
     // and every remembered foreign-code consent, plus the principal marker: an ANONYMOUS visit
     // is not gated, so owner code running there could otherwise write a consent key for the uid
     // that just signed out and have it honored when that account signs back in
@@ -4797,7 +4834,7 @@
         console.debug('signed out')
         // also clear local firestore cache, best-effort since other open tabs can block it; note cached
         // items are encrypted (see encryptItem) and secret was removed above, so this is only hygiene
-        await clearFirestoreCache(3000)
+        await Promise.all([clearFirestoreCache(3000), clearedRelay])
         location.reload()
       })
       .catch(e => {
@@ -9352,6 +9389,7 @@
     PROXY_OPT_IN_HEADER,
     PROXY_SECRET_STORAGE_KEY,
     SHARED_HOST,
+    durableNotificationRelay,
     isSharedOrigin,
     sharedOriginRedirect,
   } from '../host.js'
@@ -9364,6 +9402,17 @@
   import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
+  import {
+    NOTIFICATION_CLICK_TYPE,
+    attachNotificationRelayHandshake,
+    clearNotificationRelay,
+    clearNotificationRelayAccount,
+    createExternalAuthReloader,
+    markNotificationAccountLeft,
+    notificationRelayAccountIs,
+    reconcileNotificationRelayAccount,
+    type RelayWindowLike,
+  } from '../notification_click'
   import { inertSearchText, containsOpaqueMarker, editInertText, isVaultRouted, scanInert, childTagRegions, resolveRelativeTag } from '../inert'
   import { inertChildTags } from '../inert_markdown'
   import {
@@ -10469,11 +10518,10 @@
     // (can require dispatch on chrome if triggered from active element)
     setTimeout(() => (document.activeElement as HTMLElement).blur())
 
+    // starting a NEW sign-in clears the relay if the origin-shared account record still names a
+    // previous account, and wipes key state (review 85 §2.5)
+    if (reconcileNotificationRelayAccount(localStorage, null)) void clearRelay(() => notificationRelayAccountIs(localStorage, null))
     resetUser()
-    // starting a NEW sign-in wipes key state (review 85 §2.5): resetUser deliberately preserves
-    // the in-memory secret and both persisted stores, so account A's keys could otherwise
-    // survive into a pending-auth load of account B with the cached-uid mismatch check blinded
-    // (resetUser just removed the cached uid this check compares against)
     clearAllKeyState('sign-in start')
     window.sessionStorage.setItem('mindpage_signin_pending', '1') // prevents anonymous user on reload
     // same attributes as the marker (see setSessionMarker), so the clears above remove it
@@ -10613,6 +10661,7 @@
       // NOTE: we expect a callback in all cases (e.g. even when user is signed out or anonymous)
       //       we use any additional callbacks to trigger an automatic reload ...
       let authStateReceived = false
+      let reloadAfterExternalAuth: ReturnType<typeof createExternalAuthReloader> | null = null
       onAuthStateChanged(
         getAuth(firebase),
         authUser => {
@@ -10633,13 +10682,31 @@
             // key state is FENCED before the reload (review 85 §2.5): a pending prompt or
             // derivation must not publish into the dying page — while the persisted stores are
             // left to the flow that changed the auth state (sign-out and sign-in clear them
-            // themselves; a same-account token sign-in legitimately keeps them)
+            // themselves; a same-account token sign-in legitimately keeps them). Permanently marks
+            // the document left (withdrawing relay marks) before navigation when the new account
+            // differs from the one this document was confirmed for, updates the shared record
+            // first, asks for a relay clear only if the previous shared record disagreed with the
+            // newly confirmed uid, and releases any cleanup guard before requesting navigation so
+            // a canceled reload leaves later auth transitions active.
             console.warn('auth state modified, reloading ...')
-            invalidateKeyState('external auth transition')
-            location.reload()
+            void reloadAfterExternalAuth?.(authUser?.uid ?? null)
             return
           }
           authStateReceived = true
+          // reconcile the origin-shared notification account record against the confirmed Firebase
+          // uid (never the acting `anonymous` user in admin mode) before any redirect or reset
+          const confirmedUid = authUser?.uid ?? null
+          reloadAfterExternalAuth = createExternalAuthReloader({
+            storage: localStorage,
+            win: window as unknown as RelayWindowLike,
+            documentUid: confirmedUid,
+            invalidateKeys: () => invalidateKeyState('external auth transition'),
+            clearRelay,
+            reload: () => location.reload(),
+          })
+          const clearedRelay = reconcileNotificationRelayAccount(localStorage, confirmedUid)
+            ? clearRelay(() => notificationRelayAccountIs(localStorage, confirmedUid))
+            : null
 
           // SHARED-PAGE ORIGIN RULES. these run as soon as the auth state is known and before
           // anything else acts on the page — initialize() is NOT reached on every shared page,
@@ -10662,7 +10729,10 @@
             search: location.search,
             hash: location.hash,
           })
-          if (shared_redirect) return void location.replace(shared_redirect)
+          if (shared_redirect) {
+            if (clearedRelay) return void clearedRelay.finally(() => location.replace(shared_redirect))
+            return void location.replace(shared_redirect)
+          }
           // 2. a session on THIS origin while viewing someone else's shared page should not
           //    exist (the isolated origin offers no sign-in and is not an authorized auth
           //    domain). if it does — there, or on localhost where there is no second origin —

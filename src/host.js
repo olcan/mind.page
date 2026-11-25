@@ -43,6 +43,11 @@ export const SHARED_LOCAL_HOST = 'shared.localhost'
 // github tokens after its firestore cache had already been fixed
 export const isSharedOrigin = host => host == SHARED_HOST || host == SHARED_LOCAL_HOST
 
+// true where the durable service-worker notification click relay (IndexedDB pending store and the
+// page's `hello` handshake) is allowed: disabled on both isolated shared-page hosts, where
+// different owners' pages share the origin and arbitrary item `data` must not persist across visits
+export const durableNotificationRelay = host => !isSharedOrigin(host)
+
 // exact local names, plus loopback literals. exact matches only, and callers must pass the RAW
 // hostname: canonicalizeHost collapses `local.dev`, `127.0.0.1` and `localhost.<anything>` to
 // 'localhost' for DISPLAY, so a canonicalized host has already lost the identity this decides on.
