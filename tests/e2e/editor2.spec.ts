@@ -909,14 +909,25 @@ test('the create key seeds non-collapsed page text selected outside editable fie
       .toBe(true)
     return state!
   }
-  // exercises the app's own onBeforeUnload -> items.some(unsaved) predicate without navigating
-  const beforeUnloadPrompt = () =>
-    page.evaluate(() => {
+  // exercises the app's own onBeforeUnload -> items.some(unsaved) predicate without navigating. where
+  // the app answers with its prompt, the page was kept (nothing navigated here), so its list of the
+  // unsaved items follows after its wait (listUnsavedIfKept in index.svelte; the list's own row is in
+  // lifecycle.spec.ts): closed here, which gives the focus back, so that the row goes on as before
+  const beforeUnloadPrompt = async () => {
+    const answer = await page.evaluate(() => {
       const ev = document.createEvent('BeforeUnloadEvent')
       ev.initEvent('beforeunload', false, true)
       window.dispatchEvent(ev)
       return ev.returnValue
     })
+    if (answer) {
+      const list = page.locator('.modal .unsaved-items')
+      await expect(list, 'a kept page lists its unsaved items').toBeVisible({ timeout: 10_000 })
+      await page.locator('.modal .button.confirm', { hasText: /^OK$/ }).click()
+      await expect(list).toBeHidden({ timeout: 10_000 })
+    }
+    return answer
+  }
   const closeChild = async () => {
     await page.keyboard.press('Escape')
     await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()

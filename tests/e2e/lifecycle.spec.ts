@@ -569,3 +569,187 @@ test('a server change arriving during initialization neither throws nor blocks t
     await firestore().collection('items').doc(STORE_H).delete()
   }
 })
+
+// THE UNSAVED ITEMS BY NAME (src/unsaved_list.ts, table-tested; listUnsavedIfKept and reloadOnRequest
+// in index.svelte). The browser's own discard box shows its fixed words and tells the page nothing of
+// its answer, so the app lists the unsaved items in a dialog of its own once the page was KEPT (after
+// its wait, UNSAVED_NOTICE_MS), and in its own reload question. A name is the item's label, else the
+// first words of its text: here of the text TYPED into an open editor, which the page shows nowhere as
+// markup, so whatever the list makes of it is the list's own doing. The last step dispatches a pagehide
+// on the live page (a page that is left gets no list), which ends the page's client as in the dead
+// client's row above: the row's items are deleted at the emulator
+test("the browser's discard box, cancelled, is followed by the app's list of the unsaved items by name, and the app's own reload question lists them", async ({
+  page,
+}) => {
+  const LABEL = '#e2e_unsaved_named'
+  const NAMED = `${LABEL} a note whose text will differ from its saved one`
+  const PLAIN = 'e2e unsaved plain words, an item with no name of its own'
+  const LOGS = ['#e2e_unsaved_log the first entry', '#e2e_unsaved_log the second entry'] // two items under ONE label
+  // each within the name's length (src/unsaved_list.ts, UNSAVED_NAME_MAX), so the list shows it whole
+  const HOSTILE = [
+    `<img src=x onerror="window.__hit=1"> https://evil.example/b`,
+    `[a](https://evil.example/a) ![p](https://evil.example/p)`,
+    `<script>window.__hit=1</script> <b>b</b> & "q" 'q' \`c\` #tag`,
+  ]
+  const QUIET = 400 + 700 // the app's wait before its list, and room after it
+  await loadAdmin(page)
+  const before = await page.evaluate(() => window._init_time)
+  const seen: string[] = [] // the browser's own dialogs, by type: each is dismissed (a discard box: cancelled)
+  page.on('dialog', dialog => {
+    seen.push(dialog.type())
+    void dialog.dismiss()
+  })
+  const errors: string[] = []
+  page.on('pageerror', err => void errors.push(err.message))
+  await page.evaluate(texts => texts.forEach(text => void window._create(text)), [NAMED, PLAIN, ...LOGS])
+  const records = () =>
+    page.evaluate(
+      texts =>
+        texts.map(text => {
+          const item = (window.__items as any[]).find(item => item.text == text)
+          return item && !item.saving && item.savedId && item.savedText == text ? ([item.id, item.savedId] as [string, string]) : null
+        }),
+      [NAMED, PLAIN, ...LOGS]
+    )
+  await expect.poll(async () => (await records()).every(Boolean), { message: 'the four items saved', timeout: 30_000 }).toBe(true)
+  const [[named, namedDoc], [plain, plainDoc], [logA, logADoc], [logB, logBDoc]] = (await records()) as [string, string][]
+  // an item without a label of its own is named by its words and the reference that selects it
+  const typed = (text: string) => `${text} (id:${plainDoc}) (being edited)`
+  try {
+    // the named item's text differs from its saved text; the plain one's editor is opened the way a user
+    // does (a click on its text) and holds the typed text
+    await page.evaluate(id => void ((window.__items as any[]).find(item => item.id == id).text += ' (changed)'), named)
+    await focusMindbox(page)
+    await mindbox(page).pressSequentially('e2e unsaved plain')
+    const paragraph = page.locator(`#item-${plain} p`).first()
+    await expect(paragraph).toBeVisible({ timeout: 10_000 })
+    const box = (await paragraph.boundingBox())!
+    await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+    const textarea = page.locator(`#textarea-${plain}`)
+    await expect(textarea).toBeVisible()
+    // the page asked for the browser's box as a navigation asks it, with nothing navigating: the page is kept
+    const ask = (times = 1) =>
+      page.evaluate(times => {
+        let answer = ''
+        for (let i = 0; i < times; i++) {
+          const event = document.createEvent('BeforeUnloadEvent')
+          event.initEvent('beforeunload', false, true)
+          window.dispatchEvent(event)
+          answer = event.returnValue
+        }
+        return answer
+      }, times)
+    const modal = page.locator('.modal')
+    const list = modal.locator('.unsaved-items')
+    const ok = modal.locator('.button.confirm', { hasText: /^OK$/ })
+    const rows = async () => (await list.locator('li').allTextContents()).sort()
+    const focused = () => page.evaluate(() => document.activeElement?.id ?? null)
+
+    // 1. a kept page lists both items, each with what would be lost of it; a typed text is shown as its
+    // characters: no element of its own, no link made of its addresses, nothing run
+    for (const text of HOSTILE) {
+      await textarea.fill(text)
+      expect(await ask(), 'the app asks for the browser\'s box').toBe('Discard unsaved changes?')
+      await expect(list, 'the list follows, after the app\'s wait').toBeVisible({ timeout: 10_000 })
+      await expect(modal).toContainText('When the page was about to go, 2 items had unsaved changes:')
+      expect(await rows(), text).toEqual([`${LABEL} (not saved)`, typed(text)].sort())
+      expect(
+        await page.evaluate(() => [document.querySelectorAll('.modal a, .modal img, .modal script, .modal b, .modal code').length, (window as any).__hit ?? null]),
+        `the typed text as its characters: ${text}`
+      ).toEqual([0, null])
+      await ok.click()
+      await expect(modal).toBeHidden()
+      expect(await focused(), 'the editor has the focus back').toBe(`textarea-${plain}`)
+    }
+
+    // 1b. what the box was about is taken AT THE ASK: an item that is saved before the list shows is still
+    // named, as it was then (its text is the saved one again by the time the app's wait is over)
+    await textarea.fill('typed while another item settles')
+    await page.evaluate(id => {
+      const event = document.createEvent('BeforeUnloadEvent')
+      event.initEvent('beforeunload', false, true)
+      window.dispatchEvent(event)
+      const item = (window.__items as any[]).find(item => item.id == id)
+      item.__changed = item.text
+      item.text = item.savedText
+    }, named)
+    await expect(list).toBeVisible({ timeout: 10_000 })
+    expect(await rows(), 'the list as it was at the ask').toEqual([`${LABEL} (not saved)`, typed('typed while another item settles')].sort())
+    await ok.click()
+    await expect(modal).toBeHidden()
+    await page.evaluate(id => void ((item: any) => (item.text = item.__changed))((window.__items as any[]).find(item => item.id == id)), named)
+
+    // 1c. two items under one label are told apart: each by its own words and its own reference
+    await page.evaluate(ids => ids.forEach(id => void ((window.__items as any[]).find(item => item.id == id).text += ' (changed)')), [logA, logB])
+    expect(await ask()).toBe('Discard unsaved changes?')
+    await expect(list).toBeVisible({ timeout: 10_000 })
+    await expect(modal).toContainText('4 items had unsaved changes:')
+    expect(await rows(), 'each entry of the log by its words and its reference').toEqual(
+      [
+        `${LABEL} (not saved)`,
+        typed('typed while another item settles'),
+        `${LOGS[0]} (changed) (id:${logADoc}) (not saved)`,
+        `${LOGS[1]} (changed) (id:${logBDoc}) (not saved)`,
+      ].sort()
+    )
+    await ok.click()
+    await expect(modal).toBeHidden()
+    await page.evaluate(ids => ids.forEach(id => void ((item: any) => (item.text = item.savedText))((window.__items as any[]).find(item => item.id == id))), [logA, logB])
+
+    // 2. one list for a burst of asks (each ask starts the one wait anew; and a list that is up keeps a
+    // second one away, step 3)
+    expect(await ask(3)).toBe('Discard unsaved changes?')
+    await expect(list).toBeVisible({ timeout: 10_000 })
+    await ok.click()
+    await expect(modal).toBeHidden()
+    await page.waitForTimeout(QUIET)
+    await expect(modal, 'no second list').toBeHidden()
+
+    // 3. no list for an ask while another dialog of the app is up: not over it, and not after it either
+    // (the app shows a dialog asked for under another one once that one is closed)
+    await page.evaluate(() => void (window as any)._modal('another dialog', { confirm: 'Fine' }))
+    await expect(modal).toContainText('another dialog')
+    expect(await ask()).toBe('Discard unsaved changes?')
+    await page.waitForTimeout(QUIET)
+    await expect(modal, 'the other dialog stands').toContainText('another dialog')
+    await modal.locator('.button.confirm', { hasText: /^Fine$/ }).click()
+    await expect(modal, 'no list follows the other dialog').toBeHidden()
+    await page.waitForTimeout(QUIET)
+    await expect(modal, 'no list follows the other dialog, also after the wait').toBeHidden()
+
+    // 4. the browser's REAL box, cancelled (the listener above dismisses it): the page stays and lists
+    await textarea.fill('typed for the real box')
+    await page.evaluate(() => void setTimeout(() => location.reload()))
+    await expect(list, 'the list after the real box was cancelled').toBeVisible({ timeout: 10_000 })
+    expect([seen, await page.evaluate(() => window._init_time)], 'one discard box of the browser, and no reload').toEqual([['beforeunload'], before])
+    expect(await rows()).toEqual([`${LABEL} (not saved)`, typed('typed for the real box')].sort())
+    await ok.click()
+    await expect(modal).toBeHidden()
+
+    // 5. the app's own reload question lists them under its words; cancelled, the page stays
+    const answer = page.evaluate(() => (window as any)._reload() as Promise<boolean>)
+    await expect(modal).toContainText('Reload and discard unsaved changes?')
+    expect(await rows()).toEqual([`${LABEL} (not saved)`, typed('typed for the real box')].sort())
+    await modal.locator('.button.cancel', { hasText: /^Cancel$/ }).click()
+    expect(await answer, 'cancelled: no reload').toBe(false)
+    await expect(modal).toBeHidden()
+    expect([seen, await page.evaluate(() => window._init_time)], 'no further box of the browser, and no reload').toEqual([['beforeunload'], before])
+
+    // 6. a page that is left gets no list: the pagehide drops the wait, also after two asks (each ask
+    // starts the one wait anew, so that none is left behind for the pagehide to miss). The last step:
+    // see above
+    await page.evaluate(() => {
+      for (let i = 0; i < 2; i++) {
+        const event = document.createEvent('BeforeUnloadEvent')
+        event.initEvent('beforeunload', false, true)
+        window.dispatchEvent(event)
+      }
+      window.dispatchEvent(new PageTransitionEvent('pagehide'))
+    })
+    await page.waitForTimeout(QUIET)
+    await expect(modal, 'no list on a page that was left').toBeHidden() // (the dialog's last content stays in the document, hidden)
+    expect(errors, 'no uncaught error').toEqual([])
+  } finally {
+    for (const doc of [namedDoc, plainDoc, logADoc, logBDoc]) await firestore().collection('items').doc(doc).delete()
+  }
+})

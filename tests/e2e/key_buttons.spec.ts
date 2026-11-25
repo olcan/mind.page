@@ -462,6 +462,7 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   // Reload asks first, in the app's dialog; cancelled, nothing is reloaded and the typed text is there
   await reload()
   await expect(modal, 'Reload asks first, in the app\'s dialog').toContainText(QUESTION)
+  await expect(modal.locator('.unsaved-items li'), 'and names what would be lost: the item with the typed text').toHaveText([`${LIST} (being edited)`])
   await modal.locator('.button.cancel').click()
   await expect(modal).toBeHidden()
   await phone.waitForTimeout(500) // a reload would have started by now
@@ -536,10 +537,29 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   since = await started()
   await reload()
   await expect(modal, 'Reload asks while a save is not finished').toContainText(QUESTION)
+  await expect(modal.locator('.unsaved-items li'), 'and names the item whose save is not finished').toHaveText([`${LIST} (being saved)`])
   await modal.locator('.button.cancel').click()
   await expect(modal).toBeHidden()
   await phone.waitForTimeout(500)
   expect([await started(), loads, seen], 'cancelled: the page stays').toEqual([since, 2, []])
+  // the browser's own box in this state. nothing of this item reads as unsaved (its three texts say A),
+  // so the box is asked for by ANOTHER item's unsaved text, and a page that is kept then lists both: the
+  // list after the box names a save that is not finished too, as the app's own question above does
+  await phone.evaluate(root => void ((window.__items as any[]).find(item => item.labelText == root).text += ' (changed)'), ROOT)
+  expect(
+    await phone.evaluate(() => {
+      const event = document.createEvent('BeforeUnloadEvent')
+      event.initEvent('beforeunload', false, true)
+      window.dispatchEvent(event)
+      return event.returnValue
+    }),
+    'the box is asked for'
+  ).toBe('Discard unsaved changes?')
+  await expect(modal.locator('.unsaved-items'), 'the kept page lists what the box was about').toBeVisible({ timeout: 10_000 })
+  expect((await modal.locator('.unsaved-items li').allTextContents()).sort(), 'the unsaved text, and the save that is not finished').toEqual([`${ROOT} (not saved)`, `${LIST} (being saved)`].sort())
+  await modal.locator('.button.confirm', { hasText: /^OK$/ }).click()
+  await expect(modal).toBeHidden()
+  await phone.evaluate(root => void ((item: any) => (item.text = item.savedText))((window.__items as any[]).find(item => item.labelText == root)), ROOT)
   // the write let go: B goes out, then A, and the page has nothing left to save
   release()
   await expect.poll(saves, { message: 'both writes acknowledged', timeout: 30_000 }).toEqual({ text: A, saved: A, editor: A, saving: false, out: [], waiting: false })

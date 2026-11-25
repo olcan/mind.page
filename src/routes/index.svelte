@@ -40,6 +40,7 @@
   import { eventKey } from '../event_key'
   import { stripAttrToken } from '../item_attr'
   import { parseWikiLinksConfig, wikiLinkHtml, wikiLinkRegExp } from '../wiki_links'
+  import { reloadQuestion, unsavedName, unsavedNotice, type UnsavedEntry } from '../unsaved_list'
   import Editor from '../components/Editor.svelte'
   import Item from '../components/Item.svelte'
   export let items = []
@@ -4595,9 +4596,53 @@
   // the discard was confirmed in the app's modal, or there was nothing to lose
   let reloading_after_restore = false
 
+  // what would be lost of each such item, by name, for the two lists below (src/unsaved_list.ts). its
+  // state: text typed into its open editor; else a save that is not finished; else an open editor whose
+  // text differs from the saved one with nothing typed since (an item just created, or one that was
+  // written while it is edited); else a text that differs from the saved one. its name: a label of its
+  // own (labelUnique; the label of the item's text as it stands, also where the typed text would change
+  // it), else the first words of its text, of the typed text where there is one, with the reference a
+  // select names such an item by (selectName: two entries of a log share the log's label)
+  function unsavedEntries(lost: (item) => boolean): UnsavedEntry[] {
+    return items.filter(lost).map(item => {
+      const typed = item.editing && item.editorText != null && removeZWSP(item.editorText) != removeZWSP(item.text)
+      const own = item.labelUnique ? item.labelText || item.label : ''
+      return {
+        name: unsavedName(own, typed ? item.editorText : item.text, own ? '' : selectName(item)),
+        state: typed ? 'editing' : hasLocalIntent(item) ? 'saving' : item.editing ? 'editing' : 'unsaved',
+      }
+    })
+  }
+
+  // AFTER THE BROWSER'S OWN BOX (the owner, 2026-11-25: "let's just show the list right after
+  // cancellation of reload, not worth complicating it with handling all reload cases"). the box
+  // (onBeforeUnload) shows the browser's fixed words, nothing of the page's, and tells the page nothing
+  // of its answer. so, as the box is asked for, what it is about is TAKEN (the items' names and states
+  // at that moment: by the time the list shows, a save may have finished, and its item would be missing
+  // from a list made then) and a timer is started. a page that is left drops the timer at its pagehide
+  // (dropUnsavedNotice); a page that still runs when the timer does shows what was taken, in the app's
+  // own dialog. a heuristic: the timer counts from the ask, so a page that stood still under the box
+  // runs it as soon as it runs again; and a page that is left slowly (a reload confirmed while the
+  // server takes long to answer) can show the list for that moment, by which nothing is lost. each ask
+  // starts the one timer anew, with its own list; and no list is shown where another dialog of the app
+  // is visible WHEN THE TIMER RUNS (asked for then, the app would show it once that dialog is closed)
+  const UNSAVED_NOTICE_MS = 400
+  let unsavedNoticeTimer
+  function listUnsavedIfKept(entries: UnsavedEntry[]) {
+    clearTimeout(unsavedNoticeTimer)
+    unsavedNoticeTimer = setTimeout(() => {
+      if (_modal_visible()) return
+      _modal(unsavedNotice(entries), { confirm: 'OK', background: 'confirm' })
+    }, UNSAVED_NOTICE_MS)
+  }
+  const dropUnsavedNotice = () => clearTimeout(unsavedNoticeTimer)
+
   function onBeforeUnload(e) {
     if (reloading_after_restore) return // no browser discard prompt on top of the restore's own
     if (!items.some(unsaved)) return
+    // (the box is asked for by an unsaved text alone, as before; once it is, the list for a kept page
+    // names what the app's own reload question names: a save that is not finished too)
+    listUnsavedIfKept(unsavedEntries(item => unsaved(item) || hasLocalIntent(item)))
     const msg = 'Discard unsaved changes?'
     // see https://stackoverflow.com/a/7317311
     e.returnValue = msg // gecko + ie
@@ -4620,8 +4665,11 @@
       location.reload()
       return true
     }
-    if (!items.some(item => unsaved(item) || hasLocalIntent(item))) return Promise.resolve(reload())
-    return _modal('Reload and discard unsaved changes?', { confirm: 'Reload', cancel: 'Cancel' }).then(ok => ok === true && reload())
+    const lost = item => unsaved(item) || hasLocalIntent(item)
+    if (!items.some(lost)) return Promise.resolve(reload())
+    // (the question lists what would be lost, by name: the owner, 2026-11-23: "Can the reload prompt be a
+    // modal that lists items?")
+    return _modal(reloadQuestion(unsavedEntries(lost)), { confirm: 'Reload', cancel: 'Cancel' }).then(ok => ok === true && reload())
   }
 
   // THE PAGE-CACHE RESTORE (see src/page_lifecycle.ts, table-tested): the browser fired pagehide
@@ -13400,6 +13448,7 @@
   on:popstate={onPopState}
   on:beforeunload={onBeforeUnload}
   on:pageshow={onPageShow}
+  on:pagehide={dropUnsavedNotice}
   on:pagehide={retireReturn}
   on:pagehide={endStopNote}
   on:online={onOnline}
