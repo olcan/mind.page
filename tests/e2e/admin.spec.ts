@@ -415,6 +415,12 @@ test('#chat own page is whole, hides the first user row only when bare, and scop
       const userLabelRect = userLabel.getBoundingClientRect()
       const earlierAgentColor = getComputedStyle(earlierAgent.querySelector('.label')!).color
       const lastAgentColor = getComputedStyle(lastAgent.querySelector('.label')!).color
+      const textFontSize = parseFloat(getComputedStyle(content).fontSize)
+      const roleRows = [earlierAgent, visibleUser, lastAgent].map(row => ({
+        labelFontSize: parseFloat(getComputedStyle(row.querySelector('.label')!).fontSize),
+        rowFontSize: parseFloat(getComputedStyle(row).fontSize),
+        marginTop: getComputedStyle(row).marginTop,
+      }))
       return {
         hasVaultResult: !!content.querySelector('.vault-result'),
         hrs,
@@ -428,6 +434,8 @@ test('#chat own page is whole, hides the first user row only when bare, and scop
         userLabelMarginLeft: getComputedStyle(userLabel).marginLeft,
         userLabelLeftOffset: userLabelRect.left - userRowRect.left,
         userLabelRightOffset: userRowRect.right - userLabelRect.right,
+        textFontSize,
+        roleRows,
       }
     }, label)
 
@@ -457,6 +465,16 @@ test('#chat own page is whole, hides the first user row only when bare, and scop
   expect(plain.userLabelLeftOffset, 'released look (no inert section): user row name sits toward the right').toBeGreaterThan(
     plain.userLabelRightOffset
   )
+  expect(
+    plain.roleRows.every(
+      r => Math.abs(r.labelFontSize - r.rowFontSize) < 0.05 && Math.abs(r.labelFontSize - plain.textFontSize) < 0.05
+    ),
+    'released look (no inert section): role row names stay at text font size'
+  ).toBe(true)
+  expect(
+    plain.roleRows.every(r => r.marginTop === '0px'),
+    'released look (no inert section): role rows have no top margin'
+  ).toBe(true)
 
   const inertLabel = '#chat/e2e_fur_inert'
   await createAndShow(
@@ -490,6 +508,18 @@ test('#chat own page is whole, hides the first user row only when bare, and scop
   expect(inert.userLabelLeftOffset, 'trial look (with inert section): user row name is left of released position').toBeLessThan(
     plain.userLabelLeftOffset / 2
   )
+  expect(
+    inert.roleRows.every(
+      r =>
+        Math.abs(r.labelFontSize - r.rowFontSize * 0.8) < 0.05 &&
+        Math.abs(r.labelFontSize - inert.textFontSize * 0.8) < 0.05
+    ),
+    'trial look (with inert section): role row names are 80% of text font size'
+  ).toBe(true)
+  expect(
+    inert.roleRows.every(r => r.marginTop === '5px'),
+    'trial look (with inert section): role rows have 5 px top margin'
+  ).toBe(true)
 
   // 5. Chat inert-block top margin (the owner, 2026-11-24): 2px closed AND 2px open (not 10px
   // as in non-chat items, and not 5px when open), keeping the same distance from the agent role

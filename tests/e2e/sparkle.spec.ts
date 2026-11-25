@@ -1386,14 +1386,33 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
   await follows([{ ...RULE, tags: [TAG] }])
   await expect.poll(async () => (await sparkle(phone)).title, { timeout: POLL_MS }).toBe(`${WATCHING}\n${LINE}`)
 
-  // (a) the sparkle is the desktop's, tooltip and all; a tap opens the menu, which says the
-  // tooltips' words below its entries
+  // (a) on a coarse-pointer phone the sparkle grows to 32 px centred on the desktop 24 px corner
+  // point (right 10, bottom 6; menu bottom 46); a tap opens the menu, which says the tooltips' words
+  const phoneSparkle = await phone.evaluate(sel => {
+    const r = document.querySelector(sel)!.getBoundingClientRect()
+    return {
+      coarse: matchMedia('(pointer: coarse)').matches,
+      right: Math.round(window.innerWidth - r.right),
+      bottom: Math.round(window.innerHeight - r.bottom),
+      size: [Math.round(r.width), Math.round(r.height)],
+    }
+  }, NODE)
+  expect(phoneSparkle, 'coarse-pointer sparkle is 32 px at right 10, bottom 6 (same centre as desktop 24 px at 14/10)').toEqual({
+    coarse: true,
+    right: 10,
+    bottom: 6,
+    size: [32, 32],
+  })
   const tapSparkle = async () => {
     const box = (await phone.locator(NODE).boundingBox())!
     expect(await tap(phone, box.x + box.width / 2, box.y + box.height / 2), "the tap's click is the sparkle's").toBe('node')
     await expect.poll(async () => (await sparkle(phone)).menus).toBe(1)
   }
   await tapSparkle()
+  expect(
+    await phone.evaluate(() => Math.round(window.innerHeight - document.querySelector('[data-vault-sparkle="menu"]')!.getBoundingClientRect().bottom)),
+    'phone sparkle menu sits at bottom 46 px above the 32 px sparkle',
+  ).toBe(46)
   const ONE_WATCH = [...ENTRIES, ['says:sparkle', WATCHING, ''], ['line', LINE, ''], ['says:line', DETAILS, '']]
   expect(await menuRows(phone), "the entries, then the sparkle's words, the watched line and its details under it; nothing is left to a tooltip").toEqual(ONE_WATCH)
   const one = await menuLook(phone)

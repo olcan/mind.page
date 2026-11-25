@@ -1,5 +1,15 @@
 import { expect, test, type Page } from '@playwright/test'
+import { mkdirSync } from 'fs'
+import { resolve } from 'path'
 import { firestore, install, loadAdmin, waitForApp, waitWritesSettled } from './helpers.js'
+
+// pictures of the strip states, written only where KEY_BUTTONS_SHOTS names a directory for them
+const SHOTS = process.env.KEY_BUTTONS_SHOTS
+const shot = async (page: Page, name: string, clip?: { x: number; y: number; width: number; height: number }) => {
+  if (!SHOTS) return
+  mkdirSync(SHOTS, { recursive: true })
+  await page.screenshot({ path: resolve(SHOTS, `${name}.png`), ...(clip ? { clip } : {}) })
+}
 
 // the #key_buttons item (mind.items key_buttons.js; the vault's todo of 2026-11-17): the keys
 // that navigate items as buttons on the page, for a device without a keyboard. The item sends
@@ -395,13 +405,15 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   await expect(page.locator('#textarea-mindbox')).toHaveValue('x ')
   await page.evaluate(() => (window as any).MindBox.set(''))
 
-  // (g) the reload button: beside the sparkle on a desktop, and the mirror of the sparkle's box on a phone
+  // (g) the reload button: beside the sparkle on a desktop (24 px), and the row's size (32 px) on a phone,
+  // centred on the same point as the desktop corner button
   const reloadBox = (target: Page) => target.evaluate(selector => (box => [box.x, window.innerHeight - box.bottom, box.width, box.height])(document.querySelector(selector)!.getBoundingClientRect()), RELOAD)
   const desktopReloadBox = (target: Page) => target.evaluate(selector => (box => [window.innerWidth - box.right, window.innerHeight - box.bottom, box.width, box.height])(document.querySelector(selector)!.getBoundingClientRect()), RELOAD)
   await expect(page.locator(RELOAD), 'on a desktop too').toBeVisible()
   expect(await desktopReloadBox(page), 'desktop reload button sits a group gap left of the sparkle').toEqual([SPARKLE[0] + SPARKLE[2] + LOOK.group, SPARKLE[1], SPARKLE[2], SPARKLE[3]])
   await expect(phone.locator(RELOAD)).toBeVisible()
-  expect(await reloadBox(phone)).toEqual(SPARKLE)
+  const touchGrow = (LOOK.size - SPARKLE[2]) / 2
+  expect(await reloadBox(phone), 'touch reload button matches row size (32 px), centred on desktop corner point').toEqual([SPARKLE[0] - touchGrow, SPARKLE[1] - touchGrow, LOOK.size, LOOK.size])
   expect(await phone.evaluate(selector => getComputedStyle(document.querySelector(selector)!).color, RELOAD), 'dim, as the idle sparkle is').toBe('rgba(255, 255, 255, 0.45)')
   const [row, button] = [(await bar.boundingBox())!, (await phone.locator(RELOAD).boundingBox())!]
   expect(row.x - (button.x + button.width), 'clear of the main row at this width').toBeGreaterThanOrEqual(LOOK.gap)
@@ -1673,4 +1685,333 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     }, { message: 'phone frosted strip returns with main row', timeout: 3_000 })
     .toEqual([false, 'block', `${LOOK.size + 2 * LOOK.bottom}px`])
   await context.close()
+})
+
+// guest action buttons handed to #key_buttons (2026-11-24): wide desktop inline at the strip's
+// left end a group gap away, narrow desktop second row above the left edge, phone touch second
+// row (32 px buttons lined up with the 32 px reload button, hidden while a keyboard is up),
+// busy highlight while an async press runs, glass rejection on the guest extension and floor,
+// and console diagnostics for slow work and dropped taps
+test('guest action buttons stand inline when wide, move to a second row when narrow or on a phone, stay lit while busy, hide under a keyboard, and log slow or dropped taps', async ({ page, browser }) => {
+  await loadAdmin(page)
+  if (!(await page.evaluate(() => !!window._item('#key_buttons', true)))) {
+    expect(await install(page, 'key_buttons'), '/_install key_buttons').toBeNull()
+    await waitWritesSettled(page, '#key_buttons')
+  }
+  await expect
+    .poll(() => page.evaluate(() => (window as any)._key_buttons?.disposed === false), { message: '#key_buttons live', timeout: 10_000 })
+    .toBe(true)
+  const GUESTS = '[data-key-buttons="guests"]'
+  const LOOK: Look = await page.evaluate(() => (window._item('#key_buttons', true) as any).eval('KEY_BUTTONS_LOOK'))
+  const origSize = page.viewportSize()!
+  const warns: string[] = []
+  const errors: string[] = []
+  page.on('console', msg => {
+    if (msg.type() == 'warning') warns.push(msg.text())
+    else if (msg.type() == 'error' && /key buttons:/i.test(msg.text())) errors.push(msg.text())
+  })
+  page.on('pageerror', err => void errors.push(err.message))
+
+  const handOver = async (target: Page) => {
+    await target.evaluate(() => {
+      ;(window as any).__guest_calls = []
+      ;(window as any).__guest_resolve = null
+      ;(window as any)._key_buttons_guests = {
+        buttons: [
+          {
+            name: 'busy',
+            title: 'Busy action',
+            icon: 'M3 8h10',
+            color: '#6f6',
+            press: () => {
+              ;(window as any).__guest_calls.push('busy')
+              return new Promise<void>(r => ((window as any).__guest_resolve = r))
+            },
+          },
+          {
+            name: 'slow',
+            title: 'Slow action',
+            icon: 'M3 8h10',
+            color: '#fa4',
+            press: () => {
+              ;(window as any).__guest_calls.push('slow')
+              return new Promise<void>(r => setTimeout(r, 1050))
+            },
+          },
+          {
+            name: 'plain',
+            title: 'Plain action',
+            icon: 'M3 8h10',
+            color: '#fff',
+            press: () => void (window as any).__guest_calls.push('plain'),
+          },
+          {
+            name: 'fill',
+            title: 'Filled action',
+            icon: 'M8 1l7 7-7 7-7-7z',
+            fill: true,
+            color: '#ff6',
+            press: () => void (window as any).__guest_calls.push('fill'),
+          },
+          {
+            name: 'five',
+            title: 'Fifth action',
+            icon: 'M3 8h10',
+            color: '#6af',
+            press: () => void (window as any).__guest_calls.push('five'),
+          },
+          {
+            name: 'six',
+            title: 'Sixth action',
+            icon: 'M3 8h10',
+            color: '#f66',
+            press: () => void (window as any).__guest_calls.push('six'),
+          },
+        ],
+        taken: () => void (window as any).__guest_calls.push('taken'),
+      }
+      ;(window as any)._key_buttons.guest()
+    })
+  }
+
+  try {
+    // 1. Wide desktop (1280 px): inline at the strip's left end a group gap (18 px) away, split glass widened
+    await page.setViewportSize({ width: 1280, height: origSize.height })
+    await handOver(page)
+    await expect(page.locator(GUESTS), 'guest group visible on wide desktop').toBeVisible()
+    const wide = await page.evaluate(
+      ([guestsSel, stripSel, bgSel]) => {
+        const g = document.querySelector(guestsSel) as HTMLElement
+        const strip = document.querySelector(stripSel) as HTMLElement
+        const bg = document.querySelector(bgSel) as HTMLElement
+        const pane = bg.querySelector('.key-buttons-bg-pane') as HTMLElement
+        const floor = bg.querySelector('.key-buttons-bg-floor') as HTMLElement
+        const btns = [...g.children] as HTMLElement[]
+        const last = btns[btns.length - 1].getBoundingClientRect()
+        const firstNav = strip.children[0].getBoundingClientRect()
+        return {
+          cls: g.className,
+          bgCls: bg.className,
+          floorDisplay: getComputedStyle(floor).display,
+          paneW: Math.round(pane.getBoundingClientRect().width),
+          gapToStrip: Math.round(firstNav.left - last.right),
+          sizes: btns.map(b => [Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)]),
+          sameRow: btns.every(b => Math.round(b.getBoundingClientRect().top - firstNav.top) === 0),
+          calls: (window as any).__guest_calls,
+        }
+      },
+      [GUESTS, NAV_STRIP, BACKDROP] as const
+    )
+    const expectedW = await page.evaluate(() => (window._item('#key_buttons', true) as any).eval('key_buttons_backdrop_geom(KEY_BUTTONS_LOOK, 6).w_piece') as number)
+    expect(wide, 'wide desktop places guests inline, group gap from strip, widening split glass with no floor').toEqual({
+      cls: 'key-buttons-guests',
+      bgCls: 'key-buttons-bg desktop split',
+      floorDisplay: 'none',
+      paneW: expectedW,
+      gapToStrip: LOOK.group,
+      sizes: Array(6).fill([24, 24]),
+      sameRow: true,
+      calls: ['taken'],
+    })
+
+    // busy highlight: button lights to LOOK.pressed (#555 = rgb(85, 85, 85)) while pending (even
+    // after the pointer leaves it), and returns to idle #222 (rgb(34, 34, 34)) once settled
+    const busyBtn = page.locator(`${GUESTS} > button[data-guest="busy"]`)
+    await busyBtn.click()
+    await page.mouse.move(0, 0)
+    await expect
+      .poll(() => busyBtn.evaluate(el => [el.classList.contains('busy'), getComputedStyle(el).backgroundColor]), { message: 'busy button stays lit while promise is pending', timeout: 3_000 })
+      .toEqual([true, 'rgb(85, 85, 85)'])
+    await page.evaluate(() => (window as any).__guest_resolve?.())
+    await expect
+      .poll(() => busyBtn.evaluate(el => [el.classList.contains('busy'), getComputedStyle(el).backgroundColor]), { message: 'busy highlight clears when promise settles', timeout: 3_000 })
+      .toEqual([false, 'rgb(34, 34, 34)'])
+
+    // slow work (>= 1000 ms) logs diagnostic warning to console
+    warns.length = 0
+    await page.locator(`${GUESTS} > button[data-guest="slow"]`).click()
+    await expect
+      .poll(() => warns.find(w => w.includes('the tap on "slow"')) ?? null, { message: 'slow guest work logs timing line', timeout: 5_000 })
+      .toMatch(/key buttons: the tap on "slow" reached the page \d+ ms after the finger left; its work took \d+ ms/)
+
+    // bare glass in the 18 px group gap between guests and strip rejects clicks to the page
+    const [lastGuestBox, firstNavBox] = [
+      (await page.locator(`${GUESTS} > button`).last().boundingBox())!,
+      (await page.locator(`${NAV_STRIP} > button`).first().boundingBox())!,
+    ]
+    const [gapX, gapY] = [(lastGuestBox.x + lastGuestBox.width + firstNavBox.x) / 2, firstNavBox.y + firstNavBox.height / 2]
+    await page.evaluate(() => {
+      ;(window as any).__gap_clicks = 0
+      ;(window as any).__gap_fn = () => (window as any).__gap_clicks++
+      document.addEventListener('click', (window as any).__gap_fn)
+    })
+    await page.mouse.click(gapX, gapY)
+    expect(await page.evaluate(() => (window as any).__gap_clicks), 'bare glass in group gap between guests and strip blocks page clicks').toBe(0)
+    await page.evaluate(() => {
+      document.removeEventListener('click', (window as any).__gap_fn)
+      delete (window as any).__gap_clicks
+      delete (window as any).__gap_fn
+    })
+
+    // 2a. Mid-narrow desktop (500 px, >= merge 480 and < w_piece 532): guests move to the second floor
+    //     and the bottom strip's glass and border reach the window's right edge (drawn to w_piece 532)
+    const readFloorStrip = () =>
+      page.evaluate(
+        ([guestsSel, bgSel]) => {
+          const g = document.querySelector(guestsSel) as HTMLElement
+          const bg = document.querySelector(bgSel) as HTMLElement
+          const pane = bg.querySelector('.key-buttons-bg-pane') as HTMLElement
+          const floor = bg.querySelector('.key-buttons-bg-floor') as HTMLElement
+          const border = bg.querySelector('.key-buttons-bg-svg.strip > path[fill="none"]') as SVGPathElement | null
+          const gr = g.getBoundingClientRect()
+          const fr = floor.getBoundingClientRect()
+          const first = g.children[0].getBoundingClientRect()
+          const hit = document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2)
+          const clipPath = getComputedStyle(pane).clipPath
+          const borderD = border?.getAttribute('d') ?? ''
+          const clipW = Number(clipPath.match(/\bH\s*([0-9.]+)/)?.[1] ?? NaN)
+          const borderW = Number(borderD.match(/\bH\s*([0-9.]+)/)?.[1] ?? NaN)
+          return {
+            innerWidth: window.innerWidth,
+            bgCls: bg.className,
+            left: Math.round(gr.left),
+            bottom: Math.round(window.innerHeight - gr.bottom),
+            floorDisplay: getComputedStyle(floor).display,
+            floorRect: [Math.round(fr.left), Math.round(window.innerHeight - fr.bottom), Math.round(fr.width), Math.round(fr.height)],
+            paneW: Math.round(pane.getBoundingClientRect().width),
+            clipW,
+            borderW,
+            hitFirst: g.children[0].contains(hit),
+          }
+        },
+        [GUESTS, BACKDROP] as const
+      )
+    const rowH = LOOK.reload.size + 2 * LOOK.reload.bottom
+    const expectedFloorW = 2 * LOOK.reload.left + 6 * LOOK.reload.size + 5 * LOOK.gap
+
+    await page.setViewportSize({ width: 500, height: origSize.height })
+    await expect
+      .poll(() => page.evaluate(sel => document.querySelector(sel)?.className ?? '', GUESTS), { message: '500 px desktop moves guests to floor', timeout: 3_000 })
+      .toBe('key-buttons-guests floor')
+    const mid = await readFloorStrip()
+    expect(
+      { bgCls: mid.bgCls, left: mid.left, bottom: mid.bottom, floorDisplay: mid.floorDisplay, floorRect: mid.floorRect, paneW: mid.paneW, hitFirst: mid.hitFirst },
+      '500 px desktop second row sits above the bottom strip at left 14 px with matching glass floor',
+    ).toEqual({
+      bgCls: 'key-buttons-bg desktop floor',
+      left: LOOK.reload.left,
+      bottom: rowH + LOOK.reload.bottom,
+      floorDisplay: 'block',
+      floorRect: [0, rowH, expectedFloorW, rowH],
+      paneW: 500,
+      hitFirst: true,
+    })
+    expect(mid.clipW, '500 px strip computed clip-path reaches the window right edge').toBeGreaterThanOrEqual(mid.innerWidth)
+    expect(mid.borderW, '500 px strip border SVG path reaches the window right edge').toBeGreaterThanOrEqual(mid.innerWidth)
+    expect([mid.clipW, mid.borderW], '500 px strip glass and border draw to w_piece (532)').toEqual([expectedW, expectedW])
+    await shot(page, 'bb2_strip_500', { x: 0, y: origSize.height - 140, width: 500, height: 140 })
+
+    // 2b. Narrow desktop (430 px, below merge 480): stays on second row at left edge above the bottom strip
+    await page.setViewportSize({ width: 430, height: origSize.height })
+    await expect.poll(() => page.evaluate(() => window.innerWidth), { timeout: 3_000 }).toBe(430)
+    const narrow = await readFloorStrip()
+    expect(
+      { bgCls: narrow.bgCls, left: narrow.left, bottom: narrow.bottom, floorDisplay: narrow.floorDisplay, floorRect: narrow.floorRect, paneW: narrow.paneW, hitFirst: narrow.hitFirst },
+      'narrow desktop second row sits above the bottom bar at left 14 px with matching glass floor',
+    ).toEqual({
+      bgCls: 'key-buttons-bg desktop floor',
+      left: LOOK.reload.left,
+      bottom: rowH + LOOK.reload.bottom,
+      floorDisplay: 'block',
+      floorRect: [0, rowH, expectedFloorW, rowH],
+      paneW: 430,
+      hitFirst: true,
+    })
+    expect(narrow.clipW, '430 px strip computed clip-path reaches the window right edge').toBeGreaterThanOrEqual(narrow.innerWidth)
+    expect(narrow.borderW, '430 px strip border SVG path reaches the window right edge').toBeGreaterThanOrEqual(narrow.innerWidth)
+    await shot(page, 'bb2_strip_430', { x: 0, y: origSize.height - 140, width: 430, height: 140 })
+
+    // 3. Phone touch page: 32 px reload + 32 px second-row guests lined up with reload, hidden under keyboard, real tap works
+    const phoneCtx = await browser.newContext(PHONE)
+    const phone = await phoneCtx.newPage()
+    const phoneWarns: string[] = []
+    phone.on('console', msg => {
+      if (msg.type() == 'error' && /key buttons:/i.test(msg.text())) errors.push(`phone: ${msg.text()}`)
+      if (msg.type() == 'warning' && /key buttons:/i.test(msg.text())) phoneWarns.push(msg.text())
+    })
+    try {
+      await loadAdmin(phone)
+      await expect(phone.locator(BAR)).toBeVisible()
+      // attach after initial anonymous-seed render (whose sandboxed iframe throws a localStorage SecurityError)
+      phone.on('pageerror', err => void errors.push(`phone: ${err.message}`))
+      await handOver(phone)
+      await expect(phone.locator(GUESTS)).toBeVisible()
+      const phoneGeom = await phone.evaluate(
+        ([guestsSel, reloadSel, bgSel]) => {
+          const g = document.querySelector(guestsSel) as HTMLElement
+          const r = document.querySelector(reloadSel)!.getBoundingClientRect()
+          const gr = g.getBoundingClientRect()
+          const floor = document.querySelector(`${bgSel} > .key-buttons-bg-floor`)!.getBoundingClientRect()
+          const btns = [...g.children] as HTMLElement[]
+          return {
+            cls: g.className,
+            reload: [Math.round(r.left), Math.round(window.innerHeight - r.bottom), Math.round(r.width), Math.round(r.height)],
+            guestsLeft: Math.round(gr.left),
+            guestsBottom: Math.round(window.innerHeight - gr.bottom),
+            btnSizes: btns.map(b => [Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)]),
+            floorRect: [Math.round(floor.left), Math.round(window.innerHeight - floor.bottom), Math.round(floor.width), Math.round(floor.height)],
+          }
+        },
+        [GUESTS, RELOAD, BACKDROP] as const
+      )
+      const touchGrow = (LOOK.size - SPARKLE[2]) / 2
+      const touchLeft = LOOK.reload.left - touchGrow
+      const phoneRowH = LOOK.size + 2 * LOOK.bottom
+      expect(phoneGeom, 'phone touch reload is 32 px at 10/6 and second-row guests line up with it at 32 px').toEqual({
+        cls: 'key-buttons-guests floor touch',
+        reload: [touchLeft, LOOK.reload.bottom - touchGrow, LOOK.size, LOOK.size],
+        guestsLeft: touchLeft,
+        guestsBottom: LOOK.size + 3 * LOOK.bottom,
+        btnSizes: Array(6).fill([LOOK.size, LOOK.size]),
+        floorRect: [0, phoneRowH, 2 * touchLeft + 6 * LOOK.size + 5 * LOOK.gap, phoneRowH],
+      })
+      // tap in the 6 px gap between two guest buttons on phone delivers zero press calls and logs
+      // one dropped-tap warning where the browser adjusts the click onto a neighboring button;
+      // tap on 'plain' button's centre invokes its press
+      const [g0Box, g1Box, plainBox] = [
+        (await phone.locator(`${GUESTS} > button[data-guest="busy"]`).boundingBox())!,
+        (await phone.locator(`${GUESTS} > button[data-guest="slow"]`).boundingBox())!,
+        (await phone.locator(`${GUESTS} > button[data-guest="plain"]`).boundingBox())!,
+      ]
+      const warnsBeforeGap = phoneWarns.length
+      await phone.touchscreen.tap((g0Box.x + g0Box.width + g1Box.x) / 2, g0Box.y + g0Box.height / 2)
+      expect(await phone.evaluate(() => (window as any).__guest_calls), 'tap in gap between guest buttons invokes no press').toEqual(['taken'])
+      await expect
+        .poll(() => phoneWarns.slice(warnsBeforeGap).filter(warn => /was not taken/.test(warn)), { message: 'adjusted tap in gap between guest buttons logs dropped-tap warning (a slow page\'s own line is not counted)', timeout: 3_000 })
+        .toEqual([expect.stringMatching(/^key buttons: a tap on "(busy|slow)" was not taken: it began on the glass beside the button$/)])
+      await phone.touchscreen.tap(plainBox.x + plainBox.width / 2, plainBox.y + plainBox.height / 2)
+      await expect.poll(() => phone.evaluate(() => (window as any).__guest_calls), { message: 'tap on guest button centre invokes its press', timeout: 3_000 }).toEqual(['taken', 'plain'])
+      // on-screen keyboard up hides guest buttons alongside the main bar; down restores both
+      await phone.locator('.header .backdrop').first().click()
+      await expect(phone.locator('#textarea-mindbox')).toBeFocused()
+      await keyboard(phone, 'up')
+      await expect(phone.locator(GUESTS), 'guest buttons hide while on-screen keyboard is up').toBeHidden()
+      await expect(phone.locator(BAR)).toBeHidden()
+      await keyboard(phone, 'down')
+      await blur(phone)
+      await expect(phone.locator(GUESTS), 'guest buttons return when keyboard closes').toBeVisible()
+    } finally {
+      await phoneCtx.close()
+    }
+    expect(errors, 'no console errors or pageerrors during guest bar row').toEqual([])
+  } finally {
+    await page.setViewportSize(origSize)
+    await page.evaluate(() => {
+      ;(window as any)._key_buttons_guests = { buttons: [] }
+      ;(window as any)._key_buttons?.guest?.()
+      delete (window as any)._key_buttons_guests
+      delete (window as any).__guest_calls
+      delete (window as any).__guest_resolve
+    })
+  }
 })

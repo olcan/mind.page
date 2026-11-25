@@ -2,7 +2,7 @@ import { chromium, expect, test, type BrowserContext, type Page } from '@playwri
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { resolve } from 'path'
 import { OFFLINE_BROWSER_ARGS } from '../../src/e2e_lanes.js'
-import { focusMindbox, mindbox, userSet } from './editor_helpers.js'
+import { asUser, focusMindbox, mindbox, userSet } from './editor_helpers.js'
 import { customToken, firestore, install, interceptMindItems, loadAnonymous, secretFor, signIn, waitForApp, type TestUser } from './helpers.js'
 
 // the task-agents todoer (vault design notes/design/mind_task_agents.md, 2.2-2.4, 6; slice 3):
@@ -60,12 +60,15 @@ const WAITS_SECRET = secretFor(WAITS_USER, PHRASE)
 // the service-worker notifications row's own account: real notification permission + active SW
 const NOTIFY_SW_USER: TestUser = { uid: 'tasks_notify_sw_e2e', displayName: 'Tasks Notify SW', email: 'tasks_notify_sw@e2e.test' }
 const NOTIFY_SW_SECRET = secretFor(NOTIFY_SW_USER, PHRASE)
+// the bin-buttons, j/k row shortcuts, select-next, touch corner-size, and selected-row-border rows' account
+const BIN_USER: TestUser = { uid: 'tasks_bin_e2e', displayName: 'Tasks Bin Buttons', email: 'tasks_bin@e2e.test' }
+const BIN_SECRET = secretFor(BIN_USER, PHRASE)
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -1076,21 +1079,30 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // marker alone, and after saving the stored turn holds the marker, quote and typed text
   await userSet(page, CHATTY, { scroll: true })
   await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem?.querySelector('.content'), CHATTY), { timeout: 15_000 }).toBe(true)
-  const selectedForChat = await page.evaluate(n => {
-    const root = window._item(n, true)!.elem!
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
-    while (walker.nextNode()) {
-      const val = walker.currentNode.nodeValue ?? ''
-      const at = val.indexOf('chat about me')
-      if (at < 0) continue
-      ;(document.activeElement as HTMLElement | null)?.blur()
-      window.getSelection()!.setBaseAndExtent(walker.currentNode, at, walker.currentNode, at + 'chat about me'.length)
-      return [window.getSelection()!.type, window.getSelection()!.isCollapsed, window.getSelection()!.toString()]
-    }
-    return null
-  }, CHATTY)
-  expect(selectedForChat, 'premise: todo text selected before creating a task chat').toEqual(['Range', false, 'chat about me'])
-  await page.keyboard.press('Shift+Enter')
+  // the selection and the key in ONE turn of the page (the key dispatched where a real press with no focus
+  // arrives, on the body): the list is rebuilt once more some tens of ms after the box's change, and a real
+  // press, 3 to 35 ms after the selection, once came after that rebuild and found the selection gone with its
+  // text node (a full gate of 2026-11-24: the chat opened without the quote)
+  const selectedForChat = await asUser(
+    page,
+    n => {
+      const root = window._item(n, true)!.elem!
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const val = walker.currentNode.nodeValue ?? ''
+        const at = val.indexOf('chat about me')
+        if (at < 0) continue
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        window.getSelection()!.setBaseAndExtent(walker.currentNode, at, walker.currentNode, at + 'chat about me'.length)
+        const selected = [window.getSelection()!.type, window.getSelection()!.isCollapsed, window.getSelection()!.toString()]
+        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', shiftKey: true, bubbles: true, cancelable: true }))
+        return selected
+      }
+      return null
+    },
+    CHATTY,
+  )
+  expect(selectedForChat, 'premise: todo text was selected when Shift+Enter created the task chat').toEqual(['Range', false, 'chat about me'])
   const QUOTED_CHAT_SCAFFOLD = `${CHATTY}/1 #_chat/vault #_autodep\n<<user>> `
   const QUOTED_CHAT = `${QUOTED_CHAT_SCAFFOLD}"chat about me" `
   await expect.poll(editorState, { timeout: 10_000 }).toEqual({ value: QUOTED_CHAT, start: QUOTED_CHAT.length, end: QUOTED_CHAT.length })
@@ -2638,5 +2650,849 @@ test('a worker notification survives reload, holds clicks across startup and col
     }
   } finally {
     await swBrowser.close()
+  }
+})
+
+// pictures of selected-row states, written only where TASKS_SHOTS names a directory for them
+const TASKS_SHOTS = process.env.TASKS_SHOTS
+const taskShot = async (page: Page, name: string, clip?: { x: number; y: number; width: number; height: number }) => {
+  if (!TASKS_SHOTS) return
+  mkdirSync(TASKS_SHOTS, { recursive: true })
+  await page.screenshot({ path: resolve(TASKS_SHOTS, `${name}.png`), ...(clip ? { clip } : {}) })
+}
+
+// BIN BUTTONS, j/k ROW KEYS, SELECT-NEXT AFTER ACTIONS, AND SELECTED ROW BAR (2026-11-24):
+// runs in a desktop context with `hasTouch: false` (this spec's file-level `test.use` enables touch
+// for phase c4, which would otherwise make `(pointer: coarse)` true) so wide/narrow desktop layout
+// and mouse-sized corner buttons are genuinely exercised. The next row reuses BIN_USER on a
+// phone-sized coarse-pointer touch page.
+test('bin buttons on wide and narrow windows, j/k row keys, select-next after actions, and selected row bar', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, hasTouch: false })
+  const page = await context.newPage()
+  const dialogs: string[] = []
+  const errors: string[] = []
+  const answer = { accept: false }
+  page.on('dialog', dialog => {
+    dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+    void (dialog.type() == 'beforeunload' || answer.accept ? dialog.accept() : dialog.dismiss())
+  })
+  page.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(msg.text())))
+  page.on('pageerror', err => void errors.push(`pageerror: ${err.message}`))
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, BIN_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches), 'desktop context has fine pointer').toBe(false)
+    expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
+    expect(await install(page, 'key_buttons'), '/_install key_buttons').toBeNull()
+    expect(await install(page, 'vault'), '/_install vault').toBeNull()
+    const saved = () =>
+      expect
+        .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 })
+        .toBe(true)
+    await saved()
+    await page.reload()
+    await loaded(page)
+    // ignore transient dependency-order messages logged while /_install created items one by one
+    errors.length = 0
+    await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
+    await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both todoer widgets mounted', timeout: 30_000 }).toBe(2)
+    // fresh bridge status so #vault's sparkle is drawn on desktop too (#vault pulls in #status)
+    await page.evaluate(() => {
+      const s = window._item('#status', true) as any
+      const v = window._item('#vault', true) as any
+      s._global_store._status = { hosts: { e2e: { publisher: 'bridge', updated: Date.now() } } }
+      v._global_store._bridge = { host: 'e2e' }
+      ;(window as any)._vault_sparkle?.show?.()
+    })
+    await expect(page.locator('[data-vault-sparkle="node"]'), 'desktop sparkle visible').toBeVisible()
+    const desktopCorners = await page.evaluate(() => {
+      const box = (sel: string) => {
+        const r = document.querySelector(sel)!.getBoundingClientRect()
+        return [Math.round(window.innerWidth - r.right), Math.round(window.innerHeight - r.bottom), Math.round(r.width), Math.round(r.height)]
+      }
+      return { sparkle: box('[data-vault-sparkle="node"]'), reload: box('[data-key-buttons="reload"]') }
+    })
+    expect(desktopCorners, 'desktop corner buttons are 24 px, reload a group gap (18 px) left of sparkle').toEqual({
+      sparkle: [14, 10, 24, 24],
+      reload: [14 + 24 + 18, 10, 24, 24],
+    })
+
+    for (const text of ['#done completed items', '#bl_task\n#todo fix the cache', '#bl_other\n#todo write the release note', '#bl_third\n#todo a todo to delete', '#bl_note an item no list holds']) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    for (const name of ['#bl_task', '#bl_other', '#bl_third', '#bl_note']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    await expect.poll(() => page.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(3)
+    // ensure rows_since and bells_base baselines are recorded before creating the waiting reply chat and todo bell
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const st = (window._item('#todoer') as any)?._global_store
+            return (st?.rows_since ?? 0) > 0 && !!st?.bells_base
+          }),
+        { timeout: 30_000 },
+      )
+      .toBe(true)
+    const REPLY_CHAT = "#bl_reply/0 #_chat #_agent/vault\n<<user>> hi\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nThe reply.\n<!--/inert-->"
+    await page.evaluate(text => void window._create(text), REPLY_CHAT)
+    await expect.poll(() => savedId(page, '#bl_reply/0'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(4)
+
+    // #todoer's own page js_table shows no private bin-button definitions and introduces no missing tags
+    const todoerPage = await page.evaluate(() => {
+      const t = window._item('#todoer', true) as any
+      return { listsPrivate: /_BIN_BUTTONS|_bin_buttons/.test(t?.elem?.innerText ?? ''), missing: t?.missingTags ?? [] }
+    })
+    expect(todoerPage, '#todoer page has no leaked private bin-button definitions or missing tags').toEqual({ listsPrivate: false, missing: [] })
+
+    const guest = (name: string) => page.locator(`.key-buttons-guests > button[data-guest="${name}"]`)
+    const guestState = () =>
+      page.evaluate(() => {
+        const g = document.querySelector('.key-buttons-guests') as HTMLElement | null
+        const bg = document.querySelector('.key-buttons-bg') as HTMLElement | null
+        const floor = bg?.querySelector('.key-buttons-bg-floor') as HTMLElement | null
+        const strip = document.querySelector('.key-buttons-nav') as HTMLElement | null
+        const btns = [...(g?.children ?? [])] as HTMLElement[]
+        const last = btns[btns.length - 1]?.getBoundingClientRect()
+        const firstNav = strip?.children[0]?.getBoundingClientRect()
+        return {
+          hidden: g?.hidden ?? true,
+          cls: g?.className ?? null,
+          bgCls: bg?.className ?? null,
+          floorShown: !!floor && getComputedStyle(floor).display != 'none',
+          ownPiece: !!document.querySelector('.todoer-bin-buttons'),
+          names: btns.map(b => b.dataset.guest ?? ''),
+          titles: btns.map(b => b.title),
+          colors: Object.fromEntries(btns.map(b => [b.dataset.guest ?? '', getComputedStyle(b).color])),
+          gapToStrip: last && firstNav ? Math.round(firstNav.left - last.right) : null,
+        }
+      })
+    const mainRowNames = () =>
+      page.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+      })
+    const boxNow = () => page.evaluate(() => (window as any).MindBox.get().trim())
+    const unfocus = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    const itemText = (name: string) =>
+      page.evaluate(name => {
+        const it = (window as any).__items.find((i: any) => i.name == name)
+        return it ? { text: it.text, saved: it.savedText, editing: !!it.editing } : null
+      }, name)
+
+    // 1. j and k shortcuts + up/down buttons (Point 5)
+    const rows0 = await mainRowNames()
+    expect(rows0.length, 'four rows in main list').toBe(4)
+    expect(await page.evaluate(() => typeof (window as any)._on_key), '_on_key hook installed').toBe('function')
+    await userSet(page, '')
+    await expect.poll(() => guestState().then(s => s.hidden), { timeout: 5_000 }).toBe(true)
+    await unfocus()
+    await page.keyboard.press('j')
+    await expect.poll(boxNow, { message: 'plain j with no selection selects first row of main list', timeout: 5_000 }).toBe(rows0[0])
+    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'first row dims up and lights down', timeout: 5_000 }).toEqual([
+      'rgba(255, 255, 255, 0.25)',
+      'rgb(255, 255, 255)',
+    ])
+    await page.keyboard.press('k')
+    await page.waitForTimeout(200)
+    expect(await boxNow(), 'k at top of list stays on first row').toBe(rows0[0])
+    await page.keyboard.press('j')
+    await expect.poll(boxNow, { message: 'j steps to second row', timeout: 5_000 }).toBe(rows0[1])
+    await page.keyboard.press('k')
+    await expect.poll(boxNow, { message: 'k steps back to first row', timeout: 5_000 }).toBe(rows0[0])
+    await guest('down').click()
+    await expect.poll(boxNow, { message: 'down button steps to second row', timeout: 5_000 }).toBe(rows0[1])
+    await guest('up').click()
+    await expect.poll(boxNow, { message: 'up button steps back to first row', timeout: 5_000 }).toBe(rows0[0])
+    // empty box -> k selects last row of main list; j at bottom stays there
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await page.keyboard.press('k')
+    await expect.poll(boxNow, { message: 'plain k with no selection selects last row of main list', timeout: 5_000 }).toBe(rows0[3])
+    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'last row lights up and dims down', timeout: 5_000 }).toEqual([
+      'rgb(255, 255, 255)',
+      'rgba(255, 255, 255, 0.25)',
+    ])
+    await page.keyboard.press('j')
+    await page.waitForTimeout(200)
+    expect(await boxNow(), 'j at bottom of list stays on last row').toBe(rows0[3])
+    // unlisted item in box -> treated as no row selected for j/k; guests hidden
+    await userSet(page, '#bl_note')
+    await expect.poll(() => guestState().then(s => s.hidden), { message: 'unlisted item shows no bin buttons', timeout: 5_000 }).toBe(true)
+    await unfocus()
+    await page.keyboard.press('j')
+    await expect.poll(boxNow, { message: 'j with unlisted item selects first row of main list', timeout: 5_000 }).toBe(rows0[0])
+    // modifiers ignored; focused field keeps j
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await page.keyboard.press('Shift+J')
+    await page.keyboard.press('Control+j')
+    await page.waitForTimeout(200)
+    expect(await boxNow(), 'modified j/k do not select a row').toBe('')
+    await page.locator('.header .backdrop').first().click()
+    await expect(page.locator('#textarea-mindbox')).toBeFocused()
+    await page.keyboard.press('j')
+    expect(await boxNow(), 'focused MindBox keeps typed j').toBe('j')
+    await userSet(page, '')
+    await unfocus()
+
+    // 2. Selected row bar: 4 px #6c6 bar outside left edge (`box-shadow: -4px 0 0 0 #6c6`) over a
+    //    faint green tint with square left corners and ZERO layout change (first row beside the
+    //    item's number AND a later row); opaque #1a241a tint and transparent border when grabbed or
+    //    dragged; dashed placeholder without bar/tint and round corners; bin look without bar on
+    //    #171717 with round corners over a bin; translucent tag/mark backgrounds.
+    const mainWidget = page.locator('.todoer-widget').first()
+    const selectedItem = '.todoer-widget .list-item-container.selected > .list-item'
+    const laterIdx = rows0.indexOf('#bl_other')
+    expect(laterIdx, '#bl_other is a later row (not row 0)').toBeGreaterThan(0)
+    const measureRow = (rowIndex: number) =>
+      page.evaluate(idx => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)!
+        const list = main.querySelector('.list') as HTMLElement
+        const container = main.querySelectorAll('.list > .list-item-container')[idx] as HTMLElement
+        const item = container.querySelector('.list-item') as HTMLElement
+        const tag = item.querySelector('mark:not(.age):not(.waits)') as HTMLElement
+        const lr = list.getBoundingClientRect()
+        const ir = item.getBoundingClientRect()
+        const tr = tag.getBoundingClientRect()
+        const c = getComputedStyle(item)
+        const sc = main.closest('.super-container') as HTMLElement
+        const menu = sc.querySelector('.item-menu') as HTMLElement | null
+        const menuIdx = sc.querySelector('.item-menu > .index') as HTMLElement | null
+        const mr = menu?.getBoundingClientRect() ?? null
+        return {
+          selected: container.classList.contains('selected'),
+          listLeft: lr.left,
+          itemLeft: ir.left,
+          itemLeftInList: ir.left - lr.left,
+          itemWidth: ir.width,
+          tagLeft: tr.left,
+          tagLeftInList: tr.left - lr.left,
+          border: c.border,
+          margin: c.margin,
+          padding: c.padding,
+          menuPresent: !!menuIdx && (menuIdx.textContent ?? '').trim().length > 0,
+          besideNumber: mr ? ir.top < mr.bottom && ir.bottom > mr.top : false,
+        }
+      }, rowIndex)
+    const pinnedClip = (scroll: boolean) =>
+      page.evaluate(doScroll => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)!
+        const sc = main.closest('.super-container') as HTMLElement
+        if (doScroll) sc.scrollIntoView({ block: 'center' })
+        const r = sc.getBoundingClientRect()
+        const pad = 10
+        const x = Math.max(0, Math.floor(r.left - pad))
+        const y = Math.max(0, Math.floor(r.top - pad))
+        return {
+          x,
+          y,
+          width: Math.min(window.innerWidth - x, Math.ceil(r.width + 2 * pad)),
+          height: Math.min(window.innerHeight - y, Math.ceil(r.height + 2 * pad)),
+        }
+      }, scroll)
+    const rowStyle = (sel: string) =>
+      page.evaluate(sel => {
+        const el = document.querySelector(sel) as HTMLElement | null
+        if (!el) return null
+        const c = getComputedStyle(el)
+        const r = el.getBoundingClientRect()
+        return {
+          shadow: c.boxShadow,
+          bg: c.backgroundColor,
+          border: c.border,
+          borderColor: c.borderColor,
+          color: c.color,
+          radii: [c.borderTopLeftRadius, c.borderTopRightRadius, c.borderBottomRightRadius, c.borderBottomLeftRadius],
+          h: Math.round(r.height),
+        }
+      }, sel)
+
+    // Measure unselected vs selected on BOTH the first row (beside the item's number) and a later
+    // row (#bl_other): selecting moves neither the row's box (left edge, width) nor its first tag
+    await userSet(page, '#bl_other')
+    await expect
+      .poll(() => mainWidget.locator('.list-item-container').nth(laterIdx).evaluate(el => el.classList.contains('selected')), {
+        message: '#bl_other row marked selected',
+        timeout: 5_000,
+      })
+      .toBe(true)
+    const firstUnselected = await measureRow(0)
+    const laterSelected = await measureRow(laterIdx)
+    expect(firstUnselected.menuPresent && firstUnselected.besideNumber, 'first row stands beside the pinned item number').toBe(true)
+
+    await userSet(page, rows0[0]!)
+    await expect
+      .poll(() => mainWidget.locator('.list-item-container').nth(0).evaluate(el => el.classList.contains('selected')), {
+        message: 'first row marked selected',
+        timeout: 5_000,
+      })
+      .toBe(true)
+    const firstSelected = await measureRow(0)
+    const laterUnselected = await measureRow(laterIdx)
+    if (TASKS_SHOTS) {
+      console.log('TASKS_ROW_METRICS', JSON.stringify({ firstUnselected, firstSelected, laterUnselected, laterSelected }))
+    }
+
+    expect(
+      {
+        selected: firstSelected.selected,
+        itemLeft: firstSelected.itemLeft,
+        itemLeftInList: firstSelected.itemLeftInList,
+        itemWidth: firstSelected.itemWidth,
+        tagLeft: firstSelected.tagLeft,
+        tagLeftInList: firstSelected.tagLeftInList,
+        border: firstSelected.border,
+        margin: firstSelected.margin,
+        padding: firstSelected.padding,
+      },
+      'selecting the first row (beside the item number) moves neither its box nor its first tag',
+    ).toEqual({
+      selected: true,
+      itemLeft: firstUnselected.itemLeft,
+      itemLeftInList: firstUnselected.itemLeftInList,
+      itemWidth: firstUnselected.itemWidth,
+      tagLeft: firstUnselected.tagLeft,
+      tagLeftInList: firstUnselected.tagLeftInList,
+      border: firstUnselected.border,
+      margin: firstUnselected.margin,
+      padding: firstUnselected.padding,
+    })
+    expect(
+      {
+        selected: laterSelected.selected,
+        itemLeft: laterSelected.itemLeft,
+        itemLeftInList: laterSelected.itemLeftInList,
+        itemWidth: laterSelected.itemWidth,
+        tagLeft: laterSelected.tagLeft,
+        tagLeftInList: laterSelected.tagLeftInList,
+        border: laterSelected.border,
+        margin: laterSelected.margin,
+        padding: laterSelected.padding,
+      },
+      'selecting a later row moves neither its box nor its first tag',
+    ).toEqual({
+      selected: true,
+      itemLeft: laterUnselected.itemLeft,
+      itemLeftInList: laterUnselected.itemLeftInList,
+      itemWidth: laterUnselected.itemWidth,
+      tagLeft: laterUnselected.tagLeft,
+      tagLeftInList: laterUnselected.tagLeftInList,
+      border: laterUnselected.border,
+      margin: laterUnselected.margin,
+      padding: laterUnselected.padding,
+    })
+    await taskShot(page, 'bb3_selected_first_row', await pinnedClip(true))
+
+    await userSet(page, '#bl_other')
+    await expect
+      .poll(() => mainWidget.locator('.list-item-container').nth(laterIdx).evaluate(el => el.classList.contains('selected')), {
+        message: '#bl_other row re-selected for drag states',
+        timeout: 5_000,
+      })
+      .toBe(true)
+    const GREEN = 'rgb(102, 204, 102)' // #6c6
+    const GREEN_BAR = `${GREEN} -4px 0px 0px 0px`
+    const TINT = 'rgba(102, 204, 102, 0.1)'
+    const OPAQUE_TINT = 'rgb(26, 36, 26)' // #1a241a
+    const SQUARE_LEFT = ['0px', '4px', '4px', '0px']
+    const ROUND_ALL = ['4px', '4px', '4px', '4px']
+    const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+    const selStyle = (await rowStyle(selectedItem))!
+    expect(selStyle.shadow, 'selected row draws 4 px #6c6 bar outside left edge').toBe(GREEN_BAR)
+    expect(selStyle.bg, 'selected row paints faint green tint').toBe(TINT)
+    expect(selStyle.radii, 'selected row squares left corners and keeps right corners round').toEqual(SQUARE_LEFT)
+    expect(selStyle.border, 'selected row keeps unselected transparent dashed border').toBe(`1px dashed ${TRANSPARENT}`)
+    // grabbed (sortable-chosen before drag movement — set by class, as zz_binlook does)
+    await page.evaluate(() => document.querySelector('.todoer-widget .list-item-container.selected')!.classList.add('sortable-chosen'))
+    const grabbedStyle = (await rowStyle(selectedItem))!
+    expect(grabbedStyle, 'grabbed selected row keeps bar, opaque #1a241a tint, square left corners, and transparent border').toEqual({
+      shadow: GREEN_BAR,
+      bg: OPAQUE_TINT,
+      border: `1px solid ${TRANSPARENT}`,
+      borderColor: TRANSPARENT,
+      color: selStyle.color,
+      radii: SQUARE_LEFT,
+      h: selStyle.h,
+    })
+    await page.evaluate(() => document.querySelector('.todoer-widget .list-item-container.selected')!.classList.remove('sortable-chosen'))
+    // real drag of selected row: verify dragged clone keeps bar/opaque tint/transparent border/square left,
+    // ghost drops bar & tint with round corners and dashed #666 border, and hovering done/snooze bins
+    // drops bar, restores #171717 background and round corners, and adopts bin colour (#6f6 / #fa4)
+    await pinnedClip(true)
+    let dragging = false
+    for (let attempt = 0; attempt < 5 && !dragging; attempt++) {
+      const box = (await mainWidget.locator('.list-item-container.selected').boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      await page.mouse.down()
+      await page.waitForTimeout(400)
+      await page.mouse.move(box.x + box.width / 2 + 10, box.y + box.height / 2 + 8, { steps: 5 })
+      dragging = /dragging/.test((await mainWidget.getAttribute('class')) ?? '')
+      if (!dragging) {
+        await page.mouse.up()
+        await page.waitForTimeout(400)
+      }
+    }
+    expect(dragging, 'selected row entered real drag').toBe(true)
+    const dragCloneStyle = await rowStyle('.todoer-widget .list-item-container.selected.sortable-drag > .list-item')
+    const ghostStyle = await rowStyle('.todoer-widget .list-item-container.selected.sortable-ghost > .list-item')
+    expect(
+      [dragCloneStyle?.shadow, dragCloneStyle?.bg, dragCloneStyle?.borderColor, dragCloneStyle?.radii],
+      'real dragged clone keeps bar, opaque #1a241a tint, square left corners, and transparent border',
+    ).toEqual([GREEN_BAR, OPAQUE_TINT, TRANSPARENT, SQUARE_LEFT])
+    expect(
+      [ghostStyle?.border, ghostStyle?.shadow, ghostStyle?.bg, ghostStyle?.radii],
+      'real ghost placeholder shows dashed #666 border, round corners, no bar, and no tint',
+    ).toEqual(['1px dashed rgb(102, 102, 102)', 'none', TRANSPARENT, ROUND_ALL])
+    await taskShot(page, 'bb3_selected_dragged', await pinnedClip(false))
+    const doneBinBox = (await mainWidget.locator('.bin.done').boundingBox())!
+    await page.mouse.move(doneBinBox.x + doneBinBox.width / 2, doneBinBox.y + doneBinBox.height / 2, { steps: 10 })
+    await expect
+      .poll(
+        () =>
+          rowStyle('.todoer-widget .list-item-container.selected.sortable-drag > .list-item').then(s => [
+            s?.border,
+            s?.color,
+            s?.shadow,
+            s?.bg,
+            s?.radii,
+          ]),
+        {
+          message: 'selected clone over done bin adopts #6f6 colour, #171717 background, round corners, and drops bar',
+          timeout: 5_000,
+        },
+      )
+      .toEqual(['1px solid rgb(102, 255, 102)', 'rgb(102, 255, 102)', 'none', 'rgb(23, 23, 23)', ROUND_ALL])
+    await taskShot(page, 'bb3_selected_on_bin', await pinnedClip(false))
+    const snoozeBinBox = (await mainWidget.locator('.bin.snooze').boundingBox())!
+    await page.mouse.move(snoozeBinBox.x + snoozeBinBox.width / 2, snoozeBinBox.y + snoozeBinBox.height / 2, { steps: 10 })
+    await expect
+      .poll(
+        () =>
+          rowStyle('.todoer-widget .list-item-container.selected.sortable-drag > .list-item').then(s => [
+            s?.border,
+            s?.color,
+            s?.shadow,
+            s?.bg,
+            s?.radii,
+          ]),
+        {
+          message: 'selected clone over snooze bin adopts #fa4 colour, #171717 background, round corners, and drops bar',
+          timeout: 5_000,
+        },
+      )
+      .toEqual(['1px solid rgb(255, 170, 68)', 'rgb(255, 170, 68)', 'none', 'rgb(23, 23, 23)', ROUND_ALL])
+    // return to list and release so #bl_other stays untouched in main list
+    const listBox = (await mainWidget.locator('.list').boundingBox())!
+    await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + listBox.height / 2, { steps: 10 })
+    await page.mouse.up()
+    await expect.poll(() => mainWidget.evaluate(el => el.classList.contains('dragging')), { timeout: 5_000 }).toBe(false)
+
+    // 3. Bell rule (Points 1 & 4): a reply row's bell removes its row and selects the next row;
+    //    a todo row's bell clears its bell while keeping its row and leaving selection unchanged
+    await userSet(page, '#bl_reply/0')
+    await expect.poll(() => guestState().then(s => s.names), { message: 'reply row gets up, down, bell, done, cancel only', timeout: 5_000 }).toEqual([
+      'up', 'down', 'bell', 'done', 'cancel',
+    ])
+    expect((await guestState()).colors.bell, 'bell button is yellow #ff6').toBe('rgb(255, 255, 102)')
+    await expect.poll(() => mainWidget.locator('.list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
+    const rowsBeforeReplyBell = await mainRowNames()
+    const replyIdx = rowsBeforeReplyBell.indexOf('#bl_reply/0')
+    const expectedAfterReplyBell = rowsBeforeReplyBell[replyIdx + 1] ?? rowsBeforeReplyBell[replyIdx - 1]
+    await guest('bell').click()
+    await expect.poll(() => mainWidget.locator('.list-item-container[data-waits="reply"]').count(), { message: 'bell button clears reply row', timeout: 10_000 }).toBe(0)
+    await expect.poll(boxNow, { message: 'clearing a reply row bell selects the next row', timeout: 10_000 }).toBe(expectedAfterReplyBell)
+
+    // todo row with a bell (staged via projection surfaced=1, as in WAITS_USER row): bell clears while row and selection stay
+    const taskSavedId = (await savedId(page, '#bl_task'))!
+    const taskStoreDoc = (await storeDocId(`global_store_${taskSavedId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-task'
+    await writeStore(
+      taskStoreDoc,
+      `global_store_${taskSavedId}`,
+      { _agent: { state: { held: 'owner', reason: 'question', epoch: 1, rev: 2, surfaced: 1, updated: Date.now() } } },
+      BIN_USER,
+      BIN_SECRET,
+    )
+    const taskRow = mainWidget.locator('.list-item-container', { hasText: 'fix the cache' })
+    await expect(taskRow.locator('mark.waits'), 'todo row shows question bell').toHaveText('question', { timeout: 30_000 })
+    await userSet(page, '#bl_task')
+    await expect.poll(() => guestState().then(s => s.names), { message: 'todo with bell shows bell button before bins', timeout: 5_000 }).toEqual([
+      'up', 'down', 'bell', 'agent', 'done', 'snooze', 'cancel',
+    ])
+    await guest('bell').click()
+    await expect(taskRow.locator('mark.waits'), 'bell button clears todo bell').toHaveCount(0, { timeout: 15_000 })
+    await expect(taskRow, 'todo row stays in main list after bell clear').toHaveCount(1)
+    await expect.poll(() => guestState().then(s => s.names), { message: 'bell button disappears once cleared', timeout: 5_000 }).toEqual([
+      'up', 'down', 'agent', 'done', 'snooze', 'cancel',
+    ])
+    expect(await boxNow(), 'clearing a todo row bell leaves that todo selected').toBe('#bl_task')
+
+    // 4. Wide desktop todo bin buttons, snooze picker cancel, open-editor draft guard, and done button + select-next
+    await userSet(page, '#bl_task')
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    const wideTodo = await guestState()
+    expect(
+      [wideTodo.cls, wideTodo.bgCls, wideTodo.floorShown, wideTodo.ownPiece, wideTodo.gapToStrip, wideTodo.colors.snooze],
+      'wide window shows inline guest buttons group-gap from strip, orange snooze, no fallback piece',
+    ).toEqual(['key-buttons-guests', 'key-buttons-bg desktop split', false, false, 18, 'rgb(255, 170, 68)'])
+    // snooze button opens picker; closing without time snoozes nothing and keeps selection
+    await guest('snooze').click()
+    await expect(page.locator('.snooze-modal'), 'snooze button opens picker').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._modal_close())
+    await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 5_000 })
+    expect(await boxNow(), 'declined snooze keeps selection').toBe('#bl_task')
+    // open #bl_task in its editor: draft refuses done, reverting to saved text allows done and selects next row
+    const rowsBeforeDone = await mainRowNames()
+    const taskIdx = rowsBeforeDone.indexOf('#bl_task')
+    const expectedAfterDone = rowsBeforeDone[taskIdx + 1] ?? rowsBeforeDone[taskIdx - 1]
+    await expect(page.locator('.container.target')).toBeVisible({ timeout: 5_000 })
+    await unfocus()
+    await page.keyboard.press('Enter')
+    const editor = page.locator('.super-container .container.editing textarea').first()
+    await expect(editor, '#bl_task editor opened').toBeVisible({ timeout: 5_000 })
+    await editor.focus()
+    await editor.evaluate(el => {
+      const ta = el as HTMLTextAreaElement
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    })
+    await page.keyboard.type(' typed since')
+    const dlgBefore = dialogs.length
+    await guest('done').click()
+    await expect.poll(() => dialogs.slice(dlgBefore), { message: 'done refused with unsaved draft', timeout: 5_000 }).toEqual([
+      'alert: can not complete #bl_task with unsaved changes: save or cancel your edit first',
+    ])
+    expect((await itemText('#bl_task'))?.saved, 'item stayed #todo while draft stood').toContain('#todo')
+    expect(await boxNow(), 'refused done keeps selection').toBe('#bl_task')
+    // revert editor to saved text (nothing typed differs) -> done succeeds and selects next row
+    await page.keyboard.press('ControlOrMeta+a')
+    await page.keyboard.type('#bl_task\n#todo fix the cache')
+    await guest('done').click()
+    await expect.poll(() => itemText('#bl_task').then(t => t?.saved ?? ''), { message: 'done with no unsaved diff completes and saves', timeout: 15_000 }).toContain('#done')
+    await expect.poll(boxNow, { message: 'done button selects next row in list', timeout: 10_000 }).toBe(expectedAfterDone)
+    await page.keyboard.press('Escape')
+
+    // 5. Delegate via button -> selects next row with a history step (Back returns to delegated item);
+    //    delegated list buttons & narrow window second row (430 px)
+    //    Select #bl_note (final: true), then userSet #bl_other (pushed as a non-final entry on top of #bl_note)
+    //    so #bl_other is the sole entry at the top; _delegate's write keeps it in place, and carried _select_next
+    //    pushes #bl_third as its own step so Back returns to #bl_other (without carry it overwrites #bl_other and Back lands on #bl_note)
+    await asUser(page, () => (window._item('#bl_note', true) as any)!.select())
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('#bl_note')
+    await userSet(page, '#bl_other')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('#bl_other')
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    const histIdxBeforeDelegate = await page.evaluate(() => (history.state?.index as number | undefined) ?? -1)
+    // yield one macrotask before enqueue resolves so the click event dispatch has finished
+    // (eventPhase === 0) when _select_next settles, just as WebCrypto v1 / real async waits do
+    await page.evaluate(() => {
+      const w = window as any
+      const orig = w._enqueue_hidden_document
+      w.__orig_enqueue_hidden_document = orig
+      w._enqueue_hidden_document = async (...args: unknown[]) => {
+        await new Promise(r => setTimeout(r, 30))
+        return orig(...args)
+      }
+    })
+    try {
+      await guest('agent').click()
+      await expect.poll(() => boxNow(), { message: 'delegate button selects remaining main row (#bl_third)', timeout: 15_000 }).toBe('#bl_third')
+      await expect.poll(() => page.locator('.todoer-widget').nth(1).locator('.list-item-container').count(), { message: '#bl_other moved to delegated list', timeout: 15_000 }).toBe(1)
+    } finally {
+      await page.evaluate(() => {
+        const w = window as any
+        if (w.__orig_enqueue_hidden_document) {
+          w._enqueue_hidden_document = w.__orig_enqueue_hidden_document
+          delete w.__orig_enqueue_hidden_document
+        }
+      })
+    }
+    expect(
+      await page.evaluate(() => (history.state?.index as number | undefined) ?? -1),
+      'carried next-row selection after delegate added a history step',
+    ).toBeGreaterThan(histIdxBeforeDelegate)
+    await page.goBack()
+    await expect.poll(boxNow, { message: 'Back returns to the delegated item (#bl_other)', timeout: 10_000 }).toBe('#bl_other')
+    await expect.poll(() => guestState().then(s => [s.names, s.titles[3]]), { message: 'delegated row has take-back button', timeout: 5_000 }).toEqual([
+      ['up', 'down', 'agent', 'owner'],
+      'Take back from the agent',
+    ])
+    // translucent white backgrounds on a row's tag (0.07) and age mark (0.04) so they adapt to the tint
+    const markBgs = await page.evaluate(() => {
+      const row = document.querySelectorAll('.todoer-widget')[1]?.querySelector('.list-item') as HTMLElement | null
+      const tag = row?.querySelector('mark:not(.age):not(.waits)') as HTMLElement | null
+      const age = row?.querySelector('mark.age') as HTMLElement | null
+      return [tag ? getComputedStyle(tag).backgroundColor : null, age ? getComputedStyle(age).backgroundColor : null]
+    })
+    expect(markBgs, 'row tag and age mark use translucent white backgrounds').toEqual([
+      'rgba(255, 255, 255, 0.07)',
+      'rgba(255, 255, 255, 0.04)',
+    ])
+    // narrow window (430 px): second row above bottom bar at left edge, clickable at elementFromPoint
+    await page.setViewportSize({ width: 430, height: 800 })
+    await expect.poll(() => guestState().then(s => [s.cls, s.bgCls, s.floorShown]), { message: 'narrow window puts bin buttons on second row', timeout: 5_000 }).toEqual([
+      'key-buttons-guests floor',
+      'key-buttons-bg desktop floor',
+      true,
+    ])
+    const floorHit = await page.evaluate(() => {
+      const b = document.querySelector('.key-buttons-guests > button[data-guest="owner"]')!.getBoundingClientRect()
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) as HTMLElement | null
+      return hit?.closest('button')?.getAttribute('data-guest') ?? null
+    })
+    expect(floorHit, 'second-row owner button is reachable at its centre').toBe('owner')
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await expect.poll(() => guestState().then(s => [s.cls, s.floorShown]), { message: 'widening returns bin buttons inline', timeout: 5_000 }).toEqual(['key-buttons-guests', false])
+
+    // give the delegated list a second row and verify pressing agent on the first row enqueues
+    // one command and keeps selection on the first row (does not advance to the second)
+    await page.evaluate(() => void window._create('#bl_del2\n#todo second delegated todo'))
+    await expect.poll(() => savedId(page, '#bl_del2'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => mainRowNames().then(r => r.includes('#bl_del2')), { timeout: 15_000 }).toBe(true)
+    await userSet(page, '#bl_del2')
+    // (the MAIN row's buttons, with done among them: the delegated row selected before has an agent button
+    // too, and a press on its buttons while the box names another item is refused, as it should be)
+    await expect.poll(() => guestState().then(s => s.names.includes('agent') && s.names.includes('done')), { timeout: 5_000 }).toBe(true)
+    await guest('agent').click()
+    await expect.poll(() => page.locator('.todoer-widget').nth(1).locator('.list-item-container').count(), { message: 'delegated list holds two rows', timeout: 15_000 }).toBe(2)
+    const delRowNames = await page.evaluate(() => {
+      const del = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !!w._delegated)
+      return [...(del?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+    })
+    expect(delRowNames.length, 'two rows in delegated list').toBe(2)
+    await userSet(page, delRowNames[0]!)
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'owner'])
+    await page.evaluate(() => {
+      const w = window as any
+      const orig = w._enqueue_hidden_document
+      w.__orig_redel_enqueue = orig
+      w.__redel_enq = 0
+      w._enqueue_hidden_document = async (...args: unknown[]) => {
+        w.__redel_enq++
+        return orig(...args)
+      }
+    })
+    try {
+      await guest('agent').click()
+      await expect
+        .poll(() => page.evaluate(() => [(window as any).__redel_enq, !!(window as any)._todoer_bin_busy]), { message: 're-delegate enqueued once and settled', timeout: 15_000 })
+        .toEqual([1, false])
+    } finally {
+      await page.evaluate(() => {
+        const w = window as any
+        if (w.__orig_redel_enqueue) {
+          w._enqueue_hidden_document = w.__orig_redel_enqueue
+          delete w.__orig_redel_enqueue
+        }
+        delete w.__redel_enq
+      })
+    }
+    expect(await boxNow(), 're-delegating first of two delegated rows keeps selection on it').toBe(delRowNames[0])
+
+    // 6. Delete button on a todo WITHOUT a unique label (as `/todo buy milk` makes with other
+    //    todos present): asks confirmation; Cancel keeps the row and selection; accepting deletes
+    //    it and selects the next row; real drag to done bin also selects next row
+    const UNNAMED_DEL = '#todo delete via button'
+    const UNNAMED_PEER = '#todo unnamed peer todo'
+    for (const text of [UNNAMED_DEL, UNNAMED_PEER, '#bl_drag_a\n#todo drag next target', '#bl_drag_b\n#todo drag to done']) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    const findByText = (needle: string) =>
+      page.evaluate(needle => {
+        const it = (window as any).__items.find((i: any) => i.text === needle)
+        return it ? { id: it.id as string, savedId: (it.savedId ?? '') as string, name: it.name as string, labelUnique: !!it.labelUnique } : null
+      }, needle)
+    await expect.poll(() => findByText(UNNAMED_DEL).then(it => it?.savedId ?? ''), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => findByText(UNNAMED_PEER).then(it => it?.savedId ?? ''), { timeout: 30_000 }).toBeTruthy()
+    for (const name of ['#bl_drag_a', '#bl_drag_b']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    const delTodo = (await findByText(UNNAMED_DEL))!
+    expect(delTodo.labelUnique, 'delete-button fixture todo has no unique label').toBe(false)
+    const delRef = 'id:' + delTodo.savedId
+    const mainRowIds = () =>
+      page.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => r.getAttribute('data-id')!)
+      })
+    const selectedId = () => page.evaluate(() => window._item((window as any).MindBox.get().trim(), true)?.id ?? null)
+    await expect.poll(() => mainRowIds().then(r => r.length), { timeout: 15_000 }).toBe(5)
+    await userSet(page, delRef)
+    await expect.poll(() => guestState().then(s => s.names.includes('cancel')), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainWidget.locator('.list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
+    const delDlg0 = dialogs.length
+    answer.accept = false
+    await guest('cancel').click()
+    await expect.poll(() => dialogs.length, { message: 'delete button on unnamed todo asks confirmation', timeout: 5_000 }).toBeGreaterThan(delDlg0)
+    expect(dialogs[delDlg0], 'confirm dialog names the unnamed todo').toBe(`confirm: Delete ${delTodo.name}?`)
+    expect(await findByText(UNNAMED_DEL), 'declined delete keeps unnamed todo').not.toBeNull()
+    expect(await mainWidget.locator(`.list-item-container[data-id="${delTodo.id}"]`).count(), 'declined delete keeps the row in the list').toBe(1)
+    expect(await boxNow(), 'declined delete keeps selection on unnamed todo').toBe(delRef)
+    // read DOM order AFTER selecting the unnamed todo (selecting can re-rank) right before accepting delete
+    const rowsBeforeDel = await mainRowIds()
+    const delIdx = rowsBeforeDel.indexOf(delTodo.id)
+    const expectedAfterDelId = rowsBeforeDel[delIdx + 1] ?? rowsBeforeDel[delIdx - 1]
+    answer.accept = true
+    await guest('cancel').click()
+    answer.accept = false
+    await expect.poll(() => findByText(UNNAMED_DEL), { message: 'accepted delete removes unnamed todo', timeout: 15_000 }).toBeNull()
+    await expect.poll(selectedId, { message: 'accepted delete of unnamed todo selects next row', timeout: 10_000 }).toBe(expectedAfterDelId)
+
+    // real drag of #bl_drag_b to done bin selects its following/previous row
+    const dragBId = (await page.evaluate(() => window._item('#bl_drag_b', true)?.id ?? null))!
+    const rowsBeforeDrag = await mainRowIds()
+    const dragIdx = rowsBeforeDrag.indexOf(dragBId)
+    const expectedAfterDragId = rowsBeforeDrag[dragIdx + 1] ?? rowsBeforeDrag[dragIdx - 1]
+    await userSet(page, '')
+    await pinnedClip(true)
+    let dragDone = false
+    for (let attempt = 0; attempt < 5 && !dragDone; attempt++) {
+      const row = mainWidget.locator('.list-item-container', { hasText: 'drag to done' })
+      const box = (await row.boundingBox())!
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+      await page.mouse.down()
+      await page.waitForTimeout(400)
+      await page.mouse.move(box.x + box.width / 2 + 8, box.y + box.height / 2 + 4, { steps: 5 })
+      dragDone = /dragging/.test((await mainWidget.getAttribute('class')) ?? '')
+      if (!dragDone) {
+        await page.mouse.up()
+        await page.waitForTimeout(400)
+      }
+    }
+    expect(dragDone, '#bl_drag_b entered drag for done bin').toBe(true)
+    const doneBox2 = (await mainWidget.locator('.bin.done').boundingBox())!
+    await page.mouse.move(doneBox2.x + doneBox2.width / 2, doneBox2.y + doneBox2.height / 2, { steps: 15 })
+    await expect.poll(() => mainWidget.locator('.bin.done .list-item-container').count(), { message: '#bl_drag_b hovered over done bin', timeout: 5_000 }).toBe(1)
+    await page.mouse.up()
+    await expect.poll(() => itemText('#bl_drag_b').then(t => t?.saved ?? ''), { message: 'real drag to done bin completed #bl_drag_b', timeout: 15_000 }).toContain('#done')
+    await expect.poll(selectedId, { message: 'real drag to done bin selects next row', timeout: 10_000 }).toBe(expectedAfterDragId)
+    await saved()
+    expect(errors, 'no console errors or pageerrors on desktop bin-buttons row').toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+// PHONE TOUCH PAGE (Points 1, 2, 4): reuses BIN_USER as a returning device on a coarse-pointer
+// 390x844 phone viewport. Verifies both corner buttons (reload and #vault sparkle) are 32 px
+// centred on desktop's 24 px points, bin buttons sit on a second row lined up with reload,
+// hide while a keyboard is up, and a tap on done completes the todo and selects the next row.
+test('bin buttons on a phone touch page: 32 px corner buttons, second row lined up with reload, keyboard hide, and tap on done selects next', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true })
+  const page = await context.newPage()
+  const errors: string[] = []
+  page.on('dialog', dialog => void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss()))
+  page.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(msg.text())))
+  page.on('pageerror', err => void errors.push(`pageerror: ${err.message}`))
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(secret => {
+      localStorage.setItem('mindpage_github_token', 'e2e-local')
+      localStorage.setItem('mindpage_secret', secret)
+      localStorage.setItem('mindpage_kdf', 'off')
+    }, BIN_SECRET)
+    await signIn(page, BIN_USER)
+    await loaded(page)
+    await expect.poll(() => page.locator('.todoer-widget').count(), { timeout: 30_000 }).toBeGreaterThan(0)
+    await page.evaluate(() => {
+      const s = window._item('#status', true) as any
+      const v = window._item('#vault', true) as any
+      s._global_store._status = { hosts: { e2e: { publisher: 'bridge', updated: Date.now() } } }
+      v._global_store._bridge = { host: 'e2e' }
+      ;(window as any)._vault_sparkle?.show?.()
+    })
+    await expect(page.locator('[data-vault-sparkle="node"]'), 'phone sparkle visible').toBeVisible()
+    await expect(page.locator('[data-key-buttons="reload"]'), 'phone reload visible').toBeVisible()
+    const corners = await page.evaluate(() => {
+      const r = document.querySelector('[data-key-buttons="reload"]')!.getBoundingClientRect()
+      const s = document.querySelector('[data-vault-sparkle="node"]')!.getBoundingClientRect()
+      return {
+        coarse: matchMedia('(pointer: coarse)').matches,
+        reload: [Math.round(r.left), Math.round(window.innerHeight - r.bottom), Math.round(r.width), Math.round(r.height)],
+        sparkle: [Math.round(window.innerWidth - s.right), Math.round(window.innerHeight - s.bottom), Math.round(s.width), Math.round(s.height)],
+      }
+    })
+    expect(corners, 'coarse-pointer phone shows both corner buttons at 32 px centred on desktop (26, 22)').toEqual({
+      coarse: true,
+      reload: [10, 6, 32, 32],
+      sparkle: [10, 6, 32, 32],
+    })
+
+    for (const text of ['#bl_phone_1\n#todo first phone todo', '#bl_phone_2\n#todo second phone todo']) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    for (const name of ['#bl_phone_1', '#bl_phone_2']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    const rowsNow = () =>
+      page.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+      })
+    await expect.poll(() => rowsNow().then(r => r.includes('#bl_phone_1') && r.includes('#bl_phone_2')), { timeout: 15_000 }).toBe(true)
+    await userSet(page, '#bl_phone_1')
+    const guests = page.locator('.key-buttons-guests')
+    await expect(guests, 'second-row bin buttons visible on phone').toBeVisible({ timeout: 5_000 })
+    await expect.poll(() => page.locator('.todoer-widget .list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
+    const phoneLayout = await page.evaluate(() => {
+      const g = document.querySelector('.key-buttons-guests') as HTMLElement
+      const r = document.querySelector('[data-key-buttons="reload"]')!.getBoundingClientRect()
+      const gr = g.getBoundingClientRect()
+      const floor = document.querySelector('.key-buttons-bg > .key-buttons-bg-floor') as HTMLElement
+      const fr = floor.getBoundingClientRect()
+      return {
+        cls: g.className,
+        linedUp: Math.round(gr.left) === Math.round(r.left) && Math.round(gr.left) === 10,
+        bottom: Math.round(window.innerHeight - gr.bottom),
+        btnSizes: [...g.children].map(b => [Math.round(b.getBoundingClientRect().width), Math.round(b.getBoundingClientRect().height)]),
+        floorShown: getComputedStyle(floor).display != 'none',
+        floorBottom: Math.round(window.innerHeight - fr.bottom),
+        floorHeight: Math.round(fr.height),
+      }
+    })
+    expect(phoneLayout, 'phone second row lines up with 32 px reload button at left 10, bottom 50, with 32 px buttons and glass floor').toEqual({
+      cls: 'key-buttons-guests floor touch',
+      linedUp: true,
+      bottom: 50,
+      btnSizes: Array(6).fill([32, 32]),
+      floorShown: true,
+      floorBottom: 44,
+      floorHeight: 44,
+    })
+
+    // simulated on-screen keyboard hides the bin buttons along with the main bar; closing brings them back
+    await page.locator('.header .backdrop').first().click()
+    await expect(page.locator('#textarea-mindbox')).toBeFocused()
+    await page.evaluate(() => {
+      const view = window.visualViewport!
+      Object.defineProperty(view, 'height', { configurable: true, get: () => window.innerHeight - 336 })
+      view.dispatchEvent(new Event('resize'))
+    })
+    await expect(guests, 'bin buttons hide while on-screen keyboard is up').toBeHidden({ timeout: 5_000 })
+    await page.evaluate(() => {
+      const view = window.visualViewport!
+      delete (view as any).height
+      view.dispatchEvent(new Event('resize'))
+      ;(document.activeElement as HTMLElement | null)?.blur?.()
+    })
+    await expect(guests, 'bin buttons return when keyboard closes').toBeVisible({ timeout: 5_000 })
+
+    // real tap on done button completes #bl_phone_1 and selects the next row
+    const phoneRows = await rowsNow()
+    const p1Idx = phoneRows.indexOf('#bl_phone_1')
+    const expectedNext = phoneRows[p1Idx + 1] ?? phoneRows[p1Idx - 1]
+    await page.locator('.key-buttons-guests > button[data-guest="done"]').tap({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => window._item('#bl_phone_1', true)?.text ?? ''), { message: 'tap on done completed #bl_phone_1', timeout: 15_000 }).toContain('#done')
+    await expect.poll(() => page.evaluate(() => (window as any).MindBox.get().trim()), { message: 'tap on done selected next row on phone', timeout: 10_000 }).toBe(expectedNext)
+    expect(errors, 'no console errors or pageerrors on phone bin-buttons row').toEqual([])
+  } finally {
+    await context.close()
   }
 })
