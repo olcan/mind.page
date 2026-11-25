@@ -1246,6 +1246,89 @@ test('the run button works on an installed item whose input blocks are all hidde
   const runText = await page.evaluate(() => window._item('#e2e_hidden_input/run', true)?.text ?? '')
   expect(runText).toContain('js_input_removed')
   expect(runText).not.toContain('_removed_removed')
+  // Run from the item's EDITOR runs the input the editor shows, also after an edit was kept (Close, then
+  // Cancel at the discard question, which leaves the draft in the editor alone): the run item gets the
+  // changed input, the installed item keeps its text, its editor the draft and its stored document the old input
+  const tab = await page.evaluate(() => window._item('#e2e_hidden_input', true)!.id)
+  await page.evaluate(() => void ((window._item('#e2e_hidden_input', true) as any).editable = true)) // as /_edit does
+  await page.evaluate(() => void (location.hash = '#e2e_hidden_input'))
+  await page.locator(`#item-${tab} p`).first().click()
+  const editor = page.locator(`#textarea-${tab}`)
+  await expect(editor).toBeVisible({ timeout: 10_000 })
+  await editor.fill((await editor.inputValue()).replace('1 + 1', '2 + 1'))
+  const menu = page.locator(`#super-container-${tab} .edit-menu`)
+  await menu.locator('.button.cancel').click()
+  await expect(page.getByText('Discard unsaved changes to #e2e_hidden_input?')).toBeVisible({ timeout: 10_000 })
+  await page.locator('.modal .button.cancel').click()
+  await expect(page.locator('.modal')).toBeHidden({ timeout: 10_000 })
+  await menu.locator('.button.run').click()
+  await expect.poll(() => page.evaluate(() => window._item('#e2e_hidden_input/run', true)?.text ?? ''), { message: 'the run item got the input the editor shows', timeout: 15_000 }).toContain('2 + 1')
+  const kept = () => page.evaluate(id => ((item: any) => [!!item.editing, (item.text as string).includes('1 + 1'), (item.editorText as string).includes('2 + 1')])((window as any).__items.find((item: any) => item.id == id)), tab)
+  expect(await kept(), 'the installed item keeps its text, and its open editor the draft').toEqual([true, true, true])
+  expect((await firestore().collection('items').doc(id!).get()).data()?.text, 'its stored document keeps the old input').toContain('1 + 1')
+  // an INDIRECT run of the installed item, its editor still open with the draft: the Option-run of an item
+  // that depends on it runs its runnable dependencies first (an autorun enters the same way). It was not
+  // asked for from THAT editor (it is asked for from the other item's own editor here, whose mark must not
+  // reach its dependencies), so it runs the SAVED input: the run item's input goes back to `1 + 1` (which
+  // also shows that the run happened), and the draft stays in the editor
+  const inputs = () => page.evaluate(() => ((text: string) => [text.includes('1 + 1'), text.includes('2 + 1')])(window._item('#e2e_hidden_input/run', true)?.text ?? ''))
+  expect(await inputs(), 'premise: the run item holds the changed input alone').toEqual([false, true])
+  await page.evaluate(() => void window._create(['#e2e_hidden_user #_e2e_hidden_input', '```js_input', '0', '```'].join('\n')))
+  await expect.poll(() => savedId(page, '#e2e_hidden_user'), { timeout: 30_000 }).toBeTruthy()
+  const user = await page.evaluate(() => window._item('#e2e_hidden_user', true)!.id)
+  await page.evaluate(() => void (location.hash = '#e2e_hidden_user'))
+  await page.locator(`#item-${user} p`).first().click()
+  await expect(page.locator(`#textarea-${user}`)).toBeVisible({ timeout: 10_000 })
+  await page.locator(`#super-container-${user} .edit-menu .button.run`).click({ modifiers: ['Alt'] })
+  await expect.poll(inputs, { message: 'the indirect run gave the run item the saved input again', timeout: 15_000 }).toEqual([true, false])
+  expect(await kept(), "the draft is still in the installed item's open editor").toEqual([true, true, true])
+  // a Run that WAITS is the run of the edit it was asked on, or no run at all. A second installed item
+  // with a dependency whose run waits for the row: Option-run from its editor on the draft `2 + 1`; while
+  // the dependency waits, that edit is discarded and a new one typed (`3 + 1`); released, the Option-run
+  // ends WITHOUT running the installed item: no run item is made, neither with the input nobody ran
+  // (`3 + 1`) nor with the discarded one
+  type Held = { __hidden_ran?: string[]; __hidden_hold: Promise<void>; __hidden_release: () => void }
+  await page.evaluate(async () => {
+    await window._create(['#e2e_hidden_wait a dependency whose run waits for the row', '```js_input', ';(window.__hidden_ran ??= []).push(_this.name)', 'return window.__hidden_hold', '```'].join('\n'))
+    await window._create(['#e2e_hidden_held #_e2e_hidden_wait an installed item run from its editor', '```js_input_removed', '1 + 1', '```'].join('\n'))
+  })
+  await expect.poll(async () => [!!(await savedId(page, '#e2e_hidden_wait')), !!(await savedId(page, '#e2e_hidden_held'))], { timeout: 30_000 }).toEqual([true, true])
+  await firestore()
+    .collection('items')
+    .doc((await savedId(page, '#e2e_hidden_held'))!)
+    .update({ attr: { source: 'https://github.com/olcan/mind.items/blob/master/e2e_held.md' } })
+  await page.reload()
+  await waitForApp(page)
+  const held = await page.evaluate(() => window._item('#e2e_hidden_held', true)!.id)
+  await page.evaluate(() => {
+    const w = window as unknown as Held
+    w.__hidden_ran = []
+    w.__hidden_hold = new Promise(resolve => (w.__hidden_release = resolve))
+    ;(window._item('#e2e_hidden_held', true) as any).editable = true // as /_edit does
+    location.hash = '#e2e_hidden_held'
+  })
+  const heldEditor = page.locator(`#textarea-${held}`)
+  const heldMenu = page.locator(`#super-container-${held} .edit-menu`)
+  const typedInput = async (input: string) => {
+    await page.locator(`#item-${held} p`).first().click()
+    await expect(heldEditor).toBeVisible({ timeout: 10_000 })
+    await heldEditor.fill((await heldEditor.inputValue()).replace('1 + 1', input))
+  }
+  await typedInput('2 + 1')
+  await heldMenu.locator('.button.run').click({ modifiers: ['Alt'] })
+  await expect.poll(() => page.evaluate(() => (window as unknown as Held).__hidden_ran), { message: "the dependency's run has begun and waits", timeout: 15_000 }).toEqual(['#e2e_hidden_wait'])
+  await heldMenu.locator('.button.cancel').click()
+  await expect(page.getByText('Discard unsaved changes to #e2e_hidden_held?')).toBeVisible({ timeout: 10_000 })
+  await page.locator('.modal .button.confirm').click()
+  await expect(heldEditor).toBeHidden({ timeout: 10_000 })
+  await typedInput('3 + 1')
+  await page.evaluate(() => (window as unknown as Held).__hidden_release())
+  await expect.poll(() => page.evaluate(id => !!(window as any).__items.find((item: any) => item.id == id).running, held), { message: 'the Option-run is over', timeout: 15_000 }).toBe(false)
+  expect(
+    await page.evaluate(id => ((item: any) => [window._exists('#e2e_hidden_held/run'), !!item.editing, (item.text as string).includes('1 + 1'), (item.editorText as string).includes('3 + 1')])((window as any).__items.find((item: any) => item.id == id)), held),
+    'no run item was made: the edit the run was asked on is gone, and the new one was not run; it stays in its editor'
+  ).toEqual([false, true, true, true])
+  expect(errors.filter(e => e.includes('TypeError'))).toEqual([])
 })
 
 test('a code comment link reaches the app handler with its url as written', async ({ page }) => {

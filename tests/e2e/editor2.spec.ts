@@ -787,6 +787,612 @@ test('a name that is no label, that an item is labeled with already or that is #
   }
 })
 
+test('the create key seeds non-collapsed page text selected outside editable fields as an unsaved draft in a new child editor, leaving the initial stored document at the scaffold, preserving characters verbatim on save, skipping macro eval while open, and quoting nothing for editable fields, empty selections, non-child or non-editing creations', async ({ page }) => {
+  await deleteNamed()
+  await loadAdmin(page)
+  const OTHER = '#e2e_cn_other'
+  const PARENT = `${OTHER}/sub`
+  const RAW_PARENT = '#e2e_cn_raw'
+  const LITERAL = 'R&D #e2e_lit <details open></details> <<1+1>>'
+  const MACRO = '<<window.__e2e_quote_macro=1>>'
+  const texts = [
+    `${PARENT} hello world and plain text`,
+    `${OTHER} context item\n\nplain paragraph\n\nfirst "inner" line\n\nsecond &#8203; line\n\n<input type="text" class="e2e-w-in" value="widget input">\n<div class="e2e-w-ce" contenteditable="true">editable div</div>`,
+    'e2e_cn unnamed note with before dialog',
+    'e2e_cn unnamed note for save dialog',
+    `${RAW_PARENT}\n\n\`\`\` \\${MACRO} \`\`\`\n\n<!--inert-->\n\`${LITERAL}\`\n\n${MACRO}\n<!--/inert-->`,
+    'e2e_cn plain note for the menu',
+  ]
+  const quotedChild = (label: string, n: number, quote: string) => {
+    const value = `${label}/${n} "${quote}" `
+    return { value, start: value.length, end: value.length }
+  }
+  const plainChild = (label: string, n: number) => ({
+    value: `${label}/${n} `,
+    start: label.length + 1,
+    end: label.length + 1 + String(n).length + 1,
+  })
+  const waitItem = async (id: string) => {
+    await waitForRenderOverlayGone(page)
+    await expect(page.locator(`.column:not(.hidden) #item-${id}`)).toBeVisible({ timeout: 10_000 })
+  }
+  const selectionInfo = () =>
+    page.evaluate(() => {
+      const sel = window.getSelection()
+      return {
+        type: sel?.type ?? null,
+        collapsed: sel?.isCollapsed ?? true,
+        text: sel?.toString() ?? '',
+        active: document.activeElement?.tagName ?? null,
+      }
+    })
+  const selectAcross = (itemId: string, startText: string, endText: string) =>
+    page.evaluate(
+      ([id, a, b]) => {
+        const root = document.querySelector(`.column:not(.hidden) #item-${id}`)!
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+        let sNode: Node | null = null
+        let sOff = 0
+        let eNode: Node | null = null
+        let eOff = 0
+        while (walker.nextNode()) {
+          const val = walker.currentNode.nodeValue ?? ''
+          if (!sNode) {
+            const at = val.indexOf(a)
+            if (at >= 0) {
+              sNode = walker.currentNode
+              sOff = at
+            }
+          }
+          const atEnd = val.indexOf(b)
+          if (atEnd >= 0) {
+            eNode = walker.currentNode
+            eOff = atEnd + b.length
+          }
+        }
+        if (!sNode || !eNode) return null
+        ;(document.activeElement as HTMLElement | null)?.blur()
+        window.getSelection()!.setBaseAndExtent(sNode, sOff, eNode, eOff)
+        return window.getSelection()!.toString()
+      },
+      [itemId, startText, endText] as const
+    )
+  const dragPhrase = async (itemId: string, phrase: string) => {
+    const box = await page.evaluate(
+      ([id, text]) => {
+        const root = document.querySelector(`.column:not(.hidden) #item-${id}`)!
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+        while (walker.nextNode()) {
+          const at = (walker.currentNode.nodeValue ?? '').indexOf(text)
+          if (at < 0) continue
+          const range = document.createRange()
+          range.setStart(walker.currentNode, at)
+          range.setEnd(walker.currentNode, at + text.length)
+          const r = range.getBoundingClientRect()
+          return { x: r.x, y: r.y + r.height / 2, width: r.width }
+        }
+        return null
+      },
+      [itemId, phrase] as const
+    )
+    expect(box, `phrase "${phrase}" found in item ${itemId}`).not.toBeNull()
+    await page.mouse.move(box!.x + 1, box!.y)
+    await page.mouse.down()
+    await page.mouse.move(box!.x + box!.width - 1, box!.y, { steps: 4 })
+    await page.mouse.up()
+  }
+  const storedText = async (docId: string) => (await firestore().collection('items').doc(docId).get()).data()?.text ?? null
+  // wait for an item's in-flight write to acknowledge in Firestore and return its state
+  const waitAcked = async (label: string) => {
+    let state: { id: string; savedId: string; text: string; savedText: string; editorText: string; editing: boolean; saving: boolean } | null = null
+    await expect
+      .poll(
+        async () => {
+          state = await page.evaluate(l => {
+            const it = (window.__items as any[]).find(i => i.labelText == l)
+            return it
+              ? {
+                  id: it.id as string,
+                  savedId: (it.savedId ?? '') as string,
+                  text: it.text as string,
+                  savedText: it.savedText as string,
+                  editorText: it.editorText as string,
+                  editing: !!it.editing,
+                  saving: !!it.saving,
+                }
+              : null
+          }, label)
+          return !!state?.savedId && !state.saving && !!state.savedText
+        },
+        { message: `${label}: initial/pending write acknowledged`, timeout: 30_000 }
+      )
+      .toBe(true)
+    return state!
+  }
+  // exercises the app's own onBeforeUnload -> items.some(unsaved) predicate without navigating
+  const beforeUnloadPrompt = () =>
+    page.evaluate(() => {
+      const ev = document.createEvent('BeforeUnloadEvent')
+      ev.initEvent('beforeunload', false, true)
+      window.dispatchEvent(ev)
+      return ev.returnValue
+    })
+  const closeChild = async () => {
+    await page.keyboard.press('Escape')
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+  }
+  // leave an open quoted child without saving once its initial write settled: Escape prompts
+  // "Discard unsaved changes to <label>?" (the app's exact behavior for typed text), and Discard
+  // closes the editor leaving only the scaffold stored
+  const discardQuotedChild = async (label: string, docId: string) => {
+    await page.keyboard.press('Escape')
+    await expect(page.getByText(`Discard unsaved changes to ${label}?`)).toBeVisible({ timeout: 10_000 })
+    await page.locator('.modal .button.confirm', { hasText: 'Discard' }).click()
+    await expect(page.locator('.modal')).toBeHidden({ timeout: 10_000 })
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+    await waitAcked(label)
+    expect(await page.evaluate(l => window._item(l, true)?.text ?? null, label), `${label}: page text after discard has no quote`).toBe(`${label} `)
+    expect(await storedText(docId), `${label}: stored document after discard has no quote`).toBe(`${label} `)
+    expect(await beforeUnloadPrompt(), `${label}: nothing unsaved after discard`).toBe('')
+  }
+  try {
+    const [parent, other, unnamed, unnamedSave, raw, menu] = await createdItems(page, texts)
+    expect(await beforeUnloadPrompt(), 'premise: nothing unsaved before creating children').toBe('')
+
+    // (a) named parent with a real mouse drag on its rendered text: first acknowledged document
+    // holds only the scaffold; editor holds scaffold + quote with caret at end and backdrop painted;
+    // app reports unsaved changes; typing and saving stores scaffold + quote + typed verbatim
+    await selected(page, PARENT)
+    await waitItem(parent.id)
+    await page.locator(`.column:not(.hidden) #item-${parent.id} p`).first().scrollIntoViewIfNeeded()
+    await dragPhrase(parent.id, 'hello world')
+    expect(await selectionInfo(), 'mouse drag selected the phrase in the item').toMatchObject({
+      type: 'Range',
+      collapsed: false,
+      text: 'hello world',
+    })
+    await page.keyboard.press('Shift+Enter')
+    const FIRST = quotedChild(PARENT, 0, 'hello world')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(FIRST)
+    await expect(mindbox(page)).toHaveValue(`${PARENT}/0 `)
+    expect(await selectionInfo(), 'focusing the new editor collapsed the page selection').toMatchObject({
+      collapsed: true,
+      text: '',
+    })
+    const firstAck = await waitAcked(`${PARENT}/0`)
+    expect(await storedText(firstAck.savedId), 'first acknowledged document holds scaffold without quote').toBe(`${PARENT}/0 `)
+    expect(firstAck, 'open item keeps scaffold in text/savedText and seeded draft in editorText').toMatchObject({
+      editing: true,
+      saving: false,
+      text: `${PARENT}/0 `,
+      savedText: `${PARENT}/0 `,
+      editorText: FIRST.value,
+    })
+    expect(await childEditor(page), 'editor still holds draft after initial create acknowledges').toEqual(FIRST)
+    expect(
+      await page.locator(`#super-container-${firstAck.id} .editor .backdrop > div`).textContent(),
+      'visible editor backdrop renders the seeded draft'
+    ).toBe(FIRST.value + '\n')
+    expect(await beforeUnloadPrompt(), 'app reports unsaved changes for the seeded draft').toBe('Discard unsaved changes?')
+    await page.keyboard.type('next')
+    expect(await childEditor(page), 'typing follows the quote at the collapsed caret').toEqual({
+      value: FIRST.value + 'next',
+      start: FIRST.value.length + 4,
+      end: FIRST.value.length + 4,
+    })
+    await page.keyboard.press('Shift+Enter') // save the child
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+    await expect.poll(() => storedText(firstAck.savedId), { timeout: 30_000 }).toBe(FIRST.value + 'next')
+    await waitAcked(`${PARENT}/0`)
+    expect(await beforeUnloadPrompt(), 'nothing unsaved after saving child').toBe('')
+
+    // (b) selection in ANOTHER item (not the named parent), across a line break, with inner quotes
+    // and a ZWSP between spaces: whitespace runs collapse to one space, ZWSP removed, quotes kept;
+    // leaving the editor without saving leaves only the scaffold stored
+    await selected(page, PARENT)
+    await waitItem(other.id)
+    const rawMulti = await selectAcross(other.id, 'first', 'line')
+    expect(rawMulti, 'premise: selection spans a line break and carries inner quotes and ZWSP').toMatch(/\n/)
+    expect(rawMulti).toContain('"inner"')
+    expect(rawMulti).toContain('\u200B')
+    await page.keyboard.press('Shift+Enter')
+    const SECOND = quotedChild(PARENT, 1, 'first "inner" line second line')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(SECOND)
+    const secondAck = await waitAcked(`${PARENT}/1`)
+    expect(await storedText(secondAck.savedId), 'multi-line quote: first acknowledged document holds scaffold without quote').toBe(`${PARENT}/1 `)
+    expect(await beforeUnloadPrompt(), 'multi-line quote: app reports unsaved changes').toBe('Discard unsaved changes?')
+    // asking to discard changes nothing: while the app asks, and after Cancel, the item's own text is the
+    // scaffold and its editor holds the draft; a save of the item for another reason (its time) then stores
+    // the scaffold, and the draft is still the editor's
+    const kept = () =>
+      page.evaluate(label => {
+        const it = (window.__items as any[]).find(i => i.labelText == label)
+        return { text: it.text as string, editing: !!it.editing, editor: (document.getElementById(`textarea-${it.id}`) as HTMLTextAreaElement | null)?.value ?? null }
+      }, `${PARENT}/1`)
+    const KEPT = { text: `${PARENT}/1 `, editing: true, editor: SECOND.value }
+    await page.keyboard.press('Escape')
+    await expect(page.getByText(`Discard unsaved changes to ${PARENT}/1?`)).toBeVisible({ timeout: 10_000 })
+    expect(await kept(), 'while the app asks, the draft is in the editor and not in the item').toEqual(KEPT)
+    await page.locator('.modal .button.cancel').click()
+    await expect(page.locator('.modal')).toBeHidden({ timeout: 10_000 })
+    expect(await kept(), 'after Cancel, the draft is in the editor and not in the item').toEqual(KEPT)
+    const storedTime = async () => (await firestore().collection('items').doc(secondAck.savedId).get()).data()?.time ?? null
+    const timeBefore = await storedTime()
+    await page.evaluate(label => void (window._item(label) as any).touch(true), `${PARENT}/1`)
+    await expect.poll(storedTime, { message: "the save of the item's time reached the store", timeout: 30_000 }).not.toBe(timeBefore)
+    await waitAcked(`${PARENT}/1`)
+    expect(await storedText(secondAck.savedId), 'a save for another reason stores the scaffold, not the draft').toBe(`${PARENT}/1 `)
+    expect(await kept(), 'the draft is still the editor\'s after that save').toEqual(KEPT)
+    expect(await beforeUnloadPrompt(), 'the draft still counts as unsaved').toBe('Discard unsaved changes?')
+    await page.locator(`#textarea-${secondAck.id}`).focus()
+    await discardQuotedChild(`${PARENT}/1`, secondAck.savedId)
+
+    // (c) unnamed parent through the naming dialog: selection captured BEFORE the dialog opens
+    // (the dialog focuses and selects #modal-input, replacing the page selection) and carried into
+    // the child's unsaved draft; verified for both discard and save paths
+    await selected(page, `id:${unnamed.id}`)
+    await waitItem(unnamed.id)
+    await page.locator(`.column:not(.hidden) #item-${unnamed.id} p`).first().scrollIntoViewIfNeeded()
+    await dragPhrase(unnamed.id, 'before dialog')
+    expect(await selectionInfo(), 'premise: phrase selected before opening the naming dialog').toMatchObject({
+      type: 'Range',
+      collapsed: false,
+      text: 'before dialog',
+    })
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => nameInput(page), { timeout: 30_000 }).toEqual(offered('thread_0'))
+    expect((await selectionInfo()).text, 'dialog replaced the page selection').not.toBe('before dialog')
+    await page.keyboard.press('Enter')
+    const DIALOG_DISCARD = quotedChild('#thread_0', 0, 'before dialog')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(DIALOG_DISCARD)
+    await expect(mindbox(page)).toHaveValue('#thread_0/0 ')
+    const dialogDiscardAck = await waitAcked('#thread_0/0')
+    expect(await storedText(dialogDiscardAck.savedId), 'dialog path: first acknowledged document holds scaffold without quote').toBe('#thread_0/0 ')
+    expect(dialogDiscardAck, 'dialog path: open item holds seeded draft as unsaved editorText').toMatchObject({
+      editing: true,
+      saving: false,
+      text: '#thread_0/0 ',
+      savedText: '#thread_0/0 ',
+      editorText: DIALOG_DISCARD.value,
+    })
+    expect(await beforeUnloadPrompt(), 'dialog path: app reports unsaved changes').toBe('Discard unsaved changes?')
+    await discardQuotedChild('#thread_0/0', dialogDiscardAck.savedId)
+
+    await selected(page, `id:${unnamedSave.id}`)
+    await waitItem(unnamedSave.id)
+    await page.locator(`.column:not(.hidden) #item-${unnamedSave.id} p`).first().scrollIntoViewIfNeeded()
+    await dragPhrase(unnamedSave.id, 'save dialog')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => nameInput(page), { timeout: 30_000 }).toEqual(offered('thread_1'))
+    await page.keyboard.press('Enter')
+    const DIALOG_SAVE = quotedChild('#thread_1', 0, 'save dialog')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(DIALOG_SAVE)
+    const dialogSaveAck = await waitAcked('#thread_1/0')
+    expect(await storedText(dialogSaveAck.savedId), 'dialog save path: first acknowledged document holds scaffold without quote').toBe('#thread_1/0 ')
+    expect(await beforeUnloadPrompt(), 'dialog save path: app reports unsaved changes').toBe('Discard unsaved changes?')
+    await page.keyboard.type('kept')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+    await expect.poll(() => storedText(dialogSaveAck.savedId), { timeout: 30_000 }).toBe(DIALOG_SAVE.value + 'kept')
+    await waitAcked('#thread_1/0')
+
+    // (d) selections inside editable fields quote nothing (today's text and selected tail):
+    // (d1) MindBox textarea
+    await selected(page, PARENT, { focus: true })
+    await page.evaluate(() => {
+      const ta = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      ta.setSelectionRange(0, ta.value.length)
+    })
+    expect(await selectionInfo(), 'premise: MindBox text selected').toMatchObject({ type: 'Range', text: PARENT })
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 2))
+    await closeChild()
+
+    // (d2) an open item editor (non-collapsed Range in its .editor .backdrop, activeElement on BODY)
+    await selected(page, PARENT)
+    await waitItem(other.id)
+    await page.locator(`.column:not(.hidden) #item-${other.id} p`, { hasText: 'plain paragraph' }).click()
+    await expect(page.locator(`#textarea-${other.id}`)).toBeVisible({ timeout: 10_000 })
+    // blur first and wait for Editor's post-blur DOM update before selecting inside its backdrop
+    await page.locator(`#textarea-${other.id}`).blur()
+    await expect(page.locator(`#textarea-${other.id}`)).not.toBeFocused()
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+    // the selection is set and the key sent in ONE script run: the editor redraws its backdrop on a schedule of
+    // its own, which collapsed a selection inside it between two calls once (a loaded full gate, 2026-11-24). The
+    // key's events are a keyboard's, in its order (as the key buttons' item sends them, on the body)
+    const backdropPress = await page.evaluate(id => {
+      const bd = document.querySelector(`#super-container-${id} .editor .backdrop`)!
+      const walker = document.createTreeWalker(bd, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const val = walker.currentNode.nodeValue ?? ''
+        const at = val.indexOf('plain paragraph')
+        if (at < 0) continue
+        const sel = window.getSelection()!
+        sel.setBaseAndExtent(walker.currentNode, at, walker.currentNode, at + 'plain paragraph'.length)
+        const stood = { text: sel.toString(), type: sel.type, collapsed: sel.isCollapsed, active: document.activeElement?.tagName }
+        const send = (type: string, key: string, shiftKey: boolean) =>
+          document.body.dispatchEvent(new KeyboardEvent(type, { key, code: key == 'Shift' ? 'ShiftLeft' : key, shiftKey, bubbles: true, cancelable: true, composed: true }))
+        send('keydown', 'Shift', true)
+        send('keydown', 'Enter', true)
+        send('keyup', 'Enter', true)
+        send('keyup', 'Shift', false)
+        return stood
+      }
+      return null
+    }, other.id)
+    expect(backdropPress, 'premise: a non-collapsed selection stood inside the open item editor when the key was sent').toEqual({
+      text: 'plain paragraph',
+      type: 'Range',
+      collapsed: false,
+      active: 'BODY',
+    })
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 3))
+    await page.keyboard.press('Escape') // closes the new child and focuses the still-open editor of `other`
+    await expect(page.locator(`#textarea-${other.id}`)).toBeFocused({ timeout: 10_000 })
+    await closeChild() // closes `other`'s editor too
+    await waitItem(other.id)
+
+    // (d3) a widget <input> (blurred, activeElement on BODY) and a widget [contenteditable="true"]
+    await selected(page, PARENT)
+    await waitItem(other.id)
+    await page.evaluate(id => {
+      const inp = document.querySelector(`#item-${id} input.e2e-w-in`) as HTMLInputElement
+      inp.focus()
+      inp.setSelectionRange(0, inp.value.length)
+      inp.blur()
+    }, other.id)
+    expect(await selectionInfo(), 'premise: widget input text selected while blurred').toMatchObject({
+      type: 'Range',
+      text: 'widget input',
+      active: 'BODY',
+    })
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 4))
+    await closeChild()
+
+    await selected(page, PARENT)
+    await waitItem(other.id)
+    await page.evaluate(id => {
+      const ce = document.querySelector(`#item-${id} .e2e-w-ce`)!
+      const text = ce.firstChild!
+      window.getSelection()!.setBaseAndExtent(text, 0, text, text.nodeValue!.length)
+      ;(document.activeElement as HTMLElement | null)?.blur()
+    }, other.id)
+    expect(await selectionInfo(), 'premise: contenteditable text selected while blurred').toMatchObject({
+      type: 'Range',
+      collapsed: false,
+      text: 'editable div',
+      active: 'BODY',
+    })
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 5))
+    await closeChild()
+
+    // (e) no selection, and a whitespace/ZWSP-only selection: today's text and selected tail
+    await selected(page, PARENT)
+    await page.evaluate(() => window.getSelection()?.removeAllRanges())
+    expect((await selectionInfo()).type).toBe('None')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 6))
+    await closeChild()
+
+    await selected(page, PARENT)
+    await waitItem(other.id)
+    expect(await selectAcross(other.id, ' \u200B ', ' \u200B ')).toBe(' \u200B ')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 7))
+    await closeChild()
+
+    // (f) creations that make no child (free text in the box), open no editor (2+ of Ctrl/Alt/Cmd
+    // with Enter), or that no key asked for (synthetic _create, with or without history) quote nothing
+    await selected(page, 'e2e_cn hello')
+    await waitItem(parent.id)
+    expect(await selectAcross(parent.id, 'plain text', 'plain text')).toBe('plain text')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toMatchObject({ value: 'e2e_cn hello' })
+    await closeChild()
+
+    // keyboard creation that opens no editor (Ctrl+Alt+Enter -> editing == false): quotes nothing
+    await selected(page, PARENT)
+    await waitItem(parent.id)
+    expect(await selectAcross(parent.id, 'hello world', 'hello world')).toBe('hello world')
+    await page.keyboard.press('Control+Alt+Enter')
+    const noEditAck = await waitAcked(`${PARENT}/8`)
+    expect(noEditAck, 'no-editor keyboard creation leaves editor closed with scaffold alone').toMatchObject({
+      editing: false,
+      text: `${PARENT}/8 `,
+      savedText: `${PARENT}/8 `,
+      editorText: `${PARENT}/8 `,
+    })
+    expect(await childEditor(page), 'no-editor keyboard creation opened no item editor').toBeNull()
+    expect(await storedText(noEditAck.savedId), 'no-editor keyboard creation stored no quote').toBe(`${PARENT}/8 `)
+
+    await selected(page, PARENT)
+    await waitItem(parent.id)
+    expect(await selectAcross(parent.id, 'hello world', 'hello world')).toBe('hello world')
+    expect(
+      await page.evaluate(p => (window._create(p, { history: true }) as any)?.text, PARENT),
+      'synthetic _create with history makes child without quoting'
+    ).toBe(`${PARENT}/9 `)
+    await selected(page, PARENT)
+    await waitItem(parent.id)
+    expect(await selectAcross(parent.id, 'hello world', 'hello world')).toBe('hello world')
+    expect(
+      await page.evaluate(p => (window._create(p) as any)?.text, PARENT),
+      'synthetic _create quotes nothing'
+    ).toBe(PARENT)
+
+    // (g) a creation that runs the new item and opens its editor (Cmd/Ctrl+Enter in the box, no selection):
+    // the editor shows the item's text WITH the run's output (the editor's text is derived from the item's
+    // final text), nothing is unsaved, and a save without typing keeps the output
+    const RUN = '#e2e_cn_run'
+    await typed(page, `${RUN}\n\`\`\`js_input\n40 + 2\n\`\`\``)
+    await page.keyboard.press('ControlOrMeta+Enter')
+    await expect.poll(async () => (await childEditor(page))?.value ?? '', { message: "the new editor shows the run's output", timeout: 15_000 }).toMatch(/_output\n42\n/)
+    const runAck = await waitAcked(RUN)
+    expect(runAck, "the run's output is in the item, saved, with its editor open").toMatchObject({ editing: true, saving: false, savedText: runAck.text })
+    expect(runAck.text).toMatch(/_output\n42\n/)
+    expect((await childEditor(page))?.value, "the editor's text is the item's text").toBe(runAck.text)
+    expect(await storedText(runAck.savedId), 'the first stored document has the output').toBe(runAck.text)
+    expect(await beforeUnloadPrompt(), 'nothing unsaved after a creation with a run').toBe('')
+    await page.keyboard.press('Shift+Enter') // save without typing
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+    await waitAcked(RUN)
+    expect(await storedText(runAck.savedId), 'a save without typing keeps the output').toBe(runAck.text)
+    // the same creation offline: the first write stays pending, and its snapshot (what a discard before the
+    // acknowledgement restores) is the text WITH the output: Escape closes without a question and the output
+    // stays, on the page and, once online, in the stored document
+    const RUN2 = '#e2e_cn_run2'
+    const pendingRun = () =>
+      page.evaluate(label => {
+        const it = (window.__items as any[]).find(i => i.labelText == label)
+        return { text: it.text as string, savingText: (it.savingText ?? null) as string | null, saving: !!it.saving, editing: !!it.editing }
+      }, RUN2)
+    let pendingText = ''
+    await page.context().setOffline(true)
+    try {
+      await typed(page, `${RUN2}\n\`\`\`js_input\n40 + 3\n\`\`\``)
+      await page.keyboard.press('ControlOrMeta+Enter')
+      await expect.poll(async () => (await childEditor(page))?.value ?? '', { message: "offline: the new editor shows the run's output", timeout: 15_000 }).toMatch(/_output\n43\n/)
+      const pending = await pendingRun()
+      pendingText = pending.text
+      expect(pending, 'the pending first write: its snapshot is the text with the output').toEqual({ text: pendingText, savingText: pendingText, saving: true, editing: true })
+      expect(pendingText).toMatch(/_output\n43\n/)
+      await page.keyboard.press('Escape')
+      await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+      expect(await page.locator('.modal').isVisible(), 'no question while the first write is pending').toBe(false)
+      expect((await pendingRun()).text, 'the discard before the acknowledgement keeps the output').toBe(pendingText)
+    } finally {
+      await page.context().setOffline(false)
+    }
+    const run2Ack = await waitAcked(RUN2)
+    expect(await storedText(run2Ack.savedId), 'once online, the stored document has the output').toBe(pendingText)
+
+    // (h) the edit menu's Save follows the editor's draft, not the item's saved text: with an unlabelled
+    // item's text cleared in its editor, after Close and Cancel at the discard question, a click on Save
+    // does nothing (saving the empty draft would delete the item, an unlabelled one without a question):
+    // the editor stays open and empty and the item keeps its text; with text typed the same button saves it
+    const MENU = texts[5]
+    const menuState = () =>
+      page.evaluate(id => {
+        const it = (window.__items as any[]).find(i => i.id == id)
+        if (!it) return null
+        const editor = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement | null
+        return { text: it.text as string, editing: !!it.editing, editor: editor?.value ?? null, saveable: !!editor?.closest('.container')?.classList.contains('saveable') }
+      }, menu.id)
+    await selected(page, `id:${menu.id}`)
+    await waitItem(menu.id)
+    await page.locator(`.column:not(.hidden) #item-${menu.id} p`).first().click()
+    const menuEditor = page.locator(`#textarea-${menu.id}`)
+    await expect(menuEditor).toBeVisible({ timeout: 10_000 })
+    expect(await menuState(), 'premise: the open editor holds the saved text and Save is live').toEqual({ text: MENU, editing: true, editor: MENU, saveable: true })
+    await menuEditor.fill('')
+    const menuButtons = page.locator(`#super-container-${menu.id} .edit-menu`)
+    await menuButtons.locator('.button.cancel').click()
+    await expect(page.getByText('Discard unsaved changes to item?')).toBeVisible({ timeout: 10_000 })
+    await page.locator('.modal .button.cancel').click()
+    await expect(page.locator('.modal')).toBeHidden({ timeout: 10_000 })
+    const EMPTIED = { text: MENU, editing: true, editor: '', saveable: false }
+    expect(await menuState(), 'after Close and Cancel the emptied draft is kept and Save is not live').toEqual(EMPTIED)
+    await menuButtons.locator('.button.save').click()
+    expect(await menuState(), 'a click on Save changed nothing: the item is there, its editor open and empty').toEqual(EMPTIED)
+    // (a blurred editor shows its backdrop in the textarea's place: a click on it is how its owner returns)
+    await page.locator(`#super-container-${menu.id} .editor .backdrop`).click()
+    await expect.poll(() => page.evaluate(id => document.activeElement?.id == `textarea-${id}`, menu.id), { message: 'the click on the editor focused it', timeout: 5_000 }).toBe(true)
+    await page.keyboard.type('e2e_cn kept by the menu')
+    await expect.poll(async () => (await menuState())?.editor, { timeout: 5_000 }).toBe('e2e_cn kept by the menu')
+    await expect.poll(async () => (await menuState())?.saveable, { message: 'with text typed Save is live again', timeout: 10_000 }).toBe(true)
+    await menuButtons.locator('.button.save').click()
+    await expect.poll(async () => (await menuState())?.editing, { message: 'the same button saved the typed text', timeout: 10_000 }).toBe(false)
+    await expect.poll(() => storedText(menu.saved), { timeout: 30_000 }).toBe('e2e_cn kept by the menu')
+
+    // helper to select an element's full text inside `raw`
+    const selectRawNode = async (selector: string, source: string, expected: string) => {
+      await selected(page, RAW_PARENT)
+      await waitItem(raw.id)
+      const loc = page.locator(`.column:not(.hidden) #item-${raw.id} ${selector}`).first()
+      await expect(loc, `${source} visible`).toBeVisible({ timeout: 10_000 })
+      const selText = await page.evaluate(
+        ([id, sel]) => {
+          const el = document.querySelector(`.column:not(.hidden) #item-${id} ${sel}`)
+          if (!el) return null
+          ;(document.activeElement as HTMLElement | null)?.blur()
+          const range = document.createRange()
+          range.selectNodeContents(el)
+          const s = window.getSelection()!
+          s.removeAllRanges()
+          s.addRange(range)
+          return s.toString()
+        },
+        [raw.id, selector] as const
+      )
+      expect(selText, `premise: ${source} selection matches expected text verbatim`).toBe(expected)
+    }
+
+    // (g) verbatim save: ampersand (`R&D`), hash-tagged word, HTML tag and macro-like text are kept
+    // character for character (no escaping/rewriting) and stored with the typed follow-up on save
+    await selectRawNode('> .content .vault-result code', 'literal inert code span', LITERAL)
+    await page.keyboard.press('Shift+Enter')
+    const LIT_CHILD = quotedChild(RAW_PARENT, 0, LITERAL)
+    await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(LIT_CHILD)
+    const litAck = await waitAcked(`${RAW_PARENT}/0`)
+    expect(await storedText(litAck.savedId), 'literal quote: first acknowledged document holds scaffold without quote').toBe(`${RAW_PARENT}/0 `)
+    expect(await beforeUnloadPrompt(), 'literal quote: app reports unsaved changes').toBe('Discard unsaved changes?')
+    await page.keyboard.type('notes')
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => childEditor(page), { timeout: 10_000 }).toBeNull()
+    await expect.poll(() => storedText(litAck.savedId), { timeout: 30_000 }).toBe(LIT_CHILD.value + 'notes')
+    await waitAcked(`${RAW_PARENT}/0`)
+
+    // (h) a macro in the selection is NOT evaluated while the editor is open (it lives only in the
+    // unsaved editor draft, not in item.text), and the item is NOT saved with the macro in it
+    const verifyOpenMacroQuote = async (selector: string, childNum: number, source: string) => {
+      const childLabel = `${RAW_PARENT}/${childNum}`
+      await page.evaluate(() => {
+        ;(window as any).__e2e_quote_macro = 0
+      })
+      await selectRawNode(selector, source, MACRO)
+      await page.keyboard.press('Shift+Enter')
+      const MACRO_CHILD = quotedChild(RAW_PARENT, childNum, MACRO)
+      await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(MACRO_CHILD)
+      const macroAck = await waitAcked(childLabel)
+      expect(await storedText(macroAck.savedId), `${source}: first acknowledged document holds scaffold without macro`).toBe(`${childLabel} `)
+      // wait for the background macro pass (expandMacros) while the new item's editor is still open
+      await expect
+        .poll(
+          () =>
+            page.evaluate(label => {
+              const it = (window.__items as any[]).find(i => i.labelText == label)
+              return (
+                !!it?.editing &&
+                !!it.expanded &&
+                !it.expanded.error &&
+                it.expanded.deephash === it.deephash &&
+                it.expanded.version === it.version
+              )
+            }, childLabel),
+          { message: `${source}: background macro pass expanded open editor`, timeout: 15_000 }
+        )
+        .toBe(true)
+      expect(
+        await page.evaluate(label => {
+          const it = (window.__items as any[]).find(i => i.labelText == label)
+          return { editing: !!it?.editing, macro: (window as any).__e2e_quote_macro }
+        }, childLabel),
+        `${source}: macro flag not set while new item's editor is still open`
+      ).toEqual({ editing: true, macro: 0 })
+      // leave without saving so the macro is never saved into the item
+      await discardQuotedChild(childLabel, macroAck.savedId)
+      expect(await page.evaluate(() => (window as any).__e2e_quote_macro), `${source}: macro flag stays 0 after discard`).toBe(0)
+    }
+
+    await verifyOpenMacroQuote('> .content > p > code', 1, 'code span')
+    await verifyOpenMacroQuote('> .content .vault-result p:last-of-type', 2, 'inert region')
+  } finally {
+    await deleteNamed()
+  }
+})
+
 async function searchMindbox(page: Page, q: string) {
   await focusMindboxInPlace(page)
   await expect(mindbox(page)).toBeFocused()

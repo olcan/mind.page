@@ -1067,6 +1067,52 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await expect.poll(editorState, { timeout: 10_000 }).toEqual({ value: THREAD, start: THREAD.length, end: THREAD.length })
   expect(await read(page, '#thread_0')).toBe('#thread_0 #todo twin one')
   await page.keyboard.press('Escape')
+  // with text selected on the page, the quote is seeded only into the open editor draft after the
+  // hook's turn marker (caret collapsed after it): the first acknowledged document holds the turn
+  // marker alone, and after saving the stored turn holds the marker, quote and typed text
+  await userSet(page, CHATTY, { scroll: true })
+  await expect.poll(() => page.evaluate(n => !!window._item(n, true)?.elem?.querySelector('.content'), CHATTY), { timeout: 15_000 }).toBe(true)
+  const selectedForChat = await page.evaluate(n => {
+    const root = window._item(n, true)!.elem!
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) {
+      const val = walker.currentNode.nodeValue ?? ''
+      const at = val.indexOf('chat about me')
+      if (at < 0) continue
+      ;(document.activeElement as HTMLElement | null)?.blur()
+      window.getSelection()!.setBaseAndExtent(walker.currentNode, at, walker.currentNode, at + 'chat about me'.length)
+      return [window.getSelection()!.type, window.getSelection()!.isCollapsed, window.getSelection()!.toString()]
+    }
+    return null
+  }, CHATTY)
+  expect(selectedForChat, 'premise: todo text selected before creating a task chat').toEqual(['Range', false, 'chat about me'])
+  await page.keyboard.press('Shift+Enter')
+  const QUOTED_CHAT_SCAFFOLD = `${CHATTY}/1 #_chat/vault #_autodep\n<<user>> `
+  const QUOTED_CHAT = `${QUOTED_CHAT_SCAFFOLD}"chat about me" `
+  await expect.poll(editorState, { timeout: 10_000 }).toEqual({ value: QUOTED_CHAT, start: QUOTED_CHAT.length, end: QUOTED_CHAT.length })
+  let chatSavedId = ''
+  await expect
+    .poll(
+      async () => {
+        const st = await page.evaluate(label => {
+          const it = (window.__items as any[]).find(i => i.labelText == label)
+          return it ? { savedId: (it.savedId ?? '') as string, saving: !!it.saving, editing: !!it.editing } : null
+        }, `${CHATTY}/1`)
+        if (st?.savedId && !st.saving) chatSavedId = st.savedId
+        return !!st?.savedId && !st.saving && st.editing
+      },
+      { message: 'chat child initial create write acknowledged while editor is open', timeout: 30_000 }
+    )
+    .toBe(true)
+  expect(await serverText(chatSavedId), 'first acknowledged document holds the turn marker scaffold alone').toBe(QUOTED_CHAT_SCAFFOLD)
+  await page.keyboard.type('?')
+  expect((await editorState())!.value, 'typing follows the quote after the hook text').toBe(QUOTED_CHAT + '?')
+  await page.keyboard.press('Shift+Enter')
+  await expect.poll(editorState, { timeout: 10_000 }).toBeNull()
+  await expect.poll(() => serverText(chatSavedId), { timeout: 30_000 }).toBe(QUOTED_CHAT + '?')
+  await expect
+    .poll(() => page.evaluate(label => !(window.__items as any[]).find(i => i.labelText == label)?.saving, `${CHATTY}/1`), { timeout: 30_000 })
+    .toBe(true)
 
   // CHAT CHILDREN (vault design mind_chat_children): under the INSTALLED chat template a chat's
   // reply tags its children with `#/name` and the children bind to the chat by autodep; the

@@ -185,7 +185,9 @@
   export let target = false
   export let target_context = false
   let saveable = false
-  $: saveable = text.trim().length > 0 /* otherwise saving would delete, so just cancel */
+  // (what a save would write: the editor's draft while the item is edited, else its text. empty is as the end
+  // of an edit reads it, nothing but whitespace and zero-width spaces)
+  $: saveable = /[^\s\u200B]/.test(editing ? (editorText ?? '') : text) /* otherwise saving would delete, so just cancel */
   export let onEditing = (
     index: number,
     editing: boolean,
@@ -203,7 +205,7 @@
   export let onEditorKeyDown = (e: KeyboardEvent) => {}
   export let onEscape = e => true // false means handled/ignore
   export let onPastedImage = (url: string, file: File, size_handler = null) => {}
-  export let onRun = (index: number = -1, e: MouseEvent = null) => {}
+  export let onRun = (index: number = -1, e: MouseEvent = null, touch_first?: boolean, own_editor: boolean = false) => {}
   export let onSave = (index: number = -1, e: MouseEvent = null) => {}
   export let onTouch = (index: number, e: MouseEvent = null) => {}
   export let onUpdate = (index: number) => {}
@@ -354,7 +356,7 @@
     e.preventDefault()
     invalidateElemCache(id)
     version++ // ensure re-render even if deephash and html are unchanged
-    onRun(index, e)
+    onRun(index, e, undefined, editing) // (while it is edited the button is its edit menu's: a run from its own editor)
   }
 
   function onIndexClick(e) {
@@ -2746,7 +2748,7 @@
         bind:selectionEnd
         resume={resumeEditor}
         cancelOnDelete={fixed}
-        {onRun}
+        onRun={() => onRun(index, null, undefined, true) /* the editor's own key: a run from this item's editor */}
         {onSave}
         {onPrev}
         {onNext}

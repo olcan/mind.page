@@ -6295,6 +6295,24 @@
   let editorText = ''
   let editor
 
+  // nodes whose selections belong to an editable field or a dialog rather than the page's own text
+  const EDITABLE_SELECTION =
+    'textarea, input, [contenteditable]:not([contenteditable="false" i]), .editor, .container.editing, .modal'
+
+  // non-collapsed page text selected outside editable fields and dialogs, kept as-is except for
+  // removing ZWSPs, collapsing every whitespace run to one space and trimming; seeded as an
+  // unsaved draft into a newly created child item when the creation opens an editor
+  function selectionQuote(): string {
+    const sel = window.getSelection()
+    if (!sel || sel.type != 'Range' || sel.isCollapsed) return ''
+    const inEditable = (node: Node | null) => {
+      const el = node instanceof Element ? node : node?.parentElement
+      return !!el?.closest(EDITABLE_SELECTION)
+    }
+    if (inEditable(sel.anchorNode) || inEditable(sel.focusNode)) return ''
+    return removeZWSP(sel.toString()).replace(/\s+/g, ' ').trim()
+  }
+
   function onEditorDone(
     text: string,
     e: any = null,
@@ -6311,7 +6329,8 @@
     // whose deferred _on_create listeners snapshot '' at schedule time), and item-handled commands
     // leave the box's text and focus alone for empty/string returns (handleCommandReturn; not carried
     // into nested commands returned via { text, command: true }), so a draft in the box stays
-    mindbox = true
+    mindbox = true,
+    quoted: string | null = null
   ) {
     if (mindbox) editorText = text // in case invoked without setting editorText
     const clearMindbox = () => {
@@ -7320,8 +7339,13 @@
       const { id } = unnamed
       if (__item(id).editing) return alert('can not name an item while editing it')
       if (!__item(id).editable) return alert('can not name an item that is not editable')
+      // capture any selected page text immediately BEFORE the naming dialog opens and replaces it;
+      // creations that open no editor (editing == false) or carry no key quote nothing (see below)
+      const quote = editing ? (quoted ?? (key ? selectionQuote() : '')) : ''
       // (the creation is the key's that asked for it: its intent is captured before the dialog's wait, see userInput)
-      const named = carryInput((name: string) => onEditorDone(name, e, false, run, save, editing, attr, ignore_command, return_alerts))
+      const named = carryInput((name: string) =>
+        onEditorDone(name, e, false, run, save, editing, attr, ignore_command, return_alerts, mindbox, quote)
+      )
       return (window['_mindbox_return'] = (async () => {
         await _modal_close() // close/cancel all modals
         let typed = freeName(_labels())
@@ -7349,12 +7373,21 @@
     // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
     // we also make sure a new history state is created so user can always go back if needed
     let selection_base = -1 // based index for tail selection below
-    let selection_end = false // collapse the caret at the end (the child hook's appended text)
+    let selection_end = false // collapse the caret at the end (the child hook's appended text or a quoted selection)
+    let quote = ''
     if (
       e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
       !clearLabel /* clearing of label should not be forced (done by certain commands that set text) */ &&
       idsFromLabel.get(text.trim().toLowerCase())?.length == 1
     ) {
+      // quote selected page text ONLY when a key/button child creation opens an editor (editing == true):
+      // Shift+Enter, Alt/Shift+Alt+Enter, single-modifier Cmd/Ctrl+Enter or Cmd/Ctrl+S, Shift+Cmd/Ctrl+Enter
+      // in MindBox (on the window, Shift+Cmd/Ctrl+Enter and Shift+Cmd/Ctrl+S resume the last edit instead),
+      // the MindBox Create button ({ code: 'Enter' }) and key_buttons' Shift+Enter all open an editor and
+      // quote; any creation with 2+ of Ctrl/Alt/Cmd (Enter or S) opens no editor (editing == false) and
+      // quotes nothing; synthetic callers (window._create with or without history/edit, commands) pass no
+      // key (eventKey(e) == '') and quote nothing; text == editorText excludes commands that replaced text
+      quote = editing ? (quoted ?? (key && text == editorText ? selectionQuote() : '')) : ''
       forceNewStateOnEditorChange = true // force new state on onEditorChange (invoked below w/ new item added)
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       let suffix = 0
@@ -7386,6 +7419,10 @@
           selection_end = true
         }
       }
+      if (quote) {
+        selection_base = -1
+        selection_end = true
+      }
     }
 
     const text_modified = text != editorText // used below, e.g. to disinguish generated vs typed text
@@ -7405,7 +7442,7 @@
       savedTime: 0, // filled in onSaveDone
       savedAttr: null, // filled in onSaveDone
       savedText: '', // filled in onSaveDone
-      editorText: text, // since we may edit w/o calling onItemEditing
+      editorText: text, // since we may edit w/o calling onItemEditing (the editor's text is derived below, once)
     })
     items = [item, ...items]
 
@@ -7443,8 +7480,16 @@
     if (run) {
       // NOTE: appendJSOutput can trigger item.writes that trigger saveItem, which will be skipped due to saveId being null
       appendJSOutput(indexFromId.get(item.id))
-      text = itemToSave.text = item.text // no need to update editorText
+      text = itemToSave.text = item.text
+      if (save) item.savingText = text // the pending first write's text (a discard before its acknowledgement restores it)
     }
+
+    // the new item's editor text, derived ONCE from its final text (a run above may have appended output).
+    // a quoted selection goes ONLY here, after that text, as the open editor's unsaved draft (Editor.svelte
+    // shows a draft that differs from the text at its mount): the first write holds the item as it is created
+    // without a selection, so nothing of the quote is saved, parsed for tags or macros, in the record that the
+    // creation's run sees, or read by the bridge until the owner saves (or runs the item from its editor)
+    item.editorText = quote ? text + `"${quote}" ` : text
 
     // maintain selection on created textarea if editing, to help maintain active editing context
     if (editing) {
@@ -7461,7 +7506,7 @@
         selectionStart = selection_base
         selectionEnd = text.length
       }
-      if (selection_end) selectionStart = selectionEnd = text.length // after the hook's text
+      if (selection_end) selectionStart = selectionEnd = item.editorText.length // after the hook's text or quoted selection
 
       // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
@@ -7473,6 +7518,7 @@
           return
         }
         textarea.focus()
+        if (selection_end) selectionStart = selectionEnd = textarea.value.length // past any ZWSPs Editor inserted into a quoted URL
         textarea.selectionStart = selectionStart
         textarea.selectionEnd = selectionEnd
 
@@ -8126,8 +8172,13 @@
 
     // copy item.text to item.editorText or vice versa
     // make sure to remove any ZWSPs from editorText
+    // (a cancellation that has to ask first copies nothing: the draft stays in the editor while the app asks
+    // and after a Cancel, so that asking changes nothing. the item's own text, which its code reads, a save of
+    // its time or attributes writes and the bridge is sent, changes only when an edit ends)
+    const draft = editing ? null : item.editorText.replace(/\u200B/g, '')
+    const asks = !editing && cancelled && draft != item.savedText && !item.saving
     if (editing) item.editorText = item.text
-    else item.text = item.editorText.replace(/\u200B/g, '')
+    else if (!asks) item.text = draft
 
     // if cancelled, restore savedText (or savingText if saving)
     // we do not restore time so item remains "soft touched"
@@ -8144,7 +8195,7 @@
         if (!_.isEqual(item.attr, item.savedAttr)) saveItem(item.id)
       }
       // confirm cancellation when there are unsaved changes and item is not already saving
-      if (item.text != item.savedText && !item.saving) {
+      if (asks) {
         _modal(`Discard unsaved changes to ${item.uniqueLabel || 'item'}?`, {
           confirm: 'Discard',
           cancel: 'Cancel',
@@ -8159,8 +8210,7 @@
           }
           })
         )
-        item.editing = true // back to editing for now
-        item.editorText = item.text
+        item.editing = true // back to editing for now (the editor keeps its draft, the item its text)
         return
       }
       discardEdits()
@@ -8281,9 +8331,18 @@
     lastEditTime = Date.now()
   }
 
-  function onItemRun(index: number = -1, e: MouseEvent = null, touch_first = true) {
+  // `own_editor`: the run was asked for from THIS item's own editor (its edit menu's Run, its Option+Enter):
+  // `true` at the gesture. an installed item's inputs are then the ones its editor shows (see its branch
+  // below). that an editor is open says nothing of who asked, and a run can WAIT (for previews, for an
+  // Option-run's dependencies) while its item's edit is discarded or changed: so the draft is taken ONCE,
+  // at the gesture, a run that waited is carried on with that string, and the installed branch runs it only
+  // while the editor still holds exactly that draft, and does nothing otherwise (neither a discarded input
+  // nor a newer draft was asked for). never passed to a dependency's run, an autorun, or a /run item's run
+  function onItemRun(index: number = -1, e: MouseEvent = null, touch_first = true, own_editor: boolean | string = false) {
     if (index < 0) index = focusedItem
     let item = items[index]
+    const draft_of = (item): string | null => (item.editing ? item.editorText.replace(/\u200B/g, '') : null)
+    const own_draft: string | false = own_editor === true ? (draft_of(item) ?? false) : own_editor
 
     // if alt-modified, run all runnable dependencies (sequentially) before running this item
     if (e?.altKey) {
@@ -8299,7 +8358,7 @@
       _item(item.id).running = true
       // (each run of the chain is the gesture's: its intent is captured here, before the waits for the
       // dependencies, and handed to every run, the parent's last one included, see userInput)
-      const run = carryInput((index: number) => onItemRun(index, null /* no alt-runs */, touch_first))
+      const run = carryInput((index: number, own: string | false = false) => onItemRun(index, null /* no alt-runs */, touch_first, own))
       return (async () => {
         const runnable_deps = item.deps.filter(dep => (__item(dep).runnable ? dep : null)).filter(s => s)
         // each dependency is marked running until its run ends by ONE counted reference of this
@@ -8343,7 +8402,7 @@
         // (the parent's cached index is another item's once its record has left the page)
         if (!current(item)) throw new Error(`item ${item.id} deleted`)
         _item(item.id).status = 'running …'
-        return run(item.index)
+        return run(item.index, own_draft)
       })().finally(() => {
         if (!current(item)) return // its record left the page: a new one under its id holds nothing of this run's
         _item(item.id).status = ''
@@ -8355,7 +8414,17 @@
     const pending_previews = items.filter(item => item.previewable).map(previewItem)
     if (pending_previews.length) {
       // (the run is the click's: its intent is captured here, before the wait for the previews, see userInput)
-      return Promise.all(pending_previews).then(carryInput(() => onItemRun(item.index, e, touch_first)))
+      return Promise.all(pending_previews).then(
+        carryInput(() => {
+          // the record that asked, looked up again by its id (as the Option-run does above): one that was
+          // removed or replaced while the previews ran is not run, and nothing of its run (its editor's
+          // draft least of all) goes to whatever stands at its old index. it is an ERROR, as the
+          // Option-run's own: an Option-run that awaits this run as a dependency's must stop there
+          // and not go on to its parent
+          if (items[indexFromId.get(item.id)] !== item) throw new Error(`item ${item.id} deleted`)
+          return onItemRun(item.index, e, touch_first, own_draft)
+        })
+      )
     }
 
     // create separate "run item" for installed items
@@ -8381,10 +8450,17 @@
       // suffix normalization (hide inputs via _removed, without doubling an existing
       // suffix) also happens on the grammar view, so it cannot rename a nested opener
       // inside a restored envelope. candidates outside the selected inputs are dropped.
+      // a Run from the item's OWN editor reads the inputs its owner saw there at the gesture (own_draft, see
+      // the head of this function), as the in-place run below adopts the draft. any other run (an autorun, a
+      // dependency's run in another item's Option-run, a run asked for by code) reads the item's text, an
+      // open editor or not: a draft is not run before its owner runs or saves it. the item's own text and
+      // its stored source are not touched here
+      if (own_draft !== false && draft_of(item) !== own_draft) return // the editor closed or its draft changed while the run waited
+      const source_text = own_draft !== false ? own_draft : item.text
       let inputs_text: string | null = null
       try {
         inputs_text = editInertText(
-          item.text,
+          source_text,
           grammar => {
             const inputs = grammar.match(input_regex)
             if (!inputs) return '' // no inputs: drops everything; refused below
@@ -8399,7 +8475,8 @@
         inputs_text = null // an unclaimable candidate split: refuse rather than leak
       }
       if (!inputs_text) {
-        // unreachable while the two regexes agree; a modal beats an uncaught error if they drift
+        // a draft whose last input was removed (a Run from the item's own editor: the button shows by the
+        // saved text), or the two regexes drifting apart: a modal beats an uncaught error
         _modal(`cannot run installed item ${item.name}: no input blocks found`)
         return
       }

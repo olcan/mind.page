@@ -33,8 +33,9 @@ import { firestore, install, loadAdmin, waitForApp, waitWritesSettled } from './
 // into an item's editor it asks first, in the app's dialog: cancelled, the page and the typed
 // text stay, and confirmed, the page reloads once with no question of the browser's on top; on
 // an app without a reload of its own (the released one) the item asks before EVERY reload, the
-// one after its owner kept a draft included (the item's close button, then Cancel: a state that
-// reads as clean through an item's handles), and a clean page's; with a save that is not finished (a write held
+// one after its owner kept a draft included (the item's close button, then Cancel: an open edit
+// like any other since 2026-11-24, before that a state that read as clean through an item's
+// handles), and a clean page's; with a save that is not finished (a write held
 // at the network, a second save waiting behind it, the item's texts all agreeing) the app asks
 // as well: cancelled, the page stays until the waiting write has gone out; (h) more than one period
 // of the task after the install the desktop page has a live controller, and the item's deletion
@@ -467,23 +468,23 @@ test('the key buttons show on a phone, and a tap on one does what its key does',
   await phone.waitForTimeout(500)
   expect([await started(), await edit(), loads, seen], 'cancelled on an app without a reload of its own: the page and the typed text stay').toEqual([since, [true, INDENTED, typed], 1, []])
   // then the draft its owner has just KEPT: the item's close button, and Cancel in the app's
-  // question about the discard. The app has copied the draft into the item's text by then: the
-  // item and its editor agree and nothing is being saved, which reads as clean through an item's
-  // handles and is a draft that a reload loses. The keyboard dismissed, Reload asks all the same
+  // question about the discard. Asking copies nothing (since 2026-11-24; before, the app had copied
+  // the draft into the item's text by then, which read as clean through an item's handles): the
+  // item's text is the saved one and its editor holds the draft, as in any open edit, nothing is
+  // being saved, and a reload loses the draft. The keyboard dismissed, Reload asks all the same
   await phone.locator(`[data-item-id="${id}"] .edit-menu .button.cancel`).click()
   await expect(modal, 'the app asks about the discard').toContainText('Discard unsaved changes to')
   await modal.locator('.button.cancel').click()
   await expect(modal).toBeHidden()
   await blur(phone)
-  const kept = typed.replace(/\u200B/g, '')
   const record = () => phone.evaluate(id => ((item: any) => [!!item.saving, item.savedText])(((window as any).__items as any[]).find(item => item.id == id)), id)
-  expect([await edit(), await record()], 'the draft kept: in the item\'s text and in its editor alike, nothing being saved, the saved text the old one').toEqual([[true, kept, typed], [false, INDENTED]])
+  expect([await edit(), await record()], 'the draft kept: in its editor alone, the item\'s text and the saved text the old one, nothing being saved').toEqual([[true, INDENTED, typed], [false, INDENTED]])
   await reload()
   await expect(modal, 'the item asks before a reload that would lose the draft its owner kept').toContainText(ASKS)
   await modal.locator('.button.cancel').click()
   await expect(modal).toBeHidden()
   await phone.waitForTimeout(500)
-  expect([await started(), await edit(), loads, seen], 'cancelled: the page and the kept draft stay').toEqual([since, [true, kept, typed], 1, []])
+  expect([await started(), await edit(), loads, seen], 'cancelled: the page and the kept draft stay').toEqual([since, [true, INDENTED, typed], 1, []])
   await phone.evaluate(() => void ((window as any)._reload = (window as any).__app_reload))
   // confirmed: the page reloads once, with no question of the browser's on top of the app's, and
   // the edit is gone with the page

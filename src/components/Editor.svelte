@@ -1209,8 +1209,18 @@
     // resume (the Item withdraws the resume at its session's end), or finds an entry whose draft is not this
     // editor's editorText (the ZWSPs aside; the second check of the module script), drops the entry
     const state = editorStates.get(id_suffix)
-    if (!resume || !state || removeZWSP(state.editorText) != removeZWSP(editorText)) editorStates.delete(id_suffix)
-    else {
+    if (!resume || !state || removeZWSP(state.editorText) != removeZWSP(editorText)) {
+      editorStates.delete(id_suffix)
+      // a newly created item can open with a seeded draft (e.g. a quoted page selection) in
+      // editorText while its saved text stays the bare scaffold: seed the textarea and backdrop
+      // from editorText on mount without touching text, so unsaved() stays true until saved or
+      // discarded (the MindBox does not bind editorText and leaves it '')
+      if (editorText && removeZWSP(editorText) != removeZWSP(text)) {
+        textarea.value = insertZWSP(editorText)
+        editorText = textarea.value
+        updateTextDivs()
+      }
+    } else {
       textarea.value = state.value
       updateTextDivs() // the overlay follows the value (as after an input)
       textarea.setSelectionRange(state.selectionStart, state.selectionEnd, state.selectionDirection)
