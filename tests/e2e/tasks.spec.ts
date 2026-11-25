@@ -63,12 +63,14 @@ const NOTIFY_SW_SECRET = secretFor(NOTIFY_SW_USER, PHRASE)
 // the bin-buttons, j/k row shortcuts, select-next, touch corner-size, and selected-row-border rows' account
 const BIN_USER: TestUser = { uid: 'tasks_bin_e2e', displayName: 'Tasks Bin Buttons', email: 'tasks_bin@e2e.test' }
 const BIN_SECRET = secretFor(BIN_USER, PHRASE)
+// the shortcuts-menu row's own account: #todoer + #shortcuts installed from mind.items
+const SHORTCUTS_USER: TestUser = { uid: 'tasks_shortcuts_e2e', displayName: 'Tasks Shortcuts', email: 'tasks_shortcuts@e2e.test' }
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -3973,6 +3975,604 @@ test('bin buttons on a phone touch page: 32 px corner buttons, second row lined 
     await expect.poll(() => page.evaluate(() => window._item('#bl_phone_1', true)?.text ?? ''), { message: 'tap on done completed #bl_phone_1', timeout: 15_000 }).toContain('#done')
     await expect.poll(() => page.evaluate(() => (window as any).MindBox.get().trim()), { message: 'tap on done selected next row on phone', timeout: 10_000 }).toBe(expectedNext)
     expect(errors, 'no console errors or pageerrors on phone bin-buttons row').toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+// SHORTCUTS MENU (#shortcuts + #todoer): self-contained account verifying plain `?` in the window
+// (no row, todo first row, reply row with bell), all five tab buttons (keeping the dialog open),
+// box & item editor typing vs modifier-open and caret restoration on `?` and Escape, yielding to
+// another dialog, a second item's section (inactive & throwing tests), a hostile section rendered
+// as text only (no elements/links/images/dialogs/requests/errors), and #shortcuts' own page.
+test('shortcuts menu: now and reference views, box and editor contexts, caret return, second item, hostile text, and own page', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, hasTouch: false })
+  const page = await context.newPage()
+  page.setDefaultTimeout(15_000)
+  const browserDialogs: string[] = []
+  const errors: string[] = []
+  const hostileRequests: string[] = []
+  page.on('dialog', dialog => {
+    browserDialogs.push(`${dialog.type()}: ${dialog.message()}`)
+    void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss())
+  })
+  page.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(msg.text())))
+  page.on('pageerror', err => void errors.push(`pageerror: ${err.message}`))
+  page.on('request', req => {
+    if (/hostile-shortcut|evil\.example/i.test(req.url())) hostileRequests.push(req.url())
+  })
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, SHORTCUTS_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
+    expect(await install(page, 'agent/vault'), '/_install agent/vault').toBeNull()
+    const saved = () =>
+      expect
+        .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 })
+        .toBe(true)
+    await saved()
+    // ignore transient multi-item dependency-order errors from /_install todoer & agent/vault;
+    // keep everything from /_install shortcuts onward (including reload and all test steps)
+    errors.length = 0
+    expect(await install(page, 'shortcuts'), '/_install shortcuts').toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => typeof (window as any)._shortcuts_menu?.show), { message: 'controller stands after install without reload', timeout: 30_000 })
+      .toBe('function')
+    await saved()
+    await page.reload()
+    await loaded(page)
+    expect(errors, 'no console errors or pageerrors during #shortcuts install and reload').toEqual([])
+    await expect
+      .poll(() => page.evaluate(() => typeof (window as any)._shortcuts_menu?.show), { message: 'controller stands after reload (_on_welcome)', timeout: 30_000 })
+      .toBe('function')
+    await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
+    await expect.poll(() => page.locator('.todoer-widget').count(), { timeout: 30_000 }).toBe(2)
+
+    // Create first todo and wait for todoer baselines so a reply chat created next gets its bell
+    await page.evaluate(() => void window._create('#sm_one\n#todo first shortcuts todo'))
+    await expect.poll(() => savedId(page, '#sm_one'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(1)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const st = (window._item('#todoer') as any)?._global_store
+            return (st?.rows_since ?? 0) > 0 && !!st?.bells_base
+          }),
+        { timeout: 30_000 },
+      )
+      .toBe(true)
+    // Create reply chat then second todo so the main list has [todo, reply (middle), todo]
+    const SM_REPLY =
+      "#sm_reply/0 #_chat #_agent/vault\n<<user>> hi\n<<agent('vault/default · run cd34ef56 · 1s')>>\n<!--inert-->\nShortcuts reply.\n<!--/inert-->"
+    await page.evaluate(text => void window._create(text), SM_REPLY)
+    await expect.poll(() => savedId(page, '#sm_reply/0'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(2)
+    await page.evaluate(() => void window._create('#sm_two\n#todo second shortcuts todo'))
+    await expect.poll(() => savedId(page, '#sm_two'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(3)
+    await expect.poll(() => page.evaluate(() => ((window as any)._shortcuts?.todoer ?? []).length), { timeout: 30_000 }).toBe(11)
+
+    const mainRows = () =>
+      page.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+      })
+    expect(await mainRows(), 'main list order puts reply in the middle between two todos').toEqual(['#sm_two', '#sm_reply/0', '#sm_one'])
+
+    const menu = page.locator('.modal .shortcuts-menu')
+    const boxNow = () => page.evaluate(() => (window as any).MindBox.get())
+    const unfocus = () => page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    const TABS = ['now', 'window', 'box', 'editor', 'all']
+    const shown = () =>
+      page.evaluate(() => {
+        const m = document.querySelector('.modal .shortcuts-menu') as HTMLElement | null
+        if (!m || !m.closest('.background.visible') || getComputedStyle(m).visibility != 'visible') return null
+        return {
+          view: m.dataset.view,
+          context: m.dataset.context,
+          on: [...m.querySelectorAll('.tabs > button.on')].map(b => b.textContent),
+          tabs: [...m.querySelectorAll('.tabs > button')].map(b => b.textContent),
+          where: m.querySelector('.where')?.textContent ?? null,
+          sections: [...m.querySelectorAll('.section')].map(s => [s.querySelector('.name')?.textContent, s.querySelectorAll('tr').length]),
+          none: m.querySelector('.none')?.textContent ?? null,
+        }
+      })
+    const rowsShown = () => page.evaluate(() => [...document.querySelectorAll('.modal .shortcuts-menu tr')].map(tr => (tr as HTMLElement).innerText))
+
+    // 1. Plain ? in window with no row selected: opens on now with j and k alone
+    await userSet(page, '')
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, 'plain ? in window opens shortcuts menu').toBeVisible({ timeout: 5_000 })
+    expect(await shown(), 'now view in window with no row selected').toEqual({
+      view: 'now',
+      context: 'window',
+      on: ['now'],
+      tabs: TABS,
+      where: 'what the keys do right now, in the window',
+      sections: [['todoer', 2]],
+      none: null,
+    })
+    expect(await rowsShown(), 'no row selected: j and k alone without conditions').toEqual([
+      "j\tthe main list's first row",
+      "k\tthe main list's last row",
+    ])
+
+    // 2. Every tab button switches view and keeps the menu open (stopPropagation)
+    await menu.locator('.tabs > button', { hasText: 'window' }).click()
+    await expect
+      .poll(() => shown().then(s => s && [s.view, s.on, s.where, s.sections]), { message: 'window tab switches view and keeps menu open', timeout: 5_000 })
+      .toEqual(['window', ['window'], null, [['todoer', 11]]])
+    expect((await rowsShown())[0], 'reference view includes condition in brackets').toBe('j\tthe next row (a row is selected that is not the last of its list)')
+
+    await menu.locator('.tabs > button', { hasText: 'box' }).click()
+    await expect
+      .poll(() => shown().then(s => s && [s.view, s.on, s.sections, s.none]), { message: 'box tab switches view and keeps menu open', timeout: 5_000 })
+      .toEqual(['box', ['box'], [], 'no item has added a shortcut for this context'])
+
+    await menu.locator('.tabs > button', { hasText: 'editor' }).click()
+    await expect
+      .poll(() => shown().then(s => s && [s.view, s.on, s.sections, s.none]), { message: 'editor tab switches view and keeps menu open', timeout: 5_000 })
+      .toEqual(['editor', ['editor'], [], 'no item has added a shortcut for this context'])
+
+    await menu.locator('.tabs > button', { hasText: 'all' }).click()
+    await expect
+      .poll(() => shown().then(s => s && [s.view, s.on, s.sections]), { message: 'all tab switches view and keeps menu open', timeout: 5_000 })
+      .toEqual(['all', ['all'], [['todoer', 11]]])
+
+    await menu.locator('.tabs > button', { hasText: 'now' }).click()
+    await expect
+      .poll(() => shown().then(s => s && [s.view, s.on, s.where, s.sections]), { message: 'now tab returns to now view and keeps menu open', timeout: 5_000 })
+      .toEqual(['now', ['now'], 'what the keys do right now, in the window', [['todoer', 2]]])
+
+    // Escape closes it; ? opens and closes it again
+    await page.keyboard.press('Escape')
+    await expect(menu, 'Escape closes shortcuts menu').toBeHidden({ timeout: 5_000 })
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, 'same key closes shortcuts menu').toBeHidden({ timeout: 5_000 })
+
+    // 3. First todo row selected: no k, and the keys of its buttons (j, a, d, s, x)
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b.trim()), { timeout: 5_000 }).toBe('#sm_two')
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'first todo row selected: j, a, d, s, x and no k').toEqual([
+      'j\tthe next row',
+      'a\tdelegate to the agent',
+      'd\tdone',
+      's\tsnooze',
+      'x\tdelete, after a question',
+    ])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 4. Reply row in the middle (with bell): j, k, and b alone
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b.trim()), { timeout: 5_000 }).toBe('#sm_reply/0')
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'reply row in middle with bell: j, k, b alone').toEqual([
+      'j\tthe next row',
+      'k\tthe previous row',
+      'b\tclear the bell',
+    ])
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 5. In the box: plain ? types its character; Ctrl+? opens on box's now; both ? and Escape restore focus and caret
+    await userSet(page, '')
+    await focusMindbox(page)
+    await page.keyboard.type('what?')
+    await page.waitForTimeout(200)
+    expect([await boxNow(), await menu.isVisible()], 'plain ? in box types character without opening menu').toEqual(['what?', false])
+    await page.evaluate(() => {
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.setSelectionRange(2, 2)
+    })
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu, 'Ctrl+? opens menu from box').toBeVisible({ timeout: 5_000 })
+    expect(
+      await shown().then(s => s && [s.view, s.context, s.where, s.sections, s.none]),
+      'box now view shows box context and empty now notice',
+    ).toEqual(['now', 'box', 'what the keys do right now, in the box', [], 'no shortcut of an item does anything here right now'])
+    expect(await boxNow(), 'Ctrl+? leaves box text untouched').toBe('what?')
+    // let Modal.svelte's open-time {#if _visible}<script>setTimeout(blur)</script> finish before synchronous close
+    await page.evaluate(() => new Promise(r => setTimeout(r, 0)))
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, '? closes menu opened from box').toBeHidden({ timeout: 5_000 })
+    const boxCaret = () =>
+      page.evaluate(() => {
+        const el = document.activeElement as HTMLTextAreaElement | null
+        const field = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        return [el?.id ?? null, field.value, el?.selectionStart ?? -1, el?.selectionEnd ?? -1]
+      })
+    expect(await boxCaret(), 'closing with ? restores box focus and caret').toEqual(['textarea-mindbox', 'what?', 2, 2])
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect(menu, 'Escape closes menu opened from box').toBeHidden({ timeout: 5_000 })
+    expect(await boxCaret(), 'closing with Escape restores box focus and caret').toEqual(['textarea-mindbox', 'what?', 2, 2])
+
+    // 5b. Selection-dependent box entry + keyboard-only view switches/scroll + opening snapshot + selection return + held close key
+    await page.evaluate(() => {
+      const added = ((window as any)._shortcuts ??= {})
+      added.steer_probe = [
+        {
+          keys: 'q',
+          does: 'acts on the selection of the box',
+          context: 'box',
+          active: () => ((f: any) => f?.id == 'textarea-mindbox' && f.selectionStart != f.selectionEnd)(document.activeElement),
+        },
+        ...Array.from({ length: 60 }, (_, i) => ({ keys: `w${i}`, does: `window scroll key ${i}`, context: 'window' })),
+      ]
+    })
+    await userSet(page, '')
+    await unfocus()
+    await focusMindbox(page)
+    await page.keyboard.type('hello world')
+    await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).setSelectionRange(6, 11))
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu, 'Ctrl+? with box selection opens menu').toBeVisible({ timeout: 5_000 })
+    expect(
+      [await menu.getAttribute('data-view'), await menu.getAttribute('data-context'), (await rowsShown()).includes('q\tacts on the selection of the box')],
+      'selection-dependent box entry is listed on open',
+    ).toEqual(['now', 'box', true])
+    // Reach a reference view, scroll a long list, wrap round, and return to now using KEYS ONLY
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'ArrowRight switches to window view', timeout: 5_000 }).toBe('window')
+    await page.keyboard.press('ArrowDown')
+    const scrollAfterDown = await menu.evaluate(e => [Math.round(e.scrollTop), e.scrollHeight, e.clientHeight])
+    expect(scrollAfterDown[0], 'ArrowDown moves long shortcuts list').toBeGreaterThan(0)
+    expect(scrollAfterDown[1], 'long section overflows menu box').toBeGreaterThan(scrollAfterDown[2])
+    await page.keyboard.press('PageDown')
+    const scrollAfterPage = await menu.evaluate(e => Math.round(e.scrollTop))
+    expect(scrollAfterPage, 'PageDown moves further down').toBeGreaterThan(scrollAfterDown[0])
+    await page.keyboard.press('End')
+    const scrollAtEnd = await menu.evaluate(e => [Math.round(e.scrollTop), e.scrollHeight - e.clientHeight])
+    expect(scrollAtEnd[0], 'End scrolls to bottom of list').toBeGreaterThanOrEqual(scrollAtEnd[1] - 2)
+    await page.keyboard.press('Home')
+    expect(await menu.evaluate(e => Math.round(e.scrollTop)), 'Home returns to top of list').toBe(0)
+    await page.keyboard.press('ArrowLeft')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'ArrowLeft returns to now', timeout: 5_000 }).toBe('now')
+    expect((await rowsShown()).includes('q\tacts on the selection of the box'), 'opening snapshot keeps selection-dependent entry back on now').toBe(true)
+    await page.keyboard.press('ArrowLeft')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'ArrowLeft wraps round to all', timeout: 5_000 }).toBe('all')
+    await page.keyboard.press('Tab')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'Tab wraps round to now', timeout: 5_000 }).toBe('now')
+    await page.keyboard.press('Shift+Tab')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'Shift+Tab wraps back to all', timeout: 5_000 }).toBe('all')
+    await page.keyboard.press('Tab')
+    await expect.poll(() => shown().then(s => s?.view), { message: 'Tab returns to now again', timeout: 5_000 }).toBe('now')
+    expect((await rowsShown()).includes('q\tacts on the selection of the box'), 'selection-dependent entry still listed after Tab round-trip').toBe(true)
+    await page.evaluate(() => new Promise(r => setTimeout(r, 0)))
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, '? closes menu after keyboard navigation').toBeHidden({ timeout: 5_000 })
+    expect(await boxCaret(), 'closing after keyboard navigation restores box selection untouched').toEqual(['textarea-mindbox', 'hello world', 6, 11])
+
+    // 5c. Held close key in a field: repeats (both with Shift held and after Shift is let go first) do not type into box or replace selection; fresh press types
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu, 'Ctrl+? reopens menu from box selection').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => new Promise(r => setTimeout(r, 0)))
+    await page.keyboard.down('?')
+    for (let i = 0; i < 4; i++) await page.keyboard.down('?') // Playwright dispatches repeat=true while key is held
+    await page.keyboard.up('?')
+    await expect(menu, 'held plain ? closes menu').toBeHidden({ timeout: 5_000 })
+    await page.waitForTimeout(150)
+    expect(await boxCaret(), 'held ? repeats do not type into box or replace selection').toEqual(['textarea-mindbox', 'hello world', 6, 11])
+
+    // Shift let go before Slash while Slash is still held: repeats now carry '/' without Shift and must still be swallowed
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu, 'Ctrl+? reopens menu for Shift-up-first hold check').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => new Promise(r => setTimeout(r, 0)))
+    await page.keyboard.down('Shift')
+    await page.keyboard.down('Slash')
+    await page.keyboard.up('Shift')
+    for (let i = 0; i < 3; i++) await page.keyboard.down('Slash') // repeat=true with key='/' and shiftKey=false
+    await page.keyboard.up('Slash')
+    await expect(menu, 'Shift+Slash closes menu when Shift releases before Slash repeats').toBeHidden({ timeout: 5_000 })
+    await page.waitForTimeout(150)
+    expect(await boxCaret(), 'Slash repeats after releasing Shift do not type or replace selection').toEqual([
+      'textarea-mindbox',
+      'hello world',
+      6,
+      11,
+    ])
+    await page.keyboard.press('Slash')
+    await page.waitForTimeout(150)
+    expect([await menu.isVisible(), await boxCaret()], 'fresh Slash after release types into box and replaces selection').toEqual([
+      false,
+      ['textarea-mindbox', 'hello /', 7, 7],
+    ])
+    await page.keyboard.press('?')
+    await page.waitForTimeout(150)
+    expect([await menu.isVisible(), await boxCaret()], 'fresh plain ? after release also types into box').toEqual([
+      false,
+      ['textarea-mindbox', 'hello /?', 8, 8],
+    ])
+    // Take back the temporary probe section by writing an empty list
+    await page.evaluate(() => {
+      ;(window as any)._shortcuts.steer_probe = []
+    })
+
+    // 6. In an item's editor: plain ? types its character; Ctrl+? and Alt+? open on editor's now; both ? and Escape restore caret
+    await userSet(page, '#sm_one')
+    await expect(page.locator('.container.target')).toBeVisible({ timeout: 5_000 })
+    await unfocus()
+    await expect.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 5_000 }).not.toBe('TEXTAREA')
+    await page.keyboard.press('Enter')
+    const editor = page.locator('.super-container .container.editing textarea').first()
+    await expect(editor).toBeVisible({ timeout: 5_000 })
+    await editor.focus()
+    const beforeEd = await editor.inputValue()
+    await editor.evaluate(el => {
+      const ta = el as HTMLTextAreaElement
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    })
+    await page.keyboard.type('?')
+    await page.waitForTimeout(200)
+    expect([await editor.inputValue(), await menu.isVisible()], 'plain ? in editor types character without opening menu').toEqual([beforeEd + '?', false])
+    await page.keyboard.press('Backspace')
+    await expect.poll(() => editor.inputValue(), { timeout: 5_000 }).toBe(beforeEd)
+    const editorId = await editor.evaluate(el => {
+      const ta = el as HTMLTextAreaElement
+      ta.setSelectionRange(3, 3)
+      return ta.id
+    })
+    await page.keyboard.press('Control+Shift+Slash')
+    await expect(menu, 'Ctrl+? opens menu from item editor').toBeVisible({ timeout: 5_000 })
+    expect(
+      await shown().then(s => s && [s.view, s.context, s.where, s.sections, s.none]),
+      'editor now view shows editor context',
+    ).toEqual(['now', 'editor', "what the keys do right now, in an item's editor", [], 'no shortcut of an item does anything here right now'])
+    await page.evaluate(() => new Promise(r => setTimeout(r, 0)))
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, '? closes menu opened from editor').toBeHidden({ timeout: 5_000 })
+    expect(
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLTextAreaElement | null
+        return [el?.id ?? null, el?.selectionStart ?? -1, el?.selectionEnd ?? -1]
+      }),
+      'closing with ? restores editor focus and caret',
+    ).toEqual([editorId, 3, 3])
+    await page.keyboard.press('Alt+Shift+Slash')
+    await expect(menu, 'Alt+? opens menu from item editor').toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect(menu, 'Escape closes menu opened from editor').toBeHidden({ timeout: 5_000 })
+    expect(
+      await page.evaluate(() => {
+        const el = document.activeElement as HTMLTextAreaElement | null
+        return [el?.id ?? null, el?.selectionStart ?? -1, el?.selectionEnd ?? -1]
+      }),
+      'closing with Escape restores editor focus and caret',
+    ).toEqual([editorId, 3, 3])
+    await page.keyboard.press('Escape') // cancel unmodified edit
+    await expect(editor).toBeHidden({ timeout: 5_000 })
+
+    // 6b. Todoer dirty unfocused editor: hides x, d, a while draft stands, restores them after draft is discarded
+    await userSet(page, '#sm_two')
+    await expect(page.locator('.container.target')).toBeVisible({ timeout: 5_000 })
+    await unfocus()
+    await expect.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 5_000 }).not.toBe('TEXTAREA')
+    await page.keyboard.press('Enter')
+    const dirtyEditor = page.locator('.super-container .container.editing textarea').first()
+    await expect(dirtyEditor).toBeVisible({ timeout: 5_000 })
+    await dirtyEditor.focus()
+    await dirtyEditor.evaluate(el => {
+      const ta = el as HTMLTextAreaElement
+      ta.setSelectionRange(ta.value.length, ta.value.length)
+    })
+    await page.keyboard.type(' unsaved')
+    await unfocus()
+    await expect.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 5_000 }).not.toBe('TEXTAREA')
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'dirty unfocused todo editor hides a, d, x and keeps j and s').toEqual(['j\tthe next row', 's\tsnooze'])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+    // Discard the draft and verify a, d, x return
+    await dirtyEditor.focus()
+    await page.keyboard.press('Escape')
+    const discardBtn = page.locator('.modal .button.confirm', { hasText: 'Discard' })
+    await expect(discardBtn, 'Escape on dirty edit asks to discard').toBeVisible({ timeout: 5_000 })
+    await discardBtn.click()
+    await expect(dirtyEditor, 'discarded editor closes').toBeHidden({ timeout: 5_000 })
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'after discarding draft, todoer lists a, d, x again').toEqual([
+      'j\tthe next row',
+      'a\tdelegate to the agent',
+      'd\tdone',
+      's\tsnooze',
+      'x\tdelete, after a question',
+    ])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 7. Another dialog keeps the key
+    await unfocus()
+    await page.evaluate(() => void (window as any)._modal('other dialog keeps keys'))
+    await expect(page.locator('.modal', { hasText: 'other dialog keeps keys' })).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Shift+Slash')
+    await page.waitForTimeout(200)
+    expect([await menu.isVisible(), await page.locator('.modal', { hasText: 'other dialog keeps keys' }).isVisible()], 'other dialog keeps ? and menu stays hidden').toEqual([false, true])
+    await page.evaluate(() => (window as any)._modal_close())
+    await expect(page.locator('.modal', { hasText: 'other dialog keeps keys' })).toBeHidden({ timeout: 5_000 })
+
+    // 8. A second item adds a section with active, inactive, and throwing entries (plus a box/editor entry)
+    const EXTRA_ITEM = [
+      '#sm_extra #_welcome',
+      '```js_removed',
+      'function _on_item_change(id) {',
+      '  if (id != _this.id) return',
+      "  ;(window._shortcuts ??= {})['extra item'] = [",
+      "    { keys: 'g', does: 'go now', when: 'ready', active: () => true },",
+      "    { keys: 'n', does: 'says no', when: 'inactive now', active: () => false },",
+      "    { keys: 'e', does: 'throws now', when: 'broken test', active: () => { throw new Error('extra gone') } },",
+      "    { keys: 'c', does: 'field helper', when: 'in a field', context: ['box', 'editor'] },",
+      '  ]',
+      '}',
+      '```',
+    ].join('\n')
+    await page.evaluate(text => void window._create(text), EXTRA_ITEM)
+    await expect.poll(() => savedId(page, '#sm_extra'), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => page.evaluate(() => ((window as any)._shortcuts?.['extra item'] ?? []).length), { timeout: 15_000 }).toBe(4)
+
+    await userSet(page, '')
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect((await shown())?.sections, 'now in window includes second item active entry alone (skips no and throws)').toEqual([
+      ['todoer', 2],
+      ['extra item', 1],
+    ])
+    expect(await rowsShown(), 'second item active entry shown without condition').toEqual([
+      "j\tthe main list's first row",
+      "k\tthe main list's last row",
+      'g\tgo now',
+    ])
+    await menu.locator('.tabs > button', { hasText: 'window' }).click()
+    await expect.poll(() => shown().then(s => s?.sections), { timeout: 5_000 }).toEqual([
+      ['todoer', 11],
+      ['extra item', 3],
+    ])
+    await menu.locator('.tabs > button', { hasText: 'box' }).click()
+    await expect.poll(() => shown().then(s => s?.sections), { timeout: 5_000 }).toEqual([['extra item', 1]])
+    expect(await rowsShown(), 'box reference view shows second item field entry with condition').toEqual(['c\tfield helper (in a field)'])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 9. Hostile section written from the page: text only (no elements, links, images, dialogs, requests, or errors)
+    const hostileBeforeDialogs = browserDialogs.length
+    const hostileBeforeRequests = hostileRequests.length
+    const hostilePayloads = await page.evaluate(() => {
+      const dblLt = '<'.repeat(2)
+      const list = [
+        '<img src="http://127.0.0.1:3100/hostile-shortcut-1.png" onerror="alert(\'xss-img\')">',
+        '<div onmouseover="alert(\'xss-div\')">hover</div>',
+        "<script>alert('xss-script')</script>",
+        '[click](https://evil.example/link)',
+        '![pic](http://127.0.0.1:3100/hostile-shortcut-2.png)',
+        `${dblLt}alert(1)>>`,
+        '#hostile_tag',
+        '"double" & \'single\'',
+        'line1\n\n# heading\n![pic3](http://127.0.0.1:3100/hostile-shortcut-3.png)\n[link2](https://evil.example/l2)\n<script>alert("xss-nl")</script>',
+      ]
+      const name = list.join(' | ')
+      ;((window as any)._shortcuts ??= {})[name] = list.map((p, i) => ({
+        keys: p,
+        does: `d${i}: ${p}`,
+        when: `w${i}: ${p}`,
+        active: () => true,
+      }))
+      return list
+    })
+
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    const inspectModalDom = () =>
+      page.evaluate(() => {
+        const modal = document.querySelector('.modal')!
+        const allTags = new Set<string>()
+        for (const el of modal.querySelectorAll('*')) allTags.add(el.tagName.toLowerCase())
+        const hostileSection = [...modal.querySelectorAll('.shortcuts-menu .section')].find(s =>
+          (s.querySelector('.name')?.textContent ?? '').includes('hostile-shortcut-1.png'),
+        ) as HTMLElement | undefined
+        const sectionTags: Record<string, number> = {}
+        if (hostileSection) {
+          for (const el of hostileSection.querySelectorAll('*')) {
+            const t = el.tagName.toLowerCase()
+            sectionTags[t] = (sectionTags[t] ?? 0) + 1
+          }
+        }
+        return {
+          links: modal.querySelectorAll('a').length,
+          images: modal.querySelectorAll('img').length,
+          scripts: modal.querySelectorAll('script').length,
+          extraTags: [...allTags].filter(t => !['div', 'button', 'table', 'tbody', 'tr', 'td', 'span'].includes(t)),
+          sectionTags,
+          sectionText: hostileSection?.innerText ?? '',
+        }
+      })
+
+    const domNow = await inspectModalDom()
+    expect(
+      [domNow.links, domNow.images, domNow.scripts, domNow.extraTags, domNow.sectionTags],
+      'hostile section on now adds no link, image, script, or foreign element',
+    ).toEqual([0, 0, 0, [], { div: 1, table: 1, tbody: 1, tr: 9, td: 18 }])
+    // Switch to all so hostile `when` strings are also rendered
+    await menu.locator('.tabs > button', { hasText: 'all' }).click()
+    await expect.poll(() => shown().then(s => s?.view), { timeout: 5_000 }).toBe('all')
+    const domAll = await inspectModalDom()
+    // Structure checked strictly inside the hostile section itself (1 .name div, 1 table/tbody, 9 tr, 18 td, 9 .when span)
+    expect(
+      [domAll.links, domAll.images, domAll.scripts, domAll.extraTags, domAll.sectionTags],
+      'hostile section on all adds no link, image, script, or foreign element and keeps exact section structure',
+    ).toEqual([0, 0, 0, [], { div: 1, table: 1, tbody: 1, tr: 9, td: 18, span: 9 }])
+    for (const p of hostilePayloads) {
+      const normalized = p.replace(/\s+/g, ' ')
+      expect(domAll.sectionText, `hostile payload rendered as literal text: ${normalized}`).toContain(normalized)
+    }
+    expect(browserDialogs.slice(hostileBeforeDialogs), 'no browser dialog opened by hostile payloads').toEqual([])
+    expect(hostileRequests.slice(hostileBeforeRequests), 'no network request left for hostile image URLs').toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 9b. Second item named #shortcuts: watch retires controller within its 15 s look and restores it once alone again
+    const tRetire0 = Date.now()
+    await page.evaluate(() => void window._create('#shortcuts a second item under the name'))
+    await expect
+      .poll(() => page.evaluate(() => typeof (window as any)._shortcuts_menu), { message: 'watch retires controller while two items carry #shortcuts', timeout: 25_000, intervals: [500] })
+      .toBe('undefined')
+    const retireMs = Date.now() - tRetire0
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await page.waitForTimeout(200)
+    expect(await menu.isVisible(), '? does nothing while two #shortcuts items exist').toBe(false)
+    const tRecover0 = Date.now()
+    await page.evaluate(() => {
+      const second = (window.__items as any[]).find(item => item.text.startsWith('#shortcuts a second item'))
+      ;(window._item('id:' + second.id, true) as any).delete(false)
+    })
+    await expect
+      .poll(() => page.evaluate(() => typeof (window as any)._shortcuts_menu?.show), { message: 'watch restores controller once #shortcuts is alone again', timeout: 25_000, intervals: [500] })
+      .toBe('function')
+    const recoverMs = Date.now() - tRecover0
+    console.log(`SHORTCUTS_WATCH_MS: retire=${retireMs} recover=${recoverMs}`)
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, '? opens menu again after duplicate #shortcuts is removed').toBeVisible({ timeout: 5_000 })
+    expect(await menu.getAttribute('data-view'), 'restored menu opens on now').toBe('now')
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 10. #shortcuts' own page: text drawn, code not shown, no missing tags
+    await userSet(page, '#shortcuts')
+    await expect(page.locator('.container.target')).toBeVisible({ timeout: 5_000 })
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const t = window._item('#shortcuts', true) as any
+            const text = t?.elem?.innerText ?? ''
+            return {
+              drawn: text.length > 200 && text.includes('shows the keyboard shortcuts'),
+              codeShown: /_shortcuts_create|function _shortcuts|_SHORTCUTS_CSS/.test(text),
+              missing: t?.missingTags ?? [],
+            }
+          }),
+        { message: "#shortcuts' own page draws its text without its code or missing tags", timeout: 5_000 },
+      )
+      .toEqual({ drawn: true, codeShown: false, missing: [] })
+
+    expect(errors, 'no console errors or pageerrors on shortcuts menu row').toEqual([])
   } finally {
     await context.close()
   }
