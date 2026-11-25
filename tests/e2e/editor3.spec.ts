@@ -1,4 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
+import { readFileSync } from 'fs'
+import { dirname, resolve } from 'path'
+import { fileURLToPath } from 'url'
 import { asUser, mindbox, focusMindbox, savedId, userSet, visible, createNavigationItems, scrollTop, headerTop, entries, scrollDown, nearTop, asSet, expand, focusMindboxInPlace, blur, noWritePending, settled, historyReads } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
@@ -702,6 +705,177 @@ test('Back while a reloaded page is still starting shows the entry it reaches on
   await page.goForward()
   await expect(mindbox(page), 'one entry ahead of it').toHaveValue('#e2e_target ')
   expect(warnings).toEqual([])
+})
+
+test('history links above the header keep their clickable box tight around their text, stay in place, and cut a long last entry before the editor buttons', async ({ page }) => {
+  const reads = historyReads(page)
+  const { warnings } = reads
+  const { index } = await threeQueries(page, reads)
+  const errors: string[] = []
+  page.on('pageerror', error => void errors.push(String(error)))
+  const top = await headerTop(page)
+  const links = page.locator('.history-item')
+  await expect(links).toHaveText(['#e2e_source', '#e2e_target'])
+
+  const showHistory = async () => {
+    const y = Math.max(0, top - 200)
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(y => document.body.scrollTo(0, y), y)
+          await page.waitForTimeout(100)
+          return Math.abs((await scrollTop(page)) - y) <= 2
+        },
+        { message: 'the history list is scrolled into view' }
+      )
+      .toBe(true)
+  }
+
+  const press = async (x: number, y: number) => {
+    await page.mouse.move(x, y)
+    await page.mouse.down()
+    await page.mouse.up()
+  }
+
+  const measure = () =>
+    page.evaluate(() => {
+      const container = document.querySelector('.history-container')!.getBoundingClientRect()
+      const toolbar = document.querySelector('.header .editor .buttons')!.getBoundingClientRect()
+      const create = document.querySelector('.header .editor .buttons .button.create')!.getBoundingClientRect()
+      const items = [...document.querySelectorAll('.history-item')].map(el => {
+        const box = el.getBoundingClientRect()
+        const node = [...el.childNodes].find(n => n.nodeType === Node.TEXT_NODE && (n.nodeValue ?? '').trim().length > 0)!
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        const text = range.getBoundingClientRect()
+        const style = getComputedStyle(el)
+        return {
+          label: el.textContent ?? '',
+          box: { left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height },
+          text: { left: text.left, right: text.right, top: text.top, bottom: text.bottom, width: text.width, height: text.height },
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+          overflowX: style.overflowX,
+          textOverflow: style.textOverflow,
+        }
+      })
+      return {
+        viewportWidth: window.innerWidth,
+        container: { left: container.left, right: container.right, top: container.top, bottom: container.bottom, width: container.width, height: container.height },
+        toolbar: { left: toolbar.left, right: toolbar.right, width: toolbar.width, height: toolbar.height },
+        create: { left: create.left, right: create.right, width: create.width, height: create.height },
+        items,
+      }
+    })
+
+  await showHistory()
+  const initial = await measure()
+  expect(initial.items, 'premise: at least two history entries are shown').toHaveLength(2)
+
+  // Both the first entry and the last entry keep their text Range layout origin at x = 17 in this
+  // one-column fixture (17 px from the list's left edge, as before the style change) and their clickable
+  // box within 6 px of the text on both sides
+  for (const item of initial.items) {
+    expect(item.text.left, `${item.label}: text Range layout origin x stays at 17 in this one-column fixture`).toBe(17)
+    expect(item.text.left - item.box.left, `${item.label}: left box edge within 6 px of text`).toBeGreaterThanOrEqual(0)
+    expect(item.text.left - item.box.left, `${item.label}: left box edge within 6 px of text`).toBeLessThanOrEqual(6)
+    expect(item.box.right - item.text.right, `${item.label}: right box edge within 6 px of text`).toBeGreaterThanOrEqual(0)
+    expect(item.box.right - item.text.right, `${item.label}: right box edge within 6 px of text`).toBeLessThanOrEqual(6)
+  }
+
+  // A real mouse press 100 px to the right of the last entry's text lands on column padding, not the link:
+  // the padding handler scrolls back to the header, and the query, history position and list stay as they were
+  const last = initial.items[1]
+  const rightX = last.text.right + 100
+  const lastY = (last.text.top + last.text.bottom) / 2
+  expect(rightX, 'premise: 100 px right of the last entry text stays inside the list').toBeLessThan(initial.container.right)
+  await press(rightX, lastY)
+  await nearTop(page, 'pressing 100 px right of the last entry reached the padding behind the list')
+  await settled(page)
+  await expect(mindbox(page), 'press 100 px right of last entry keeps query').toHaveValue('#e2e_target/sub')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history.length, (window as any)._history_index]), 'press 100 px right of last entry keeps history position').toEqual([index + 2, index + 3, index + 2])
+  await expect(links, 'press 100 px right of last entry keeps the list').toHaveText(['#e2e_source', '#e2e_target'])
+
+  // A real mouse press 10 px to the left of an entry's text lands in its left margin, not the link
+  await showHistory()
+  const beforeLeft = await measure()
+  const first = beforeLeft.items[0]
+  const leftX = first.text.left - 10
+  const firstY = (first.text.top + first.text.bottom) / 2
+  expect(leftX, 'premise: 10 px left of the entry text stays inside the list').toBeGreaterThan(beforeLeft.container.left)
+  await press(leftX, firstY)
+  await nearTop(page, 'pressing 10 px left of an entry reached the padding behind the list')
+  await settled(page)
+  await expect(mindbox(page), 'press 10 px left of entry keeps query').toHaveValue('#e2e_target/sub')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history.length, (window as any)._history_index]), 'press 10 px left of entry keeps history position').toEqual([index + 2, index + 3, index + 2])
+  await expect(links, 'press 10 px left of entry keeps the list').toHaveText(['#e2e_source', '#e2e_target'])
+
+  // A real mouse press on the text goes to that entry, as before
+  await showHistory()
+  const beforeLastClick = await measure()
+  const lastLink = beforeLastClick.items[1]
+  await press((lastLink.text.left + lastLink.text.right) / 2, (lastLink.text.top + lastLink.text.bottom) / 2)
+  await expect(mindbox(page), 'press on the last entry text goes to it').toHaveValue('#e2e_target ')
+  expect(await page.evaluate(() => [history.state.index, (window as any)._history_index])).toEqual([index + 1, index + 1])
+
+  // A long entry (wider than the window) as the last entry is cut before the editor's Create button with
+  // ellipsis, both with the lane's fallback font and with the app's Open Sans 600
+  await page.goForward()
+  await expect(mindbox(page)).toHaveValue('#e2e_target/sub')
+  await expect.poll(() => page.evaluate(() => history.state.index)).toBe(index + 2)
+  const longQuery = '#e2e_long_history_entry_' + 'segment_'.repeat(30)
+  await userSet(page, longQuery)
+  await expect.poll(() => page.evaluate(() => history.state.editorText), { timeout: 10_000 }).toBe(longQuery)
+  await asUser(page, () => void (window._item('#e2e_source', true) as any).select())
+  await expect(mindbox(page)).toHaveValue('#e2e_source')
+  await expect(links).toHaveText(['#e2e_source', '#e2e_target', longQuery])
+  await settled(page)
+  await showHistory()
+  const longMeasured = await measure()
+  const longLast = longMeasured.items[longMeasured.items.length - 1]
+  expect(longLast.text.left, 'long last entry text Range layout origin x stays at 17 in this one-column fixture').toBe(17)
+  expect(longLast.scrollWidth, 'premise: long entry is wider than the window').toBeGreaterThan(longMeasured.viewportWidth)
+  expect(longLast.scrollWidth, 'long last entry overflows its client width').toBeGreaterThan(longLast.clientWidth)
+  expect([longLast.overflowX, longLast.textOverflow], 'long last entry cuts text with ellipsis').toEqual(['hidden', 'ellipsis'])
+  expect(longMeasured.create.width, 'premise: Create button is rendered').toBeGreaterThan(0)
+  expect(longLast.box.right, 'long last entry box ends at or before Create button (fallback font)').toBeLessThanOrEqual(longMeasured.create.left)
+
+  // Load the bundled Latin Open Sans 600 under the family name the app styles ask for, then wait until
+  // the toolbar width changes or two animation frames have passed
+  const openSans600 = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../static/open-sans/files/open-sans-latin-600-normal.woff2')
+  ).toString('base64')
+  const fontState = await page.evaluate(
+    async ([font, beforeWidth]) => {
+      const face = await new FontFace('Open Sans', `url(data:font/woff2;base64,${font})`, {
+        weight: '600',
+        style: 'normal',
+      }).load()
+      document.fonts.add(face)
+      await document.fonts.ready
+      const buttons = document.querySelector('.header .editor .buttons')!
+      let frames = 0
+      let widthChanged = buttons.getBoundingClientRect().width !== beforeWidth
+      while (!widthChanged && frames < 2) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+        frames++
+        widthChanged = buttons.getBoundingClientRect().width !== beforeWidth
+      }
+      return { status: face.status, widthChanged, frames }
+    },
+    [openSans600, longMeasured.toolbar.width] as const
+  )
+  expect(fontState.status, 'Open Sans 600 loaded').toBe('loaded')
+  const afterFont = await measure()
+  const afterFontLast = afterFont.items[afterFont.items.length - 1]
+  expect(afterFontLast.box.right, 'long last entry box ends at or before Create button (Open Sans 600)').toBeLessThanOrEqual(afterFont.create.left)
+  expect(Math.abs(afterFont.container.right - afterFontLast.box.right - 180), 'long last entry box ends 180 px before the list right edge').toBeLessThanOrEqual(0.5)
+  expect(afterFontLast.text.left, 'long last entry text Range layout origin x stays at 17 in this one-column fixture').toBe(17)
+  expect(afterFontLast.scrollWidth, 'long last entry overflows its client width').toBeGreaterThan(afterFontLast.clientWidth)
+  expect([afterFontLast.overflowX, afterFontLast.textOverflow], 'long last entry cuts text with ellipsis').toEqual(['hidden', 'ellipsis'])
+
+  expect(errors, 'no page errors').toEqual([])
+  expect(warnings, 'no history warnings').toEqual([])
 })
 
 // BACK BETWEEN A RELOADED PAGE'S INITIALIZATION AND ITS LAUNCH FRAGMENT (review 2 of scroll_history,

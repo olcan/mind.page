@@ -14148,13 +14148,13 @@
     font-family: 'JetBrains Mono', monospace;
     font-size: 14px;
     white-space: nowrap;
-    max-width: 100%;
+    max-width: calc(100% - 12px);
     box-sizing: border-box;
     overflow: hidden;
     text-overflow: ellipsis;
     border-radius: 4px;
     padding: 5px;
-    padding-left: 17px; /* 10 for header, 10 for editor, +1 border, -4 margin, has to be updated if header padding-left is reduced <10 on smaller screens below */
+    margin-left: 12px; /* 12 margin + 5 padding = 17 text indent (10 header + 10 editor + 1 border - 4 editor margin); has to be updated if header padding-left is reduced <10 on smaller screens below */
     margin-bottom: 2px;
     width: fit-content;
     cursor: pointer;
@@ -14163,7 +14163,11 @@
     color: #777;
   }
   .history-item:last-child {
-    padding-right: 180px; /* clears editor buttons */
+    /* the last entry's box ends where its text is cut, 180 px before the list's right edge (12 margin-left + 180), as its
+       text always was: no part of it reaches the editor buttons, whose left edge stands 176 to 178 px from that edge by
+       the font their labels are drawn in (the row measures the Create button with both fonts) */
+    padding-right: 0;
+    max-width: calc(100% - 192px);
   }
 
   /* override italic comment style of sunburst */
