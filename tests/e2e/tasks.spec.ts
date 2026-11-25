@@ -3693,6 +3693,167 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(() => mainRowNames().then(r => r.includes(delTarget)), { message: 'u returns the todo to main list', timeout: 15_000 }).toBe(true)
     expect(await priorKeys(), 'u did not forward to prior hook').toEqual([])
 
+    // 8. #todoer's own page: five short bullets, commands table (4 single-line closed rows),
+    // functions table filtered to lowercase functions only (no names in capitals), and clicking
+    // the description of /delegate, /notify, and todoer_widget opens a table of its forms
+    await userSet(page, '#todoer', { scroll: true })
+    await expect
+      .poll(
+        () => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#todoer', true)?.id),
+        { message: '#todoer is the targeted item', timeout: 15_000 },
+      )
+      .toBe(true)
+    const todoerItem = page.locator('.super-container.target')
+    await expect(todoerItem.locator('.core_js_table.ready'), '#todoer renders commands and functions tables').toHaveCount(2, { timeout: 30_000 })
+    await expect(todoerItem.locator('.content > ul > li'), '#todoer visible text has five bullets').toHaveCount(5)
+    const readTodoerTables = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.super-container.target .core_js_table')].map(table =>
+          [...table.querySelectorAll(':scope > .function')].map(row => {
+            const more = row.querySelector('.more') as HTMLElement | null
+            return {
+              name: (row.querySelector('.usage .name')?.textContent ?? '').trim(),
+              expanded: row.classList.contains('expanded'),
+              moreHidden: !more || getComputedStyle(more).display == 'none',
+              height: Math.round((row as HTMLElement).getBoundingClientRect().height),
+            }
+          }),
+        ),
+      )
+    const [cmdRows, fnRows] = await readTodoerTables()
+    expect(cmdRows.map(r => r.name), '#todoer commands table lists its four commands').toEqual([
+      '/todo [text]',
+      '/delegate [item|text]',
+      '/takeback [item]',
+      '/notify [on [reason...]|off [reason...]|test [item]]',
+    ])
+    const singleLineHeight = cmdRows[0]!.height
+    expect(
+      cmdRows.every(r => !r.expanded && r.moreHidden && r.height <= 45 && Math.abs(r.height - singleLineHeight) <= 2),
+      `each closed command row is one line high (rows: ${JSON.stringify(cmdRows)})`,
+    ).toBe(true)
+    expect(fnRows.map(r => r.name), '#todoer functions table lists only todoer_widget and create_pinned_item').toEqual([
+      'todoer_widget',
+      'create_pinned_item',
+    ])
+    expect(fnRows.filter(r => /^[A-Z]/.test(r.name)), '#todoer functions table lists no names in capitals').toEqual([])
+    for (const [name, formRows] of [
+      ['/delegate', 3],
+      ['/notify', 7],
+      ['todoer_widget', 5],
+    ] as const) {
+      const row = todoerItem.locator('.core_js_table .function', { has: page.locator('.usage .name', { hasText: name }) }).first()
+      await row.locator('.desc').click({ position: { x: 20, y: 10 } })
+      await expect(row, `${name} row expands on description click`).toHaveClass(/\bexpanded\b/, { timeout: 10_000 })
+      await expect(todoerItem.locator('.core_js_table.ready')).toHaveCount(2, { timeout: 10_000 })
+      await expect(row.locator('.more'), `${name} expanded forms panel is visible`).toBeVisible()
+      await expect(row.locator('.more table > tbody > tr'), `${name} forms table has ${formRows} rows`).toHaveCount(formRows)
+      await expect(row.locator('.more table'), `${name} forms render as one table`).toHaveCount(1)
+      await expect(page.locator('.modal'), `${name} description click opens no code modal`).toBeHidden()
+    }
+    expect(errors, '#todoer page logs no error').toEqual([])
+
+    // 9. /vault command caret placement: without Shift no editor opens and no error is logged;
+    // plain /vault and /vault <words> typed in MindBox with Shift+Enter focus the new chat's editor
+    // with the caret collapsed at the end (one space after the user delimiter for plain /vault);
+    // and a chat's child keeps its caret at the end. #chat/vault/0 is created without Shift first,
+    // so the measured Shift+Enter chats are later chats (not the first chat after reload)
+    expect(
+      await page.evaluate(() => [window._exists('#chat/vault'), typeof (window as any)._customize_child]),
+      '#chat/vault and _customize_child are installed',
+    ).toEqual([true, 'function'])
+    const activeItemEditor = () =>
+      page.evaluate(() => {
+        const a = document.activeElement as HTMLTextAreaElement | null
+        const container = a?.closest?.('.container[data-item-id]') as HTMLElement | null
+        const item = container ? window._item('id:' + container.getAttribute('data-item-id'), true) : null
+        return a?.tagName == 'TEXTAREA' && item
+          ? { name: item.name, value: a.value, start: a.selectionStart, end: a.selectionEnd, len: a.value.length }
+          : null
+      })
+    await userSet(page, '')
+    await unfocus()
+    // (the message holds a text field of its own: a field in the item's drawn text is not the editor's, and
+    // the command must leave it as it is)
+    const FIELD = '<textarea>draft</textarea>'
+    const drawnField = () =>
+      page.evaluate(() => {
+        const field = document.querySelector('.container.target textarea') as HTMLTextAreaElement | null
+        return field ? [field.id, field.value, field.selectionStart, field.selectionEnd] : null
+      })
+    await page.evaluate(field => void window._create('/vault ' + field, { command: true }), FIELD)
+    await expect.poll(() => savedId(page, '#chat/vault/0'), { message: '/vault without Shift creates #chat/vault/0', timeout: 30_000 }).toBeTruthy()
+    await expect
+      .poll(
+        () => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#chat/vault/0', true)?.id),
+        { message: '/vault without Shift targets #chat/vault/0', timeout: 10_000 },
+      )
+      .toBe(true)
+    await expect.poll(drawnField, { message: "the message's own field is drawn in the item, untouched", timeout: 10_000 }).toEqual(['', 'draft', 0, 0])
+    await page.evaluate(() => (window as any)._update_dom())
+    await page.evaluate(() => (window as any)._update_dom())
+    expect(await drawnField(), "/vault without Shift leaves the message's own field as it was").toEqual(['', 'draft', 0, 0])
+    expect(
+      await page.evaluate(() => {
+        const it = window._item('#chat/vault/0', true) as any
+        return { text: it?.text ?? null, editing: !!it?.editing }
+      }),
+      '/vault without Shift leaves #chat/vault/0 unedited',
+    ).toEqual({ text: '#chat/vault/0 #_agent/vault\n<<user>> ' + FIELD, editing: false })
+    expect(await activeItemEditor(), '/vault without Shift opens no item editor').toBeNull()
+    expect(errors, '/vault without Shift logs no error').toEqual([])
+
+    const runInMindbox = async (typed: string, expectedName: string, expectedValue: string, label: string) => {
+      await userSet(page, '')
+      await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe('')
+      await focusMindbox(page)
+      await page.keyboard.type(typed)
+      await expect(mindbox(page)).toHaveValue(typed)
+      // the witness of the caret's FIRST frame: at the new editor's focus, the frame after it is sampled (at
+      // the focus itself the app has not placed any caret yet, a chat's child included). A caret that is
+      // moved later than that leaves room for a first key to land at the text's start
+      await page.evaluate(() => {
+        const w = window as any
+        w.__caret_first = null
+        const seen = (e: FocusEvent) => {
+          const field = e.target as HTMLTextAreaElement | null
+          if (field?.tagName != 'TEXTAREA' || field.id == 'textarea-mindbox') return
+          document.removeEventListener('focusin', seen, true)
+          requestAnimationFrame(() => void (w.__caret_first = [field.id, field.selectionStart, field.selectionEnd, field.value.length]))
+        }
+        document.addEventListener('focusin', seen, true)
+      })
+      await page.keyboard.press('Shift+Enter')
+      await expect
+        .poll(
+          () => page.evaluate(n => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item(n, true)?.id, expectedName),
+          { message: `${label} targets ${expectedName}`, timeout: 10_000 },
+        )
+        .toBe(true)
+      const editorId = await page.evaluate(n => 'textarea-' + window._item(n, true)?.id, expectedName)
+      await expect
+        .poll(() => page.evaluate(() => (window as any).__caret_first), { message: `${label}: by the first frame after the editor's focus`, timeout: 10_000 })
+        .toEqual([editorId, expectedValue.length, expectedValue.length, expectedValue.length])
+      // and a character typed at once goes on from the text's end
+      await page.keyboard.type('x')
+      expect(await activeItemEditor(), `${label}: a typed character extends the text`).toEqual({
+        name: expectedName,
+        value: expectedValue + 'x',
+        start: expectedValue.length + 1,
+        end: expectedValue.length + 1,
+        len: expectedValue.length + 1,
+      })
+      await page.keyboard.press('Backspace')
+      expect((await activeItemEditor())?.value, `${label}: the character taken back`).toBe(expectedValue)
+      await page.keyboard.press('Escape')
+      await expect.poll(activeItemEditor, { message: `${label} editor closes on Escape`, timeout: 5_000 }).toBeNull()
+      await expect.poll(() => savedId(page, expectedName), { message: `${expectedName} saved`, timeout: 30_000 }).toBeTruthy()
+    }
+    await runInMindbox('/vault', '#chat/vault/1', '#chat/vault/1 #_agent/vault\n<<user>> ', 'plain /vault Shift+Enter focuses editor with caret collapsed at end')
+    await runInMindbox('/vault hello again', '#chat/vault/2', '#chat/vault/2 #_agent/vault\n<<user>> hello again', '/vault with words Shift+Enter focuses editor with caret collapsed after words')
+    await runInMindbox('#chat/vault/1', '#chat/vault/1/0', '#chat/vault/1/0\n<<user>> ', 'chat child Shift+Enter keeps editor focused with caret collapsed at end')
+    await userSet(page, '')
+
     await saved()
     expect(errors, 'no console errors or pageerrors on desktop bin-buttons row').toEqual([])
   } finally {
