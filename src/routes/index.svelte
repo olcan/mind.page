@@ -3131,6 +3131,7 @@
   let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
   let ignoreEditorChanges = false
+  let recentWalk: RecentWalk | null = null // Option+Down's walk (see onKeyDown); ended by any other change of the box
 
   function onEditorChange(text: string, keep_times = false) {
     // console.debug('onEditorChange', text, keep_times)
@@ -3148,6 +3149,7 @@
       const root = items.find(item => item.shared?.indices?.[shared_key] == 0)
       if (root?.labelText && text.trim().toLowerCase() == root.labelText.toLowerCase()) text = ''
     }
+    if (recentWalk && text !== recentWalk.query) recentWalk = null // (a walk's own step holds its query already)
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
@@ -4529,6 +4531,7 @@
     intro = state.intro
 
     // restore editor text and unsaved times
+    recentWalk = null
     editorText = state.editorText || ''
     if (state.unsavedTimes) {
       items.forEach(item => (item.time = item.savedTime))
@@ -9401,6 +9404,7 @@
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
+  import { isRecentDownKey, stepRecentWalk, type RecentWalk } from '../recent_descendant'
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import {
     NOTIFICATION_CLICK_TYPE,
@@ -12310,6 +12314,42 @@
         // showToggle.dispatchEvent(new Event('click'))
         return
       }
+    }
+    // Option+Down (Alt+ArrowDown alone; the owner, 2026-11-24: "most recently updated descendant" /
+    // "having alt/option+down go to the most recently updated descendant, or root item in global context"):
+    // from a uniquely labeled item selects the newest descendant at any depth by item.time (or, on an empty
+    // box, the newest non-pinned item of all, unnamed included by its id reference); consecutive presses
+    // walk on to the next newest from the same start without going back up, ending quietly with no wrap
+    if (isRecentDownKey(key, e)) {
+      e.preventDefault()
+      const { item: next, walk } = stepRecentWalk(
+        items,
+        editorText,
+        recentWalk,
+        chosen => (chosen.labelUnique && chosen.label ? (labelTextOf(chosen.labelText, chosen.label) || chosen.label) + ' ' : selectName(chosen)),
+        label => idsFromLabel.get(label)?.length == 1,
+        query => _item(query.trim(), true /* silent */)?.id // what the box selects now (a walk goes on from its own last item alone)
+      )
+      if (next && walk) {
+        // a query still debouncing (a label typed within 500 ms with the MindBox focused) is settled first, as
+        // typing is, so the jump is an entry of its own after it and Back returns to the label typed: applied
+        // alone, the jump's query cancelled the typed one's, and where the box had shown that very item before
+        // it wrote no entry at all (review 0 of option_down). a press that selects nothing writes nothing
+        if (editorChangePending) {
+          lastEditorChangeTime = 0 // disable debounce even if editor focused
+          onEditorChange(editorText)
+        }
+        recentWalk = walk // (after the settling, which ends a walk whose query the box no longer holds)
+        textArea(-1)?.blur()
+        lastEditorChangeTime = 0 // force immediate update
+        forceNewStateOnEditorChange = true // add to history like click-based nav
+        finalizeStateOnEditorChange = true // keep the step if the user types after it
+        tick().then(() => editor.setSelection(editorText.length, editorText.length))
+        onEditorChange(walk.query, true) // keep_times for consistency w/ mousedown w/ altKey:true
+        // note since we are using onEditorChange, we need to handle scrolling as needed
+        update_dom().then(scrollToTarget)
+      } else recentWalk = walk
+      return
     }
     // let unmodified or alt-modified ArrowUp select label on last context item (i.e. move up to parent)
     if (key == 'ArrowUp' && (!modified || e.altKey)) {

@@ -491,6 +491,96 @@ test('#chat own page is whole, hides the first user row only when bare, and scop
     plain.userLabelLeftOffset / 2
   )
 
+  // 5. Chat inert-block top margin (the owner, 2026-11-24): 2px closed AND 2px open (not 10px
+  // as in non-chat items, and not 5px when open), keeping the same distance from the agent role
+  // row in both states
+  const chatInertGeometry = (label: string) =>
+    page.evaluate(name => {
+      const item = window._item(name, true)
+      const container = item && (document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${item.id}"]`) as HTMLElement | null)
+      if (!container) return null
+      const content = container.querySelector('.content') as HTMLElement
+      const lh = parseFloat(getComputedStyle(content).lineHeight)
+      const agentRows = [...content.querySelectorAll(':scope > div.message.agent')] as HTMLElement[]
+      const blocks = [...content.querySelectorAll('.inert-block')] as HTMLElement[]
+      return {
+        selected: container.classList.contains('target'),
+        blocks: blocks.map((block, i) => {
+          const s = getComputedStyle(block)
+          const open = [...block.querySelectorAll(':scope > .vault-result')].every(f => f.getClientRects().length > 0)
+          const row = agentRows[i]
+          return {
+            open,
+            margins: [s.marginTop, s.marginRight, s.marginBottom, s.marginLeft],
+            gap: row ? Math.round((block.getBoundingClientRect().top - row.getBoundingClientRect().bottom) * 100) / 100 : null,
+            lines: Math.round(((block.offsetHeight + parseFloat(s.marginTop) + parseFloat(s.marginBottom)) / lh) * 100) / 100,
+          }
+        }),
+      }
+    }, label)
+
+  // unselected (closed): a leading non-matching term deselects the item without matching inside
+  // either reply, so both chat inert blocks close naturally
+  await page.evaluate(name => void (window as any).MindBox.set(`nothingsuch ${name}`), inertLabel)
+  await expect
+    .poll(() => chatInertGeometry(inertLabel).then(g => (g ? [g.selected, ...g.blocks.map(b => b.open)] : null)), {
+      timeout: 15_000,
+      message: 'chat item unselected with both inert blocks closed',
+    })
+    .toEqual([false, false, false])
+  const chatClosed = (await chatInertGeometry(inertLabel))!
+  expect(
+    chatClosed.blocks.map(b => b.margins),
+    'chat closed inert blocks keep 2px top margin (not the 10px non-chat margin)'
+  ).toEqual([
+    ['2px', '0px', '2px', '0px'],
+    ['2px', '0px', '2px', '0px'],
+  ])
+  expect(chatClosed.blocks.map(b => b.lines), 'chat closed inert blocks stay exactly one line tall').toEqual([1, 1])
+
+  // manually opened (.opened while unselected): top margin stays 2px and distance from agent row is unchanged
+  const inertId = await page.evaluate(name => window._item(name, true)!.id, inertLabel)
+  await page
+    .locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${inertId}"] .inert-block > .inert-line`)
+    .first()
+    .click({ position: { x: 5, y: 8 } })
+  await expect
+    .poll(() => chatInertGeometry(inertLabel).then(g => g?.blocks.map(b => b.open) ?? null), {
+      timeout: 15_000,
+      message: 'first chat inert block opened by click',
+    })
+    .toEqual([true, false])
+  const chatManualOpen = (await chatInertGeometry(inertLabel))!
+  expect(
+    chatManualOpen.blocks[0].margins,
+    'chat manually opened inert block keeps 2px top margin (not 5px)'
+  ).toEqual(['2px', '-10px', '5px', '-10px'])
+  expect(
+    chatManualOpen.blocks[0].gap,
+    'chat manually opened inert block keeps the exact closed distance under the agent role row'
+  ).toBe(chatClosed.blocks[0].gap)
+
+  // selected (.container.target): both open blocks keep 2px top margin and the exact closed distance under each agent role row
+  await page.evaluate(name => void (window as any).MindBox.set(name), inertLabel)
+  await expect
+    .poll(() => chatInertGeometry(inertLabel).then(g => (g ? [g.selected, ...g.blocks.map(b => b.open)] : null)), {
+      timeout: 15_000,
+      message: 'chat item selected with both inert blocks open',
+    })
+    .toEqual([true, true, true])
+  const chatTargetOpen = (await chatInertGeometry(inertLabel))!
+  expect(
+    chatTargetOpen.blocks.map(b => b.margins),
+    'chat selected open inert blocks keep 2px top margin (not 5px)'
+  ).toEqual([
+    ['2px', '-10px', '5px', '-10px'],
+    ['2px', '-10px', '5px', '-10px'],
+  ])
+  expect(
+    chatTargetOpen.blocks.map(b => b.gap),
+    'chat selected open inert blocks keep the exact closed distance under each agent role row'
+  ).toEqual(chatClosed.blocks.map(b => b.gap))
+
   // leave no writes in flight for the next row in this serial lane
   for (const label of [hiddenLabel, sameLineLabel, betweenLineLabel, spacedLabel, plainLabel, inertLabel]) {
     await waitWritesSettled(page, label)

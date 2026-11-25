@@ -2525,3 +2525,334 @@ test('time rows: a fresh load groups the corpus although layouts ran over an emp
   await expect.poll(() => fresh.evaluate(() => ((window as any).__items ?? []).filter((i: any) => i.timeString).length), { timeout: 30_000 }).toBeGreaterThan(1)
   await cold.close()
 })
+
+test('Option+Down selects the newest descendant at any depth, walks consecutive presses to the end without wrapping, handles the global case including unnamed items, and yields inside an item editor', async ({ page }) => {
+  // the owner (2026-11-24): Option+Down (Alt+ArrowDown alone) selects the newest item below the selected one
+  // at any depth by item.time, walks consecutive presses to the next newest from the same start without going
+  // back up, ends quietly with no wrap, handles the empty-box global case (non-pinned, unnamed included by
+  // id:<savedId>), leaves plain Down and two-modifier scroll shortcuts intact, and stays text navigation
+  // inside an item's open editor
+  await loadAdmin(page)
+  const PARENT = '#e2e_od'
+  const CHILD_A = `${PARENT}/a`
+  const DEEP = `${CHILD_A}/deep`
+  const CHILD_B = `${PARENT}/b`
+  const PIN = '#e2e_od_pin'
+  const UNNAMED_TEXT = 'e2e_od_unnamed_body without label'
+  const fixtures = [
+    `${PARENT} parent\n\nsecond line`,
+    `${CHILD_A} child a`,
+    `${DEEP} grandchild deep`,
+    `${CHILD_B} child b`,
+    `${PIN} #_pin pinned newer than everything`,
+    UNNAMED_TEXT,
+  ]
+  await page.evaluate(texts => texts.forEach(text => void window._create(text)), fixtures)
+  // wait for all six creates to finish saving so no onSaveDone overwrites our deterministic times
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ([labels, unnamed]) => {
+            const list = (window as any).__items as any[]
+            const found = [...labels.map(l => list.find(i => i.label == l)), list.find(i => i.text == unnamed)]
+            return found.every(i => i && i.savedId && !i.saving && !i.saveTask && !(i.unackedWrites?.length))
+          },
+          [[PARENT, CHILD_A, DEEP, CHILD_B, PIN], UNNAMED_TEXT] as const
+        ),
+      { message: 'fixture items saved and idle', timeout: 30_000 }
+    )
+    .toBe(true)
+
+  const setFixtureTimes = () =>
+    page.evaluate(
+      ([labels, unnamed]) => {
+        const list = (window as any).__items as any[]
+        const maxTime = Math.max(Date.now(), ...list.map(i => (Number.isFinite(i.time) ? i.time : 0)))
+        const base = maxTime + 60_000
+        const byLabel = (l: string) => list.find(i => i.label == l)
+        const unnamedItem = list.find(i => i.text == unnamed)
+        const plan: [any, number][] = [
+          [byLabel(labels[4]), base + 5000], // pinned: newest overall, must be skipped globally
+          [unnamedItem, base + 4000], // unnamed: newest non-pinned item of all
+          [byLabel(labels[2]), base + 3000], // grandchild (2 levels down): newest descendant of PARENT
+          [byLabel(labels[1]), base + 2000], // child a: 2nd newest descendant of PARENT
+          [byLabel(labels[3]), base + 1000], // child b (leaf): 3rd newest descendant of PARENT
+          [byLabel(labels[0]), base + 500], // parent
+        ]
+        for (const [it, t] of plan) it.time = it.savedTime = t
+        return {
+          parentId: byLabel(labels[0]).id as string,
+          parentSavedId: byLabel(labels[0]).savedId as string,
+          unnamedSavedId: unnamedItem.savedId as string,
+          times: [byLabel(labels[2]).time, byLabel(labels[1]).time, byLabel(labels[3]).time] as number[],
+        }
+      },
+      [[PARENT, CHILD_A, DEEP, CHILD_B, PIN], UNNAMED_TEXT] as const
+    )
+  const { parentId, parentSavedId, unnamedSavedId, times } = await setFixtureTimes()
+
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const descTimes = () =>
+    page.evaluate(
+      labels => labels.map(l => (window as any).__items.find((i: any) => i.label == l)?.time),
+      [DEEP, CHILD_A, CHILD_B]
+    )
+
+  // 1. From selected parent: lands 2 levels down on newest descendant, walks to end, no wrap, times kept, Back steps 1 by 1
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  await blur(page)
+  const [len0, idx0] = await entries(page)
+
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: '1st Option+Down lands on newest descendant two levels down' }).toBe(`${DEEP} `)
+  expect(await entries(page), '1st Option+Down pushes a history entry').toEqual([len0 + 1, idx0 + 1])
+  expect(await descTimes(), 'Option+Down keeps item times').toEqual(times)
+
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: '2nd Option+Down walks to next newest below the same parent' }).toBe(`${CHILD_A} `)
+  expect(await entries(page), '2nd Option+Down pushes a history entry').toEqual([len0 + 2, idx0 + 2])
+
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: '3rd Option+Down walks to oldest descendant below the same parent' }).toBe(`${CHILD_B} `)
+  expect(await entries(page), '3rd Option+Down pushes a history entry').toEqual([len0 + 3, idx0 + 3])
+
+  // at the walk's end: default prevented, no box change, no history entry, no scroll, no wrap
+  const scrollBeforeEnd = await scrollTop(page)
+  await page.evaluate(() => {
+    ;(window as any).__odEndPrevented = null
+    const onEndKey = (e: KeyboardEvent) => {
+      if (e.code == 'ArrowDown' && e.altKey) {
+        ;(window as any).__odEndPrevented = e.defaultPrevented
+        window.removeEventListener('keydown', onEndKey)
+      }
+    }
+    window.addEventListener('keydown', onEndKey)
+  })
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await page.evaluate(() => (window as any).__odEndPrevented), 'default prevented at walk end').toBe(true)
+  expect(await query(), 'walk end changes nothing').toBe(`${CHILD_B} `)
+  expect(await entries(page), 'walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
+  expect(await scrollTop(page), 'walk end does not scroll').toBe(scrollBeforeEnd)
+  // a second press at the end still does not wrap
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await query(), 'repeated press at walk end does not wrap').toBe(`${CHILD_B} `)
+  expect(await entries(page), 'repeated press at walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
+
+  // Back steps back through the walk one entry at a time
+  await page.goBack()
+  await expect.poll(query, { message: 'Back 1 returns to child a' }).toBe(`${CHILD_A} `)
+  await page.goBack()
+  await expect.poll(query, { message: 'Back 2 returns to grandchild deep' }).toBe(`${DEEP} `)
+  await page.goBack()
+  await expect.poll(query, { message: 'Back 3 returns to parent' }).toMatch(/^#e2e_od ?$/)
+
+  // 2. Plain Down is as before, and a plain Down or a click in between starts the walk anew
+  await blur(page)
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query, { message: 'plain Down from parent still selects first direct child' }).toBe(`${CHILD_A} `)
+
+  // plain Down in between: start walk from parent -> deep -> child a, then plain Down to deep (leaf), then Option+Down must do nothing (not continue to child b)
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query).toBe(`${DEEP} `)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query).toBe(`${CHILD_A} `)
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query, { message: 'plain Down enters direct child of child a' }).toBe(`${DEEP} `)
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await query(), 'Option+Down after plain Down starts anew on leaf and does nothing').toBe(`${DEEP} `)
+
+  // click in between: start walk from parent -> deep, then click child a on parent context, then Option+Down starts anew from child a (-> deep, not child b)
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query).toBe(`${DEEP} `)
+  await expect.poll(() => page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).count()).toBeGreaterThan(0)
+  await page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).first().click()
+  await expect.poll(query, { message: 'click on child a selects child a' }).toBe(`${CHILD_A} `)
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: 'Option+Down after click starts anew from child a' }).toBe(`${DEEP} `)
+
+  // 3. MindBox context (at end edge) and second-modifier rejection
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  // two-modifier scroll shortcut stays intact
+  await expand(page)
+  const scrolled = await scrollDown(page)
+  await blur(page)
+  await page.keyboard.press('Control+Alt+ArrowUp')
+  await nearTop(page, 'Control+Alt+ArrowUp scrolls to top')
+  await page.keyboard.press('Control+Alt+ArrowDown')
+  await expect.poll(() => scrollTop(page), { message: 'Control+Alt+ArrowDown keeps scroll-back shortcut' }).toBeGreaterThan(scrolled - 100)
+  expect(await query(), 'Control+Alt+ArrowDown does not trigger Option+Down navigation').toMatch(/^#e2e_od ?$/)
+
+  // Shift+Alt+ArrowDown in MindBox (at end edge) must NOT propagate or trigger Option+Down
+  const boxTextNow = await query()
+  await focusMindboxInPlace(page, boxTextNow.length)
+  await page.evaluate(() => {
+    ;(window as any).__odShiftAltReachedWindow = false
+    const onShiftAlt = (e: KeyboardEvent) => {
+      if (e.code == 'ArrowDown' && e.altKey && e.shiftKey) (window as any).__odShiftAltReachedWindow = true
+    }
+    ;(window as any).__odShiftAltCleanup = () => window.removeEventListener('keydown', onShiftAlt)
+    window.addEventListener('keydown', onShiftAlt)
+  })
+  await page.keyboard.press('Shift+Alt+ArrowDown')
+  const shiftAltReached = await page.evaluate(() => {
+    ;(window as any).__odShiftAltCleanup?.()
+    delete (window as any).__odShiftAltCleanup
+    return (window as any).__odShiftAltReachedWindow as boolean
+  })
+  expect(shiftAltReached, 'Shift+Alt+ArrowDown in MindBox does not propagate to window').toBe(false)
+  expect(await query(), 'Shift+Alt+ArrowDown in MindBox keeps query').toBe(boxTextNow)
+  await expect(mindbox(page), 'Shift+Alt+ArrowDown keeps MindBox focused').toBeFocused()
+
+  // Alt+ArrowDown alone in MindBox (at end edge) IS taken
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: 'Option+Down from MindBox at end selects newest descendant' }).toBe(`${DEEP} `)
+  await expect(mindbox(page), 'Option+Down blurs MindBox after navigating').not.toBeFocused()
+
+  // Alt+ArrowDown on a leaf in MindBox (at end edge; fresh start on the leaf): does nothing, keeps focus and caret
+  await userSet(page, DEEP, { scroll: true })
+  await expect.poll(query).toBe(DEEP)
+  await focusMindboxInPlace(page, DEEP.length)
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await query(), 'Option+Down on leaf in MindBox changes nothing').toBe(DEEP)
+  await expect(mindbox(page), 'Option+Down on leaf keeps MindBox focused').toBeFocused()
+  expect(await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).selectionStart)).toBe(DEEP.length)
+
+  // 4. Empty box (global case): plain Down still picks newest uniquely labeled; Option+Down skips pinned and picks unnamed by id:<savedId>, then walks on; start by id does nothing
+  await setFixtureTimes() // restore deterministic times after Part 2-3 soft-touches
+  await userSet(page, '')
+  await expect.poll(query).toBe('')
+  await blur(page)
+  await page.keyboard.press('ArrowDown')
+  await expect.poll(query, { message: 'plain Down on empty box still selects newest uniquely labeled item' }).toBe(`${DEEP} `)
+
+  await userSet(page, '')
+  await expect.poll(query).toBe('')
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: 'Option+Down on empty box skips pinned and selects newest unnamed item by id' }).toBe(`id:${unnamedSavedId}`)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: '2nd global Option+Down walks on to next newest item' }).toBe(`${DEEP} `)
+
+  // a fresh Option+Down on an item selected by id has nothing below it (even if uniquely labeled with descendants)
+  await userSet(page, `id:${parentSavedId}`)
+  await expect.poll(query).toBe(`id:${parentSavedId}`)
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await query(), 'Option+Down from id reference does nothing').toBe(`id:${parentSavedId}`)
+
+  // 5. Inside an item's open editor, Option+Down is NOT taken and keeps its meaning for the text
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  const secondLine = page.locator(`#item-${parentId} p`).nth(1)
+  await expect(secondLine).toBeVisible()
+  await secondLine.click()
+  const itemTextarea = page.locator(`#textarea-${parentId}`)
+  await expect(itemTextarea).toBeFocused()
+  await page.evaluate(id => {
+    const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+    t.setSelectionRange(0, 0)
+    ;(window as any).__odEditorProbe = { windowSaw: false, prevented: null as boolean | null }
+    const onTaKey = (e: KeyboardEvent) => {
+      if (e.code == 'ArrowDown' && e.altKey) (window as any).__odEditorProbe.prevented = e.defaultPrevented
+    }
+    const onWinKey = (e: KeyboardEvent) => {
+      if (e.code == 'ArrowDown' && e.altKey) (window as any).__odEditorProbe.windowSaw = true
+    }
+    t.addEventListener('keydown', onTaKey)
+    window.addEventListener('keydown', onWinKey)
+    ;(window as any).__odEditorCleanup = () => {
+      t.removeEventListener('keydown', onTaKey)
+      window.removeEventListener('keydown', onWinKey)
+    }
+  }, parentId)
+  await page.keyboard.press('Alt+ArrowDown')
+  const probe = await page.evaluate(id => {
+    ;(window as any).__odEditorCleanup?.()
+    delete (window as any).__odEditorCleanup
+    const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+    return { ...(window as any).__odEditorProbe, caret: t.selectionStart }
+  }, parentId)
+  expect(probe.windowSaw, 'item editor stops Option+Down propagation').toBe(false)
+  expect(probe.prevented, 'item editor leaves Option+Down default action intact').toBe(false)
+  expect(probe.caret, 'Option+Down moved the caret inside the item editor').toBeGreaterThan(0)
+  expect(await query(), 'Option+Down inside item editor does not navigate').toMatch(/^#e2e_od ?$/)
+  await expect(itemTextarea, 'item editor keeps focus').toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(itemTextarea).toBeHidden()
+
+  // 6. The parent TYPED into the box and the key pressed before the query's debounce ends (review 0 of
+  // option_down): the pending query is settled first, as typing is, so the jump is a final entry of its own
+  // after the parent's: Back returns to the parent, Forward to the child. Applied alone, the jump's query
+  // cancelled the typed one's, and on a box that had shown that very child it wrote no entry at all
+  await setFixtureTimes()
+  await userSet(page, PARENT, { scroll: true })
+  await expect.poll(query).toMatch(/^#e2e_od ?$/)
+  await blur(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  await expect.poll(query, { message: 'the newest child, by the key: the box and the history show it' }).toBe(`${DEEP} `)
+  const [len6, idx6] = await entries(page)
+  await focusMindboxInPlace(page)
+  await expect(mindbox(page)).toBeFocused()
+  // the parent's name typed (the input event a key or a paste makes) and the key, in one turn of the page
+  const turn = await asUser(
+    page,
+    parent => {
+      const w = window as any
+      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+      box.value = parent
+      box.setSelectionRange(parent.length, parent.length)
+      box.dispatchEvent(new Event('input'))
+      const pending = w._editor_change_pending as boolean
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', altKey: true, bubbles: true, cancelable: true }))
+      return { pending, still: w._editor_change_pending as boolean, focused: document.activeElement == box, entry: [history.state.editorText, history.state.final] }
+    },
+    PARENT,
+  )
+  expect(turn, 'the typed parent was pending; the key settled it and selected the child at once, in a final entry, the box blurred').toEqual({ pending: true, still: false, focused: false, entry: [`${DEEP} `, true] })
+  expect(await entries(page), 'two entries: the typed parent, then the child').toEqual([len6 + 2, idx6 + 2])
+  await page.goBack()
+  await expect.poll(query, { message: 'Back restores the parent as typed' }).toBe(PARENT)
+  await page.goForward()
+  await expect.poll(query, { message: 'Forward restores the child' }).toBe(`${DEEP} `)
+  // a press on the restored child (a leaf) stays there, though the walk that selected it had a sibling left
+  // to visit: the history's restore ended that walk
+  await blur(page)
+  const restored = await entries(page)
+  await page.keyboard.press('Alt+ArrowDown')
+  expect(await query(), 'a press on the restored leaf changes nothing').toBe(`${DEEP} `)
+  expect(await entries(page), 'and writes no entry').toEqual(restored)
+
+  // clean up fixtures so later runs see a tidy account
+  await page.evaluate(
+    ([labels, unnamed]) => {
+      for (const label of labels) window._item(label, true)?.delete(false)
+      const u = (window as any).__items.find((i: any) => i.text == unnamed)
+      if (u) window._item(u.id, true)?.delete(false)
+    },
+    [[DEEP, CHILD_A, CHILD_B, PARENT, PIN], UNNAMED_TEXT] as const
+  )
+  await userSet(page, '')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ([labels, unnamed]) => {
+            const list = (window as any).__items as any[]
+            return !list.some(i => labels.includes(i.label) || i.text == unnamed)
+          },
+          [[PARENT, CHILD_A, DEEP, CHILD_B, PIN], UNNAMED_TEXT] as const
+        ),
+      { message: 'fixture items removed', timeout: 15_000 }
+    )
+    .toBe(true)
+})

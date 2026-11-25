@@ -84,6 +84,7 @@
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
   import { eventKey } from '../event_key'
   import { inertCandidateSpan, scanInert } from '../inert'
+  import { isRecentDownKey } from '../recent_descendant'
 
   const placeholder = ' '
   let spellcheck = false
@@ -548,7 +549,8 @@
     }
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
-    // only keys we propagate are unmodified ArrowUp/Down at start/end of editor
+    // only keys we propagate are unmodified ArrowUp/Down at start/end of editor, plus Option+Down
+    // (Alt+ArrowDown alone) at end of editor (MindBox)
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return
     else if (propagateArrowUpDownAtEdges && key == 'ArrowUp' && !modified && textarea.selectionEnd == 0) return
@@ -559,6 +561,13 @@
       textarea.selectionStart == textarea.value.length
     ) {
       textarea.blur() // also remove focus to avoid confusion e.g. if there is a scroll down
+      return
+    } else if (
+      propagateArrowUpDownAtEdges &&
+      isRecentDownKey(key, e) &&
+      textarea.selectionStart == textarea.value.length
+    ) {
+      createClosure = createClosureModifierKeys = null
       return
     } else e.stopPropagation()
 

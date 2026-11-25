@@ -52,6 +52,13 @@ export function normalize(html: string): string {
           .filter(decl => decl && !/px|translate\(/.test(decl))
         return decls.length ? ` style="${decls.join('; ')};"` : ''
       })
+      // a shape's style attribute stands where chrome first wrote it out, and that depends on how
+      // the chart came to be: after the shape's drawing (d, cx, cy, r) in a chart taken from the
+      // app's element cache (generated at page load), before it in a bar chart that c3 generates
+      // while a row is at the item (the bars of one chart, in two gates of 2026-11-24; the vault's
+      // issues/Render Golden Fails On C3 Path Attribute Order.md). the drawing is the same: a
+      // shape's style is compared last, as every snapshot has it
+      .replace(/<(\w+)((?: [^>]*?)? class="[^"]*\bc3-shape\b[^"]*"[^>]*?)( style="[^"]*")( [^>]+)>/g, '<$1$2$4$3>')
   )
   return html
     .replace(/ id="(?:mjx-|time-|[^"]*\d{8,})[^"]*"/g, '') // mathjax / $cid / timestamp ids

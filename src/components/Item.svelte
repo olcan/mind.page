@@ -3844,21 +3844,24 @@
     border-radius: 2px;
     background: rgba(128, 128, 128, 0.08);
   }
-  /* THE INERT SECTIONS (src/inert_blocks.ts; the owner, 2026-11-19 and 2026-11-20): a frame, or
-     the frames that follow each other, in ONE block under one head line (.inert-line: the first
-     section's small name, on the middle of the line, and its status line). CLOSED, the block is
-     that line and is exactly as tall as a line of the item's text at every width (its margins,
-     its rules and a head of the item's line height less those 6px): a long status line is cut at
-     the block's width with an ellipsis, on a phone too. OPEN, it is a full-width block in
-     the look of the #template item's toggle() (dashed rules above and below, across the item's
-     own padding where the block stands in the item's top-level flow), the sections under their
-     small names; the frames are not framed again. An open block starts with its first section:
-     with that section's name, 6px under the rule, or, where it has none (a reply), with the
-     section's own first line, the item's own padding under the rule (the head holds the name
-     alone then, and an empty head has no height). THE WHOLE BLOCK IS THE CONTROL (the pointer; a
-     click anywhere on it toggles), and no arrow says so: the dashed look does. its marker, the
-     control of a keyboard and a reader, lies over the block, takes no press, and shows as a ring
-     under a keyboard's focus alone.
+  /* THE INERT SECTIONS (src/inert_blocks.ts; the owner, 2026-11-19, 2026-11-20 and 2026-11-24): a
+     frame, or the frames that follow each other, in ONE block under one head line (.inert-line:
+     the first section's small name, on the middle of the line, and its status line). CLOSED, the
+     block is that line and, in a chat (where top-level div.message role rows from chat.html stand
+     in .content), is exactly as tall as a line of the item's text at every width (its 2px top and
+     bottom margins, its rules and a head of the item's line height less those 6px); outside a chat
+     it takes 10px above it, closed and open, so the closed box itself keeps the same height while
+     adding 8px above it. A long status line is cut at the block's width with an ellipsis, on a
+     phone too. OPEN, it is a full-width block in the look of the #template item's toggle() (dashed
+     rules above and below, across the item's own padding where the block stands in the item's
+     top-level flow, with 5px below and the same top margin as when closed: 2px in a chat so the
+     agent role row stays close, 10px outside a chat), the sections under their small names; the
+     frames are not framed again. An open block starts with its first section: with that section's
+     name, 6px under the rule, or, where it has none (a reply), with the section's own first line,
+     the item's own padding under the rule (the head holds the name alone then, and an empty head
+     has no height). THE WHOLE BLOCK IS THE CONTROL (the pointer; a click anywhere on it toggles),
+     and no arrow says so: the dashed look does. its marker, the control of a keyboard and a reader,
+     lies over the block, takes no press, and shows as a ring under a keyboard's focus alone.
      OPEN is: what a manual toggle left (.opened, .closed) while it stands, else a search match
      (.matched), else the item being the target (blockOpen in the module is this same rule, and so is
      what a marker says of its block). the two classes of a toggle and the search's are the
@@ -3927,14 +3930,20 @@
     margin-top: 10px;
   }
   .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed))) {
-    margin: 5px 0;
+    margin: 2px 0 5px;
     padding: 10px; /* the item's own, above a reply's first line too */
     border-width: 1px 0;
     border-radius: 0;
     background: rgba(255, 255, 255, 0.05);
   }
   .item > :global(.content > p > :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed))) {
-    margin: 5px -10px;
+    margin: 2px -10px 5px;
+  }
+  /* outside a chat (no top-level div.message role row from chat.html): 10px above the block,
+     closed and open (the owner, 2026-11-24); chats keep the 2px top margin above in both states */
+  .item > :global(.content:not(:has(> div.message)) span.inert-block),
+  .item > :global(.content:not(:has(> div.message)) :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed))) {
+    margin-top: 10px;
   }
   .item > :global(.content :is(.inert-block:is(.opened, .matched:not(.closed)), .container.target .inert-block:not(.closed)) > .inert-line) {
     height: auto; /* the name's line, or nothing */

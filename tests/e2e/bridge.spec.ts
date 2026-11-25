@@ -1986,15 +1986,17 @@ test("a tag written in an inert section is a quiet link: a click fills the MindB
       span.remove()
       return {
         shown: [status.getClientRects().length > 0, [...block.querySelectorAll(':scope > .vault-result')].some(frame => frame.getClientRects().length > 0)],
-        // the block with its margins, in lines of the item's text
-        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        // the closed box height apart from its 10px non-chat top margin (2px base each side = 1 line)
+        lines: Math.round(((block.offsetHeight + 2 * parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        marginTop: parseFloat(style.marginTop),
         tags: tags.map(tag => [tag.tagName, tag.className, tag.getAttribute('title'), tag.textContent]),
         looks,
       }
     }, await shown(TODO))
-  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line, and holds its tags as tag link elements with their tooltips').toEqual({
+  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line (plus its 10px non-chat top margin), and holds its tags as tag link elements with their tooltips').toEqual({
     shown: [true, false],
     lines: 1,
+    marginTop: 10,
     tags: [
       ['CODE', 'tag-link', '#e2e_tl_bare', '#e2e_tl_bare'],
       ['CODE', 'tag-link', '#e2e_tl_code', '#e2e_tl_code'],
@@ -2126,13 +2128,15 @@ test("a tag written in an inert section is a quiet link: a click fills the MindB
       const within = (inner: DOMRect, outer: DOMRect) => inner.top >= outer.top - 0.5 && inner.bottom <= outer.bottom + 0.5
       return {
         width: innerWidth,
-        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        // non-chat closed block adds 8px above (10px top margin); check its 1-line box and top margin
+        lines: Math.round(((block.offsetHeight + 2 * parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        marginTop: parseFloat(style.marginTop),
         cut: [status.scrollWidth > status.clientWidth, getComputedStyle(status).textOverflow],
         line: within(status.getBoundingClientRect(), head), // the status line's box is the head's: one line
         tags: [...status.querySelectorAll('code.tag-link')].map(tag => within(tag.getBoundingClientRect(), status.getBoundingClientRect())),
       }
     }, await shown(TODO))
-  await expect.poll(narrow, "the closed line at a phone's width").toEqual({ width: 375, lines: 1, cut: [true, 'ellipsis'], line: true, tags: [true, true, true] })
+  await expect.poll(narrow, "the closed line at a phone's width").toEqual({ width: 375, lines: 1, marginTop: 10, cut: [true, 'ellipsis'], line: true, tags: [true, true, true] })
 })
 
 test("an inline-code command in an inert section is a quiet link: one-tap /_update of an installed default-repo item runs directly; other commands confirm first without changing MindBox text or focus; drag and closed line run nothing", async ({ page }) => {
@@ -2318,14 +2322,17 @@ test("an inline-code command in an inert section is a quiet link: one-tap /_upda
       span.remove()
       return {
         shown: [status.getClientRects().length > 0, [...block.querySelectorAll(':scope > .vault-result')].some(frame => frame.getClientRects().length > 0)],
-        lines: Math.round(((block.offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        // non-chat closed block adds 8px above (10px top margin); check its 1-line box and top margin
+        lines: Math.round(((block.offsetHeight + 2 * parseFloat(style.marginBottom)) / parseFloat(getComputedStyle(block.closest('.content')!).lineHeight)) * 100) / 100,
+        marginTop: parseFloat(style.marginTop),
         cmds: cmds.map(c => [c.tagName, c.className, c.getAttribute('title'), c.textContent]),
         looks: { cmds: cmds.map(look), plain: plainLook, open: look(block.querySelector('.vault-result code.command-link')!) },
       }
     }, await shown(TODO))
-  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line and holds its command links').toEqual({
+  await expect.poll(async () => ({ ...(await closed()), looks: 0 }), 'the closed line is one line (plus its 10px non-chat top margin) and holds its command links').toEqual({
     shown: [true, false],
     lines: 1,
+    marginTop: 10,
     cmds: [
       ['CODE', 'command-link', '/_invert', '/_invert'],
       ['CODE', 'command-link', '/e2e_cl_cmd echo hi', '/e2e_cl_cmd echo hi'],
@@ -3972,13 +3979,14 @@ const region = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
 type Fold = {
   selected: boolean
   stored: boolean // the layout holds the height of the item's box
-  blocks: { state: string; memory: string; matched: boolean; says: string | null; head: string; frames: number; lines: number }[]
+  blocks: { state: string; memory: string; matched: boolean; says: string | null; head: string; frames: number; lines: number; marginTop: number }[]
 }
 // what the inert blocks of the item ON THE PAGE show (not a mount in the offscreen column): per
 // block whether it is the one head line (its status shown, its frames not) or open (the frames
 // shown, the status not), what a click left on it, whether the search opens it, what its marker
-// says of it (aria-expanded), the head's name and status, and its height with its margins in lines
-// of the item's text
+// says of it (aria-expanded), the head's name and status, its height with symmetric bottom
+// margins in lines of the item's text (1 for a closed block, apart from the extra 8px top margin
+// outside a chat), and its computed top margin in px
 const fold = (page: import('@playwright/test').Page, label: string): Promise<Fold | null> =>
   page.evaluate(label => {
     const w = window as any
@@ -4001,7 +4009,8 @@ const fold = (page: import('@playwright/test').Page, label: string): Promise<Fol
           matched: block.classList.contains('matched'),
           head: [block.querySelector(':scope > .inert-line > .inert-name')?.textContent ?? '', status?.textContent ?? ''].join('|'),
           frames: frames.length,
-          lines: Math.round((((block as HTMLElement).offsetHeight + parseFloat(style.marginTop) + parseFloat(style.marginBottom)) / lh) * 100) / 100,
+          lines: Math.round((((block as HTMLElement).offsetHeight + 2 * parseFloat(style.marginBottom)) / lh) * 100) / 100,
+          marginTop: parseFloat(style.marginTop),
         }
       }),
     }
@@ -4029,8 +4038,8 @@ test("an inert section is one line until its item is selected, the search has a 
   }
   const kept = (label: string) => page.evaluate(label => !!((window as any)._item(label, true).elem.querySelector('.inert-block') as any).__kept, label)
   await page.evaluate(text => void window._create(text), text('working: sorting the tools'))
-  const line = (head: string, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head, frames: 1, lines: 1, ...more }] })
-  const open = (head: string, lines: number, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'open', memory: '', matched: false, says: 'true', head, frames: 1, lines, ...more }] })
+  const line = (head: string, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head, frames: 1, lines: 1, marginTop: 10, ...more }] })
+  const open = (head: string, lines: number, more: object = {}) => ({ selected: false, stored: true, blocks: [{ state: 'open', memory: '', matched: false, says: 'true', head, frames: 1, lines, marginTop: 10, ...more }] })
   const HEAD = 'agent|working: sorting the tools'
 
   // CLOSED BY DEFAULT: listed by a word of the owner's line (a match outside the section opens
@@ -4248,7 +4257,7 @@ test('inert sections that follow each other are one block under one head, a line
   ])
     await page.evaluate(text => void window._create(text), text)
   await query(page, 'foldmore')
-  const block = (state: string, head: string, frames: number, more: object = {}) => ({ state, memory: '', matched: false, says: String(state == 'open'), head, frames, lines: 1, ...more })
+  const block = (state: string, head: string, frames: number, more: object = {}) => ({ state, memory: '', matched: false, says: String(state == 'open'), head, frames, lines: 1, marginTop: 10, ...more })
 
   // ONE BLOCK for the tree and the request under it, its line the agent's status; the same with blank lines between them
   const HEAD = 'agent|working: sorting the tools · notes'
@@ -4269,6 +4278,24 @@ test('inert sections that follow each other are one block under one head, a line
     }, label)
   expect(await lineLook(MERGED), 'a closed line: no arrow, the name first, on the middle of the status text').toEqual({ arrow: 'none', start: 0, centred: true })
   expect(await lineLook(REPLY), 'a closed line without a name: no arrow, the status text first').toEqual({ arrow: 'none', start: 0, centred: null })
+  // a todo (non-chat) closed block: 10px top margin, other margins/box height/width as before
+  const todoClosed = await page.evaluate(label => {
+    const elem = (window as any)._item(label, true).elem as HTMLElement
+    const content = elem.querySelector('.content') as HTMLElement
+    const block = elem.querySelector('.inert-block') as HTMLElement
+    const s = getComputedStyle(block)
+    const lh = parseFloat(getComputedStyle(content).lineHeight)
+    return {
+      margins: [s.marginTop, s.marginRight, s.marginBottom, s.marginLeft],
+      boxLines: Math.round(((block.offsetHeight + 4) / lh) * 100) / 100,
+      widthDiff: Math.round((block.getBoundingClientRect().width - content.getBoundingClientRect().width) * 100) / 100,
+    }
+  }, MERGED)
+  expect(todoClosed, 'todo closed block: 10px top margin, 0/2px/0 other margins, 1-line box height apart from top margin, content width').toEqual({
+    margins: ['10px', '0px', '2px', '0px'],
+    boxLines: 1,
+    widthDiff: 0,
+  })
   // A LINK IN THE HEAD is followed, and toggles nothing
   const popup = context.waitForEvent('page')
   await (await headOf(page, MERGED)).locator('a').click()
@@ -4288,8 +4315,10 @@ test('inert sections that follow each other are one block under one head, a line
     const block = elem.querySelector('.inert-block')!
     const [first, second] = [...block.querySelectorAll(':scope > .vault-result')]
     const item = rect(elem.querySelector('.item')!)
+    const s = getComputedStyle(block)
     const shown = (e: Element | null) => !!e && e.getClientRects().length > 0
     return {
+      margins: [s.marginTop, s.marginRight, s.marginBottom, s.marginLeft],
       edges: [rect(block).left - item.left, item.right - rect(block).right],
       borders: [block, first, second].map(e => getComputedStyle(e).borderLeftWidth),
       rules: [getComputedStyle(block).borderTopStyle, getComputedStyle(block).borderBottomStyle],
@@ -4302,7 +4331,8 @@ test('inert sections that follow each other are one block under one head, a line
       under: (elem.querySelector('.content')!.textContent ?? '').includes('the last line of the owner'),
     }
   }, MERGED)
-  expect(look).toEqual({
+  expect(look, 'todo open block: 10px top margin, -10px sides, 5px bottom, full item width').toEqual({
+    margins: ['10px', '-10px', '5px', '-10px'],
     edges: [0, 0],
     borders: ['0px', '0px', '0px'],
     rules: ['dashed', 'dashed'],
@@ -4799,7 +4829,7 @@ test("a phone's width: a closed section is one line, a long status line cut with
     const long = 'working: sorting every tool of the shed by its size and its colour, then the screws, the nails and the hooks'
     await page.evaluate(text => void window._create(text), `${LABEL} foldphone\n${region(`agent\n- ${long}\n    - [ ] sort the tools`)}`)
     await query(page, 'foldphone')
-    await expect.poll(() => fold(page, LABEL)).toEqual({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head: 'agent|' + long, frames: 1, lines: 1 }] })
+    await expect.poll(() => fold(page, LABEL)).toEqual({ selected: false, stored: true, blocks: [{ state: 'line', memory: '', matched: false, says: 'false', head: 'agent|' + long, frames: 1, lines: 1, marginTop: 10 }] })
     const measure = () =>
       page.evaluate(label => {
         const elem = (window as any)._item(label, true).elem as HTMLElement
