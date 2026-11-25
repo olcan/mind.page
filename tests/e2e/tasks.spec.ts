@@ -2314,6 +2314,79 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
     .toBe('agent:delegated:2:1|delegated')
   expect(await notified(), 'a later projection change with the same count gives no second notification').toHaveLength(1)
   await expect(workRow.locator('mark.waits'), 'after a later projection change with the same count the checkin bell stays').toHaveText('checkin')
+
+  // 6. /notify test <name>: unknown item is refused (alert + command kept); known item arms one
+  //    5000 ms timer and shows nothing at once; releasing that held timer shows the sample card
+  //    with the item's tag and data, and clicking it selects the item (literal 4999/5000 ms
+  //    delay is pinned in external/mind.items/tests/todoer_test.js)
+  const notifiedTest = () =>
+    page.evaluate(() =>
+      ((window as any).__notified as any[]).map(n => ({
+        title: n.title,
+        tag: n.options.tag,
+        body: n.options.body,
+        data: n.options.data,
+        closed: n.closed,
+      })),
+    )
+  await page.evaluate(() => void ((window as any).__notified.length = 0))
+  const dlgBeforeUnknown = rowDialogs.length
+  expect(await command(page, '/notify test #waits_missing'), 'unknown item command returned to box').toBeNull()
+  await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { message: 'unknown item keeps the command in the box', timeout: 10_000 }).toBe('/notify test #waits_missing')
+  expect(rowDialogs.slice(dlgBeforeUnknown), 'unknown item alerts').toEqual(['/notify: no item is named #waits_missing'])
+  await userSet(page, '')
+  await page.evaluate(() => {
+    const w = window as any
+    const held: { id: number; ms: number; cb: (...args: unknown[]) => void; args: unknown[] }[] = (w.__rk_held = [])
+    const origSet = (w.__rk_origSet = window.setTimeout)
+    const origClear = (w.__rk_origClear = window.clearTimeout)
+    let nextId = 1 << 30
+    ;(window as any).setTimeout = (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) =>
+      ms == 5000 ? (held.push({ id: ++nextId, ms, cb, args }), nextId) : origSet(cb, ms, ...args)
+    ;(window as any).clearTimeout = (id?: number) => {
+      const i = held.findIndex(h => h.id == id)
+      i >= 0 ? held.splice(i, 1) : origClear(id)
+    }
+  })
+  try {
+    expect(await command(page, '/notify test #waits_t/0'), '/notify test <name> command accepted').toBeNull()
+    expect(await notifiedTest(), '/notify test <name> shows nothing at once').toEqual([])
+    expect(await page.evaluate(() => (window as any).__rk_held.map((h: any) => h.ms)), '/notify test <name> arms one 5000 ms timer').toEqual([5000])
+    await page.evaluate(() => {
+      const w = window as any
+      if (w.__rk_origSet) window.setTimeout = w.__rk_origSet
+      if (w.__rk_origClear) window.clearTimeout = w.__rk_origClear
+      delete w.__rk_origSet
+      delete w.__rk_origClear
+      for (const h of w.__rk_held.splice(0)) h.cb(...h.args)
+    })
+  } finally {
+    await page.evaluate(() => {
+      const w = window as any
+      if (w.__rk_origSet) window.setTimeout = w.__rk_origSet
+      if (w.__rk_origClear) window.clearTimeout = w.__rk_origClear
+      delete w.__rk_origSet
+      delete w.__rk_origClear
+      delete w.__rk_held
+    })
+  }
+  await expect
+    .poll(() => notifiedTest().then(n => n.length), { message: '/notify test <name> shows one notification when its timer fires', timeout: 10_000 })
+    .toBe(1)
+  expect(await notifiedTest(), '/notify test <name> carries the item tag and data').toEqual([
+    {
+      title: '[blocked] ask me something',
+      tag: `todoer:${todoId}`,
+      body: '#waits_t/0',
+      data: { source: 'todoer', item: todoId },
+      closed: false,
+    },
+  ])
+  await page.evaluate(() => (window as any).__notified[0].onclick())
+  await expect
+    .poll(() => page.evaluate(() => (window as any).MindBox.get().trim()), { message: 'clicking the test notification selects the item', timeout: 10_000 })
+    .toBe('#waits_t/0')
+  expect((await notifiedTest())[0]!.closed, 'clicked test notification is closed').toBe(true)
 })
 
 // SERVICE-WORKER DESKTOP NOTIFICATIONS (protocol v2: hello handshake; outlive page reload;
@@ -2603,6 +2676,52 @@ test('a worker notification survives reload, holds clicks across startup and col
       ).toBe(true)
       await expect.poll(() => pendingRows(), { message: 'worker deleted cold-open click after received', timeout: 10_000 }).toEqual([])
 
+      // 4b. /notify test <name> through the worker's path: hold the command's 5000 ms timer,
+      //     assert nothing shows at once, release it, and assert the worker card and relayed click
+      await userSet(page2, '')
+      await expect.poll(() => box(page2!), { timeout: 5_000 }).toBe('')
+      await page2.evaluate(() => {
+        const w = window as any
+        const held: { id: number; ms: number; cb: (...args: unknown[]) => void; args: unknown[] }[] = (w.__rk_held = [])
+        const origSet = (w.__rk_origSet = window.setTimeout)
+        const origClear = (w.__rk_origClear = window.clearTimeout)
+        let nextId = 1 << 30
+        ;(window as any).setTimeout = (cb: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) =>
+          ms == 5000 ? (held.push({ id: ++nextId, ms, cb, args }), nextId) : origSet(cb, ms, ...args)
+        ;(window as any).clearTimeout = (id?: number) => {
+          const i = held.findIndex(h => h.id == id)
+          i >= 0 ? held.splice(i, 1) : origClear(id)
+        }
+      })
+      try {
+        expect(await command(page2, `/notify test ${SW_TODO}`), '/notify test <name> accepted on worker page').toBeNull()
+        expect(await swNotifications(`todoer:${todoId}`), 'worker /notify test <name> shows nothing at once').toEqual([])
+        expect(await page2.evaluate(() => (window as any).__rk_held.map((h: any) => h.ms)), 'worker /notify test <name> arms one 5000 ms timer').toEqual([5000])
+        await page2.evaluate(() => {
+          const w = window as any
+          if (w.__rk_origSet) window.setTimeout = w.__rk_origSet
+          if (w.__rk_origClear) window.clearTimeout = w.__rk_origClear
+          delete w.__rk_origSet
+          delete w.__rk_origClear
+          for (const h of w.__rk_held.splice(0)) h.cb(...h.args)
+        })
+      } finally {
+        await page2.evaluate(() => {
+          const w = window as any
+          if (w.__rk_origSet) window.setTimeout = w.__rk_origSet
+          if (w.__rk_origClear) window.clearTimeout = w.__rk_origClear
+          delete w.__rk_origSet
+          delete w.__rk_origClear
+          delete w.__rk_held
+        })
+      }
+      await expect
+        .poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker /notify test <name> shows notification when its timer fires', timeout: 15_000 })
+        .toEqual([{ title: '[proposal] survive page reload', tag: `todoer:${todoId}`, body: SW_TODO, requireInteraction: true, data: { source: 'todoer', item: todoId } }])
+      expect(await dispatchClick(`todoer:${todoId}`), 'dispatched worker click on /notify test <name> card').toEqual({ count: 1 })
+      await expect.poll(() => box(page2!), { message: 'relayed worker click on /notify test <name> selects the item', timeout: 10_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
+      await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed clicked /notify test <name> card', timeout: 10_000 }).toEqual([])
+
       // 5. SIGN-OUT CLEARS OUTGOING WORKER NOTIFICATIONS AND STORED CLICKS:
       //    seed one active worker notification (`/notify test`) and one real worker-stored click
       //    (clicked during a held-welcome reload), then run `/_signout`; both must be gone after sign-out.
@@ -2694,6 +2813,18 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 })
         .toBe(true)
     await saved()
+    // Install a recording window._on_key BEFORE the reload so #todoer wraps it on load
+    await page.addInitScript(() => {
+      const w = window as any
+      if (w.__rk_prior_installed) return
+      w.__rk_prior_installed = true
+      const seen: string[] = (w.__rk_prior_keys = [])
+      const prev = w._on_key
+      w._on_key = (key: string, e: KeyboardEvent) => {
+        seen.push(key)
+        return typeof prev == 'function' ? prev(key, e) : undefined
+      }
+    })
     await page.reload()
     await loaded(page)
     // ignore transient dependency-order messages logged while /_install created items one by one
@@ -2747,7 +2878,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     // #todoer's own page js_table shows no private bin-button definitions and introduces no missing tags
     const todoerPage = await page.evaluate(() => {
       const t = window._item('#todoer', true) as any
-      return { listsPrivate: /_BIN_BUTTONS|_bin_buttons/.test(t?.elem?.innerText ?? ''), missing: t?.missingTags ?? [] }
+      return { listsPrivate: /_BIN_BUTTONS|_bin_buttons|_BIN_KEYS|_row_buttons/.test(t?.elem?.innerText ?? ''), missing: t?.missingTags ?? [] }
     })
     expect(todoerPage, '#todoer page has no leaked private bin-button definitions or missing tags').toEqual({ listsPrivate: false, missing: [] })
 
@@ -3099,8 +3230,9 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     // 3. Bell rule (Points 1 & 4): a reply row's bell removes its row and selects the next row;
     //    a todo row's bell clears its bell while keeping its row and leaving selection unchanged
     await userSet(page, '#bl_reply/0')
-    await expect.poll(() => guestState().then(s => s.names), { message: 'reply row gets up, down, bell, done, cancel only', timeout: 5_000 }).toEqual([
-      'up', 'down', 'bell', 'done', 'cancel',
+    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row gets up, down, bell only', timeout: 5_000 }).toEqual([
+      ['up', 'down', 'bell'],
+      ['Previous row (k)', 'Next row (j)', 'Clear the notification (b)'],
     ])
     expect((await guestState()).colors.bell, 'bell button is yellow #ff6').toBe('rgb(255, 255, 102)')
     await expect.poll(() => mainWidget.locator('.list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
@@ -3137,7 +3269,10 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
 
     // 4. Wide desktop todo bin buttons, snooze picker cancel, open-editor draft guard, and done button + select-next
     await userSet(page, '#bl_task')
-    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'todo row tooltips name their keys', timeout: 5_000 }).toEqual([
+      ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+      ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Done (d)', 'Snooze (s)', 'Delete (x)'],
+    ])
     const wideTodo = await guestState()
     expect(
       [wideTodo.cls, wideTodo.bgCls, wideTodo.floorShown, wideTodo.ownPiece, wideTodo.gapToStrip, wideTodo.colors.snooze],
@@ -3222,7 +3357,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(boxNow, { message: 'Back returns to the delegated item (#bl_other)', timeout: 10_000 }).toBe('#bl_other')
     await expect.poll(() => guestState().then(s => [s.names, s.titles[3]]), { message: 'delegated row has take-back button', timeout: 5_000 }).toEqual([
       ['up', 'down', 'agent', 'owner'],
-      'Take back from the agent',
+      'Take back from the agent (u)',
     ])
     // translucent white backgrounds on a row's tag (0.07) and age mark (0.04) so they adapt to the tint
     const markBgs = await page.evaluate(() => {
@@ -3355,7 +3490,11 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     let dragDone = false
     for (let attempt = 0; attempt < 5 && !dragDone; attempt++) {
       const row = mainWidget.locator('.list-item-container', { hasText: 'drag to done' })
-      const box = (await row.boundingBox())!
+      const box = await row.boundingBox()
+      if (!box) {
+        await page.waitForTimeout(200)
+        continue
+      }
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
       await page.mouse.down()
       await page.waitForTimeout(400)
@@ -3373,6 +3512,187 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await page.mouse.up()
     await expect.poll(() => itemText('#bl_drag_b').then(t => t?.saved ?? ''), { message: 'real drag to done bin completed #bl_drag_b', timeout: 15_000 }).toContain('#done')
     await expect.poll(selectedId, { message: 'real drag to done bin selects next row', timeout: 10_000 }).toBe(expectedAfterDragId)
+
+    // 7. Row button keys (a, d, s, x, b, u; d a todo's alone) through the app's own key path,
+    //    not-rows classes, repeat guard, and forwarding to the prior window._on_key hook
+    const RK_REPLY = "#rk_reply/0 #_chat #_agent/vault\n<<user>> hi\n<<agent('vault/default · run ab12cd34 · 1s')>>\n<!--inert-->\nRow keys reply.\n<!--/inert-->"
+    for (const text of ['#rk_one\n#todo row keys first', '#rk_two\n#todo row keys second', '#rk_three\n#todo row keys third', RK_REPLY]) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    for (const name of ['#rk_one', '#rk_two', '#rk_three', '#rk_reply/0']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    await expect.poll(() => mainRowNames().then(r => ['#rk_one', '#rk_two', '#rk_three', '#rk_reply/0'].every(n => r.includes(n))), { timeout: 15_000 }).toBe(true)
+    const delegatedRowNames = () =>
+      page.evaluate(() => {
+        const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !!w._delegated)
+        return [...(w?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+      })
+    await page.evaluate(() => {
+      ;(window as any).__rk_keys = []
+      window.addEventListener('keydown', e => void queueMicrotask(() => (window as any).__rk_keys.push([e.code, e.defaultPrevented, e.repeat])))
+    })
+    const keys = () => page.evaluate(() => (window as any).__rk_keys.splice(0))
+    const priorKeys = () => page.evaluate(() => (window as any).__rk_prior_keys.splice(0))
+    const selectRow = async (name: string) => {
+      await userSet(page, name)
+      await expect.poll(boxNow, { timeout: 5_000 }).toBe(name)
+      await unfocus()
+    }
+
+    // 7a. Not the rows': no row selected, unlisted item (#bl_note), Shift, typing in the box
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await keys()
+    await priorKeys()
+    const rowsBeforeKeys = await mainRowNames()
+    await page.keyboard.press('d')
+    await page.waitForTimeout(150)
+    expect([await boxNow(), await mainRowNames(), await keys(), await priorKeys()], 'd with no row selected forwards to prior hook with default left').toEqual([
+      '',
+      rowsBeforeKeys,
+      [['KeyD', false, false]],
+      ['KeyD'],
+    ])
+
+    await selectRow('#bl_note')
+    await keys()
+    await priorKeys()
+    const dlgNote = dialogs.length
+    await page.keyboard.press('d')
+    await page.keyboard.press('x')
+    await page.waitForTimeout(150)
+    expect([await boxNow(), (await itemText('#bl_note'))?.saved, dialogs.length - dlgNote, await keys(), await priorKeys()], 'd and x on an unlisted item forward to prior hook').toEqual([
+      '#bl_note',
+      '#bl_note an item no list holds',
+      0,
+      [['KeyD', false, false], ['KeyX', false, false]],
+      ['KeyD', 'KeyX'],
+    ])
+
+    await selectRow('#rk_one')
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('Shift+D')
+    await page.waitForTimeout(150)
+    expect([await boxNow(), (await itemText('#rk_one'))?.saved, await priorKeys()], 'Shift+D leaves todo and forwards to prior hook').toEqual([
+      '#rk_one',
+      '#rk_one\n#todo row keys first',
+      ['ShiftLeft', 'KeyD'],
+    ])
+
+    await focusMindbox(page)
+    await page.keyboard.type('d')
+    await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { message: 'd typed into MindBox enters text instead of completing todo', timeout: 5_000 }).toBe('#rk_oned')
+    expect((await itemText('#rk_one'))?.saved, 'todo unchanged when d typed in box').toBe('#rk_one\n#todo row keys first')
+
+    // 7b. Prior hook on a selected todo: receives unrelated key `t`
+    await selectRow('#rk_one')
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('t')
+    await page.waitForTimeout(150)
+    expect([await keys(), await priorKeys()], 'prior _on_key hook receives t when a todo row is selected').toEqual([[['KeyT', false, false]], ['KeyT']])
+
+    // 7c. s opens the snooze picker
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('s')
+    await expect(page.locator('.snooze-modal'), 's opens the snooze picker').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._modal_close())
+    await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 5_000 })
+    expect([await boxNow(), (await keys())[0], await priorKeys()], 's was taken by rows and closed picker keeps selection').toEqual(['#rk_one', ['KeyS', true, false], []])
+
+    // 7d. x asks first; declined question keeps the row and selection
+    const dlgX = dialogs.length
+    answer.accept = false
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('x')
+    await expect.poll(() => dialogs.length, { message: 'x asks confirmation', timeout: 5_000 }).toBe(dlgX + 1)
+    expect(dialogs[dlgX], 'x confirm dialog asks before delete').toMatch(/^confirm: /)
+    await page.waitForTimeout(150)
+    expect([await boxNow(), (await itemText('#rk_one'))?.saved, await priorKeys()], 'declined x keeps row and selection without forwarding').toEqual([
+      '#rk_one',
+      '#rk_one\n#todo row keys first',
+      [],
+    ])
+
+    // 7e. Held d completes ONE todo, selects the next row, and does NOT forward to prior hook
+    //     (choose a todo whose immediate following row is also a todo so dropping the repeat guard completes two)
+    const rowsBeforeD = await mainRowNames()
+    const heldIdx = rowsBeforeD.findIndex((n, i) => !!n && n.startsWith('#rk_') && n != '#rk_reply/0' && !!rowsBeforeD[i + 1] && rowsBeforeD[i + 1] != '#rk_reply/0')
+    expect(heldIdx, 'found a #rk_ todo followed by another todo').toBeGreaterThanOrEqual(0)
+    const heldTarget = rowsBeforeD[heldIdx]!
+    const heldNext = rowsBeforeD[heldIdx + 1]!
+    await selectRow(heldTarget)
+    await keys()
+    await priorKeys()
+    await page.keyboard.down('d')
+    await page.keyboard.down('d')
+    await page.keyboard.down('d')
+    await page.keyboard.up('d')
+    await expect.poll(() => itemText(heldTarget).then(t => t?.saved ?? ''), { message: 'd completes the selected todo', timeout: 15_000 }).toContain('#done')
+    await expect.poll(boxNow, { message: 'd selects the next row', timeout: 10_000 }).toBe(heldNext)
+    await page.waitForTimeout(300)
+    expect([await mainRowNames(), await keys(), await priorKeys()], 'held d completed one todo, claimed repeats, and did not forward to prior hook').toEqual([
+      rowsBeforeD.filter(n => n != heldTarget),
+      [['KeyD', true, false], ['KeyD', true, true], ['KeyD', true, true]],
+      [],
+    ])
+    expect((await itemText(heldNext))?.saved ?? '', 'the next todo row was NOT completed by held d repeats').toContain('#todo')
+
+    // 7f. Reply row: only up/down/bell shown; d and x leave the row (no confirm dialog) and forward to prior hook; b clears the row
+    await selectRow('#rk_reply/0')
+    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row shows up, down, and bell only', timeout: 5_000 }).toEqual([
+      ['up', 'down', 'bell'],
+      ['Previous row (k)', 'Next row (j)', 'Clear the notification (b)'],
+    ])
+    const dlgReply = dialogs.length
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('d')
+    await page.keyboard.press('x')
+    await page.waitForTimeout(150)
+    expect(
+      [await boxNow(), await mainWidget.locator('.list-item-container[data-waits="reply"]').count(), dialogs.length - dlgReply, await keys(), await priorKeys()],
+      'd and x leave reply row untouched (no confirm) and forward to prior hook',
+    ).toEqual(['#rk_reply/0', 1, 0, [['KeyD', false, false], ['KeyX', false, false]], ['KeyD', 'KeyX']])
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('b')
+    await expect.poll(() => mainWidget.locator('.list-item-container[data-waits="reply"]').count(), { message: 'b clears the reply row', timeout: 10_000 }).toBe(0)
+    expect([await keys(), await priorKeys()], 'b was taken by reply row without forwarding').toEqual([[['KeyB', true, false]], []])
+
+    // 7g. a delegates and selects next row; d on delegated row forwards to prior hook; u takes back
+    const delTarget = ['#rk_one', '#rk_two', '#rk_three'].find(n => n != heldTarget)!
+    await selectRow(delTarget)
+    const rowsBeforeA = await mainRowNames()
+    const afterA = rowsBeforeA[rowsBeforeA.indexOf(delTarget) + 1] ?? rowsBeforeA[rowsBeforeA.indexOf(delTarget) - 1]
+    await priorKeys()
+    await page.keyboard.press('a')
+    await expect.poll(() => delegatedRowNames().then(r => r.includes(delTarget)), { message: 'a delegates the todo', timeout: 15_000 }).toBe(true)
+    await expect.poll(boxNow, { message: 'a selects the next row', timeout: 10_000 }).toBe(afterA)
+    expect(await priorKeys(), 'a did not forward to prior hook').toEqual([])
+    await selectRow(delTarget)
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'owner'])
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('d')
+    await page.waitForTimeout(150)
+    expect([(await itemText(delTarget))?.saved?.includes('#done') ?? false, await keys(), await priorKeys()], 'd on a delegated row forwards to prior hook').toEqual([
+      false,
+      [['KeyD', false, false]],
+      ['KeyD'],
+    ])
+    await priorKeys()
+    await page.keyboard.press('u')
+    await expect.poll(() => delegatedRowNames().then(r => r.includes(delTarget)), { message: 'u takes the todo back from delegated list', timeout: 15_000 }).toBe(false)
+    await expect.poll(() => mainRowNames().then(r => r.includes(delTarget)), { message: 'u returns the todo to main list', timeout: 15_000 }).toBe(true)
+    expect(await priorKeys(), 'u did not forward to prior hook').toEqual([])
+
     await saved()
     expect(errors, 'no console errors or pageerrors on desktop bin-buttons row').toEqual([])
   } finally {
