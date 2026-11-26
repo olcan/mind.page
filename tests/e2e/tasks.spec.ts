@@ -2503,8 +2503,126 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   // (the walk of j and k goes round at its ends: with a neighbor on either side both keys are active)
   expect(
     shortcutSnap.active,
-    'shortcuts menu lists navigation and b:clear the bell alone for a selected item row',
+    'shortcuts menu lists navigation and b:clear the bell alone for a selected item row without #pusher',
   ).toEqual(['j:the next row', 'k:the previous row', 'b:clear the bell'])
+  const stripButtons = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll('.todoer-bin-buttons > button')].map(b => [
+        b.className.split(/\s+/)[0],
+        b.getAttribute('title'),
+      ]),
+    )
+  const historyPageErrors: string[] = []
+  const onHistoryPageError = (err: Error) => void historyPageErrors.push(err.message)
+  page.on('pageerror', onHistoryPageError)
+  await expect
+    .poll(stripButtons, { message: 'without #pusher, item row strip holds up, down, bell only', timeout: 5_000 })
+    .toEqual([
+      ['up', 'Previous row (k)'],
+      ['down', 'Next row (j)'],
+      ['bell', 'Clear the notification (b)'],
+    ])
+  // Install real #pusher (without reloading, so init_pusher does not run or prompt offline)
+  // and verify no history button shows and no store is created before a destination exists, then
+  // write dest to #pusher's Firestore store so _on_global_store_change adds the history button live
+  expect(await install(page, 'pusher'), '/_install pusher').toBeNull()
+  await expect.poll(() => savedId(page, '#pusher'), { message: '#pusher saved', timeout: 30_000 }).toBeTruthy()
+  const pusherId = (await savedId(page, '#pusher'))!
+  await saved()
+  await page.evaluate(() => {
+    const w = window as any
+    w.__origWindowOpen = window.open
+    w.__openedHistory = []
+    window.open = ((url?: string | URL) => {
+      w.__openedHistory.push(String(url ?? ''))
+      return null
+    }) as typeof window.open
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+  })
+  try {
+    expect(await stripButtons(), '#pusher without destination still shows no history button').toEqual([
+      ['up', 'Previous row (k)'],
+      ['down', 'Next row (j)'],
+      ['bell', 'Clear the notification (b)'],
+    ])
+    await page.keyboard.press('h')
+    expect(
+      await page.evaluate(() => (window as any).__openedHistory),
+      'h opens nothing while #pusher has no destination',
+    ).toEqual([])
+    expect(
+      await serverStore(`global_store_${pusherId}`, WAITS_USER, WAITS_SECRET),
+      'checking #pusher for history creates no store on the server',
+    ).toBeNull()
+
+    const pusherStoreDoc = (await storeDocId(`global_store_${pusherId}`, WAITS_USER, WAITS_SECRET)) ?? 'e2e-waits-store-pusher'
+    await writeStore(
+      pusherStoreDoc,
+      `global_store_${pusherId}`,
+      { dest: 'e2e-owner/e2e-repo' },
+      WAITS_USER,
+      WAITS_SECRET,
+    )
+    await expect
+      .poll(stripButtons, { message: 'item row strip adds history button right after bell once #pusher has dest', timeout: 30_000 })
+      .toEqual([
+        ['up', 'Previous row (k)'],
+        ['down', 'Next row (j)'],
+        ['bell', 'Clear the notification (b)'],
+        ['history', 'Open item history (h)'],
+      ])
+    const activeWithPusher = await page.evaluate(() =>
+      ((window as any)._shortcuts?.todoer ?? []).filter((e: any) => e.active()).map((e: any) => `${e.keys}:${e.does}`),
+    )
+    expect(activeWithPusher, 'shortcuts menu activates h:open item history alongside j, k, b').toEqual([
+      'j:the next row',
+      'k:the previous row',
+      'b:clear the bell',
+      'h:open item history',
+    ])
+    const expectedHistoryUrl = `https://github.com/e2e-owner/e2e-repo/commits/master/items/${agentItemId}.md`
+    await page.locator('.todoer-bin-buttons > button.history').click()
+    await expect
+      .poll(() => page.evaluate(() => [...(window as any).__openedHistory]), {
+        message: 'clicking history button opens the pusher commit-history URL for the item',
+        timeout: 5_000,
+      })
+      .toEqual([expectedHistoryUrl])
+    expect(
+      await page.evaluate(() => (window as any).MindBox.get().trim()),
+      'clicking history button leaves MindBox unchanged',
+    ).toBe('#waits_item')
+    await expect(itemRow, 'clicking history button leaves the item row standing').toHaveCount(1)
+    await expect(itemRow.locator('mark.waits'), 'clicking history button leaves the item bell intact').toHaveText('item')
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    await page.keyboard.press('h')
+    await expect
+      .poll(() => page.evaluate(() => [...(window as any).__openedHistory]), {
+        message: 'pressing h opens the same pusher commit-history URL for the item',
+        timeout: 5_000,
+      })
+      .toEqual([expectedHistoryUrl, expectedHistoryUrl])
+    expect(
+      await page.evaluate(() => (window as any).MindBox.get().trim()),
+      'pressing h leaves MindBox unchanged',
+    ).toBe('#waits_item')
+    await expect(itemRow, 'pressing h leaves the item row standing').toHaveCount(1)
+    await expect(itemRow.locator('mark.waits'), 'pressing h leaves the item bell intact').toHaveText('item')
+    expect(
+      (await serverStore(`global_store_${agentItemId}`, WAITS_USER, WAITS_SECRET))?._todoer?.cleared_items ?? null,
+      'history button and h do not clear the item stamp',
+    ).toBeNull()
+    expect(historyPageErrors, 'no pageerror during history button and h stretch').toEqual([])
+  } finally {
+    page.off('pageerror', onHistoryPageError)
+    await page.evaluate(() => {
+      const w = window as any
+      if (w.__origWindowOpen) window.open = w.__origWindowOpen
+      delete w.__origWindowOpen
+      delete w.__openedHistory
+    })
+  }
   await page.keyboard.press('b')
   await expect(itemRow, 'b clears the agent-written item row').toHaveCount(0, { timeout: 15_000 })
   await expect
@@ -3035,7 +3153,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     const todoerPage = await page.evaluate(() => {
       const t = window._item('#todoer', true) as any
       return {
-        listsPrivate: /_BIN_BUTTONS|_bin_buttons|_BIN_KEYS|_row_buttons|_row_sequence|_row_now|_row_has|_row_can|_row_goes|_ROW_SHORTCUTS|_BIN_REFUSAL|_LIST_BINS|_todo_list|_todo_buttons|_todo_log_text|_unsnooze_for_bell|_shown_bell|_watch_list_visibility|_log_done/.test(
+        listsPrivate: /_BIN_BUTTONS|_bin_buttons|_BIN_KEYS|_history_url|_row_buttons|_row_sequence|_row_now|_row_has|_row_can|_row_goes|_ROW_SHORTCUTS|_BIN_REFUSAL|_LIST_BINS|_todo_list|_todo_buttons|_todo_log_text|_unsnooze_for_bell|_shown_bell|_watch_list_visibility|_log_done/.test(
           t?.elem?.innerText ?? '',
         ),
         missing: t?.missingTags ?? [],
@@ -5172,7 +5290,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await page.evaluate(() => void window._create('#sm_two\n#todo second shortcuts todo'))
     await expect.poll(() => savedId(page, '#sm_two'), { timeout: 30_000 }).toBeTruthy()
     await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(3)
-    await expect.poll(() => page.evaluate(() => ((window as any)._shortcuts?.todoer ?? []).length), { timeout: 30_000 }).toBe(13)
+    await expect.poll(() => page.evaluate(() => ((window as any)._shortcuts?.todoer ?? []).length), { timeout: 30_000 }).toBe(14)
 
     const mainRows = () =>
       page.evaluate(() => {
@@ -5224,11 +5342,15 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await menu.locator('.tabs > button', { hasText: 'window' }).click()
     await expect
       .poll(() => shown().then(s => s && [s.view, s.on, s.where, s.sections]), { message: 'window tab switches view and keeps menu open', timeout: 5_000 })
-      .toEqual(['window', ['window'], null, [['todoer', 13]]])
-    expect((await rowsShown())[0], 'reference view includes condition in brackets').toBe(
+      .toEqual(['window', ['window'], null, [['todoer', 14]]])
+    const windowRows = await rowsShown()
+    expect(windowRows[0], 'reference view includes condition in brackets').toBe(
       'j\tthe next row (a row is selected: through the rows with a bell and the main list, round and round)',
     )
-    expect((await rowsShown()).slice(-2), 'reference view lists role-agnostic w entries').toEqual([
+    expect(windowRows, 'reference view lists h history entry with its condition').toContain(
+      'h\topen item history (a row of an item an agent wrote is selected, and the pusher has a destination)',
+    )
+    expect(windowRows.slice(-2), 'reference view lists role-agnostic w entries').toEqual([
       'w\tlink with the other window (another window of the app is open, and this window is not linked)',
       'w\tunlink from the other window (this window is linked with the other window)',
     ])
@@ -5246,7 +5368,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await menu.locator('.tabs > button', { hasText: 'all' }).click()
     await expect
       .poll(() => shown().then(s => s && [s.view, s.on, s.sections]), { message: 'all tab switches view and keeps menu open', timeout: 5_000 })
-      .toEqual(['all', ['all'], [['todoer', 13]]])
+      .toEqual(['all', ['all'], [['todoer', 14]]])
 
     await menu.locator('.tabs > button', { hasText: 'now' }).click()
     await expect
@@ -5665,7 +5787,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     ])
     await menu.locator('.tabs > button', { hasText: 'window' }).click()
     await expect.poll(() => shown().then(s => s?.sections), { timeout: 5_000 }).toEqual([
-      ['todoer', 13],
+      ['todoer', 14],
       ['extra item', 3],
     ])
     await menu.locator('.tabs > button', { hasText: 'box' }).click()
