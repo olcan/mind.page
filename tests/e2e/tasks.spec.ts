@@ -2038,37 +2038,60 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   const FOOTER2 = "<<agent('vault/default · run ef56ab78 · 2s')>>"
   const CLEAR_KEY = "1|'vault/default · run ab12cd34 · 1s'"
   const CLEAR_KEY2 = "1|'vault/default · run ef56ab78 · 2s'"
-  // a chat with a reply from BEFORE the list begins in the account (the todoer is not installed yet)
+  // a chat with a reply and a stamped item from BEFORE the baselines begin in the account
   const CHAT_OLD = `#waits_old/0 #_agent/vault\n<<user>> an old question\n${FOOTER}\n<!--inert-->\nThe old answer.\n<!--/inert-->`
+  const PRE_ITEM = '#waits_pre\nWritten before items_base existed.'
   await page.evaluate(text => void window._create(text), CHAT_OLD)
+  await page.evaluate(text => void window._create(text), PRE_ITEM)
   await expect.poll(() => savedId(page, '#waits_old/0'), { message: 'the old chat saved', timeout: 30_000 }).toBeTruthy()
+  await expect.poll(() => savedId(page, '#waits_pre'), { message: 'the pre-baseline item saved', timeout: 30_000 }).toBeTruthy()
   const chatOldId = (await savedId(page, '#waits_old/0'))!
+  const preItemId = (await savedId(page, '#waits_pre'))!
   expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
   await saved()
+  const todoerId = (await savedId(page, '#todoer'))!
+  const hashOf = (text: string) => page.evaluate(t => (window as any)._hash_64_fnv1a(t) as string, text)
+  const preStampAt = Date.now() - 60_000
+  const preStampHash = await hashOf(PRE_ITEM)
+  const todoerStoreDoc0 = (await storeDocId(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET)) ?? 'e2e-waits-store-todoer'
+  await writeStore(
+    todoerStoreDoc0,
+    `global_store_${todoerId}`,
+    { _agent: { wrote: { [preItemId]: { by: 'claude', at: preStampAt, hash: preStampHash } } } },
+    WAITS_USER,
+    WAITS_SECRET,
+  )
   await page.reload()
   await loaded(page)
   await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
   await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both todoer widgets mounted', timeout: 30_000 }).toBe(2)
   await page.evaluate(() => void window._create('#todo waits baseline'))
   await saved()
-  const todoerId = (await savedId(page, '#todoer'))!
   await expect
     .poll(async () => {
       const store = await serverStore(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET)
-      return [store?.rows_since > 0, Object.keys(store?.rows_base ?? { none: 0 }), !!store?.bells_base]
-    }, { message: 'the todoer writes its baselines on the server: the time, a mark of the old chat\'s reply, the bells\' counts', timeout: 60_000 })
-    .toEqual([true, [String(chatOldId)], true])
+      return [store?.rows_since > 0, Object.keys(store?.rows_base ?? { none: 0 }), !!store?.bells_base, store?.items_base ?? null]
+    }, { message: 'the todoer writes its baselines on the server: the time, a mark of the old chat\'s reply, the bells\' counts, the pre-baseline write stamp', timeout: 60_000 })
+    .toEqual([true, [String(chatOldId)], true, { [preItemId]: preStampAt }])
 
   const main = page.locator('.todoer-widget').first()
   const delegated = page.locator('.todoer-widget').nth(1)
 
-  // 0. a reply from before the list began never becomes a row: not when its chat is selected, not
-  // after an unrelated edit of the chat, not after a reload (the app moves an item's time at each;
-  // review 0 of the thread notify_list); a replacement reply on it is a new one, and shows
+  // 0. a reply and an agent write stamp from before the list began never become rows: not when the
+  // chat is selected, not after an unrelated edit of the chat, not after a reload (the app moves an
+  // item's time at each; review 0 of the thread notify_list); a replacement reply on it is a new one
   const oldRow = main.locator('.list-item-container[data-waits="reply"]', { hasText: '#waits_old/0' })
+  const preRow = main.locator('.list-item-container[data-waits="item"]', { hasText: '#waits_pre' })
   const seenOld = () => page.evaluate(id => (window._item('#todoer') as any)?.store?.reply_seen?.[window._item('id:' + id, true)?.id ?? '']?.footer ?? null, chatOldId)
   await expect.poll(seenOld, { message: 'this tab holds the old chat\'s reply', timeout: 30_000 }).toBe("'vault/default · run ab12cd34 · 1s'")
   await expect(oldRow, 'a reply from before the list began has no row').toHaveCount(0)
+  await expect
+    .poll(() => page.evaluate(id => (window._item('id:' + id, true) as any)?.hash ?? null, preItemId), {
+      message: 'the pre-baseline item holds its stamped hash',
+      timeout: 15_000,
+    })
+    .toBe(preStampHash)
+  await expect(preRow, 'a stamp that stood before the baseline shows nothing').toHaveCount(0)
   await page.evaluate(() => void (window as any).MindBox.set('#waits_old/0'))
   await expect
     .poll(() => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#waits_old/0', true)?.id), { message: 'the old chat is selected', timeout: 15_000 })
@@ -2083,6 +2106,19 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both widgets mounted after the old chat\'s reload', timeout: 30_000 }).toBe(2)
   await expect.poll(seenOld, { message: 'the reloaded tab holds the old chat\'s reply', timeout: 30_000 }).toBe("'vault/default · run ab12cd34 · 1s'")
   await expect(oldRow, 'after a reload the old chat still has no row').toHaveCount(0)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const it = window._item('id:' + id, true) as any
+          const gs = (window._item('#todoer') as any)?._global_store
+          const stamp = gs?._agent?.wrote?.[id]
+          return [it?.hash ?? null, gs?.items_base?.[id] ?? null, stamp?.at ?? null, stamp?.hash ?? null]
+        }, preItemId),
+      { message: 'the reloaded tab holds the pre-baseline item hash, items_base entry, and retained stamp', timeout: 15_000 },
+    )
+    .toEqual([preStampHash, preStampAt, preStampAt, preStampHash])
+  await expect(preRow, 'after a reload the pre-baseline item stamp still has no row').toHaveCount(0)
   await page.evaluate(text => void window._item('#waits_old/0', true)!.write(text, ''), CHAT_OLD.replace(FOOTER, FOOTER2))
   await expect(oldRow, 'a replacement reply on the old chat is a new one: it has a row').toHaveCount(1, { timeout: 30_000 })
   await saved()
@@ -2389,6 +2425,119 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
     .poll(() => page.evaluate(() => (window as any).MindBox.get().trim()), { message: 'clicking the test notification selects the item', timeout: 10_000 })
     .toBe('#waits_t/0')
   expect((await notifiedTest())[0]!.closed, 'clicked test notification is closed').toBe(true)
+
+  // 7. agent-written item rows: a stamp in #todoer's store (`_agent.wrote`, mind_item.py shape)
+  //    shows an `item` bell row in the main list even with `/notify` off, `b` clears it without
+  //    touching item text, a second stamp brings it back, and a user edit removes the row
+  expect(await command(page, '/notify off'), '/notify off succeeds before item-row step').toBeNull()
+  await expect
+    .poll(() => rowDialogs.at(-1) ?? '', { message: '/notify off reports notifications off', timeout: 10_000 })
+    .toBe('notifications: off')
+  await expect
+    .poll(async () => (await serverStore(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET))?.notify ?? null, {
+      message: '/notify off persisted on the server before stamping',
+      timeout: 30_000,
+    })
+    .toBeNull()
+  await page.evaluate(() => void ((window as any).__notified.length = 0))
+  const ITEM_TEXT = '#waits_item\n<!-- hidden comment -->\nAgent wrote this note.\nSecond line.'
+  await page.evaluate(text => void window._create(text), ITEM_TEXT)
+  await expect.poll(() => savedId(page, '#waits_item'), { message: 'agent-written item saved', timeout: 30_000 }).toBeTruthy()
+  const agentItemId = (await savedId(page, '#waits_item'))!
+  await saved()
+  const stampItem = async (itemId: string, text: string, at: number, author = 'claude') => {
+    const current = (await serverStore(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET)) ?? {}
+    const docId = (await storeDocId(`global_store_${todoerId}`, WAITS_USER, WAITS_SECRET)) ?? todoerStoreDoc0
+    const prevWrote = current._agent?.wrote && typeof current._agent.wrote == 'object' ? current._agent.wrote : {}
+    await writeStore(
+      docId,
+      `global_store_${todoerId}`,
+      {
+        ...current,
+        _agent: {
+          ...(current._agent ?? {}),
+          wrote: { ...prevWrote, [itemId]: { by: author, at, hash: await hashOf(text) } },
+        },
+      },
+      WAITS_USER,
+      WAITS_SECRET,
+    )
+  }
+  const itemHash1 = await hashOf(ITEM_TEXT)
+  const stampAt1 = Date.now()
+  await stampItem(agentItemId, ITEM_TEXT, stampAt1)
+  const itemRow = main.locator('.list-item-container[data-waits="item"]', { hasText: '#waits_item' })
+  await expect(itemRow, 'an item stamped as an agent write gets a row in the main list with /notify off').toHaveCount(1, { timeout: 30_000 })
+  expect(await notified(), 'no desktop notification fires for the stamped item while /notify is off').toEqual([])
+  await expect(itemRow.locator('mark.waits'), 'the agent-written item row shows a bell saying item').toHaveText('item')
+  await expect
+    .poll(async () => (await itemRow.locator('.list-item').innerText()).replace(/\s+/g, ' ').trim(), {
+      message: 'the item row shows its bell, name, and first visible line without comments or second line',
+      timeout: 10_000,
+    })
+    .toBe('item #waits_item Agent wrote this note.')
+  await main.scrollIntoViewIfNeeded()
+  const itemCell = itemRow.locator('.list-item')
+  const itemBox = (await itemCell.boundingBox())!
+  await page.mouse.click(itemBox.x + itemBox.width - 12, itemBox.y + itemBox.height / 2)
+  await expect(itemRow, 'clicking the item row selects it').toHaveClass(/(^| )selected( |$)/, { timeout: 10_000 })
+  const shortcutSnap = await page.evaluate(() => {
+    const row = document.querySelector('.todoer-widget .list-item-container[data-waits="item"].selected')
+    const active = ((window as any)._shortcuts?.todoer ?? [])
+      .filter((e: any) => e.active())
+      .map((e: any) => `${e.keys}:${e.does}`)
+    return {
+      hasPrev: !!row?.previousElementSibling?.getAttribute('data-id'),
+      hasNext: !!row?.nextElementSibling?.getAttribute('data-id'),
+      active,
+    }
+  })
+  expect(shortcutSnap.hasPrev || shortcutSnap.hasNext, 'the selected item row has a neighbor in the main list').toBe(true)
+  expect(
+    shortcutSnap.active,
+    'shortcuts menu lists navigation and b:clear the bell alone for a selected item row',
+  ).toEqual([
+    ...(shortcutSnap.hasNext ? ['j:the next row'] : []),
+    ...(shortcutSnap.hasPrev ? ['k:the previous row'] : []),
+    'b:clear the bell',
+  ])
+  await page.keyboard.press('b')
+  await expect(itemRow, 'b clears the agent-written item row').toHaveCount(0, { timeout: 15_000 })
+  await expect
+    .poll(async () => (await serverStore(`global_store_${agentItemId}`, WAITS_USER, WAITS_SECRET))?._todoer?.cleared_items ?? null, {
+      message: 'clearing with b records the kinded stamp key in the item store cleared_items field',
+      timeout: 30_000,
+    })
+    .toEqual([`item|${stampAt1}|${itemHash1}`])
+  expect(await serverText(agentItemId, WAITS_SECRET), 'clearing an item row with b leaves the item text unchanged').toBe(ITEM_TEXT)
+
+  const ITEM_TEXT2 = '#waits_item\nAgent revised this note.\nSecond line.'
+  await rewriteText(agentItemId, () => ITEM_TEXT2, WAITS_SECRET)
+  const stampAt2 = stampAt1 + 1000
+  await stampItem(agentItemId, ITEM_TEXT2, stampAt2)
+  await expect(itemRow, 'a second stamp shows the agent-written item row again').toHaveCount(1, { timeout: 30_000 })
+  await expect
+    .poll(async () => (await itemRow.locator('.list-item').innerText()).replace(/\s+/g, ' ').trim(), {
+      message: 'the row updates to the revised first visible line',
+      timeout: 10_000,
+    })
+    .toBe('item #waits_item Agent revised this note.')
+
+  await page.evaluate(() => void (window as any).MindBox.set('#waits_item'))
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#waits_item', true)?.id), {
+      message: '#waits_item is the target item',
+      timeout: 15_000,
+    })
+    .toBe(true)
+  const targetArea = page.locator('.container.target textarea')
+  await page.locator('.container.target .item').getByText('Agent revised this note.').click()
+  await expect(targetArea, 'clicking the item opens its editor').toBeVisible({ timeout: 10_000 })
+  await targetArea.fill(ITEM_TEXT2 + '\nOwner reviewed it.')
+  await targetArea.press('Shift+Enter')
+  await expect(targetArea, 'Shift+Enter saves and closes the editor').toHaveCount(0, { timeout: 15_000 })
+  await expect(itemRow, 'editing the item by the user takes the waiting row away').toHaveCount(0, { timeout: 15_000 })
+  await saved()
 })
 
 // SERVICE-WORKER DESKTOP NOTIFICATIONS (protocol v2: hello handshake; outlive page reload;
@@ -4363,14 +4512,28 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await page.keyboard.press('Enter')
     const dirtyEditor = page.locator('.super-container .container.editing textarea').first()
     await expect(dirtyEditor).toBeVisible({ timeout: 5_000 })
-    await dirtyEditor.focus()
+    await expect(dirtyEditor).toBeFocused({ timeout: 5_000 })
     await dirtyEditor.evaluate(el => {
       const ta = el as HTMLTextAreaElement
       ta.setSelectionRange(ta.value.length, ta.value.length)
     })
     await page.keyboard.type(' unsaved')
-    await unfocus()
-    await expect.poll(() => page.evaluate(() => document.activeElement?.tagName), { timeout: 5_000 }).not.toBe('TEXTAREA')
+    // the focus is taken from the editor, and taken again until it stays away over the page's
+    // update: a layout that ran while the editor had the focus gives its field the focus AGAIN
+    // after that update (index.svelte, the layout's `update_dom().then`), which put the opening
+    // key, or Escape, into the editor under the menu
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async () => {
+            ;(document.activeElement as HTMLElement | null)?.blur?.()
+            await (window as any)._update_dom()
+            await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))
+            return document.activeElement?.tagName ?? null
+          }),
+        { timeout: 5_000 },
+      )
+      .not.toBe('TEXTAREA')
     await page.keyboard.press('Shift+Slash')
     await expect(menu).toBeVisible({ timeout: 5_000 })
     expect(await rowsShown(), 'dirty unfocused todo editor hides a, d, x and keeps j and s').toEqual(['j\tthe next row', 's\tsnooze'])
