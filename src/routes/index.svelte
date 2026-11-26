@@ -39,6 +39,7 @@
   import Modal from '../components/Modal.svelte'
   import { eventKey } from '../event_key'
   import { stripAttrToken } from '../item_attr'
+  import { comparePinTerm } from '../pin_sort'
   import { parseWikiLinksConfig, wikiLinkHtml, wikiLinkRegExp } from '../wiki_links'
   import { reloadQuestion, unsavedName, unsavedNotice, type UnsavedEntry } from '../unsaved_list'
   import Editor from '../components/Editor.svelte'
@@ -3610,24 +3611,15 @@
           // dotted? (contains #_pin/dot or #_pin/dot/*)
           b.dotted - a.dotted ||
           // alphanumeric ordering on #_pin/dot/* term (see https://stackoverflow.com/a/38641281)
-          a.dotTerm.localeCompare(b.dotTerm, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          }) ||
+          comparePinTerm(a.dotTerm, b.dotTerm) ||
           // pinned? (contains #_pin or #_pin/*)
           b.pinned - a.pinned ||
           // alphanumeric ordering on #_pin/* term
-          a.pinTerm.localeCompare(b.pinTerm, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          }) ||
+          comparePinTerm(a.pinTerm, b.pinTerm) ||
           // pinned match? (contains /pin or /pin/*)
           b.pinnedMatch - a.pinnedMatch ||
           // alphanumeric ordering on #*/pin/* term
-          a.pinnedMatchTerm.localeCompare(b.pinnedMatchTerm, undefined, {
-            numeric: true,
-            sensitivity: 'base',
-          }) ||
+          comparePinTerm(a.pinnedMatchTerm, b.pinnedMatchTerm) ||
           // listing item context position (includes labelPrefixes)
           context.indexOf(b.uniqueLabel) - context.indexOf(a.uniqueLabel) ||
           // target item (listing item or id-matching item)

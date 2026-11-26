@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import _ from 'lodash'
+import { comparePinTerm } from '../../src/pin_sort.js'
 
 // the REAL ranking step of onEditorChange (index.svelte, extracted by its first and last lines): the dummy
 // item pushed to mark where the "tail" starts (the items ranked by time alone), the sort, and the check
@@ -16,7 +17,18 @@ const step = source.match(
 )?.[0]
 if (!step) throw new Error('the ranking step (the dummy through the tail check) not found in index.svelte')
 // the step's free variables, in the order `rank` supplies them
-const FREE = ['items', 'now', 'text', 'context', 'listing', '_', 'console', 'lastRankedQuery', 'regroupTimeRowsPending']
+const FREE = [
+  'items',
+  'now',
+  'text',
+  'context',
+  'listing',
+  '_',
+  'console',
+  'lastRankedQuery',
+  'regroupTimeRowsPending',
+  'comparePinTerm',
+]
 
 const QUERY = '#t'
 const NOW = 1_800_000_000_000
@@ -95,6 +107,7 @@ function rank(
     log,
     lastRankedQuery,
     false,
+    comparePinTerm,
   )
   return { tailIndex, lastRankedQuery: nextRankedQuery as string, errors, dummy: made.dummy, compare: made.compare! }
 }
