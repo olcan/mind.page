@@ -2493,14 +2493,11 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
     }
   })
   expect(shortcutSnap.hasPrev || shortcutSnap.hasNext, 'the selected item row has a neighbor in the main list').toBe(true)
+  // (the walk of j and k goes round at its ends: with a neighbor on either side both keys are active)
   expect(
     shortcutSnap.active,
     'shortcuts menu lists navigation and b:clear the bell alone for a selected item row',
-  ).toEqual([
-    ...(shortcutSnap.hasNext ? ['j:the next row'] : []),
-    ...(shortcutSnap.hasPrev ? ['k:the previous row'] : []),
-    'b:clear the bell',
-  ])
+  ).toEqual(['j:the next row', 'k:the previous row', 'b:clear the bell'])
   await page.keyboard.press('b')
   await expect(itemRow, 'b clears the agent-written item row').toHaveCount(0, { timeout: 15_000 })
   await expect
@@ -2959,6 +2956,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
     expect(await install(page, 'key_buttons'), '/_install key_buttons').toBeNull()
     expect(await install(page, 'vault'), '/_install vault').toBeNull()
+    expect(await install(page, 'logger'), '/_install logger').toBeNull()
     const saved = () =>
       expect
         .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 })
@@ -3029,7 +3027,12 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     // #todoer's own page js_table shows no private bin-button definitions and introduces no missing tags
     const todoerPage = await page.evaluate(() => {
       const t = window._item('#todoer', true) as any
-      return { listsPrivate: /_BIN_BUTTONS|_bin_buttons|_BIN_KEYS|_row_buttons/.test(t?.elem?.innerText ?? ''), missing: t?.missingTags ?? [] }
+      return {
+        listsPrivate: /_BIN_BUTTONS|_bin_buttons|_BIN_KEYS|_row_buttons|_row_sequence|_row_now|_row_has|_row_can|_row_goes|_ROW_SHORTCUTS|_BIN_REFUSAL|_LIST_BINS|_todo_list|_todo_buttons|_todo_log_text|_unsnooze_for_bell|_shown_bell|_watch_list_visibility|_log_done/.test(
+          t?.elem?.innerText ?? '',
+        ),
+        missing: t?.missingTags ?? [],
+      }
     })
     expect(todoerPage, '#todoer page has no leaked private bin-button definitions or missing tags').toEqual({ listsPrivate: false, missing: [] })
 
@@ -3057,7 +3060,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       })
     const mainRowNames = () =>
       page.evaluate(() => {
-        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !w._snoozed && !w._delegated)
         return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
       })
     const boxNow = () => page.evaluate(() => (window as any).MindBox.get().trim())
@@ -3077,13 +3080,14 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await unfocus()
     await page.keyboard.press('j')
     await expect.poll(boxNow, { message: 'plain j with no selection selects first row of main list', timeout: 5_000 }).toBe(rows0[0])
-    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'first row dims up and lights down', timeout: 5_000 }).toEqual([
-      'rgba(255, 255, 255, 0.25)',
+    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'first row lights both up and down (cycling)', timeout: 5_000 }).toEqual([
+      'rgb(255, 255, 255)',
       'rgb(255, 255, 255)',
     ])
     await page.keyboard.press('k')
-    await page.waitForTimeout(200)
-    expect(await boxNow(), 'k at top of list stays on first row').toBe(rows0[0])
+    await expect.poll(boxNow, { message: 'k at top of list wraps round to last row', timeout: 5_000 }).toBe(rows0[3])
+    await page.keyboard.press('j')
+    await expect.poll(boxNow, { message: 'j at bottom of list wraps round to first row', timeout: 5_000 }).toBe(rows0[0])
     await page.keyboard.press('j')
     await expect.poll(boxNow, { message: 'j steps to second row', timeout: 5_000 }).toBe(rows0[1])
     await page.keyboard.press('k')
@@ -3092,19 +3096,18 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(boxNow, { message: 'down button steps to second row', timeout: 5_000 }).toBe(rows0[1])
     await guest('up').click()
     await expect.poll(boxNow, { message: 'up button steps back to first row', timeout: 5_000 }).toBe(rows0[0])
-    // empty box -> k selects last row of main list; j at bottom stays there
+    // empty box -> k selects last row of main list; j at bottom wraps round to first row
     await userSet(page, '')
     await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
     await unfocus()
     await page.keyboard.press('k')
     await expect.poll(boxNow, { message: 'plain k with no selection selects last row of main list', timeout: 5_000 }).toBe(rows0[3])
-    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'last row lights up and dims down', timeout: 5_000 }).toEqual([
+    await expect.poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'last row lights both up and down (cycling)', timeout: 5_000 }).toEqual([
       'rgb(255, 255, 255)',
-      'rgba(255, 255, 255, 0.25)',
+      'rgb(255, 255, 255)',
     ])
     await page.keyboard.press('j')
-    await page.waitForTimeout(200)
-    expect(await boxNow(), 'j at bottom of list stays on last row').toBe(rows0[3])
+    await expect.poll(boxNow, { message: 'j at bottom wraps round to first row', timeout: 5_000 }).toBe(rows0[0])
     // unlisted item in box -> treated as no row selected for j/k; guests hidden
     await userSet(page, '#bl_note')
     await expect.poll(() => guestState().then(s => s.hidden), { message: 'unlisted item shows no bin buttons', timeout: 5_000 }).toBe(true)
@@ -3676,7 +3679,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(() => mainRowNames().then(r => ['#rk_one', '#rk_two', '#rk_three', '#rk_reply/0'].every(n => r.includes(n))), { timeout: 15_000 }).toBe(true)
     const delegatedRowNames = () =>
       page.evaluate(() => {
-        const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !!w._delegated)
+        const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !!w._delegated)
         return [...(w?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
       })
     await page.evaluate(() => {
@@ -4005,6 +4008,453 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await runInMindbox('#chat/vault/1', '#chat/vault/1/0', '#chat/vault/1/0\n<<user>> ', 'chat child Shift+Enter keeps editor focused with caret collapsed at end')
     await userSet(page, '')
 
+    // 10. Snoozed & off-list todo buttons, snooze clearing a bell, and a ringing bell unsnoozing (2026-11-25)
+    const DIM_COLOR = 'rgba(255, 255, 255, 0.25)'
+    const LIT_COLOR = 'rgb(255, 255, 255)'
+    const mountedWidgets = () =>
+      page.evaluate(() => [...document.querySelectorAll('.todoer-widget')].filter(w => !w.closest('#cache-div')).length)
+    const mountedSnoozed = () =>
+      page.evaluate(() => [...document.querySelectorAll('.todoer-widget')].filter((w: any) => !w.closest('#cache-div') && !!w._snoozed).length)
+    const snoozedRowNames = () =>
+      page.evaluate(() => {
+        const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !!w._snoozed)
+        return [...(w?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
+      })
+    const matchingItemNames = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id]')]
+          .filter(el => !!el.querySelector('.item-menu .index.matching'))
+          .map(el => window._item('id:' + el.getAttribute('data-item-id'), true)?.name ?? null),
+      )
+
+    for (const text of [
+      '#sb_snz\n#todo snoozed todo one',
+      '#sb_snz2\n#todo snoozed todo two',
+      '#sb_main\n#todo solo main todo',
+      '#sb_bell\n#todo snooze clears bell and bell unsnoozes',
+      '#sb_snz_list #_pin #_menu\n<<todoer_widget({snoozed: true})>>\n#_todoer',
+    ]) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    for (const name of ['#sb_snz', '#sb_snz2', '#sb_main', '#sb_bell', '#sb_snz_list']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    await expect.poll(mountedSnoozed, { message: 'pinned snoozed widget mounted', timeout: 15_000 }).toBe(1)
+    await expect
+      .poll(() => mainRowNames().then(r => ['#sb_snz', '#sb_snz2', '#sb_main', '#sb_bell'].every(n => r.includes(n))), { timeout: 15_000 })
+      .toBe(true)
+
+    // Snooze #sb_snz (3h) and #sb_snz2 (tomorrow) so #sb_snz stands first in the snoozed list
+    const snoozeByKey = async (name: string, buttonRe: RegExp) => {
+      await selectRow(name)
+      await page.keyboard.press('s')
+      await expect(page.locator('.snooze-modal'), `${name} snooze modal opens`).toBeVisible({ timeout: 5_000 })
+      await page.locator('.snooze-modal .button', { hasText: buttonRe }).click()
+      await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 5_000 })
+      await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { message: `${name} snooze press settled`, timeout: 5_000 }).toBe(true)
+    }
+    await snoozeByKey('#sb_snz', /^3h$/)
+    await snoozeByKey('#sb_snz2', /^tomorrow$/i)
+    await expect.poll(snoozedRowNames, { message: 'both snoozed todos listed in order', timeout: 15_000 }).toEqual(['#sb_snz', '#sb_snz2'])
+
+    // 10a. Snoozed todo selected by its row while the snoozed list IS on the page (page row wins; both up/down lit via sequence)
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    const snoozedWidget = page.locator('.column:not(.hidden) .todoer-widget').filter({ has: page.locator('.list-item-container', { hasText: 'snoozed todo one' }) })
+    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item').click()
+    await expect.poll(boxNow, { message: 'clicking snoozed row selects #sb_snz', timeout: 5_000 }).toBe('#sb_snz')
+    expect(await mountedSnoozed(), 'snoozed list stays mounted while pinned').toBe(1)
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, snooze: s.titles[s.names.indexOf('snooze')], nav: [s.colors.up, s.colors.down] })), {
+        message: 'snoozed todo selected with mounted snoozed list has Unsnooze and lit up/down arrows',
+        timeout: 5_000,
+      })
+      .toEqual({
+        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        snooze: 'Unsnooze (s)',
+        nav: [LIT_COLOR, LIT_COLOR],
+      })
+
+    // 10b. Unpin snoozed list (now visible only when searching its label, as in owner account): clicking #sb_snz
+    //      hides the snoozed list, #sb_snz keeps its snoozed buttons (lit up/down while main list is mounted, Unsnooze),
+    //      and key s unsnoozes it into main
+    await page.evaluate(() => {
+      const it = window._item('#sb_snz_list', true) as any
+      it.write('#sb_snz_list #_menu\n<<todoer_widget({snoozed: true})>>\n#_todoer', '', { skip_save: false })
+    })
+    await userSet(page, '#sb_snz_list')
+    await expect.poll(mountedSnoozed, { message: 'unpinned snoozed list mounts under its label search', timeout: 10_000 }).toBe(1)
+    await expect.poll(snoozedRowNames, { timeout: 10_000 }).toEqual(['#sb_snz', '#sb_snz2'])
+    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item').click()
+    await expect.poll(boxNow, { message: 'clicking row in unpinned snoozed list selects #sb_snz', timeout: 5_000 }).toBe('#sb_snz')
+    await expect.poll(mountedSnoozed, { message: 'snoozed list leaves the page when #sb_snz is selected', timeout: 10_000 }).toBe(0)
+    await expect
+      .poll(() => guestState().then(s => ({ hidden: s.hidden, names: s.names, snooze: s.titles[s.names.indexOf('snooze')], nav: [s.colors.up, s.colors.down] })), {
+        message: 'off-list snoozed todo keeps Unsnooze and bins with lit up/down',
+        timeout: 5_000,
+      })
+      .toEqual({
+        hidden: false,
+        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        snooze: 'Unsnooze (s)',
+        nav: [LIT_COLOR, LIT_COLOR],
+      })
+    await unfocus()
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('s')
+    await expect.poll(() => mainRowNames().then(r => r.includes('#sb_snz')), { message: 's key unsnoozes off-list #sb_snz into main list', timeout: 15_000 }).toBe(true)
+    expect(await boxNow(), '#sb_snz stays selected after off-list unsnooze').toBe('#sb_snz')
+    expect([await keys(), await priorKeys()], 's key on off-list snoozed todo was taken and not forwarded').toEqual([[['KeyS', true, false]], []])
+    await expect
+      .poll(() => guestState().then(s => ({ snooze: s.titles[s.names.indexOf('snooze')], down: s.colors.down })), {
+        message: 'after off-list unsnooze, buttons redraw from new main row (Snooze and lit down)',
+        timeout: 10_000,
+      })
+      .toEqual({ snooze: 'Snooze (s)', down: LIT_COLOR })
+
+    // 10c. Main-list todo selected by its label with ONLY its own item on the page (no todoer widgets mounted)
+    //      and #logger installed: Done writes #done, logs the entry into today's daily log, and keeps #sb_main selected
+    const origPinned = await page.evaluate(() => {
+      const pinned = (window as any).__items.find((i: any) => i.tags?.includes('#pin') && /todoer_widget\(\)/.test(i.text ?? ''))
+      const raw = pinned?.text ?? null
+      if (pinned) (window._item('id:' + pinned.id, true) as any).write(raw.replace(/#_pin\s*/, ''), '', { skip_save: false })
+      return pinned ? { id: pinned.id as string, text: raw as string } : null
+    })
+    expect(origPinned?.text, 'found pinned todoer item to unpin temporarily').toBeTruthy()
+    const origPinnedText = origPinned!.text
+    await selectRow('#sb_main')
+    await expect.poll(mountedWidgets, { message: 'no todoer widgets mounted when only #sb_main is shown', timeout: 10_000 }).toBe(0)
+    await expect.poll(matchingItemNames, { message: 'only #sb_main matches on the page', timeout: 10_000 }).toEqual(['#sb_main'])
+    await expect
+      .poll(() => guestState().then(s => ({ hidden: s.hidden, names: s.names, snooze: s.titles[s.names.indexOf('snooze')], nav: [s.colors.up, s.colors.down] })), {
+        message: 'solo main todo gets main-list buttons with dimmed up/down',
+        timeout: 5_000,
+      })
+      .toEqual({
+        hidden: false,
+        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        snooze: 'Snooze (s)',
+        nav: [DIM_COLOR, DIM_COLOR],
+      })
+    await page.keyboard.press('d')
+    await expect.poll(() => itemText('#sb_main').then(t => t?.saved ?? ''), { message: 'd completes solo main todo', timeout: 15_000 }).toContain('#done')
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { message: 'solo done press (with #logger) settled', timeout: 10_000 }).toBe(true)
+    const todayLog = () =>
+      page.evaluate(() => {
+        const d = new Date()
+        const p = (n: number) => String(n).padStart(2, '0')
+        const name = `#${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`
+        return (window._item(name, true) as any)?.read?.('log') ?? ''
+      })
+    await expect.poll(todayLog, { message: '#logger recorded solo done entry in daily log', timeout: 10_000 }).toContain('done #todo solo main todo')
+    await expect.poll(() => guestState().then(s => [s.hidden, s.names]), { message: 'completed solo todo hides bin buttons', timeout: 10_000 }).toEqual([true, []])
+    expect(await boxNow(), 'solo completed todo stays selected after #logger logs directly').toBe('#sb_main')
+    await page.evaluate(() => (window as any)._update_dom?.())
+    expect(await boxNow(), 'solo completed todo stays selected after page update').toBe('#sb_main')
+
+    // 10c2. Dotted pinned list (#_pin/dot) stays in DOM under .super-container.hidden when folded:
+    //       same selected item transitions visible -> folded -> visible with arrows lit -> dim -> lit and j following
+    const visibleWidgets = () =>
+      page.evaluate(
+        () => [...document.querySelectorAll('.todoer-widget')].filter(w => !w.closest('#cache-div, .column.hidden, .super-container.hidden')).length,
+      )
+    const foldedWidgets = () =>
+      page.evaluate(
+        () => [...document.querySelectorAll('.todoer-widget')].filter(w => !!w.closest('.super-container.hidden') && !w.closest('#cache-div, .column.hidden')).length,
+      )
+    await page.evaluate(id => {
+      ;(window._item('id:' + id, true) as any).write('#_pin/dot #_menu\n<<todoer_widget()>>\n#_todoer', '', { skip_save: false })
+    }, origPinned!.id)
+    const statusBar = page.locator('.header .status')
+    await expect(statusBar.locator('.dots'), 'folded #_pin/dot list shows dots in status bar').toBeVisible({ timeout: 10_000 })
+    await expect.poll(foldedWidgets, { message: 'folded list stays mounted inside .super-container.hidden', timeout: 10_000 }).toBe(1)
+    expect(await visibleWidgets(), 'folded list is excluded from visible widgets').toBe(0)
+    // Unfold via .status click -> visible state
+    await statusBar.locator('.dots').click()
+    await expect(statusBar.locator('.triangle'), 'clicking status unfolds #_pin/dot list').toBeVisible({ timeout: 5_000 })
+    await expect.poll(visibleWidgets, { message: 'unfolded list counts as 1 visible widget', timeout: 10_000 }).toBe(1)
+    await expect.poll(() => mainRowNames().then(r => r.includes('#sb_snz') && r.length >= 2), { message: 'unfolded list renders #sb_snz beside other rows', timeout: 10_000 }).toBe(true)
+    await selectRow('#sb_snz')
+    await unfocus()
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, nav: [s.colors.up, s.colors.down] })), {
+        message: 'visible #_pin/dot list lights up/down for selected #sb_snz',
+        timeout: 5_000,
+      })
+      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [LIT_COLOR, LIT_COLOR] })
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b !== '#sb_snz' && b !== ''), { message: 'j advances when #_pin/dot list is visible', timeout: 5_000 }).toBe(true)
+    await page.keyboard.press('k')
+    await expect.poll(boxNow, { message: 'k returns to #sb_snz', timeout: 5_000 }).toBe('#sb_snz')
+    // Fold via .status click while #sb_snz remains selected -> arrows dim automatically, j does nothing
+    await statusBar.locator('.triangle').click()
+    await expect(statusBar.locator('.dots'), 'clicking status folds #_pin/dot list again').toBeVisible({ timeout: 5_000 })
+    await expect.poll(foldedWidgets, { message: 'refolded list stays in DOM under .super-container.hidden', timeout: 5_000 }).toBe(1)
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, nav: [s.colors.up, s.colors.down] })), {
+        message: 'folding #_pin/dot list refreshes same selected item arrows to dim while keeping bins',
+        timeout: 5_000,
+      })
+      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [DIM_COLOR, DIM_COLOR] })
+    await unfocus()
+    await page.keyboard.press('j')
+    await page.evaluate(() => (window as any)._update_dom?.())
+    expect(await boxNow(), 'j does not walk hidden folded list from selected #sb_snz').toBe('#sb_snz')
+    // Unfold again while #sb_snz remains selected -> arrows light up automatically, j moves again
+    await statusBar.locator('.dots').click()
+    await expect(statusBar.locator('.triangle'), 'second status click unfolds #_pin/dot list').toBeVisible({ timeout: 5_000 })
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, nav: [s.colors.up, s.colors.down] })), {
+        message: 'unfolding #_pin/dot list refreshes same selected item arrows back to lit',
+        timeout: 5_000,
+      })
+      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [LIT_COLOR, LIT_COLOR] })
+    await unfocus()
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b !== '#sb_snz' && b !== ''), { message: 'j advances again after unfolding', timeout: 5_000 }).toBe(true)
+    // Also verify empty box + folded list cannot select a hidden row with j
+    await statusBar.locator('.triangle').click()
+    await expect(statusBar.locator('.dots')).toBeVisible({ timeout: 5_000 })
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await page.keyboard.press('j')
+    await page.evaluate(() => (window as any)._update_dom?.())
+    expect(await boxNow(), 'j from empty box does not select hidden folded row').toBe('')
+
+    // Restore the pinned todoer item before bell checks (and for the phone row that follows)
+    await page.evaluate(({ id, raw }) => {
+      ;(window._item('id:' + id, true) as any).write(raw, '', { skip_save: false })
+    }, { id: origPinned!.id, raw: origPinnedText })
+    await expect.poll(mountedWidgets, { message: 'pinned todoer widgets restored', timeout: 15_000 }).toBe(2)
+
+    // 10d. Snooze of a todo with a bell clears the bell; then a new projection ringing the bell unsnoozes it into main with its bell
+    const bellId = (await savedId(page, '#sb_bell'))!
+    const bellStoreDoc = (await storeDocId(`global_store_${bellId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-sb-bell'
+    const mkState = (reason: string, surfaced: number, rev: number) => ({ held: 'owner', reason, epoch: 1, rev, surfaced, updated: Date.now() })
+    await writeStore(bellStoreDoc, `global_store_${bellId}`, { _agent: { state: mkState('question', 1, 2) } }, BIN_USER, BIN_SECRET)
+    const sbMainWidget = page.locator('.column:not(.hidden) .todoer-widget').first()
+    const sbBellMainRow = sbMainWidget.locator('.list-item-container', { hasText: 'snooze clears bell and bell unsnoozes' })
+    await expect(sbBellMainRow.locator('mark.waits'), '#sb_bell shows question bell before snooze').toHaveText('question', { timeout: 30_000 })
+    await selectRow('#sb_bell')
+    await expect.poll(() => guestState().then(s => s.names.includes('bell')), { message: '#sb_bell shows bell button before snooze', timeout: 5_000 }).toBe(true)
+    await snoozeByKey('#sb_bell', /^3h$/)
+    await expect.poll(() => mainRowNames().then(r => r.includes('#sb_bell')), { message: 'snoozed #sb_bell leaves main list', timeout: 15_000 }).toBe(false)
+    await expect
+      .poll(async () => ((await serverStore(`global_store_${bellId}`, BIN_USER, BIN_SECRET))?._todoer?.snoozed ?? 0) > Date.now(), {
+        message: 'snooze writes snoozed in the server store',
+        timeout: 30_000,
+      })
+      .toBe(true)
+    const snoozedBellStore = (await serverStore(`global_store_${bellId}`, BIN_USER, BIN_SECRET))?._todoer ?? null
+    expect(snoozedBellStore?.bell ?? null, 'snooze writes bell=1 in the same save').toBe(1)
+    await selectRow('#sb_bell')
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, snooze: s.titles[s.names.indexOf('snooze')] })), {
+        message: 'snoozed #sb_bell has no bell button and shows Unsnooze',
+        timeout: 5_000,
+      })
+      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], snooze: 'Unsnooze (s)' })
+    await userSet(page, '#sb_snz_list')
+    await expect.poll(() => snoozedRowNames().then(r => r.includes('#sb_bell')), { message: '#sb_bell sits in snoozed list', timeout: 10_000 }).toBe(true)
+    const sbSnzWidget = page.locator('.column:not(.hidden) .todoer-widget').filter({ has: page.locator('.list-item-container', { hasText: 'snoozed todo two' }) })
+    const sbBellSnzRow = sbSnzWidget.locator('.list-item-container', { hasText: 'snooze clears bell and bell unsnoozes' })
+    await expect(sbBellSnzRow.locator('mark.waits'), 'snoozed #sb_bell row carries no bell').toHaveCount(0)
+
+    expect(await page.evaluate(() => (window as any)._primary), 'this tab is the primary instance for bell unsnooze').toBe(true)
+    await saved()
+    await expect
+      .poll(() => page.evaluate(() => !(window._item('#sb_bell', true) as any)?.saving_global_store), {
+        message: 'snooze global_store save settled before remote projection arrives',
+        timeout: 15_000,
+      })
+      .toBe(true)
+    const keptBellTodoer = ((await serverStore(`global_store_${bellId}`, BIN_USER, BIN_SECRET)) ?? {})._todoer ?? {}
+    const bellStoreDoc2 = (await storeDocId(`global_store_${bellId}`, BIN_USER, BIN_SECRET)) ?? bellStoreDoc
+    await writeStore(bellStoreDoc2, `global_store_${bellId}`, { _todoer: keptBellTodoer, _agent: { state: mkState('blocked', 2, 3) } }, BIN_USER, BIN_SECRET)
+    await expect.poll(() => snoozedRowNames().then(r => r.includes('#sb_bell')), { message: 'coming-up snoozed todo leaves snoozed list', timeout: 30_000 }).toBe(false)
+    await expect.poll(() => mainRowNames().then(r => r.includes('#sb_bell')), { message: 'coming-up snoozed todo enters main list', timeout: 30_000 }).toBe(true)
+    await expect(sbBellMainRow.locator('mark.waits'), 'unsnoozed #sb_bell carries its blocked bell in main list').toHaveText('blocked', { timeout: 15_000 })
+    await expect
+      .poll(async () => (await serverStore(`global_store_${bellId}`, BIN_USER, BIN_SECRET))?._todoer?.snoozed ?? null, {
+        message: 'server store records snoozed=0 after bell unsnooze',
+        timeout: 30_000,
+      })
+      .toBe(0)
+    await selectRow('#sb_bell')
+    await expect
+      .poll(() => guestState().then(s => [s.names.includes('bell'), s.titles[s.names.indexOf('snooze')]]), {
+        message: 'selected unsnoozed #sb_bell shows bell button and Snooze title',
+        timeout: 5_000,
+      })
+      .toEqual([true, 'Snooze (s)'])
+
+    // Clean up temporary snoozed-list item so only the two pinned widgets stand before the delegated-above walk
+    answer.accept = true
+    await page.evaluate(() => void (window._item('#sb_snz_list', true) as any)?.delete(false))
+    await expect.poll(() => page.evaluate(() => window._exists('#sb_snz_list')), { timeout: 15_000 }).toBe(false)
+    answer.accept = false
+    await userSet(page, '')
+
+    // 11. Cycling j/k walk with delegated list ABOVE main list: union of belled rows and main list in page order,
+    //     unbelled delegated rows passed over, nearest-neighbour jump on click (2026-11-25)
+    const widgetKinds = () =>
+      page.evaluate(() =>
+        [...document.querySelectorAll('.todoer-widget')]
+          .filter(w => !w.closest('#cache-div'))
+          .map((w: any) => (w._delegated ? 'delegated' : w._snoozed ? 'snoozed' : 'main')),
+      )
+    await page.evaluate(() => {
+      const pinned = (window as any).__items.find((i: any) => i.tags?.includes('#pin') && /todoer_widget\(\)/.test(i.text ?? ''))
+      if (pinned) {
+        ;(window._item('id:' + pinned.id, true) as any).write(
+          '#_pin \n<<todoer_widget({delegated: true})>>\n<<todoer_widget()>>\n#_todoer',
+          '',
+          { skip_save: false },
+        )
+      }
+    })
+    await expect.poll(widgetKinds, { message: 'delegated widget mounted above main widget', timeout: 15_000 }).toEqual(['delegated', 'main'])
+
+    for (const text of ['#jk_del_a\n#todo walk delegated a', '#jk_del_b\n#todo walk delegated b']) {
+      await page.evaluate(text => void window._create(text), text)
+    }
+    for (const name of ['#jk_del_a', '#jk_del_b']) {
+      await expect.poll(() => savedId(page, name), { timeout: 30_000 }).toBeTruthy()
+    }
+    const jkAId = (await savedId(page, '#jk_del_a'))!
+    const jkBId = (await savedId(page, '#jk_del_b'))!
+    await writeStore(
+      (await storeDocId(`global_store_${jkAId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-jk-a',
+      `global_store_${jkAId}`,
+      { _agent: { state: { held: 'agent', reason: 'delegated', epoch: 1, rev: 1, surfaced: 0, updated: Date.now() } } },
+      BIN_USER,
+      BIN_SECRET,
+    )
+    await writeStore(
+      (await storeDocId(`global_store_${jkBId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-jk-b',
+      `global_store_${jkBId}`,
+      { _agent: { state: { held: 'agent', reason: 'delegated', epoch: 1, rev: 1, surfaced: 0, updated: Date.now() } } },
+      BIN_USER,
+      BIN_SECRET,
+    )
+    await expect
+      .poll(() => delegatedRowNames().then(r => r.length >= 3 && r.includes('#jk_del_a') && r.includes('#jk_del_b')), {
+        message: 'three delegated rows mounted above main list',
+        timeout: 30_000,
+      })
+      .toBe(true)
+
+    // Give the MIDDLE delegated row a checkin bell so unbelled delegated rows sit BOTH before and after it
+    const delRows11 = (await delegatedRowNames()).filter((n): n is string => !!n)
+    expect(delRows11.length, 'at least three delegated rows for walk').toBeGreaterThanOrEqual(3)
+    const delBefore = delRows11[0]!
+    const delBelled = delRows11[1]!
+    const delAfter = delRows11[2]!
+    const delBelledSavedId = (await savedId(page, delBelled))!
+    await writeStore(
+      (await storeDocId(`global_store_${delBelledSavedId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-jk-bell',
+      `global_store_${delBelledSavedId}`,
+      { _agent: { state: { held: 'agent', reason: 'delegated', epoch: 1, rev: 2, surfaced: 1, updated: Date.now() } } },
+      BIN_USER,
+      BIN_SECRET,
+    )
+    const delBelledId = await page.evaluate(n => window._item(n, true)?.id ?? null, delBelled)
+    expect(delBelledId, 'found id for belled delegated row').toBeTruthy()
+    await expect(
+      page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${delBelledId}"] mark.waits`),
+      'middle delegated row shows checkin bell',
+    ).toHaveText('checkin', { timeout: 30_000 })
+    const delBeforeId = await page.evaluate(n => window._item(n, true)?.id ?? null, delBefore)
+    const delAfterId = await page.evaluate(n => window._item(n, true)?.id ?? null, delAfter)
+    await expect(
+      page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${delBeforeId}"] mark.waits`),
+      'first delegated row has no bell',
+    ).toHaveCount(0)
+    await expect(
+      page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${delAfterId}"] mark.waits`),
+      'third delegated row has no bell',
+    ).toHaveCount(0)
+
+    const mainRows11 = (await mainRowNames()).filter((n): n is string => !!n)
+    expect(mainRows11.length, 'main list holds multiple rows below delegated list').toBeGreaterThanOrEqual(2)
+    const expectedSeq11 = [delBelled, ...mainRows11]
+
+    const pressAndRead = async (key: 'j' | 'k', expected: string, msg: string) => {
+      await page.keyboard.press(key)
+      await expect.poll(boxNow, { message: msg, timeout: 5_000 }).toBe(expected)
+      return await boxNow()
+    }
+
+    // Forward walk from nothing selected: lands on delegated bell row, walks main list, wraps back to delegated bell row
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    const fwdWalk: string[] = []
+    for (const [i, target] of [...expectedSeq11, delBelled].entries()) {
+      fwdWalk.push(await pressAndRead('j', target, `j step ${i + 1} lands on ${target}`))
+    }
+    expect(fwdWalk, 'j from empty walks delegated bell row, then main list, then wraps back to delegated bell row').toEqual([...expectedSeq11, delBelled])
+    expect(fwdWalk.includes(delBefore) || fwdWalk.includes(delAfter), 'j walk never lands on unbelled delegated rows').toBe(false)
+
+    // Backward walk from delegated bell row: wraps to last main row, walks main list in reverse, returns to delegated bell row
+    const bwdExpected = [...[...mainRows11].reverse(), delBelled]
+    const bwdWalk: string[] = []
+    for (const [i, target] of bwdExpected.entries()) {
+      bwdWalk.push(await pressAndRead('k', target, `k step ${i + 1} lands on ${target}`))
+    }
+    expect(bwdWalk, 'k walks backward from delegated bell row across main list and back').toEqual(bwdExpected)
+    expect(bwdWalk.includes(delBefore) || bwdWalk.includes(delAfter), 'k walk never lands on unbelled delegated rows').toBe(false)
+
+    // From nothing selected, k lands on last row of sequence (last main row)
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from empty selects last row of sequence')
+
+    // Click unbelled delegated row AFTER the bell row (between delBelled and mainRows11[0]):
+    // j goes to nearest sequence row AFTER it (mainRows11[0], not delBelled), k to nearest BEFORE it (delBelled)
+    const clickDelRow = async (id: string, name: string) => {
+      // click mark.age inside the row so the click hits the row's own onclick (never a #todo tag mark)
+      await page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${id}"] .list-item mark.age`).first().click()
+      await expect.poll(boxNow, { message: `clicking unbelled delegated row selects ${name}`, timeout: 5_000 }).toBe(name)
+      // let the row click's select_in_target _update_dom() settle before stepping away with j/k
+      await expect
+        .poll(
+          () =>
+            page.evaluate(itemId => {
+              const t = document.querySelector('.container.target')
+              return t?.getAttribute('data-item-id') === itemId && !!t.getAttribute('data-selection')
+            }, id),
+          { message: `clicked delegated row ${name} settled target selection`, timeout: 5_000 },
+        )
+        .toBe(true)
+      await unfocus()
+    }
+    await clickDelRow(delAfterId!, delAfter)
+    await expect
+      .poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'unbelled delegated row lights up/down when sequence is non-empty', timeout: 5_000 })
+      .toEqual([LIT_COLOR, LIT_COLOR])
+    await pressAndRead('j', mainRows11[0]!, 'j from unbelled delegated row between bell and main lands on first main row')
+    await clickDelRow(delAfterId!, delAfter)
+    await pressAndRead('k', delBelled, 'k from unbelled delegated row between bell and main lands on delegated bell row')
+
+    // Click unbelled delegated row BEFORE the bell row:
+    // j goes to nearest AFTER it (delBelled), k wraps past start to last row of sequence (mainRows11[last])
+    await clickDelRow(delBeforeId!, delBefore)
+    await pressAndRead('j', delBelled, 'j from unbelled delegated row before bell lands on delegated bell row')
+    await clickDelRow(delBeforeId!, delBefore)
+    await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from unbelled delegated row before bell wraps to last row of sequence')
+
+    // Restore original pinned widget order (main above delegated) for the returning phone row
+    await page.evaluate(raw => {
+      const pinned = (window as any).__items.find((i: any) => i.tags?.includes('#pin') && /todoer_widget\(\)/.test(i.text ?? ''))
+      if (pinned) (window._item('id:' + pinned.id, true) as any).write(raw, '', { skip_save: false })
+    }, origPinnedText!)
+    await expect.poll(widgetKinds, { message: 'pinned widgets restored to main above delegated', timeout: 15_000 }).toEqual(['main', 'delegated'])
+    await userSet(page, '')
+
     await saved()
     expect(errors, 'no console errors or pageerrors on desktop bin-buttons row').toEqual([])
   } finally {
@@ -4208,7 +4658,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
 
     const mainRows = () =>
       page.evaluate(() => {
-        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !w._snoozed && !w._delegated)
         return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
       })
     expect(await mainRows(), 'main list order puts reply in the middle between two todos').toEqual(['#sm_two', '#sm_reply/0', '#sm_one'])
@@ -4248,8 +4698,8 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
       none: null,
     })
     expect(await rowsShown(), 'no row selected: j and k alone without conditions').toEqual([
-      "j\tthe main list's first row",
-      "k\tthe main list's last row",
+      'j\tthe first row',
+      'k\tthe last row',
     ])
 
     // 2. Every tab button switches view and keeps the menu open (stopPropagation)
@@ -4257,7 +4707,9 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await expect
       .poll(() => shown().then(s => s && [s.view, s.on, s.where, s.sections]), { message: 'window tab switches view and keeps menu open', timeout: 5_000 })
       .toEqual(['window', ['window'], null, [['todoer', 11]]])
-    expect((await rowsShown())[0], 'reference view includes condition in brackets').toBe('j\tthe next row (a row is selected that is not the last of its list)')
+    expect((await rowsShown())[0], 'reference view includes condition in brackets').toBe(
+      'j\tthe next row (a row is selected: through the rows with a bell and the main list, round and round)',
+    )
 
     await menu.locator('.tabs > button', { hasText: 'box' }).click()
     await expect
@@ -4287,13 +4739,14 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await page.keyboard.press('Shift+Slash')
     await expect(menu, 'same key closes shortcuts menu').toBeHidden({ timeout: 5_000 })
 
-    // 3. First todo row selected: no k, and the keys of its buttons (j, a, d, s, x)
+    // 3. First todo row selected: both j and k (cycling), plus its button keys (a, d, s, x)
     await page.keyboard.press('j')
     await expect.poll(() => boxNow().then(b => b.trim()), { timeout: 5_000 }).toBe('#sm_two')
     await page.keyboard.press('Shift+Slash')
     await expect(menu).toBeVisible({ timeout: 5_000 })
-    expect(await rowsShown(), 'first todo row selected: j, a, d, s, x and no k').toEqual([
+    expect(await rowsShown(), 'first todo row selected: j, k (cycling), a, d, s, x').toEqual([
       'j\tthe next row',
+      'k\tthe previous row',
       'a\tdelegate to the agent',
       'd\tdone',
       's\tsnooze',
@@ -4314,6 +4767,24 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     ])
     await page.keyboard.press('Shift+Slash')
     await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 4b. Last row of the main list selected: j is listed (it wraps round to the first row)
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j moves from middle reply to last row #sm_one', timeout: 5_000 }).toBe('#sm_one')
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'last row of main list lists j (wraps round) along with k and bins').toEqual([
+      'j\tthe next row',
+      'k\tthe previous row',
+      'a\tdelegate to the agent',
+      'd\tdone',
+      's\tsnooze',
+      'x\tdelete, after a question',
+    ])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j on last row wraps round to first row #sm_two', timeout: 5_000 }).toBe('#sm_two')
 
     // 5. In the box: plain ? types its character; Ctrl+? opens on box's now; both ? and Escape restore focus and caret
     await userSet(page, '')
@@ -4536,7 +5007,11 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
       .not.toBe('TEXTAREA')
     await page.keyboard.press('Shift+Slash')
     await expect(menu).toBeVisible({ timeout: 5_000 })
-    expect(await rowsShown(), 'dirty unfocused todo editor hides a, d, x and keeps j and s').toEqual(['j\tthe next row', 's\tsnooze'])
+    expect(await rowsShown(), 'dirty unfocused todo editor hides a, d, x and keeps j, k, and s').toEqual([
+      'j\tthe next row',
+      'k\tthe previous row',
+      's\tsnooze',
+    ])
     await page.keyboard.press('Escape')
     await expect(menu).toBeHidden({ timeout: 5_000 })
     // Discard the draft and verify a, d, x return
@@ -4551,6 +5026,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await expect(menu).toBeVisible({ timeout: 5_000 })
     expect(await rowsShown(), 'after discarding draft, todoer lists a, d, x again').toEqual([
       'j\tthe next row',
+      'k\tthe previous row',
       'a\tdelegate to the agent',
       'd\tdone',
       's\tsnooze',
@@ -4558,6 +5034,35 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     ])
     await page.keyboard.press('Escape')
     await expect(menu).toBeHidden({ timeout: 5_000 })
+
+    // 6c. Snoozed todo selected whose list is NOT on the page: opens on a, d, s (unsnooze), x and
+    //     the two no-row walk entries (j first row, k last row); j jumps to the first row
+    await userSet(page, '#sm_one')
+    await expect.poll(() => boxNow().then(b => b.trim()), { timeout: 5_000 }).toBe('#sm_one')
+    await unfocus()
+    await page.keyboard.press('s')
+    await expect(page.locator('.snooze-modal'), 's opens snooze modal for #sm_one').toBeVisible({ timeout: 5_000 })
+    await page.locator('.snooze-modal .button', { hasText: /^3h$/ }).click()
+    await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => mainRows().then(r => !r.includes('#sm_one')), { message: 'snoozed #sm_one leaves main list', timeout: 15_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await userSet(page, '#sm_one')
+    await expect.poll(() => boxNow().then(b => b.trim()), { timeout: 5_000 }).toBe('#sm_one')
+    await unfocus()
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu).toBeVisible({ timeout: 5_000 })
+    expect(await rowsShown(), 'off-list snoozed todo opens menu on walk first/last and a, d, s (unsnooze), x').toEqual([
+      'j\tthe first row',
+      'k\tthe last row',
+      'a\tdelegate to the agent',
+      'd\tdone',
+      's\tunsnooze',
+      'x\tdelete, after a question',
+    ])
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
+    await page.keyboard.press('j')
+    await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j from off-list snoozed todo selects first row of walk', timeout: 5_000 }).toBe('#sm_two')
 
     // 7. Another dialog keeps the key
     await unfocus()
@@ -4597,8 +5102,8 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
       ['extra item', 1],
     ])
     expect(await rowsShown(), 'second item active entry shown without condition').toEqual([
-      "j\tthe main list's first row",
-      "k\tthe main list's last row",
+      'j\tthe first row',
+      'k\tthe last row',
       'g\tgo now',
     ])
     await menu.locator('.tabs > button', { hasText: 'window' }).click()
