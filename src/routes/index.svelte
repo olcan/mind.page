@@ -7470,8 +7470,7 @@
     // this also ensures the new item is created _below_ target item (and easily navigated via arrow keys etc)
     // if conflict was intentional, user can edit the item (plus mindbox), but this should be quite rare
     // we also make sure a new history state is created so user can always go back if needed
-    let selection_base = -1 // based index for tail selection below
-    let selection_end = false // collapse the caret at the end (the child hook's appended text or a quoted selection)
+    let selection_end = false // collapse the caret at the end of a new child's editor (after `/<n> `, hook text or quote)
     let quote = ''
     if (
       e /* should not be null as in for "synthetic" calls, e.g. from commands */ &&
@@ -7490,17 +7489,15 @@
       lastEditorChangeTime = 0 // disable debounce even if editor focused
       let suffix = 0
       while (_exists(text.trim() + `/${suffix}`)) suffix++
-      selection_base = text.trim().length + 1 // select just past the '/'
+      selection_end = true // place caret after the space (and any hook text or quoted selection)
       editorText = text = text.trim() + `/${suffix} `
       // the child-customization hook (the vault's notes/design/mind_task_chat.md, section 3): an
       // account's item code (an _init function of an #_init item) may define
       // window._customize_child(parent, text) to shape a child created under a parent, e.g. a
       // chat item under a #todo; what it returns (a string) is APPENDED after the allocated
       // label, which stays as the child's binding (a return that does not start with
-      // whitespace is put on its own line, so the label is never extended), and the caret
-      // then collapses at the end of the appended text so the first typed character extends
-      // it instead of replacing the suffix; a hook that returns nothing (or throws, logged)
-      // leaves the child as before
+      // whitespace is put on its own line, so the label is never extended); a hook that returns
+      // nothing (or throws, logged) leaves the child as the allocated label and space
       const customize = (window as any)._customize_child
       if (typeof customize == 'function') {
         const parent_id = idsFromLabel.get(text.trim().replace(/\/\d+$/, '').toLowerCase())?.[0]
@@ -7513,13 +7510,7 @@
         if (typeof appended == 'string' && appended) {
           if (!/^\s/.test(appended)) appended = '\n' + appended // the label's boundary
           editorText = text = text.trimEnd() + appended
-          selection_base = -1
-          selection_end = true
         }
-      }
-      if (quote) {
-        selection_base = -1
-        selection_end = true
       }
     }
 
@@ -7611,13 +7602,6 @@
       // note we allow both item text and editor text to be modified together (e.g. see above for appending /#)
       if (text_modified) selectionStart = selectionEnd = 0
 
-      // if a selection base is specified (e.g. when appending /# above) use that
-      if (selection_base >= 0) {
-        selectionStart = selection_base
-        selectionEnd = text.length
-      }
-      if (selection_end) selectionStart = selectionEnd = item.editorText.length // after the hook's text or quoted selection
-
       // NOTE: update_dom here does not work on iOS, presumably because it leaves too much time between user input and focus, causing system to reject the change of focus
       tick().then(() => {
         const index = indexFromId.get(item.id)
@@ -7628,7 +7612,8 @@
           return
         }
         textarea.focus()
-        if (selection_end) selectionStart = selectionEnd = textarea.value.length // past any ZWSPs Editor inserted into a quoted URL
+        // collapse at the end of a new child (past any ZWSPs Editor inserted, e.g. into a quoted URL)
+        if (selection_end) selectionStart = selectionEnd = textarea.value.length
         textarea.selectionStart = selectionStart
         textarea.selectionEnd = selectionEnd
 

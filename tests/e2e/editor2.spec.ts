@@ -613,8 +613,11 @@ const childEditor = (page: Page) =>
     const editor = document.activeElement as HTMLTextAreaElement | null
     return editor?.tagName == 'TEXTAREA' && editor.id != 'textarea-mindbox' ? { value: editor.value, start: editor.selectionStart, end: editor.selectionEnd } : null
   })
-// a first child as the app makes it under a named item: its index selected, with the space after it
-const child = (label: string) => ({ value: `${label}/0 `, start: label.length + 1, end: label.length + 3 })
+// a first child as the app makes it under a named item: caret collapsed after the space
+const child = (label: string) => {
+  const value = `${label}/0 `
+  return { value, start: value.length, end: value.length }
+}
 
 test('the create key on an unnamed item the box names by its id asks for its name, the next free thread_<n> offered and selected; accepted, the name is saved in front of the text the item has by then, as its label and under the time its document had, and the child is created under it as under a named item; a typed name replaces the offer; the key that opened the dialog does not answer it, pressed or held', async ({ page }) => {
   await loadAdmin(page)
@@ -730,12 +733,25 @@ test('a name that is no label, that an item is labeled with already or that is #
     await expect(page.locator('.modal')).toBeHidden()
     await expect(mindbox(page)).toHaveValue(`id:${unnamed.id}`)
     expect(await state()).toEqual(before)
-    // (c) a named item takes its child as before: no dialog, its text as it was
-    await selected(page, TAKEN, { focus: true })
-    await page.keyboard.press('Shift+Enter')
-    await expect.poll(() => childEditor(page), { timeout: 30_000 }).toEqual(child(TAKEN))
-    expect([await page.evaluate(() => (window as any)._modal_visible()), await page.evaluate(id => window._item(id, true)!.text, taken.id)]).toEqual([false, texts[2]])
-    await page.keyboard.press('Escape') // the child's editor closed, nothing typed
+    // (c) a named item takes its child without a dialog, its text as it was, and the child's
+    // editor opens with the caret collapsed after the space so typing extends it
+    await test.step('Shift+Enter on a named item opens the child editor with caret collapsed at the end and typing extends it', async () => {
+      await selected(page, TAKEN, { focus: true })
+      await page.keyboard.press('Shift+Enter')
+      await expect.poll(() => childEditor(page), { message: 'child editor opened and focused', timeout: 30_000 }).not.toBeNull()
+      const expected = `${TAKEN}/0 `
+      expect(await childEditor(page), 'child editor opens with label, slash, number, space and caret collapsed at end').toEqual(child(TAKEN))
+      expect([await page.evaluate(() => (window as any)._modal_visible()), await page.evaluate(id => window._item(id, true)!.text, taken.id)]).toEqual([false, texts[2]])
+      await page.keyboard.type('x')
+      expect(await childEditor(page), 'a typed character is added after the space').toEqual({
+        value: expected + 'x',
+        start: expected.length + 1,
+        end: expected.length + 1,
+      })
+      await page.keyboard.press('Backspace')
+      expect(await childEditor(page), 'backspacing restores the child scaffold').toEqual(child(TAKEN))
+      await page.keyboard.press('Escape') // the child's editor closed, nothing typed
+    })
     // and one the box names by its id is left as it was: no dialog either (the box's text becomes an item)
     await selected(page, `id:${taken.id}`, { focus: true })
     await page.keyboard.press('Shift+Enter')
@@ -876,11 +892,10 @@ test('the create key seeds non-collapsed page text selected outside editable fie
     const value = `${label}/${n} "${quote}" `
     return { value, start: value.length, end: value.length }
   }
-  const plainChild = (label: string, n: number) => ({
-    value: `${label}/${n} `,
-    start: label.length + 1,
-    end: label.length + 1 + String(n).length + 1,
-  })
+  const plainChild = (label: string, n: number) => {
+    const value = `${label}/${n} `
+    return { value, start: value.length, end: value.length }
+  }
   const waitItem = async (id: string) => {
     await waitForRenderOverlayGone(page)
     await expect(page.locator(`.column:not(.hidden) #item-${id}`)).toBeVisible({ timeout: 10_000 })
@@ -1156,7 +1171,7 @@ test('the create key seeds non-collapsed page text selected outside editable fie
     await expect.poll(() => storedText(dialogSaveAck.savedId), { timeout: 30_000 }).toBe(DIALOG_SAVE.value + 'kept')
     await waitAcked('#thread_1/0')
 
-    // (d) selections inside editable fields quote nothing (today's text and selected tail):
+    // (d) selections inside editable fields quote nothing (plain child scaffold with caret at end):
     // (d1) MindBox textarea
     await selected(page, PARENT, { focus: true })
     await page.evaluate(() => {
@@ -1248,7 +1263,7 @@ test('the create key seeds non-collapsed page text selected outside editable fie
     await expect.poll(() => childEditor(page), { timeout: 15_000 }).toEqual(plainChild(PARENT, 5))
     await closeChild()
 
-    // (e) no selection, and a whitespace/ZWSP-only selection: today's text and selected tail
+    // (e) no selection, and a whitespace/ZWSP-only selection: plain child scaffold with caret at end
     await selected(page, PARENT)
     await page.evaluate(() => window.getSelection()?.removeAllRanges())
     expect((await selectionInfo()).type).toBe('None')

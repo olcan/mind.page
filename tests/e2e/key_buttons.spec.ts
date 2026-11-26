@@ -187,7 +187,6 @@ const reply = async (page: Page, press: Press, parent: string) => {
   await expect.poll(() => query(page), { message: `a child of ${parent}` }).toBe(`${child} `)
   const id = await page.evaluate(label => window._item(label, true)!.id, child)
   await expect(page.locator(`#textarea-${id}`), 'the new item is edited, with the focus').toBeFocused()
-  await page.keyboard.press('ArrowRight') // the selected suffix collapsed to its end
   await page.keyboard.type('a reply')
   await press('create') // in the focused editor: its save, once the modifier is released
   const saved = () => page.evaluate(label => [(window._item(label, true) as any).editing, window._item(label, true)!.text] as const, child)

@@ -970,7 +970,7 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   // character extends the turn; the tag applies to the chat's DESCENDANTS (2026-09-27): the
   // chat itself does not depend on the todo, while a child of it depends on it by label prefix
   // and continues it with no hidden tag; any other parent's child stays as the app makes it
-  // (the suffix selected)
+  // (the caret collapsed after the space)
   expect(await page.evaluate(() => typeof (window as any)._customize_child)).toBe('function')
   const editorState = () =>
     page.evaluate(() => {
@@ -1039,7 +1039,8 @@ test('a delegation enqueues one command document, marks the item, and moves it t
   await page.evaluate(text => void window._create(text), `${PLAIN}\nnot a todo, not a chat`)
   await expect.poll(() => savedId(page, PLAIN), { timeout: 30_000 }).toBeTruthy()
   const plainChild = await createChild(PLAIN)
-  expect(plainChild, 'the suffix selected, as the app makes it').toEqual({ value: `${PLAIN}/0 `, start: PLAIN.length + 1, end: PLAIN.length + 3 })
+  const PLAIN_CHILD = `${PLAIN}/0 `
+  expect(plainChild, 'caret collapsed after the space, as the app makes it').toEqual({ value: PLAIN_CHILD, start: PLAIN_CHILD.length, end: PLAIN_CHILD.length })
   await page.keyboard.press('Escape')
   // an item BENEATH the task chat by label prefix alone (no tag, no user turn): the chat carries
   // #_autodep, so the app makes the chat its first dependency (a descendant adopts its parent)
