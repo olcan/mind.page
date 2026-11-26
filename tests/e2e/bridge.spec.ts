@@ -449,7 +449,7 @@ test("the owner's math typeset before a reply frame's is marked at once: a re-re
   const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
   await page.evaluate(text => void window._create(text), `${DEFS} the chat delimiters, as values\n\`\`\`js\nconst user = ''\nconst agent = (...args) => ''\n\`\`\``)
   await page.evaluate(text => void window._create(text), `${CHAT}/a #_e2e_mmdefs\n<<agent('vault/default · run ab12cd34')>>\n${inert('a body')}`)
-  await page.evaluate(() => {
+  await page.evaluate(label => {
     const w = window as any
     const proto = w.MathJax.startup.constructors.HTMLHandler.prototype
     const create = proto.create
@@ -457,22 +457,58 @@ test("the owner's math typeset before a reply frame's is marked at once: a re-re
     w.__e2e_frame_docs = 0
     proto.create = function (this: any, ...args: unknown[]) {
       const doc = create.apply(this, args)
-      w.__e2e_frame_docs++
-      if (!w.__e2e_hold_frame) return doc
-      w.__e2e_hold_frame = false // the first frame document after arming, once
       const render = doc.render.bind(doc)
-      let first = true
+      let seen = false
       doc.render = () => {
-        if (first) {
-          first = false
-          w.__e2e_frame_held = true
-          throw { retry: new Promise<void>(resolve => void (w.__e2e_release_frame = resolve)) }
+        // scope the hold and doc count to CHAT's own frame documents (doc.options.elements is set
+        // before render(), src/inert_math.ts): earlier lane fixtures with failing macros (e.g.
+        // #e2e_inert_math_fail) can be promoted by idle expandMacros() after arming with an
+        // invalidated element cache, and holding another item's frame deadlocks
+        // window._typeset_queue ahead of CHAT's owner typesetPromise
+        if (!seen) {
+          seen = true
+          const elem = window._item(label, true)?.elem
+          const elems = doc.options?.elements
+          const isChat = !!elem && Array.isArray(elems) && elems.some((e: Element) => elem.contains(e))
+          if (isChat) {
+            w.__e2e_frame_docs++
+            if (w.__e2e_hold_frame) {
+              w.__e2e_hold_frame = false // CHAT's first frame document after arming, once
+              w.__e2e_frame_held = true
+              throw { retry: new Promise<void>(resolve => void (w.__e2e_release_frame = resolve)) }
+            }
+          }
         }
         return render()
       }
       return doc
     }
-  })
+  }, CHAT)
+  // regression: an unrelated item's inert math frame typesets AFTER the hook is armed and BEFORE
+  // CHAT is created, verifying the hook neither holds it (which would deadlock _typeset_queue) nor
+  // counts its document in __e2e_frame_docs
+  const OTHER = '#e2e_mm_other'
+  await page.evaluate(
+    text => void window._create(text),
+    `${OTHER} #_e2e_mmdefs other reply\n<<agent('vault/default · run ab12cd34')>>\n${inert('other $`b^2`$')}`
+  )
+  await page.evaluate(label => (window as any).MindBox.set(label, { scroll: true }), OTHER)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          label =>
+            (window._item(label, true)?.elem?.querySelectorAll('.vault-result mjx-container').length ?? 0) > 0 ||
+            !!(window as any).__e2e_frame_held,
+          OTHER
+        ),
+      { message: 'other item frame settled (or grabbed the hold)', timeout: 15_000 }
+    )
+    .toBe(true)
+  expect(
+    await page.evaluate(() => !!(window as any).__e2e_frame_held),
+    "an unrelated item's frame must not trip CHAT's hold"
+  ).toBe(false)
   await page.evaluate(
     text => void window._create(text),
     `${CHAT} #_e2e_mmdefs chat with $\`y_0\`$ and $\`z^2\`$ in the owner's text\n<<user>> q\n<<agent('vault/default · run ab12cd34 · 1s')>>\n${inert('see #/a, with $`x^2`$')}`
