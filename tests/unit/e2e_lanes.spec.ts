@@ -3,7 +3,7 @@ import { mkdtempSync, readdirSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { extname, join, relative } from 'path'
 import { fileURLToPath } from 'url'
-import { E2E_BASE_PORT, E2E_LANES, isLanePort, lanePort, laneProject } from '../../src/e2e_lanes.js'
+import { E2E_BASE_PORT, E2E_LANES, emulatorFirestoreSettings, isLanePort, lanePort, laneProject } from '../../src/e2e_lanes.js'
 
 // the e2e lanes (see src/e2e_lanes.js): ports, the lane-port test and the project id mapping the
 // client, the server, the seed and the helpers all derive from
@@ -24,6 +24,11 @@ for (const [port, expected] of [
   ['3100.5', false],
 ] as const)
   test(`lanes: ${JSON.stringify(port)} is ${expected ? '' : 'not '}a lane port`, () => expect(isLanePort(port)).toBe(expected))
+
+test('lanes: an emulator connection alone turns the long-polling auto-detection off; any other connection leaves the SDK default', () => {
+  expect(emulatorFirestoreSettings(true)).toEqual({ experimentalAutoDetectLongPolling: false })
+  expect(emulatorFirestoreSettings(false)).toEqual({})
+})
 
 test('lanes: the project id — the base for the first lane and for any non-lane port, suffixed after it', () => {
   expect(laneProject(3100, 'p')).toBe('p')

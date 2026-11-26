@@ -20,6 +20,7 @@ import {
   type TestUser,
 } from './helpers.js'
 import { savedId } from './editor_helpers.js'
+import { delayFirstListen } from './listen_delay.js'
 
 // write-path tests: signed in as the admin uid with ?user=anonymous, the app acts on the seeded
 // anonymous account with write access (as on mindbox.io); these run after the baseline project
@@ -1401,6 +1402,70 @@ test('a hidden parent tag places a renamed chat under its tag parent: context, a
   seen = await reloaded()
   expect(seen[`${G}/b/c/d`]).toMatchObject({ deps: [`${G}/b/c`] })
   expect(seen[`${G}/b/c`]).toMatchObject({ deps: [] })
+})
+
+test('a reloaded page with over 200 items confirms on its emulator connection, which keeps streaming, and stays live', async ({ page }) => {
+  // more than 200 items even where this row runs alone (after the earlier rows the account has
+  // about 218, and nothing is added): the size at which the emulator's replay lost its beginning
+  // while the SDK's long-polling auto-detection was on (src/e2e_lanes.js, emulatorFirestoreSettings)
+  const db = firestore()
+  const existing = (await db.collection('items').where('user', '==', 'anonymous').get()).size
+  const seededRefs: FirebaseFirestore.DocumentReference[] = []
+  const deficit = Math.max(0, 205 - existing)
+  if (deficit > 0) {
+    const batch = db.batch()
+    const baseTime = Date.now()
+    for (let i = 0; i < deficit; i++) {
+      const ref = db.collection('items').doc()
+      seededRefs.push(ref)
+      batch.set(ref, { user: 'anonymous', text: `#e2e_bp_pad_${i} padding item`, time: baseTime + i })
+    }
+    await batch.commit()
+  }
+  const confirmed = () => page.evaluate(() => window._server_confirmed && window._server_current)
+  try {
+    await loadAdmin(page)
+    await expect.poll(confirmed, { message: 'the first load applied a server-confirmed corpus', timeout: 30_000 }).toBe(true)
+    expect(await page.evaluate(() => window.__items.length), 'premise: an account of more than 200 items').toBeGreaterThan(200)
+    // the effective setting of this connection (with the helper taken out, the SDK's default, true, shows here)
+    expect(
+      await page.evaluate(() => (window as any).firebase.firestore.getFirestore((window as any).firebase).toJSON().settings.experimentalAutoDetectLongPolling),
+      'the long-polling auto-detection is off on the emulator connection',
+    ).toBe(false)
+    // the DIAGNOSTIC (MIND_LISTEN_DELAY=1, tests/e2e/listen_delay.ts): the first Listen response held back
+    const delay = process.env.MIND_LISTEN_DELAY ? await delayFirstListen(page) : null
+    try {
+      await page.reload()
+      await waitForApp(page)
+      expect(await page.evaluate(() => window._readonly), 'still signed in as admin after the reload').toBe(false)
+      await expect.poll(confirmed, { message: 'the reloaded page applied a server-confirmed corpus', timeout: 30_000 }).toBe(true)
+      if (delay)
+        expect([delay.delayed, delay.delivered, delay.fellBack], 'the diagnostic: the first Listen response was held and delivered whole, with no switch to long polling').toEqual([
+          true,
+          true,
+          false,
+        ])
+      // the stream is live after the reload: a write made on the server reaches the page
+      const docRef = db.collection('items').doc()
+      const label = `#e2e_bp_live_${Date.now()}`
+      await docRef.set({ user: 'anonymous', text: `${label} live after the reload`, time: Date.now() })
+      try {
+        await expect
+          .poll(() => page.evaluate(name => window._item(name, true)?.text ?? null, label), { message: 'a write on the server reached the reloaded page', timeout: 15_000 })
+          .toBe(`${label} live after the reload`)
+      } finally {
+        await docRef.delete().catch(() => {})
+      }
+    } finally {
+      await delay?.stop()
+    }
+  } finally {
+    if (seededRefs.length) {
+      const batch = db.batch()
+      for (const ref of seededRefs) batch.delete(ref)
+      await batch.commit().catch(() => {})
+    }
+  }
 })
 
 test('installed items keep no GitHub token in items or history, strip legacy and in-memory tokens on save, and authenticate /_update and /_updates from the browser', async ({ page, browser }) => {

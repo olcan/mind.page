@@ -10,7 +10,7 @@ window['_'] = _
 import { firebaseConfig } from '../firebase-config.js' // ~0
 import { isSharedOrigin, SHARED_LOCAL_HOST } from './host.js'
 import { initializeApp, onLog } from 'firebase/app' // ~10K
-import { isLanePort, laneProject } from './e2e_lanes.js'
+import { emulatorFirestoreSettings, isLanePort, laneProject } from './e2e_lanes.js'
 // the e2e stack (tests/e2e): served on one of its lane ports on a local host, the app connects to
 // the local emulators (below) and binds to the lane's own project id (src/e2e_lanes.js), so
 // concurrent lanes keep their Firestore state apart (auth is one shared namespace of immutable
@@ -37,10 +37,13 @@ import { initializeFirestore, memoryLocalCache, persistentLocalCache, persistent
 // read-only anyway, so the offline benefit is small.
 // SHARED_LOCAL_HOST belongs here for the same reason it is absent from LOCAL_REQUEST_HOSTS: it is
 // the local counterpart, and every rule naming one has to name the other
+// The Firestore emulator can lose the initial Listen acknowledgement when WebChannel switches
+// transports during a large replay. Keep streaming on emulator connections (emulatorFirestoreSettings)
 initializeFirestore(firebase, {
   localCache: isSharedOrigin(location.hostname)
     ? memoryLocalCache()
     : persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  ...emulatorFirestoreSettings(USING_EMULATORS),
 })
 
 // connect to local firebase emulators (see firebase.json) when served on one of the ports dedicated

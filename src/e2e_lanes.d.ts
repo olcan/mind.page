@@ -4,4 +4,5 @@ export const E2E_LANES: string[]
 export function lanePort(lane: string): number
 export function isLanePort(port: string | number | undefined): boolean
 export function laneProject(port: string | number | undefined, base: string): string
+export function emulatorFirestoreSettings(usingEmulators: boolean): { experimentalAutoDetectLongPolling?: false }
 export const OFFLINE_BROWSER_ARGS: string[]

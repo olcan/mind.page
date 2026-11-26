@@ -42,6 +42,14 @@ export function laneProject(port, base) {
   return index > 0 ? `${base}-e2e${index}` : base
 }
 
+// the Firestore settings of an EMULATOR connection alone (client-globals.ts): the Firestore emulator
+// can lose the initial Listen acknowledgement when WebChannel switches transports during a large
+// replay (its auto-detection of long polling), and that watch then never confirms; so emulator
+// connections keep streaming. every other connection keeps the SDK's default
+export function emulatorFirestoreSettings(usingEmulators) {
+  return usingEmulators ? { experimentalAutoDetectLongPolling: false } : {}
+}
+
 // the gate's browsers resolve loopback only (vault design mind_task_agents 9.7, the offline app
 // gate): Chromium's host-resolver rule as a launch argument (not request interception, which
 // disables the browser's http cache), the ip literals excluded explicitly (the rule applies to
