@@ -5226,6 +5226,10 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     expect((await rowsShown())[0], 'reference view includes condition in brackets').toBe(
       'j\tthe next row (a row is selected: through the rows with a bell and the main list, round and round)',
     )
+    expect((await rowsShown()).slice(-2), 'reference view lists role-agnostic w entries').toEqual([
+      'w\tlink with the other window (another window of the app is open, and this window is not linked)',
+      'w\tunlink from the other window (this window is linked with the other window)',
+    ])
 
     await menu.locator('.tabs > button', { hasText: 'box' }).click()
     await expect
@@ -5798,44 +5802,38 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
 })
 
 // TWO WINDOWS, ONE SELECTION: two pages of one account in one browser context linked with `w`
-// (or the two-panes button). Covers the three solid-box looks of the button (plain, left pane lit
-// on the list window, right pane lit on the showing window), `window._shortcuts.todoer` entries
-// for `w` in every reached state, presses in every role, a second list window giving way, busy
-// showing window with two quick selections, busy list page longer than the hold, twelve quick `j`
-// presses keeping the row in view with zero console errors, listed-only sharing in both directions
-// (unlisted items and children stay local, new todos in the other window sync once their row
-// renders), wheel-ended holds, `d` sending the next row, closing the other window, and reload.
-test('two windows keep one selection with w: list window holds scroll, keeps selected row in view, syncs listed items and actions, and persists across reload', async ({ browser }) => {
+// (or the two-panes button) with fluid, role-agnostic behavior. Covers the button's two looks
+// (dim plain when unlinked, whole-lit cyan in both windows when linked), `window._shortcuts.todoer`
+// entries for `w`, linking and unlinking from either window, row clicks staying put and showing in
+// the other window from EITHER window, busy partner with two quick selections, busy page longer
+// than the hold, twelve quick `j` presses keeping the row in view with zero console errors,
+// item-itself selections syncing mounted rows by the row-stay rule (unlisted items and children
+// stay local, new todos sync once their row renders), wheel-ended holds, `d` sending the next row,
+// closing the other window, and reload.
+test('two windows keep one selection with w: fluid roles hold scroll on row clicks in either window, sync listed items and actions, and persist across reload', async ({ browser }) => {
   const N = 24 // rows taller than the 600 px viewport so j/k cross both edges
   const PLAIN_D = 'M1.5 3.5h5.5v9h-5.5zM9 3.5h5.5v9H9z'
-  const LEFT_D = PLAIN_D + 'M2.3 4.3v7.4M3.1 4.3v7.4M3.9 4.3v7.4M4.7 4.3v7.4M5.5 4.3v7.4M6.2 4.3v7.4'
-  const RIGHT_D = PLAIN_D + 'M9.8 4.3v7.4M10.6 4.3v7.4M11.4 4.3v7.4M12.2 4.3v7.4M13 4.3v7.4M13.7 4.3v7.4'
   const PLAIN_BTN = {
-    title: 'Link the selection with the other window: this one keeps the list (w)',
+    title: 'Link with the other window (w)',
     d: PLAIN_D,
     color: 'rgba(255, 255, 255, 0.25)',
   }
-  const LEFT_BTN = {
-    title: 'Linked: this window keeps the list, the other one shows the item. Unlink (w)',
-    d: LEFT_D,
-    color: 'rgb(102, 255, 255)',
-  }
-  const RIGHT_BTN = {
-    title: 'Linked: this window shows the item, the other one keeps the list. Unlink (w)',
-    d: RIGHT_D,
+  const LIT_BTN = {
+    title: 'Linked with the other window. Unlink (w)',
+    d: PLAIN_D,
     color: 'rgb(102, 255, 255)',
   }
   const W_NONE = [
-    ['link the selection with the other window', false],
-    ['unlink the two windows', false],
+    ['link with the other window', false],
+    ['unlink from the other window', false],
   ]
   const W_LINK = [
-    ['link the selection with the other window', true],
-    ['unlink the two windows', false],
+    ['link with the other window', true],
+    ['unlink from the other window', false],
   ]
   const W_UNLINK = [
-    ['link the selection with the other window', false],
-    ['unlink the two windows', true],
+    ['link with the other window', false],
+    ['unlink from the other window', true],
   ]
   const context = await browser.newContext({ viewport: { width: 1100, height: 600 }, deviceScaleFactor: 1, hasTouch: false })
   const a = await context.newPage()
@@ -5930,8 +5928,8 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await page.evaluate(pos => void (document.body.scrollTop = pos), y)
     await expect.poll(() => top(page), { timeout: 3_000 }).toBe(y)
   }
-  const startScrollWatch = () =>
-    a.evaluate(() => {
+  const startScrollWatch = (page: Page = a) =>
+    page.evaluate(() => {
       const w = window as any
       w.__ow_frames = [] as number[]
       w.__ow_events = [] as number[]
@@ -5949,16 +5947,16 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
         return { frames: w.__ow_frames as number[], events: w.__ow_events as number[] }
       }
     })
-  const stopScrollWatch = () => a.evaluate(() => (window as any).__ow_stop() as { frames: number[]; events: number[] })
-  const waitFramesAt = (want: number, count: number, message: string) =>
+  const stopScrollWatch = (page: Page = a) => page.evaluate(() => (window as any).__ow_stop() as { frames: number[]; events: number[] })
+  const waitFramesAt = (want: number, count: number, message: string, page: Page = a) =>
     expect
-      .poll(() => a.evaluate(y => ((window as any).__ow_frames as number[]).filter(f => Math.abs(f - y) <= 2).length, want), {
+      .poll(() => page.evaluate(y => ((window as any).__ow_frames as number[]).filter(f => Math.abs(f - y) <= 2).length, want), {
         message,
         timeout: 5_000,
       })
       .toBeGreaterThanOrEqual(count)
-  const waitFrames = (count: number, message: string) =>
-    expect.poll(() => a.evaluate(() => ((window as any).__ow_frames as number[]).length), { message, timeout: 5_000 }).toBeGreaterThanOrEqual(count)
+  const waitFrames = (count: number, message: string, page: Page = a) =>
+    expect.poll(() => page.evaluate(() => ((window as any).__ow_frames as number[]).length), { message, timeout: 5_000 }).toBeGreaterThanOrEqual(count)
 
   try {
     expect(await interceptMindItems(a), 'mind.items local checkout required').toBe(true)
@@ -6017,54 +6015,39 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await expect.poll(() => windowButton(b), { message: 'plain button shown in B with no row selected', timeout: 5_000 }).toEqual(PLAIN_BTN)
     expect([await wShortcuts(a), await wShortcuts(b)], 'unlinked with peer: link w active alone in both windows').toEqual([W_LINK, W_LINK])
 
-    // Press w in unlinked A -> A keeps list (left lit), B shows item (right lit)
+    // Press w in unlinked A -> both A and B count as linked with identical whole-lit button
     await a.bringToFront()
     await a.keyboard.press('w')
     await expect.poll(() => isOn(a), { message: 'w with nothing selected turns link on in A', timeout: 5_000 }).toBe(true)
-    await expect.poll(() => windowButton(a), { message: 'A shows left-lit button as list window', timeout: 5_000 }).toEqual(LEFT_BTN)
-    await expect.poll(() => windowButton(b), { message: 'B shows right-lit button as showing window', timeout: 5_000 }).toEqual(RIGHT_BTN)
-    expect(await on(b), 'showing window B keeps its own switch off').toBeNull()
-    expect(await wShortcuts(a), 'list window A lists unlink w alone').toEqual(W_UNLINK)
-    expect(await wShortcuts(b), 'showing window B lists unlink w alone').toEqual(W_UNLINK)
+    await expect.poll(() => windowButton(a), { message: 'A shows whole-lit button when linked', timeout: 5_000 }).toEqual(LIT_BTN)
+    await expect.poll(() => windowButton(b), { message: 'B shows identical whole-lit button when linked', timeout: 5_000 }).toEqual(LIT_BTN)
+    expect(await on(b), 'second window B keeps its own storage unset').toBeNull()
+    expect(await wShortcuts(a), 'linked A lists unlink w alone').toEqual(W_UNLINK)
+    expect(await wShortcuts(b), 'linked B lists unlink w alone').toEqual(W_UNLINK)
 
-    // Press w in showing window B -> sends unlink to A without turning B on; both return to plain
+    // Press w in second window B -> sends unlink to A without turning B on; both return to plain
     await b.bringToFront()
     await unfocus(b)
     await b.keyboard.press('w')
-    await expect.poll(() => on(a), { message: 'w in showing window B ends link in A', timeout: 5_000 }).toBeNull()
-    expect(await on(b), 'w in showing window B does not turn B on').toBeNull()
+    await expect.poll(() => on(a), { message: 'w in second window B ends link in A', timeout: 5_000 }).toBeNull()
+    expect(await on(b), 'w in second window B does not turn B on').toBeNull()
     await expect.poll(() => windowButton(a), { message: 'A returns to plain button after B unlinks', timeout: 5_000 }).toEqual(PLAIN_BTN)
     await expect.poll(() => windowButton(b), { message: 'B returns to plain button after B unlinks', timeout: 5_000 }).toEqual(PLAIN_BTN)
     expect([await wShortcuts(a), await wShortcuts(b)], 'after B unlinks: link w active alone in both windows').toEqual([W_LINK, W_LINK])
 
-    // Click button in unlinked B -> B keeps list (left lit), A shows item (right lit); click button in showing A ends link
+    // Click button in unlinked B -> both whole-lit; click button in A ends link for both
     expect(await clickWindowButton(b), 'click window button in B').toBe(true)
-    await expect.poll(() => isOn(b), { message: 'clicking button in B makes B the list window', timeout: 5_000 }).toBe(true)
-    await expect.poll(() => windowButton(b), { message: 'B shows left-lit button', timeout: 5_000 }).toEqual(LEFT_BTN)
-    await expect.poll(() => windowButton(a), { message: 'A shows right-lit button', timeout: 5_000 }).toEqual(RIGHT_BTN)
-    expect([await wShortcuts(b), await wShortcuts(a)], 'with B keeping list and A showing: unlink w active alone in both').toEqual([W_UNLINK, W_UNLINK])
-    expect(await clickWindowButton(a), 'click window button in showing A').toBe(true)
-    await expect.poll(() => on(b), { message: 'clicking button in showing A ends link in B', timeout: 5_000 }).toBeNull()
-    expect(await on(a), 'clicking button in showing A does not turn A on').toBeNull()
+    await expect.poll(() => isOn(b), { message: 'clicking button in B links both windows', timeout: 5_000 }).toBe(true)
+    await expect.poll(() => windowButton(b), { message: 'B shows whole-lit button', timeout: 5_000 }).toEqual(LIT_BTN)
+    await expect.poll(() => windowButton(a), { message: 'A shows whole-lit button', timeout: 5_000 }).toEqual(LIT_BTN)
+    expect([await wShortcuts(b), await wShortcuts(a)], 'linked from B: unlink w active alone in both').toEqual([W_UNLINK, W_UNLINK])
+    expect(await clickWindowButton(a), 'click window button in A to unlink').toBe(true)
+    await expect.poll(() => on(b), { message: 'clicking button in A ends link in B', timeout: 5_000 }).toBeNull()
+    expect(await on(a), 'clicking button in A does not turn A on').toBeNull()
+    await expect.poll(() => windowButton(a), { timeout: 5_000 }).toEqual(PLAIN_BTN)
+    await expect.poll(() => windowButton(b), { timeout: 5_000 }).toEqual(PLAIN_BTN)
 
-    // Only one list window: A turns on, then B forced on later -> A gives way to right-lit while B keeps left-lit
-    await a.bringToFront()
-    await unfocus(a)
-    await a.keyboard.press('w')
-    await expect.poll(() => isOn(a), { timeout: 5_000 }).toBe(true)
-    await a.waitForTimeout(20)
-    await b.evaluate(() => void (window._item('#todoer') as any).eval('_send_toggle(true)'))
-    await expect.poll(async () => [await isOn(a), await isOn(b)], { message: 'earlier list window A gives way when B takes list later', timeout: 5_000 }).toEqual([false, true])
-    await expect.poll(() => windowButton(a), { message: 'A flips to right-lit after giving way', timeout: 5_000 }).toEqual(RIGHT_BTN)
-    await expect.poll(() => windowButton(b), { message: 'B holds left-lit after taking over', timeout: 5_000 }).toEqual(LEFT_BTN)
-    expect([await wShortcuts(a), await wShortcuts(b)], 'after A gives way to B: unlink w active alone in both').toEqual([W_UNLINK, W_UNLINK])
-    // Press w in list window B -> turns off
-    await b.bringToFront()
-    await unfocus(b)
-    await b.keyboard.press('w')
-    await expect.poll(() => on(b), { message: 'w in list window B turns link off', timeout: 5_000 }).toBeNull()
-
-    // With switch off: click in A scrolls A to the item and leaves B untouched
+    // With link off: click in A scrolls A to the item and leaves B untouched
     await a.bringToFront()
     await userSet(b, '')
     await resetScroll(a, headerTop)
@@ -6077,7 +6060,7 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await unfocus(a)
     await a.keyboard.press('w')
     await expect.poll(() => isOn(a), { message: 'w with row selected turns link on in A', timeout: 5_000 }).toBe(true)
-    await expect.poll(() => windowButton(b), { timeout: 5_000 }).toEqual(RIGHT_BTN)
+    await expect.poll(() => windowButton(b), { timeout: 5_000 }).toEqual(LIT_BTN)
     await expect.poll(() => boxNow(b), { message: 'linking with a listed row selected tells it to B at once', timeout: 5_000 }).toBe(names[2])
 
     // 3. Row click, second click (no editor), j, and wheel-set position in list window
@@ -6324,7 +6307,7 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await userSet(a, '#ow_unlisted')
     await expect.poll(() => boxNow(a), { timeout: 5_000 }).toBe('#ow_unlisted')
     await a.waitForTimeout(400)
-    expect(await boxNow(b), 'unlisted item opened in list window A is not told to B').toBe(names[20])
+    expect(await boxNow(b), 'unlisted item opened in A leaves B on its selection (B has no row of it)').toBe(names[20])
 
     // 5. Listed-only sync from B + flicker witness (scroll events & animation frames on A while A is in front):
     //    near row from top fires zero scroll events with one position throughout; far row fires one event straight
@@ -6335,27 +6318,27 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await a.waitForTimeout(150)
     const topBeforeB = await top(a)
 
-    // 5a. Near row in view from top selected in B: zero scroll events and one scrollTop across all frames
+    // 5a. Near row in view from top opened directly in B: zero scroll events and one scrollTop across all frames in A
     await startScrollWatch()
-    expect(await clickRow(b, names[4]!), 'select near row in B for flicker witness').toBe(true)
+    await userSet(b, names[4]!, { scroll: true })
     await expect.poll(() => boxNow(a), { message: 'A follows listed selection made in B', timeout: 5_000 }).toBe(names[4])
     await expect.poll(() => selectedRowName(a), { message: 'A marks row for listed selection from B', timeout: 5_000 }).toBe(names[4])
     await a.evaluate(() => (window as any)._update_dom())
     await waitFramesAt(topBeforeB, 6, 'flicker witness (near row): sampled frames at headerTop')
     const nearWatch = await stopScrollWatch()
     expect(nearWatch.frames.length, 'flicker witness (near row): animation frames sampled').toBeGreaterThan(5)
-    expect(nearWatch.events, 'flicker witness (near row from B): list window fires zero scroll events').toEqual([])
+    expect(nearWatch.events, 'flicker witness (near row from B): A fires zero scroll events').toEqual([])
     expect(
       nearWatch.frames.filter(y => Math.abs(y - topBeforeB) > 2),
       'flicker witness (near row from B): every animation frame stays at headerTop',
     ).toEqual([])
-    expect(Math.abs((await top(a)) - topBeforeB) <= 2, 'list window does not scroll for selection taken from B').toBe(true)
+    expect(Math.abs((await top(a)) - topBeforeB) <= 2, 'A does not scroll for readable row of item-itself selection taken from B').toBe(true)
 
-    // 5b. Far row down the long list selected in B: one scroll event straight to 80% depth and no third-position frame
+    // 5b. Far row down the long list opened directly in B: one scroll event straight to 80% depth and no third-position frame
     await startScrollWatch()
-    expect(await clickRow(b, names[22]!), 'select far row in B for flicker witness').toBe(true)
-    await expect.poll(() => boxNow(a), { message: 'A follows far row selected in B', timeout: 5_000 }).toBe(names[22])
-    await expect.poll(() => selectedRowName(a), { message: 'A marks far row selected in B', timeout: 5_000 }).toBe(names[22])
+    await userSet(b, names[22]!, { scroll: true })
+    await expect.poll(() => boxNow(a), { message: 'A follows far row opened in B', timeout: 5_000 }).toBe(names[22])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks far row opened in B', timeout: 5_000 }).toBe(names[22])
     await expect.poll(() => top(a), { message: 'A moves down for far row from B', timeout: 5_000 }).toBeGreaterThan(headerTop + 100)
     const farTop = await top(a)
     await a.evaluate(() => (window as any)._update_dom())
@@ -6381,9 +6364,9 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
       'flicker witness (far row from B): no animation frame at any third position',
     ).toEqual([])
 
-    // 5c. Near row again selected in B while A is down at farTop: one scroll event back to headerTop, no third-position frame
+    // 5c. Near row again opened directly in B while A is down at farTop: one scroll event back to headerTop, no third-position frame
     await startScrollWatch()
-    expect(await clickRow(b, names[4]!), 'select near row again in B for flicker witness').toBe(true)
+    await userSet(b, names[4]!, { scroll: true })
     await expect.poll(() => boxNow(a), { message: 'A follows return to near row in B', timeout: 5_000 }).toBe(names[4])
     await expect.poll(() => selectedRowName(a), { message: 'A marks return to near row in B', timeout: 5_000 }).toBe(names[4])
     await expect.poll(async () => Math.abs((await top(a)) - headerTop) <= 2, { message: 'A returns to headerTop for near row from B', timeout: 5_000 }).toBe(true)
@@ -6468,7 +6451,7 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await expect.poll(() => boxNow(a), { message: 'Shift+Enter creates child in A', timeout: 5_000 }).toBe(childA)
     await expect.poll(() => savedId(a, childA), { message: 'child created in A is saved', timeout: 15_000 }).toBeTruthy()
     await a.waitForTimeout(500)
-    expect(await boxNow(b), 'new child created in list window A has no row and is not told to B').toBe('#ow_new_b')
+    expect(await boxNow(b), 'new child created in A has no row in B: B keeps its selection').toBe('#ow_new_b')
     await a.keyboard.press('Escape')
     await expect.poll(() => a.evaluate(n => !(window._item(n, true) as any)?.editing, childA), { timeout: 5_000 }).toBe(true)
     await a.waitForTimeout(300)
@@ -6489,7 +6472,48 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await a.waitForTimeout(250)
     expect(Math.abs((await top(a)) - headerTop) <= 2, 'list window keeps header position after done key').toBe(true)
 
-    // 8. Close B: selection shown in A after all; button stays left-lit while on; timestamp survives reload; w turns off & hides button
+    // 7b. Fluid roles: with the link still on, a real click on an in-view row in the second window B
+    //     shows the item inside A's viewport (even with A's own row) while B's list stays right where
+    //     it was (zero scroll events and every sampled frame at headerTopB)
+    await b.bringToFront()
+    const headerTopB = await b.evaluate(() => Math.round((document.querySelector('.header') as HTMLElement).offsetTop))
+    await resetScroll(b, headerTopB)
+    const bRow = names[6]!
+    const bInView = await rowBox(b, bRow)
+    expect(
+      !!bInView && bInView.top >= 8 && bInView.bottom <= bInView.footLimit,
+      'row clicked in second window B is in view at headerTopB',
+    ).toBe(true)
+    const bRowId = await b.evaluate(name => window._item(name, true)!.id, bRow)
+    const bClickBox = await b.locator(`.todoer-widget .list-item-container[data-id="${bRowId}"] .list-item`).boundingBox()
+    expect(bClickBox, 'row clicked in second window B has a bounding box').toBeTruthy()
+    await startScrollWatch(b)
+    await b.mouse.click(bClickBox!.x + bClickBox!.width / 2, bClickBox!.y + bClickBox!.height / 2)
+    await expect.poll(() => boxNow(a), { message: 'first window A shows item clicked in second window B', timeout: 5_000 }).toBe(bRow)
+    await expect
+      .poll(
+        () =>
+          a.evaluate(name => {
+            const id = window._item(name, true)?.id
+            const el = id ? document.getElementById('super-container-' + id) : null
+            const r = el?.getBoundingClientRect()
+            return !!r && r.height > 0 && r.top >= 0 && r.bottom <= innerHeight
+          }, bRow),
+        { message: 'first window A shows item clicked in B inside its viewport (even with its own row)', timeout: 5_000 },
+      )
+      .toBe(true)
+    await expect.poll(() => selectedRowName(b), { message: 'second window B marks its clicked row', timeout: 5_000 }).toBe(bRow)
+    await b.evaluate(() => (window as any)._update_dom())
+    await waitFrames(6, 'second window row click: animation frames sampled', b)
+    const bStayWatch = await stopScrollWatch(b)
+    expect(bStayWatch.events, 'second window row click: B fires zero scroll events').toEqual([])
+    expect(
+      bStayWatch.frames.filter(y => Math.abs(y - headerTopB) > 2),
+      'second window row click: every animation frame in B stays at headerTopB',
+    ).toEqual([])
+    expect(Math.abs((await top(b)) - headerTopB) <= 2, 'second window B stays where its list was').toBe(true)
+
+    // 8. Close B: selection shown in A after all; button stays whole-lit while on; timestamp survives reload; w turns off & hides button
     await allSaved(a)
     const keptSwitch = await on(a)
     expect(keptSwitch && JSON.parse(keptSwitch), 'sessionStorage stores owned link record with uid and timestamp').toEqual({
@@ -6499,7 +6523,7 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     expect(JSON.parse(keptSwitch!).since, 'stored link start timestamp is positive').toBeGreaterThan(1)
     await b.close()
     await expect.poll(() => peers(a), { message: 'closing B removes peer in A', timeout: 5_000 }).toBe(0)
-    expect(await windowButton(a), 'left-lit button stays visible alone while link is on').toEqual(LEFT_BTN)
+    expect(await windowButton(a), 'whole-lit button stays visible alone while link is on').toEqual(LIT_BTN)
     expect(await wShortcuts(a), 'alone while link on: unlink w stays active alone').toEqual(W_UNLINK)
     await resetScroll(a, headerTop)
     expect(await clickRow(a, names[14]!), 'click row after B closed').toBe(true)
@@ -6512,8 +6536,8 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await expect.poll(() => a.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(N)
     expect(await on(a), 'owned link record survives reload').toBe(keptSwitch)
     await expect
-      .poll(() => windowButton(a), { message: 'left-lit button stays visible after reload while link is on', timeout: 5_000 })
-      .toEqual(LEFT_BTN)
+      .poll(() => windowButton(a), { message: 'whole-lit button stays visible after reload while link is on', timeout: 5_000 })
+      .toEqual(LIT_BTN)
     expect(await wShortcuts(a), 'after reload while link on: unlink w stays active alone').toEqual(W_UNLINK)
     await unfocus(a)
     await a.keyboard.press('w')
