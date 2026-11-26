@@ -4582,7 +4582,7 @@ test('bin buttons on a phone touch page: 32 px corner buttons, second row lined 
 // SHORTCUTS MENU (#shortcuts + #todoer): self-contained account verifying plain `?` in the window
 // (no row, todo first row, reply row with bell), all five tab buttons (keeping the dialog open),
 // box & item editor typing vs modifier-open and caret restoration on `?` and Escape, yielding to
-// another dialog, a second item's section (inactive & throwing tests), a hostile section rendered
+// another dialog and to a capturing window listener, a second item's section (inactive & throwing tests), a hostile section rendered
 // as text only (no elements/links/images/dialogs/requests/errors), and #shortcuts' own page.
 test('shortcuts menu: now and reference views, box and editor contexts, caret return, second item, hostile text, and own page', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, hasTouch: false })
@@ -5073,6 +5073,41 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     expect([await menu.isVisible(), await page.locator('.modal', { hasText: 'other dialog keeps keys' }).isVisible()], 'other dialog keeps ? and menu stays hidden').toEqual([false, true])
     await page.evaluate(() => (window as any)._modal_close())
     await expect(page.locator('.modal', { hasText: 'other dialog keeps keys' })).toBeHidden({ timeout: 5_000 })
+
+    // 7b. A capturing window listener added after the menu keeps ?: menu stays closed until removed
+    await unfocus()
+    await page.evaluate(() => {
+      const state = {
+        count: 0,
+        fn(e: KeyboardEvent) {
+          e.stopImmediatePropagation()
+          if (e.key == '?' || (e.code == 'Slash' && e.shiftKey)) state.count++
+        },
+      }
+      ;(window as any).__gk1_win_capture = state
+      window.addEventListener('keydown', state.fn, true)
+    })
+    try {
+      await page.keyboard.press('Shift+Slash')
+      await page.evaluate(async () => {
+        await (window as any)._update_dom()
+        await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))
+      })
+      expect(
+        [await page.evaluate(() => (window as any).__gk1_win_capture.count), await menu.isVisible()],
+        'window capture listener added after menu receives ? and keeps menu closed',
+      ).toEqual([1, false])
+    } finally {
+      await page.evaluate(() => {
+        const state = (window as any).__gk1_win_capture
+        if (state) window.removeEventListener('keydown', state.fn, true)
+        delete (window as any).__gk1_win_capture
+      })
+    }
+    await page.keyboard.press('Shift+Slash')
+    await expect(menu, 'after removing window capture listener, ? opens shortcuts menu').toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect(menu).toBeHidden({ timeout: 5_000 })
 
     // 8. A second item adds a section with active, inactive, and throwing entries (plus a box/editor entry)
     const EXTRA_ITEM = [
