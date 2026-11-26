@@ -69,12 +69,14 @@ const SHORTCUTS_USER: TestUser = { uid: 'tasks_shortcuts_e2e', displayName: 'Tas
 const WINDOW_USER: TestUser = { uid: 'tasks_window_e2e', displayName: 'Tasks Window', email: 'tasks_window@e2e.test' }
 // the inline /vault command-link row's account: #chat/vault installed alone (no #todoer drag)
 const VAULT_LINK_USER: TestUser = { uid: 'tasks_vault_link_e2e', displayName: 'Tasks Vault Link', email: 'tasks_vault_link@e2e.test' }
+// the shared _chat_command row's account: #chat installed alone with a made-up #chat/stub command
+const CHAT_CMD_USER: TestUser = { uid: 'tasks_chat_cmd_e2e', displayName: 'Tasks Chat Cmd', email: 'tasks_chat_cmd@e2e.test' }
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER, VAULT_LINK_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER, VAULT_LINK_USER, CHAT_CMD_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -6706,6 +6708,294 @@ test('clicking a rendered /vault command link while another item is selected nav
       .toEqual({ box: '#chat/vault/2', end: true })
 
     expect(errors, 'no console errors or pageerrors in /vault command-link row').toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+test('shared _chat_command sets mindbox_text on first frame, targets and scrolls to the new chat, moves caret to end on Shift, and still navigates from an inline command link', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: false })
+  const page = await context.newPage()
+  const errors: string[] = []
+  page.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(msg.text())))
+  page.on('pageerror', err => void errors.push(`pageerror: ${err.message}`))
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, CHAT_CMD_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    expect(await install(page, 'chat'), '/_install chat').toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'installed items saved', timeout: 60_000 })
+      .toBe(true)
+
+    // Made-up chat command item calling _chat_command (like the eleven model commands, with no
+    // network model agent), plus a tall pinned spacer and a separate item carrying a rendered
+    // inline `/stub from link` command link.
+    const stubText = [
+      '#chat/stub',
+      '```js:js_removed',
+      'const _on_command_stub = msg => _chat_command(msg)',
+      '```',
+      '#_listen',
+    ].join('\n')
+    const todoText = [
+      '#e2e_cc_todo selected item holding a command link',
+      '<!--inert-->',
+      'Start a chat with `/stub from link` now.',
+      '<!--/inert-->',
+    ].join('\n')
+    await page.evaluate(
+      ([stub, todo]) => {
+        window._create(stub)
+        window._create('#e2e_cc_pin #_pin\n\n<div style="height:1200px">spacer</div>')
+        window._create(todo)
+      },
+      [stubText, todoText],
+    )
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { timeout: 30_000 })
+      .toBe(true)
+    await page.reload()
+    await loaded(page)
+    errors.length = 0
+
+    expect(
+      await page.evaluate(() => {
+        const chat = window._item('#chat', true)
+        const stub = window._item('#chat/stub', true)
+        return !!chat && !!stub && stub.dependencies.includes(chat.id)
+      }),
+      'premise: #chat/stub depends on #chat through #_autodep',
+    ).toBe(true)
+
+    // 1. Command run from a link inside an item while ANOTHER item (#e2e_cc_todo) is selected:
+    // handleCommandReturn drops mindbox_text, so _chat_command_init falls back to MindBox.set and
+    // navigates MindBox, target, and scroll to #chat/stub/0.
+    await userSet(page, '#e2e_cc_todo')
+    const todoId = await page.evaluate(() => window._item('#e2e_cc_todo', true)!.id)
+    const cmdLink = page.locator(`.column:not(.hidden) .container[data-item-id="${todoId}"] .vault-result code.command-link[data-command-link="/stub from link"]`)
+    await expect(cmdLink, 'rendered /stub command link is visible').toBeVisible({ timeout: 15_000 })
+    await cmdLink.scrollIntoViewIfNeeded()
+    await expect.poll(() => page.evaluate(() => document.body.scrollTop), { timeout: 5_000 }).toBeGreaterThan(0)
+    await cmdLink.click()
+    const modal = page.locator('.modal')
+    await expect(modal, 'command confirmation dialog opens').toBeVisible({ timeout: 10_000 })
+    await expect(modal.locator('code')).toHaveText('/stub from link')
+    await modal.locator('.button.confirm', { hasText: 'Run' }).click()
+    await expect(modal).toBeHidden()
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const chat = window._item('#chat/stub/0', true) as { id: string; text: string } | null
+            const targetId = document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null
+            const chatEl = chat ? (document.getElementById('super-container-' + chat.id) as HTMLElement | null) : null
+            const rect = chatEl?.getBoundingClientRect() ?? null
+            return {
+              created: !!chat,
+              chats: (window.__items as { label?: string }[]).map(i => i.label ?? '').filter(l => /^#chat\/stub\/\d+$/.test(l)).sort(),
+              text: chat?.text ?? null,
+              box: (window as any).MindBox.get() as string,
+              targetMatchesChat: !!chat && targetId === chat.id,
+              inView: !!rect && rect.top >= -5 && rect.top < window.innerHeight - 50,
+              boxFocused: document.activeElement?.id === 'textarea-mindbox',
+            }
+          }),
+        { message: 'confirmed /stub command link navigates MindBox, target, and viewport to #chat/stub/0', timeout: 15_000 },
+      )
+      .toEqual({
+        created: true,
+        chats: ['#chat/stub/0'],
+        text: '#chat/stub/0\n<<user>> from link',
+        box: '#chat/stub/0',
+        targetMatchesChat: true,
+        inView: true,
+        boxFocused: false,
+      })
+    await expect.poll(() => savedId(page, '#chat/stub/0'), { timeout: 30_000 }).toBeTruthy()
+
+    // 2. Typed `/stub` via Control+Enter: MindBox shows #chat/stub/1 on the first frame with no
+    // debounce, the item is created once, MindBox blurs, and the page scrolls to #chat/stub/1.
+    await userSet(page, '')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as any).MindBox.get() === '' &&
+              !(window as any).__layoutPending &&
+              !(window as any)._editor_change_pending &&
+              !document.querySelector('#sapper > .loading.visible'),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
+    await page.evaluate(() => {
+      document.body.scrollTop = 0
+    })
+    await focusMindbox(page)
+    await page.keyboard.type('/stub')
+    await expect(mindbox(page)).toHaveValue('/stub')
+    await expect.poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { timeout: 5_000 }).toBe(true)
+    await page.evaluate(() => {
+      const w = window as any
+      w.__cc_ctrl_first = null
+      const poll = () => {
+        const it = w._item('#chat/stub/1', true)
+        if (it) {
+          w.__cc_ctrl_first = {
+            boxVal: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+            debounced: !!w._editor_change_pending,
+            targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+            itemId: it.id,
+          }
+          return
+        }
+        requestAnimationFrame(poll)
+      }
+      requestAnimationFrame(poll)
+    })
+    await page.keyboard.press('Control+Enter')
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__cc_ctrl_first), {
+        message: 'Ctrl+Enter /stub sets #chat/stub/1 on first frame with no debounce',
+        timeout: 15_000,
+      })
+      .toEqual({
+        boxVal: '#chat/stub/1',
+        debounced: false,
+        targetId: expect.any(String),
+        itemId: expect.any(String),
+      })
+    const ctrlFirst = await page.evaluate(() => (window as any).__cc_ctrl_first)
+    expect(ctrlFirst.targetId, 'Ctrl+Enter /stub targets #chat/stub/1 on first frame').toBe(ctrlFirst.itemId)
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const chat = window._item('#chat/stub/1', true) as { id: string; text: string; editing: boolean } | null
+            const targetId = document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null
+            const chatEl = chat ? (document.getElementById('super-container-' + chat.id) as HTMLElement | null) : null
+            const rect = chatEl?.getBoundingClientRect() ?? null
+            return {
+              settled: !(window as any).__layoutPending && !document.querySelector('#sapper > .loading.visible'),
+              chats: (window.__items as { label?: string }[]).map(i => i.label ?? '').filter(l => /^#chat\/stub\/\d+$/.test(l)).sort(),
+              text: chat?.text ?? null,
+              editing: chat?.editing ?? null,
+              box: (window as any).MindBox.get() as string,
+              boxFocused: document.activeElement?.id === 'textarea-mindbox',
+              targetMatchesChat: !!chat && targetId === chat.id,
+              scrolledDown: document.body.scrollTop > 0,
+              inView: !!rect && rect.top >= -5 && rect.top < window.innerHeight - 50,
+            }
+          }),
+        { message: 'Ctrl+Enter /stub settles with #chat/stub/1 created once, blurred box, targeted and scrolled into view', timeout: 15_000 },
+      )
+      .toEqual({
+        settled: true,
+        chats: ['#chat/stub/0', '#chat/stub/1'],
+        text: '#chat/stub/1\n<<user>> ',
+        editing: false,
+        box: '#chat/stub/1',
+        boxFocused: false,
+        targetMatchesChat: true,
+        scrolledDown: true,
+        inView: true,
+      })
+    await expect.poll(() => savedId(page, '#chat/stub/1'), { timeout: 30_000 }).toBeTruthy()
+
+    // 3. Typed `/stub` via Shift+Enter: sets mindbox_text on first frame, creates #chat/stub/2
+    // once, opens its editor focused with caret collapsed at the end.
+    await userSet(page, '')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as any).MindBox.get() === '' &&
+              !(window as any).__layoutPending &&
+              !(window as any)._editor_change_pending &&
+              !document.querySelector('#sapper > .loading.visible'),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
+    await focusMindbox(page)
+    await page.keyboard.type('/stub')
+    await expect(mindbox(page)).toHaveValue('/stub')
+    await expect.poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { timeout: 5_000 }).toBe(true)
+    await page.evaluate(() => {
+      const w = window as any
+      w.__cc_shift_first = null
+      const poll = () => {
+        const it = w._item('#chat/stub/2', true)
+        if (it) {
+          w.__cc_shift_first = {
+            boxVal: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+            debounced: !!w._editor_change_pending,
+            targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+            itemId: it.id,
+          }
+          return
+        }
+        requestAnimationFrame(poll)
+      }
+      requestAnimationFrame(poll)
+    })
+    await page.keyboard.press('Shift+Enter')
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__cc_shift_first), {
+        message: 'Shift+Enter /stub sets #chat/stub/2 on first frame with no debounce',
+        timeout: 15_000,
+      })
+      .toEqual({
+        boxVal: '#chat/stub/2',
+        debounced: false,
+        targetId: expect.any(String),
+        itemId: expect.any(String),
+      })
+    const shiftFirst = await page.evaluate(() => (window as any).__cc_shift_first)
+    expect(shiftFirst.targetId, 'Shift+Enter /stub targets #chat/stub/2 on first frame').toBe(shiftFirst.itemId)
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const it = window._item('#chat/stub/2', true) as { id: string } | null
+            const ta = document.activeElement as HTMLTextAreaElement | null
+            return it && ta?.id === 'textarea-' + it.id
+              ? {
+                  chats: (window.__items as { label?: string }[]).map(i => i.label ?? '').filter(l => /^#chat\/stub\/\d+$/.test(l)).sort(),
+                  box: (window as any).MindBox.get(),
+                  value: ta.value,
+                  end: ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length,
+                }
+              : null
+          }),
+        { message: 'Shift+Enter /stub focuses #chat/stub/2 editor with caret at end', timeout: 15_000 },
+      )
+      .toEqual({
+        chats: ['#chat/stub/0', '#chat/stub/1', '#chat/stub/2'],
+        box: '#chat/stub/2',
+        value: '#chat/stub/2\n<<user>> ',
+        end: true,
+      })
+    await page.keyboard.type('x')
+    expect(
+      await page.evaluate(() => (document.activeElement as HTMLTextAreaElement | null)?.value ?? null),
+      'typed character after Shift+Enter /stub lands at the end',
+    ).toBe('#chat/stub/2\n<<user>> x')
+    await page.keyboard.press('Escape')
+    await expect.poll(() => savedId(page, '#chat/stub/2'), { timeout: 30_000 }).toBeTruthy()
+
+    expect(errors, 'no console errors or pageerrors in _chat_command row').toEqual([])
   } finally {
     await context.close()
   }
