@@ -5898,9 +5898,14 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
       const r = document.querySelector('.todoer-widget .list-item-container.selected')
       return r ? window._item(r.getAttribute('data-id')!, true)?.name ?? null : null
     })
-  const selectedRowBox = (page: Page) =>
-    page.evaluate(() => {
-      const r = document.querySelector('.todoer-widget .list-item-container.selected') as HTMLElement | null
+  const rowBox = (page: Page, name: string | null = null) =>
+    page.evaluate(name => {
+      const id = name ? window._item(name, true)?.id : null
+      const r = (
+        id
+          ? [...document.querySelectorAll('.todoer-widget .list-item-container')].find(el => el.getAttribute('data-id') == id)
+          : document.querySelector('.todoer-widget .list-item-container.selected')
+      ) as HTMLElement | null
       const b = r?.getBoundingClientRect()
       if (!b) return null
       const bar = document.querySelector('.todoer-bin-buttons:not([hidden])') as HTMLElement | null
@@ -5909,7 +5914,8 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
       const footLimit = overlap ? Math.round(br.top) - 8 : innerHeight - 64
       const targetBottom = Math.min(Math.round(0.8 * innerHeight), footLimit)
       return { top: Math.round(b.top), bottom: Math.round(b.bottom), inner: innerHeight, footLimit, targetBottom }
-    })
+    }, name)
+  const selectedRowBox = (page: Page) => rowBox(page)
   const clickRow = (page: Page, name: string) =>
     page.evaluate(name => {
       const id = window._item(name, true)?.id
@@ -5924,6 +5930,35 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await page.evaluate(pos => void (document.body.scrollTop = pos), y)
     await expect.poll(() => top(page), { timeout: 3_000 }).toBe(y)
   }
+  const startScrollWatch = () =>
+    a.evaluate(() => {
+      const w = window as any
+      w.__ow_frames = [] as number[]
+      w.__ow_events = [] as number[]
+      const onScroll = () => w.__ow_events.push(Math.round(document.body.scrollTop))
+      document.addEventListener('scroll', onScroll, true)
+      let live = true
+      const frame = () => {
+        w.__ow_frames.push(Math.round(document.body.scrollTop))
+        if (live) requestAnimationFrame(frame)
+      }
+      requestAnimationFrame(frame)
+      w.__ow_stop = () => {
+        live = false
+        document.removeEventListener('scroll', onScroll, true)
+        return { frames: w.__ow_frames as number[], events: w.__ow_events as number[] }
+      }
+    })
+  const stopScrollWatch = () => a.evaluate(() => (window as any).__ow_stop() as { frames: number[]; events: number[] })
+  const waitFramesAt = (want: number, count: number, message: string) =>
+    expect
+      .poll(() => a.evaluate(y => ((window as any).__ow_frames as number[]).filter(f => Math.abs(f - y) <= 2).length, want), {
+        message,
+        timeout: 5_000,
+      })
+      .toBeGreaterThanOrEqual(count)
+  const waitFrames = (count: number, message: string) =>
+    expect.poll(() => a.evaluate(() => ((window as any).__ow_frames as number[]).length), { message, timeout: 5_000 }).toBeGreaterThanOrEqual(count)
 
   try {
     expect(await interceptMindItems(a), 'mind.items local checkout required').toBe(true)
@@ -6068,19 +6103,49 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await a.waitForTimeout(200)
     expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'list window holds header position on j').toEqual([names[5], true])
 
-    // Wheel during active hold ends the hold and moves A; clicking a row in view from top returns A to headerTop
+    // Wheel during active hold ends the hold and moves A; clicking a row still in view keeps A right
+    // where it was, with zero scroll events and every sampled animation frame at that position
     await a.mouse.move(400, 300)
     await a.mouse.wheel(0, 160)
     await expect.poll(() => top(a), { message: 'wheel ends scroll hold and moves list window', timeout: 5_000 }).toBeGreaterThan(headerTop + 80)
-    await a.waitForTimeout(100)
-    expect(await clickRow(a, names[7]!), 'click row in view from top after wheel').toBe(true)
-    await expect.poll(() => boxNow(b), { message: 'B follows click after wheel', timeout: 5_000 }).toBe(names[7])
     await expect
-      .poll(async () => Math.abs((await top(a)) - headerTop) <= 2, {
-        message: 'clicking a row in view from top returns list window to headerTop after wheel',
-        timeout: 5_000,
-      })
+      .poll(
+        () =>
+          a.evaluate(
+            () =>
+              new Promise<boolean>(resolve => {
+                const start = Math.round(document.body.scrollTop)
+                let steady = 0
+                const step = () => {
+                  if (Math.round(document.body.scrollTop) != start) return resolve(false)
+                  if (++steady >= 3) return resolve(true)
+                  requestAnimationFrame(step)
+                }
+                requestAnimationFrame(step)
+              }),
+          ),
+        { message: 'wheel scroll settles before in-view click', timeout: 5_000 },
+      )
       .toBe(true)
+    const scrolledTop = await top(a)
+    const inViewBox = await rowBox(a, names[7]!)
+    expect(
+      !!inViewBox && inViewBox.top >= 8 && inViewBox.bottom <= inViewBox.footLimit,
+      'clicked row is still in view after small wheel scroll',
+    ).toBe(true)
+    await startScrollWatch()
+    expect(await clickRow(a, names[7]!), 'click row still in view after wheel').toBe(true)
+    await expect.poll(() => boxNow(b), { message: 'B follows click after wheel', timeout: 5_000 }).toBe(names[7])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks clicked row after wheel', timeout: 5_000 }).toBe(names[7])
+    await a.evaluate(() => (window as any)._update_dom())
+    await waitFrames(6, 'scrolled in-view click: animation frames sampled')
+    const stayWatch = await stopScrollWatch()
+    expect(stayWatch.events, 'scrolled in-view click: list window fires zero scroll events').toEqual([])
+    expect(
+      stayWatch.frames.filter(y => Math.abs(y - scrolledTop) > 2),
+      'scrolled in-view click: every animation frame stays at scrolledTop',
+    ).toEqual([])
+    expect(Math.abs((await top(a)) - scrolledTop) <= 2, 'clicking a row still in view after wheel keeps list window where it was').toBe(true)
 
     // 3b. Wheel right after a row click, BEFORE the page's update_dom().then(scrollToTarget):
     //     hold ends on the wheel, targeted swallow stays armed for the selection's automatic scroll,
@@ -6214,9 +6279,9 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
       .poll(
         async () => {
           const box = await selectedRowBox(a)
-          return !!box && box.top >= 8 && box.bottom <= box.targetBottom + 3 && box.bottom >= box.targetBottom - 4
+          return !!box && box.top >= 8 && box.bottom <= box.footLimit + 3 && box.bottom >= box.targetBottom - 4
         },
-        { message: 'j walk down places out-of-view row at 80% depth (or above visible button strip) with margin below', timeout: 5_000 },
+        { message: 'j walk down keeps selected row in view between 80% depth and button strip', timeout: 5_000 },
       )
       .toBe(true)
     const afterQuickTop = await top(a)
@@ -6224,12 +6289,26 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     expect(afterQuickTop, 'twelve quick j presses stay far above target item position').toBeLessThan(targetItemY - 100)
     expect(afterQuickTop, 'twelve quick j presses moved past headerTop to put row at 80% depth').toBeGreaterThan(headerTop)
 
-    // Step a few more rows down then k back up to a row in view from top: list window returns to headerTop
+    // Step a few more rows down then k back up to a row that shows from the top and is out of view wherever the
+    // walk down ended: list window returns to headerTop. (The walk down ends at one of three places, by which
+    // press's page update comes before the next press; from the highest of them names[2] stands exactly at the
+    // window's upper edge, where it counts as in view and the window rightly stays. names[1] is above all three.
+    // The walk back starts once row 18 is clear of the button strip: a row is marked before its scroll is
+    // decided, and a walk back begun at the old place would supersede that scroll and find names[1] in view there)
     for (let i = 0; i < 5; i++) await a.keyboard.press('j')
     await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[18])
-    for (let i = 0; i < 16; i++) await a.keyboard.press('k')
-    await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[2])
-    await expect.poll(() => boxNow(b), { message: 'B follows k walk up list', timeout: 8_000 }).toBe(names[2])
+    await expect
+      .poll(
+        async () => {
+          const box = await selectedRowBox(a)
+          return !!box && box.bottom <= box.footLimit + 3 && box.bottom >= box.targetBottom - 4
+        },
+        { message: 'j walk down to row 18 keeps selected row in view between 80% depth and button strip before k walk up', timeout: 5_000 },
+      )
+      .toBe(true)
+    for (let i = 0; i < 17; i++) await a.keyboard.press('k')
+    await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[1])
+    await expect.poll(() => boxNow(b), { message: 'B follows k walk up list', timeout: 8_000 }).toBe(names[1])
     await expect
       .poll(async () => Math.abs((await top(a)) - headerTop) <= 2, {
         message: 'k walk up to a row in view from top returns list window to headerTop',
@@ -6255,34 +6334,6 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
     await resetScroll(a, headerTop)
     await a.waitForTimeout(150)
     const topBeforeB = await top(a)
-    const startScrollWatch = () =>
-      a.evaluate(() => {
-        const w = window as any
-        w.__ow_frames = [] as number[]
-        w.__ow_events = [] as number[]
-        const onScroll = () => w.__ow_events.push(Math.round(document.body.scrollTop))
-        document.addEventListener('scroll', onScroll, true)
-        let live = true
-        const frame = () => {
-          w.__ow_frames.push(Math.round(document.body.scrollTop))
-          if (live) requestAnimationFrame(frame)
-        }
-        requestAnimationFrame(frame)
-        w.__ow_stop = () => {
-          live = false
-          document.removeEventListener('scroll', onScroll, true)
-          return { frames: w.__ow_frames as number[], events: w.__ow_events as number[] }
-        }
-      })
-    const stopScrollWatch = () => a.evaluate(() => (window as any).__ow_stop() as { frames: number[]; events: number[] })
-
-    const waitFramesAt = (want: number, count: number, message: string) =>
-      expect
-        .poll(
-          () => a.evaluate(y => ((window as any).__ow_frames as number[]).filter(f => Math.abs(f - y) <= 2).length, want),
-          { message, timeout: 5_000 },
-        )
-        .toBeGreaterThanOrEqual(count)
 
     // 5a. Near row in view from top selected in B: zero scroll events and one scrollTop across all frames
     await startScrollWatch()
