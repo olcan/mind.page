@@ -4660,7 +4660,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
 
     for (const text of [
       '#sb_snz\n#todo snoozed todo one',
-      '#sb_snz2\n#todo snoozed todo two',
+      '#sb_snz2\nalpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega snoozed todo two #todo',
       '#sb_main\n#todo solo main todo',
       '#sb_bell\n#todo snooze clears bell and bell unsnoozes',
       '#sb_snz_list #_pin #_menu\n<<todoer_widget({snoozed: true})>>\n#_todoer',
@@ -4688,11 +4688,89 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await snoozeByKey('#sb_snz2', /^tomorrow$/i)
     await expect.poll(snoozedRowNames, { message: 'both snoozed todos listed in order', timeout: 15_000 }).toEqual(['#sb_snz', '#sb_snz2'])
 
+    // Snoozed rows start with a coarse time-left mark (rounded up) whose tooltip gives the locale end time
+    const snoozedMarks = await page.evaluate(() => {
+      const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !!w._snoozed)
+      return [...(w?.querySelectorAll('.list > .list-item-container[data-id]') ?? [])].map(r => {
+        const it = window._item(r.getAttribute('data-id')!, true) as any
+        const m = r.querySelector('.list-item > mark.age:first-child') as HTMLElement | null
+        const until = it?._global_store?._todoer?.snoozed ?? 0
+        return {
+          name: it?.name ?? null,
+          text: m?.textContent ?? null,
+          title: m?.getAttribute('title') ?? null,
+          expectedTitle: until ? new Date(until).toLocaleString() : null,
+        }
+      })
+    })
+    expect(snoozedMarks.map(m => [m.name, m.title === m.expectedTitle]), 'snoozed rows carry mark.age with end-time locale tooltip').toEqual([
+      ['#sb_snz', true],
+      ['#sb_snz2', true],
+    ])
+    expect(snoozedMarks[0].text, '3h snoozed row shows 3h').toMatch(/^3h$/)
+    expect(snoozedMarks[1].text, 'tomorrow snoozed row shows coarse time left').toMatch(/^(?:<1m|[1-9]\d*[mhd])$/)
+    expect(snoozedMarks[0].title, 'snoozed mark tooltip carries date/time').toMatch(/\d/)
+
+    // Left-truncated snoozed row (#sb_snz2, long text before #todo): time-left mark stays inside
+    // the row at its left edge, the row stays one line of the usual height, and #todo stays visible at the right
+    const rtlGeo = await page.evaluate(expectedMark => {
+      const w = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !!w._snoozed)
+      const rows = [...(w?.querySelectorAll('.list > .list-item-container[data-id]') ?? [])]
+      const byName = (name: string) => rows.find(r => window._item(r.getAttribute('data-id')!, true)?.name === name) ?? null
+      const ltrRow = byName('#sb_snz')?.querySelector('.list-item') as HTMLElement | null
+      const rtlRow = byName('#sb_snz2')?.querySelector('.list-item') as HTMLElement | null
+      if (!ltrRow || !rtlRow) return null
+      rtlRow.scrollIntoView({ block: 'center' })
+      const ltrRect = ltrRow.getBoundingClientRect()
+      const ltrMark = ltrRow.querySelector(':scope > mark.age:first-child')?.getBoundingClientRect() ?? null
+      const rowRect = rtlRow.getBoundingClientRect()
+      const mark = rtlRow.querySelector(':scope > mark.age:first-child') as HTMLElement | null
+      const span = rtlRow.querySelector(':scope > .rtl-text') as HTMLElement | null
+      const tag = span?.querySelector('mark:last-of-type') as HTMLElement | null
+      if (!ltrMark || !mark || !span || !tag) return null
+      const markRect = mark.getBoundingClientRect()
+      const tagRect = tag.getBoundingClientRect()
+      const hitMark = document.elementFromPoint((markRect.left + markRect.right) / 2, (markRect.top + markRect.bottom) / 2)
+      const hitTag = document.elementFromPoint((tagRect.left + tagRect.right) / 2, (tagRect.top + tagRect.bottom) / 2)
+      return {
+        overflows: span.scrollWidth > span.clientWidth,
+        markMatchesExpected: (mark.textContent ?? '') === expectedMark,
+        tagText: tag.textContent ?? '',
+        markInRow:
+          markRect.left >= rowRect.left - 0.5 &&
+          markRect.right <= rowRect.right + 0.5 &&
+          markRect.top >= rowRect.top - 0.5 &&
+          markRect.bottom <= rowRect.bottom + 0.5,
+        markAtLeft: markRect.left - rowRect.left <= 8 && Math.abs(markRect.left - ltrMark.left) <= 1,
+        hitMarkSelf: !!hitMark && (hitMark === mark || mark.contains(hitMark)),
+        oneLineUsualHeight: Math.abs(rowRect.height - ltrRect.height) <= 1.5 && rowRect.height < ltrRect.height * 1.5,
+        tagInRowAtRight:
+          tagRect.left > markRect.right &&
+          tagRect.right <= rowRect.right + 0.5 &&
+          rowRect.right - tagRect.right <= 8 &&
+          tagRect.top >= rowRect.top - 0.5 &&
+          tagRect.bottom <= rowRect.bottom + 0.5,
+        hitTagSelf: !!hitTag && (hitTag === tag || tag.contains(hitTag)),
+      }
+    }, snoozedMarks[1].text)
+    expect(rtlGeo, 'left-truncated snoozed row keeps time-left mark at left, single-line height, and #todo at right').toEqual({
+      overflows: true,
+      markMatchesExpected: true,
+      tagText: '#todo',
+      markInRow: true,
+      markAtLeft: true,
+      hitMarkSelf: true,
+      oneLineUsualHeight: true,
+      tagInRowAtRight: true,
+      hitTagSelf: true,
+    })
+
     // 10a. Snoozed todo selected by its row while the snoozed list IS on the page (page row wins; both up/down lit via sequence)
     await userSet(page, '')
     await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
     const snoozedWidget = page.locator('.column:not(.hidden) .todoer-widget').filter({ has: page.locator('.list-item-container', { hasText: 'snoozed todo one' }) })
-    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item').click()
+    // click mark.age inside the row so the click hits the row's own onclick (never a #todo tag mark)
+    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item mark.age').click()
     await expect.poll(boxNow, { message: 'clicking snoozed row selects #sb_snz', timeout: 5_000 }).toBe('#sb_snz')
     expect(await mountedSnoozed(), 'snoozed list stays mounted while pinned').toBe(1)
     await expect
@@ -4716,7 +4794,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await userSet(page, '#sb_snz_list')
     await expect.poll(mountedSnoozed, { message: 'unpinned snoozed list mounts under its label search', timeout: 10_000 }).toBe(1)
     await expect.poll(snoozedRowNames, { timeout: 10_000 }).toEqual(['#sb_snz', '#sb_snz2'])
-    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item').click()
+    await snoozedWidget.locator('.list-item-container', { hasText: 'snoozed todo one' }).locator('.list-item mark.age').click()
     await expect.poll(boxNow, { message: 'clicking row in unpinned snoozed list selects #sb_snz', timeout: 5_000 }).toBe('#sb_snz')
     await expect.poll(mountedSnoozed, { message: 'snoozed list leaves the page when #sb_snz is selected', timeout: 10_000 }).toBe(0)
     await expect
@@ -4948,7 +5026,10 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     })
     await expect.poll(widgetKinds, { message: 'delegated widget mounted above main widget', timeout: 15_000 }).toEqual(['delegated', 'main'])
 
-    for (const text of ['#jk_del_a\n#todo walk delegated a', '#jk_del_b\n#todo walk delegated b']) {
+    for (const text of [
+      '#jk_del_a\n#todo walk delegated a',
+      '#jk_del_b\nalpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega walk delegated b #todo',
+    ]) {
       await page.evaluate(text => void window._create(text), text)
     }
     for (const name of ['#jk_del_a', '#jk_del_b']) {
@@ -5077,6 +5158,111 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await pressAndRead('j', delBelled, 'j from unbelled delegated row before bell lands on delegated bell row')
     await clickDelRow(delBeforeId!, delBefore)
     await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from unbelled delegated row before bell wraps to last row of sequence')
+
+    // Narrow 420 px delegated project row cut on the left (#jk_del_b) with long stats/wake age mark
+    // and an uncleared checkin bell: bell stays whole, trailing #todo fits and clicks into MindBox,
+    // and age truncates with ellipsis while keeping its leading age visible and tooltip intact
+    const projWake = new Date(Date.now() + 24 * 3600_000)
+    projWake.setHours(15, 12, 0, 0)
+    await writeStore(
+      (await storeDocId(`global_store_${jkBId}`, BIN_USER, BIN_SECRET)) ?? 'e2e-bin-store-jk-b',
+      `global_store_${jkBId}`,
+      {
+        _agent: {
+          state: {
+            held: 'agent',
+            reason: 'delegated',
+            project: true,
+            epoch: 2,
+            rev: 10,
+            surfaced: 2,
+            updated: Date.now() - 5 * 60_000,
+            wake: projWake.getTime(),
+            stats: { children: 3, workers: 5, active: 1, cost: 41.2, sub: 12.5, since: Date.now() - 3600_000 },
+          },
+        },
+      },
+      BIN_USER,
+      BIN_SECRET,
+    )
+    const jkBItemId = (await page.evaluate(() => window._item('#jk_del_b', true)?.id ?? null))!
+    const projRow = page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${jkBItemId}"]`)
+    await expect(projRow.locator('mark.waits'), 'delegated project row shows checkin bell').toHaveText('checkin', { timeout: 30_000 })
+    await expect(projRow.locator('mark.age'), 'delegated project row shows stats and wake').toContainText('3c · 5w · $41.20 (sub $12.50)', { timeout: 15_000 })
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await page.setViewportSize({ width: 420, height: 800 })
+    try {
+      const projGeo = await page.evaluate(itemId => {
+        const row = document.querySelector(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${itemId}"] > .list-item`) as HTMLElement | null
+        if (!row) return null
+        row.scrollIntoView({ block: 'center' })
+        const age = row.querySelector(':scope > mark.age:first-child') as HTMLElement | null
+        const bell = row.querySelector(':scope > mark.waits') as HTMLElement | null
+        const span = row.querySelector(':scope > .rtl-text') as HTMLElement | null
+        const tag = span?.querySelector('mark:last-of-type') as HTMLElement | null
+        if (!age || !bell || !span || !tag) return null
+        const rowRect = row.getBoundingClientRect()
+        const ageRect = age.getBoundingClientRect()
+        const bellRect = bell.getBoundingClientRect()
+        const spanRect = span.getBoundingClientRect()
+        const tagRect = tag.getBoundingClientRect()
+        const hitAt = (r: DOMRect) =>
+          r.width > 0 && r.height > 0 ? document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2) : null
+        const hitAge = hitAt(ageRect)
+        const hitBell = hitAt(bellRect)
+        const hitTag = hitAt(tagRect)
+        return {
+          ageStartsInRow:
+            ageRect.left >= rowRect.left - 0.5 &&
+            ageRect.left <= rowRect.left + 8 &&
+            ageRect.right <= rowRect.right + 0.5 &&
+            ageRect.top >= rowRect.top - 0.5 &&
+            ageRect.bottom <= rowRect.bottom + 0.5 &&
+            ageRect.width >= 24,
+          ageTruncated: age.scrollWidth > age.clientWidth,
+          ageHasTooltip: (age.getAttribute('title') ?? '').includes('next wake'),
+          ageTitleStartsWithLabel: (age.getAttribute('title') ?? '').split('\n')[0] === (age.textContent ?? ''),
+          hitAgeSelf: !!hitAge && (hitAge === age || age.contains(hitAge)),
+          bellText: bell.textContent ?? '',
+          bellInRow:
+            bellRect.left > ageRect.right &&
+            bellRect.right <= rowRect.right + 0.5 &&
+            bellRect.top >= rowRect.top - 0.5 &&
+            bellRect.bottom <= rowRect.bottom + 0.5 &&
+            bell.scrollWidth <= bell.clientWidth + 1,
+          hitBellSelf: !!hitBell && (hitBell === bell || bell.contains(hitBell)),
+          spanHasPrecedingText: spanRect.width > tagRect.width + 10 && span.scrollWidth > span.clientWidth,
+          tagText: tag.textContent ?? '',
+          tagInRow:
+            tagRect.left > bellRect.right &&
+            tagRect.left >= spanRect.left - 0.5 &&
+            tagRect.right <= rowRect.right + 0.5 &&
+            tagRect.top >= rowRect.top - 0.5 &&
+            tagRect.bottom <= rowRect.bottom + 0.5,
+          hitTagSelf: !!hitTag && (hitTag === tag || tag.contains(hitTag)),
+        }
+      }, jkBItemId)
+      expect(projGeo, 'narrow 420 px delegated project row keeps leading age, whole bell, and whole clickable trailing #todo inside row').toEqual({
+        ageStartsInRow: true,
+        ageTruncated: true,
+        ageHasTooltip: true,
+        ageTitleStartsWithLabel: true,
+        hitAgeSelf: true,
+        bellText: 'checkin',
+        bellInRow: true,
+        hitBellSelf: true,
+        spanHasPrecedingText: true,
+        tagText: '#todo',
+        tagInRow: true,
+        hitTagSelf: true,
+      })
+      await projRow.locator('.list-item > .rtl-text > mark:last-of-type').click()
+      await expect.poll(boxNow, { message: 'clicking trailing #todo tag on narrow delegated project row sets MindBox to #todo', timeout: 5_000 }).toBe('#todo')
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 800 })
+      await userSet(page, '')
+    }
 
     // Restore original pinned widget order (main above delegated) for the returning phone row
     await page.evaluate(raw => {
