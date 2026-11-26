@@ -1710,7 +1710,8 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
 // left end a group gap away, narrow desktop second row above the left edge, phone touch second
 // row (32 px buttons lined up with the 32 px reload button, hidden while a keyboard is up),
 // busy highlight while an async press runs, glass rejection on the guest extension and floor,
-// and console diagnostics for slow work and dropped taps
+// and console diagnostics for slow work, dropped taps, and page stalls (long animation frames
+// and Event Timing fallback)
 test('guest action buttons stand inline when wide, move to a second row when narrow or on a phone, stay lit while busy, hide under a keyboard, and log slow or dropped taps', async ({ page, browser }) => {
   await loadAdmin(page)
   if (!(await page.evaluate(() => !!window._item('#key_buttons', true)))) {
@@ -2021,6 +2022,98 @@ test('guest action buttons stand inline when wide, move to a second row when nar
       await expect(phone.locator(GUESTS), 'guest buttons return when keyboard closes').toBeVisible()
     } finally {
       await phoneCtx.close()
+    }
+
+    // 4. Page-stall console warning (~1.5 s synchronous click handler):
+    //    (a) Chromium long-animation-frame path names safe BUTTON.onclick (no function, file or place)
+    //    (b) Fresh page with long-animation-frame hidden from PerformanceObserver.supportedEntryTypes
+    //        uses Event Timing and names safe click on BUTTON with >=1000 ms handling time
+    //    Neither path leaks the sentinel id, class, handler function name, or button text.
+    const stallSentinel = 'sentinel-payroll-9f4c'
+    const addStallButton = async (target: Page) => {
+      await target.evaluate(sentinel => {
+        const b = document.createElement('button')
+        b.id = sentinel
+        b.className = `cls-${sentinel}`
+        b.textContent = `secret item text ${sentinel}`
+        b.style.cssText = 'position:fixed;left:8px;top:8px;z-index:9999;padding:8px 12px'
+        b.addEventListener('click', function e2eStallClickSentinel() {
+          const until = performance.now() + 1500
+          while (performance.now() < until) {}
+        })
+        document.body.appendChild(b)
+      }, stallSentinel)
+    }
+    const loafPattern =
+      /^key buttons: the page did not respond for \d+ ms, until .+; the browser names \d+ long frames?: .*\b[1-9]\d{3,} ms event-listener BUTTON\.onclick(?=[;,]|$)/
+    const eventPattern =
+      /^key buttons: the page did not respond for \d+ ms, until .+; the browser names \d+ slow events?: .*\b[1-9]\d{3,} ms click on BUTTON \(waited \d+ ms, handled for [1-9]\d{3,} ms\)/
+    const leakPattern = new RegExp(`${stallSentinel}|e2eStallClickSentinel|secret item text`, 'i')
+    await page.setViewportSize(origSize)
+    await page.waitForTimeout(350)
+    const warnsBeforeStall = warns.length
+    await addStallButton(page)
+    try {
+      await page.locator(`#${stallSentinel}`).click()
+      await expect
+        .poll(() => warns.slice(warnsBeforeStall).find(w => loafPattern.test(w)) ?? null, {
+          message: 'page stall logs long-animation-frame warning naming safe BUTTON.onclick with >=1000 ms handler time',
+          timeout: 5_000,
+        })
+        .not.toBeNull()
+      const loafLine = warns.slice(warnsBeforeStall).find(w => loafPattern.test(w))!
+      console.log(`stall (long-animation-frame): ${loafLine}`)
+      expect(loafLine, 'long-frame path does not emit slow-event text').not.toMatch(/slow event/)
+      for (const w of warns.slice(warnsBeforeStall)) {
+        expect(w, 'long-frame warnings leak no sentinel id, class, handler name, or button text').not.toMatch(leakPattern)
+      }
+    } finally {
+      await page.evaluate(id => document.getElementById(id)?.remove(), stallSentinel)
+    }
+
+    const eventCtx = await browser.newContext()
+    const eventPage = await eventCtx.newPage()
+    const eventWarns: string[] = []
+    await eventPage.addInitScript(() => {
+      if (typeof PerformanceObserver != 'function') return
+      const kept = (PerformanceObserver.supportedEntryTypes ?? []).filter(t => t !== 'long-animation-frame')
+      Object.defineProperty(PerformanceObserver, 'supportedEntryTypes', { configurable: true, get: () => kept })
+    })
+    eventPage.on('console', msg => {
+      if (msg.type() == 'warning') eventWarns.push(msg.text())
+      else if (msg.type() == 'error' && /key buttons:/i.test(msg.text())) errors.push(`event: ${msg.text()}`)
+    })
+    try {
+      await loadAdmin(eventPage)
+      await expect
+        .poll(() => eventPage.evaluate(() => (window as any)._key_buttons?.disposed === false), { message: '#key_buttons live on event-fallback page', timeout: 10_000 })
+        .toBe(true)
+      eventPage.on('pageerror', err => void errors.push(`event: ${err.message}`))
+      expect(
+        await eventPage.evaluate(() => [
+          PerformanceObserver.supportedEntryTypes.includes('long-animation-frame'),
+          PerformanceObserver.supportedEntryTypes.includes('event'),
+        ]),
+        'init script hides long-animation-frame while keeping event'
+      ).toEqual([false, true])
+      await eventPage.waitForTimeout(350)
+      const eventWarnsBefore = eventWarns.length
+      await addStallButton(eventPage)
+      await eventPage.locator(`#${stallSentinel}`).click()
+      await expect
+        .poll(() => eventWarns.slice(eventWarnsBefore).find(w => eventPattern.test(w)) ?? null, {
+          message: 'event fallback logs slow-event warning naming safe click on BUTTON with >=1000 ms handler time',
+          timeout: 5_000,
+        })
+        .not.toBeNull()
+      const eventLine = eventWarns.slice(eventWarnsBefore).find(w => eventPattern.test(w))!
+      console.log(`stall (event): ${eventLine}`)
+      expect(eventLine, 'event path does not emit long-frame text').not.toMatch(/long frame/)
+      for (const w of eventWarns.slice(eventWarnsBefore)) {
+        expect(w, 'event warnings leak no sentinel id, class, handler name, or button text').not.toMatch(leakPattern)
+      }
+    } finally {
+      await eventCtx.close()
     }
     expect(errors, 'no console errors or pageerrors during guest bar row').toEqual([])
   } finally {
