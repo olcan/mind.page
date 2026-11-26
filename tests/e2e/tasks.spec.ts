@@ -2131,7 +2131,7 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   await saved()
 
   // 1. a reply's row and its clear
-  const CHAT_A = `#waits_a/0 #_agent/vault\n<<user>> what now?\n${FOOTER}\n<!--inert-->\nThe answer, see [the plan](https://example.com/plan) at https://example.com/x.\n<!--/inert-->`
+  const CHAT_A = `#waits_a/0 #_agent/vault\n<<user>> what now?\n${FOOTER}\n<!--inert-->\nThe answer, see [the plan](https://example.com/plan) at https://example.com/x. [[docs/Meeting notes|the guide]]\n<!--/inert-->`
   await page.evaluate(text => void window._create(text), CHAT_A)
   await expect.poll(() => savedId(page, '#waits_a/0'), { message: 'first chat saved', timeout: 30_000 }).toBeTruthy()
   const chatAId = (await savedId(page, '#waits_a/0'))!
@@ -2149,6 +2149,66 @@ test('waiting reply rows, a chat-todo question and its selection, todo bells, an
   await expect(replyRowA, 'the box names the chat: its reply row is marked').toHaveClass(/(^| )selected( |$)/, { timeout: 5_000 })
   await page.evaluate(() => void (window as any).MindBox.set(''))
   await expect(main.locator('.list-item-container.selected'), 'the box names nothing again: no row is marked').toHaveCount(0)
+  // with wiki links configured, a verbatim wiki reference in the same reply row becomes an
+  // app-built anchor while markdown and bare urls stay text; a real locator click (with a
+  // one-shot guard against the protocol navigation) stops bubbling without selecting the row and
+  // keeps the browser default
+  const wikiConfig = { url: 'x-e2e://host/file' }
+  expect(
+    await page.evaluate(cfg => (window as any)._set_wiki_links(cfg), wikiConfig),
+    'wiki links config accepted',
+  ).toEqual(wikiConfig)
+  try {
+    const wikiAnchor = replyRowA.locator('a[data-wiki-link]')
+    await expect(wikiAnchor, 'the reply row renders one wiki-link anchor').toHaveCount(1, { timeout: 15_000 })
+    await expect(replyRowA.locator('a'), 'only the wiki link becomes an anchor; markdown link and url stay text').toHaveCount(1)
+    await expect(wikiAnchor, 'the wiki anchor shows the alias text').toHaveText('the guide')
+    expect(
+      await wikiAnchor.evaluate(el => ({
+        href: el.getAttribute('href'),
+        title: el.getAttribute('title'),
+        target: el.getAttribute('target'),
+        rel: el.getAttribute('rel'),
+        onclickAttr: el.getAttribute('onclick'),
+      })),
+      'the wiki anchor carries the expected href and title with no target, rel, or inline onclick',
+    ).toEqual({
+      href: 'x-e2e://host/file?path=docs%2FMeeting%20notes',
+      title: 'docs/Meeting notes',
+      target: null,
+      rel: null,
+      onclickAttr: null,
+    })
+    await main.scrollIntoViewIfNeeded()
+    await wikiAnchor.evaluate(el => {
+      ;(window as any).__e2e_wiki_click = null
+      el.addEventListener(
+        'click',
+        e => {
+          ;(window as any).__e2e_wiki_click = {
+            stopped: e.cancelBubble,
+            defaultPrevented: e.defaultPrevented,
+          }
+          e.preventDefault()
+        },
+        { once: true },
+      )
+    })
+    await wikiAnchor.click()
+    expect(
+      await page.evaluate(() => {
+        const res = (window as any).__e2e_wiki_click
+        delete (window as any).__e2e_wiki_click
+        return res
+      }),
+      'clicking the wiki anchor stops bubbling and keeps the browser default',
+    ).toEqual({ stopped: true, defaultPrevented: false })
+    expect(await page.evaluate(() => (window as any).MindBox.get().trim()), 'clicking the wiki anchor does not select the chat').toBe('')
+    await expect(replyRowA, 'clicking the wiki anchor does not mark the row selected').not.toHaveClass(/(^| )selected( |$)/)
+  } finally {
+    await page.evaluate(() => void (window as any)._set_wiki_links(null))
+  }
+  await expect(replyRowA.locator('a'), 'clearing the wiki-links setting returns the reply row to text').toHaveCount(0, { timeout: 15_000 })
   await main.scrollIntoViewIfNeeded()
   await replyRowA.locator('mark.waits').click()
   await expect(replyRowA, "the bell's click removes the reply row").toHaveCount(0, { timeout: 15_000 })
