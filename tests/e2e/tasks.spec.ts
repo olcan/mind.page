@@ -67,12 +67,14 @@ const BIN_SECRET = secretFor(BIN_USER, PHRASE)
 const SHORTCUTS_USER: TestUser = { uid: 'tasks_shortcuts_e2e', displayName: 'Tasks Shortcuts', email: 'tasks_shortcuts@e2e.test' }
 // the two-windows linked-selection row's account
 const WINDOW_USER: TestUser = { uid: 'tasks_window_e2e', displayName: 'Tasks Window', email: 'tasks_window@e2e.test' }
+// the inline /vault command-link row's account: #chat/vault installed alone (no #todoer drag)
+const VAULT_LINK_USER: TestUser = { uid: 'tasks_vault_link_e2e', displayName: 'Tasks Vault Link', email: 'tasks_vault_link@e2e.test' }
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER, VAULT_LINK_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -3959,7 +3961,43 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     expect(await activeItemEditor(), '/vault without Shift opens no item editor').toBeNull()
     expect(errors, '/vault without Shift logs no error').toEqual([])
 
-    const runInMindbox = async (typed: string, expectedName: string, expectedValue: string, label: string) => {
+    const caretInViewport = (expectedName: string) =>
+      page.evaluate(n => {
+        const it = window._item(n, true)
+        const ta = it ? (document.getElementById('textarea-' + it.id) as HTMLTextAreaElement | null) : null
+        const backdrop = ta?.closest('.editor')?.querySelector('.backdrop') as HTMLElement | null
+        if (!ta || !backdrop) return null
+        const clone = backdrop.cloneNode(true) as HTMLElement
+        clone.style.visibility = 'hidden'
+        backdrop.parentElement!.insertBefore(clone, backdrop)
+        const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        ;(clone.firstChild as HTMLElement).innerHTML =
+          esc(ta.value.substring(0, ta.selectionStart)) +
+          `<span>${esc(ta.value.substring(ta.selectionStart) || ' ')}</span>`
+        const spanRect = clone.querySelector('span')!.getBoundingClientRect()
+        clone.remove()
+        const vv = window.visualViewport
+        const offsetTop = vv?.offsetTop ?? 0
+        const vvHeight = vv?.height ?? window.innerHeight
+        const top = spanRect.top - offsetTop
+        const bottom = spanRect.bottom - offsetTop
+        return {
+          inView: top >= 0 && bottom <= vvHeight,
+          top: Math.round(top),
+          bottom: Math.round(bottom),
+          vvHeight: Math.round(vvHeight),
+          scrollTop: Math.round(document.body.scrollTop),
+          focused: document.activeElement === ta,
+        }
+      }, expectedName)
+
+    const runInMindbox = async (
+      typed: string,
+      expectedName: string,
+      expectedValue: string,
+      label: string,
+      { checkFirstFrame = false, checkSettledCaret = false } = {},
+    ) => {
       await userSet(page, '')
       await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe('')
       await focusMindbox(page)
@@ -3967,18 +4005,34 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       await expect(mindbox(page)).toHaveValue(typed)
       // the witness of the caret's FIRST frame: at the new editor's focus, the frame after it is sampled (at
       // the focus itself the app has not placed any caret yet, a chat's child included). A caret that is
-      // moved later than that leaves room for a first key to land at the text's start
-      await page.evaluate(() => {
-        const w = window as any
-        w.__caret_first = null
-        const seen = (e: FocusEvent) => {
-          const field = e.target as HTMLTextAreaElement | null
-          if (field?.tagName != 'TEXTAREA' || field.id == 'textarea-mindbox') return
-          document.removeEventListener('focusin', seen, true)
-          requestAnimationFrame(() => void (w.__caret_first = [field.id, field.selectionStart, field.selectionEnd, field.value.length]))
-        }
-        document.addEventListener('focusin', seen, true)
-      })
+      // moved later than that leaves room for a first key to land at the text's start. When checkFirstFrame
+      // is set, also sample the MindBox value and debounce state on the first frame after creation.
+      await page.evaluate(
+        ([name, sampleBox]) => {
+          const w = window as any
+          w.__caret_first = null
+          w.__vault_first_frame = null
+          const seen = (e: FocusEvent) => {
+            const field = e.target as HTMLTextAreaElement | null
+            if (field?.tagName != 'TEXTAREA' || field.id == 'textarea-mindbox') return
+            document.removeEventListener('focusin', seen, true)
+            requestAnimationFrame(() => {
+              w.__caret_first = [field.id, field.selectionStart, field.selectionEnd, field.value.length]
+              if (sampleBox && !w.__vault_first_frame) {
+                const it = w._item?.(name, true)
+                w.__vault_first_frame = {
+                  boxVal: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement)?.value ?? null,
+                  debounced: !!w._editor_change_pending,
+                  targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+                  itemId: it?.id ?? null,
+                }
+              }
+            })
+          }
+          document.addEventListener('focusin', seen, true)
+        },
+        [expectedName, checkFirstFrame] as const,
+      )
       await page.keyboard.press('Shift+Enter')
       await expect
         .poll(
@@ -3990,7 +4044,56 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       await expect
         .poll(() => page.evaluate(() => (window as any).__caret_first), { message: `${label}: by the first frame after the editor's focus`, timeout: 10_000 })
         .toEqual([editorId, expectedValue.length, expectedValue.length, expectedValue.length])
-      // and a character typed at once goes on from the text's end
+      if (checkFirstFrame) {
+        const ff = await page.evaluate(() => (window as any).__vault_first_frame)
+        expect(ff, `${label}: box shows ${expectedName} on first frame with no debounce`).toEqual({
+          boxVal: expectedName,
+          debounced: false,
+          targetId: ff?.itemId,
+          itemId: expect.any(String),
+        })
+        expect(
+          await page.evaluate(n => (window.__items as { label?: string }[]).filter(i => i.label === n).length, expectedName),
+          `${label}: ${expectedName} is created once`,
+        ).toBe(1)
+      }
+      if (checkSettledCaret) {
+        await expect
+          .poll(
+            () =>
+              page.evaluate(n => {
+                const it = window._item(n, true) as any
+                const chat = window._item('#chat', true) as any
+                const chatVault = window._item('#chat/vault', true) as any
+                return (
+                  !!it &&
+                  !!chat &&
+                  !!chatVault &&
+                  chat.index < it.index &&
+                  chatVault.index < it.index &&
+                  !(window as any).__layoutPending &&
+                  !(window as any)._editor_change_pending
+                )
+              }, expectedName),
+            { message: `${label}: parents moved ahead of ${expectedName} and layouts settled`, timeout: 15_000 },
+          )
+          .toBe(true)
+        await page.evaluate(
+          () =>
+            new Promise<void>(resolve => {
+              let n = 8
+              const step = () => (--n <= 0 ? resolve() : requestAnimationFrame(step))
+              requestAnimationFrame(step)
+            }),
+        )
+        const caret = await caretInViewport(expectedName)
+        expect(caret?.focused, `${label}: editor stays focused after parents move`).toBe(true)
+        expect(
+          caret?.inView,
+          `${label}: caret stays inside visual viewport after parents move (${JSON.stringify(caret)})`,
+        ).toBe(true)
+      }
+      // and a character typed (at once, or late after the parents move) goes on from the text's end without refocusing
       await page.keyboard.type('x')
       expect(await activeItemEditor(), `${label}: a typed character extends the text`).toEqual({
         name: expectedName,
@@ -4005,9 +4108,354 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       await expect.poll(activeItemEditor, { message: `${label} editor closes on Escape`, timeout: 5_000 }).toBeNull()
       await expect.poll(() => savedId(page, expectedName), { message: `${expectedName} saved`, timeout: 30_000 }).toBeTruthy()
     }
-    await runInMindbox('/vault', '#chat/vault/1', '#chat/vault/1 #_agent/vault\n<<user>> ', 'plain /vault Shift+Enter focuses editor with caret collapsed at end')
-    await runInMindbox('/vault hello again', '#chat/vault/2', '#chat/vault/2 #_agent/vault\n<<user>> hello again', '/vault with words Shift+Enter focuses editor with caret collapsed after words')
+
+    // Give the pinned todoer widget and the #chat parent realistic desktop heights during the plain
+    // /vault Shift+Enter check so #chat + #chat/vault push the new chat down when they rank above it,
+    // then remove the temporary style immediately after so later sections see untouched geometry
+    const tallIds = await page.evaluate(() => ({
+      pinned: (window.__items.find((i: any) => i.pinned) as any)?.id ?? null,
+      chat: window._item('#chat', true)?.id ?? null,
+    }))
+    const tallStyles = await page.addStyleTag({
+      content: [
+        tallIds.pinned ? `#super-container-${tallIds.pinned} .content { min-height: 750px }` : '',
+        tallIds.chat ? `#super-container-${tallIds.chat} .content { min-height: 950px }` : '',
+      ].join('\n'),
+    })
+    try {
+      await page.evaluate(async ids => {
+        for (const id of [ids.pinned, ids.chat]) {
+          if (id) await window._render_item(window._item(id)!)
+        }
+        ;(window as any).__layout?.()
+      }, tallIds)
+      await expect
+        .poll(
+          () =>
+            page.evaluate(ids => {
+              const items = window.__items as { id: string; height?: number }[]
+              const ok = (id: string | null) => !id || (items.find(i => i.id === id)?.height ?? 0) >= 700
+              return ok(ids.pinned) && ok(ids.chat) && !(window as any).__layoutPending
+            }, tallIds),
+          { timeout: 10_000 },
+        )
+        .toBe(true)
+      await runInMindbox(
+        '/vault',
+        '#chat/vault/1',
+        '#chat/vault/1 #_agent/vault\n<<user>> ',
+        'plain /vault Shift+Enter focuses editor with caret collapsed at end',
+        { checkFirstFrame: true, checkSettledCaret: true },
+      )
+    } finally {
+      await tallStyles.evaluate(el => (el as Element).remove())
+      await page.evaluate(() => {
+        ;(window as any).__layout?.()
+      })
+      await expect.poll(() => page.evaluate(() => !(window as any).__layoutPending), { timeout: 10_000 }).toBe(true)
+    }
+
+    await runInMindbox(
+      '/vault hello again',
+      '#chat/vault/2',
+      '#chat/vault/2 #_agent/vault\n<<user>> hello again',
+      '/vault with words Shift+Enter focuses editor with caret collapsed after words',
+      { checkFirstFrame: true },
+    )
     await runInMindbox('#chat/vault/1', '#chat/vault/1/0', '#chat/vault/1/0\n<<user>> ', 'chat child Shift+Enter keeps editor focused with caret collapsed at end')
+
+    // 9b. Plain /vault via Control+Enter: box shows the new chat's name on the first frame with no
+    // intermediate old query or debounce; the loading overlay clears immediately when the last
+    // visible item finishes rendering (cancelling any already-scheduled 250 ms tryLayout timer
+    // without running an extra layout); Back/Forward navigate between the prior view and the new
+    // chat; and recent item-editor typing still holds the overlay via lastEditTime.
+    await userSet(page, '')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (window as any).MindBox.get() === '' &&
+              !(window as any).__layoutPending &&
+              !(window as any)._editor_change_pending &&
+              !(window as any)._history_update_pending &&
+              !document.querySelector('#sapper > .loading.visible'),
+          ),
+        { timeout: 10_000 },
+      )
+      .toBe(true)
+    const beforeCtrlHist = await page.evaluate(() => {
+      const vis = document.querySelector('.column:not(.hidden) .super-container[id^="super-container-"]')
+      return {
+        idx: (window as any)._history_index as number,
+        box: (window as any).MindBox.get() as string,
+        todoerId: vis ? vis.id.replace('super-container-', '') : null,
+      }
+    })
+    expect(beforeCtrlHist.todoerId, 'premise: a visible item is mounted for pre-scheduled resize timer').toBeTruthy()
+    await focusMindbox(page)
+    await page.keyboard.type('/vault')
+    await expect(mindbox(page)).toHaveValue('/vault')
+    await expect.poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { timeout: 5_000 }).toBe(true)
+
+    try {
+      await page.evaluate(todoerId => {
+        const w = window as any
+        const origSetTimeout = window.setTimeout.bind(window)
+        const origClearTimeout = window.clearTimeout.bind(window)
+        const rec = {
+          preTimerId: null as number | null,
+          preTimerCleared: false,
+          preTimerFired: false,
+          extra250FiredBeforeClear: 0,
+          extra250FiredAfterClear: 0,
+          sawOverlay: false,
+          overlayVisibleWhenRendered: null as boolean | null,
+          layoutPendingWhenRendered: null as boolean | null,
+          layoutCountAtClear: null as number | null,
+          firstFrame: null as null | { boxVal: string; debounced: boolean; targetId: string | null; itemId: string | null },
+          capturingPreTimer: false,
+        }
+        w.__vj_ctrl = rec
+        const tracked250 = new Set<number>()
+        window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+          let id = 0
+          const wrapped =
+            typeof fn === 'function'
+              ? (...a: unknown[]) => {
+                  if (id === rec.preTimerId) rec.preTimerFired = true
+                  const countBefore = w.__layoutCount as number
+                  const clearedBefore = rec.layoutCountAtClear !== null
+                  const res = (fn as (...x: unknown[]) => unknown)(...a)
+                  if (tracked250.has(id) && (w.__layoutCount as number) > countBefore) {
+                    if (!clearedBefore) rec.extra250FiredBeforeClear++
+                    else rec.extra250FiredAfterClear++
+                  }
+                  return res
+                }
+              : fn
+          id = origSetTimeout(wrapped, delay, ...args)
+          if (rec.capturingPreTimer && delay === 250) rec.preTimerId = id
+          if (delay === 250 && w.__layoutPending && rec.layoutCountAtClear === null) tracked250.add(id)
+          return id
+        }) as typeof window.setTimeout
+        window.clearTimeout = ((id?: number) => {
+          if (id != null && id === rec.preTimerId) rec.preTimerCleared = true
+          return origClearTimeout(id)
+        }) as typeof window.clearTimeout
+        w.__vj_restoreTimers = () => {
+          window.setTimeout = origSetTimeout
+          window.clearTimeout = origClearTimeout
+        }
+
+        // Trigger a >300px resize on pinned #todoer right on Control+Enter keydown so a delayed
+        // 250ms tryLayout timer is already scheduled while #chat/vault/3 renders
+        const onKey = (e: KeyboardEvent) => {
+          if (e.code !== 'Enter' || !e.ctrlKey) return
+          document.removeEventListener('keydown', onKey, true)
+          const el = document.querySelector(`#super-container-${todoerId} .item > .content`) as HTMLElement | null
+          if (el) {
+            el.style.paddingBottom = '400px'
+            rec.capturingPreTimer = true
+            w._item_hooks?.[todoerId]?.resize('e2e_delay')
+            rec.capturingPreTimer = false
+          }
+        }
+        document.addEventListener('keydown', onKey, true)
+
+        const loading = document.querySelector('#sapper > .loading')!
+        const mo = new MutationObserver(() => {
+          if (loading.classList.contains('visible')) {
+            rec.sawOverlay = true
+          } else if (rec.sawOverlay && rec.layoutCountAtClear === null) {
+            rec.layoutCountAtClear = w.__layoutCount
+          }
+        })
+        mo.observe(loading, { attributes: true, attributeFilter: ['class'] })
+        w.__vj_stopMo = () => mo.disconnect()
+
+        let sampleScheduled = false
+        const poll = () => {
+          const it = w._item('#chat/vault/3', true)
+          if (it) {
+            if (!rec.firstFrame) {
+              rec.firstFrame = {
+                boxVal: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement)?.value ?? '',
+                debounced: !!w._editor_change_pending,
+                targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+                itemId: it.id,
+              }
+            }
+            const items = w.__items as { id: string; rendered?: boolean; editing?: boolean }[]
+            const recItem = items.find(x => x.id === it.id)
+            const allRendered = items.slice(0, w.__hideIndex).every(x => x.rendered || x.editing)
+            if (recItem?.rendered && allRendered && !sampleScheduled) {
+              sampleScheduled = true
+              // Sample 20ms after all shown items report rendered: past the coalesced delay-0
+              // readiness check (Fix 2), still well before the 250ms delayed tryLayout timer.
+              origSetTimeout(() => {
+                rec.overlayVisibleWhenRendered = loading.classList.contains('visible')
+                rec.layoutPendingWhenRendered = !!w.__layoutPending
+              }, 20)
+            }
+          }
+          if (rec.layoutCountAtClear === null || !sampleScheduled) {
+            requestAnimationFrame(poll)
+          }
+        }
+        requestAnimationFrame(poll)
+      }, beforeCtrlHist.todoerId!)
+
+      await page.keyboard.press('Control+Enter')
+      await expect.poll(() => savedId(page, '#chat/vault/3'), { message: 'Ctrl+Enter /vault creates #chat/vault/3', timeout: 30_000 }).toBeTruthy()
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const r = (window as any).__vj_ctrl
+              return (
+                r?.layoutCountAtClear !== null &&
+                r?.overlayVisibleWhenRendered !== null &&
+                !document.querySelector('#sapper > .loading.visible')
+              )
+            }),
+          { message: 'overlay cleared and first-rendered snapshot captured', timeout: 10_000 },
+        )
+        .toBe(true)
+
+      // Wait past the original 250ms delayed timer window to confirm no stale tryLayout fires
+      await page.waitForTimeout(350)
+      const ctrlSnap = await page.evaluate(() => {
+        const w = window as any
+        const r = w.__vj_ctrl
+        return {
+          ...r,
+          countOfChat3: (w.__items as { label?: string }[]).filter(i => i.label === '#chat/vault/3').length,
+          boxValue: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement)?.value ?? '',
+          activeId: document.activeElement?.id ?? '',
+          targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+          chat3Id: w._item('#chat/vault/3', true)?.id ?? null,
+        }
+      })
+
+      expect(ctrlSnap.firstFrame, 'Ctrl+Enter /vault sets MindBox to #chat/vault/3 on first frame with no debounce').toEqual({
+        boxVal: '#chat/vault/3',
+        debounced: false,
+        targetId: ctrlSnap.chat3Id,
+        itemId: ctrlSnap.chat3Id,
+      })
+      expect(ctrlSnap.countOfChat3, '#chat/vault/3 is created once').toBe(1)
+      expect(ctrlSnap.boxValue, 'MindBox holds #chat/vault/3').toBe('#chat/vault/3')
+      expect(ctrlSnap.activeId, 'MindBox is blurred after Ctrl+Enter /vault').not.toBe('textarea-mindbox')
+      expect(await activeItemEditor(), 'Ctrl+Enter /vault opens no editor').toBeNull()
+      expect(ctrlSnap.sawOverlay, 'premise: loading overlay was raised for unrendered #chat/vault/3').toBe(true)
+      expect(ctrlSnap.preTimerId, 'premise: a 250ms delayed tryLayout timer was already scheduled').toBeTruthy()
+      expect(
+        ctrlSnap.overlayVisibleWhenRendered,
+        'overlay is already gone when the last visible item finishes rendering (no 250ms wait)',
+      ).toBe(false)
+      expect(ctrlSnap.layoutPendingWhenRendered, 'layoutPending cleared immediately when last visible item rendered').toBe(false)
+      expect(ctrlSnap.extra250FiredBeforeClear, 'no 250ms tryLayout timer fired to clear the overlay').toBe(0)
+      expect(ctrlSnap.preTimerCleared, 'already-scheduled delayed tryLayout timer was cancelled').toBe(true)
+      expect(ctrlSnap.preTimerFired, 'cancelled delayed tryLayout timer never fired').toBe(false)
+      expect(ctrlSnap.extra250FiredAfterClear, 'no pre-clear 250ms tryLayout timer fired after the immediate overlay clear').toBe(0)
+    } finally {
+      await page.evaluate(todoerId => {
+        const w = window as any
+        w.__vj_stopMo?.()
+        w.__vj_restoreTimers?.()
+        const el = document.querySelector(`#super-container-${todoerId} .item > .content`) as HTMLElement | null
+        if (el) el.style.paddingBottom = ''
+        w._item_hooks?.[todoerId]?.resize('e2e_delay_cleanup')
+      }, beforeCtrlHist.todoerId!)
+      await expect
+        .poll(() => page.evaluate(() => !(window as any).__layoutPending && !document.querySelector('#sapper > .loading.visible')), {
+          timeout: 10_000,
+        })
+        .toBe(true)
+    }
+
+    // Back and Forward after Ctrl+Enter /vault: returns to the prior view and forward to #chat/vault/3
+    await expect.poll(() => page.evaluate(() => !(window as any)._history_update_pending), { timeout: 5_000 }).toBe(true)
+    expect(await page.evaluate(() => (window as any)._history_index), 'one history step added for /vault').toBe(
+      beforeCtrlHist.idx + 1,
+    )
+    await page.goBack()
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => ({
+            idx: (window as any)._history_index,
+            box: (window as any).MindBox.get(),
+            targeted: document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#chat/vault/3', true)?.id,
+          })),
+        { message: 'Back returns to prior empty view', timeout: 10_000 },
+      )
+      .toEqual({ idx: beforeCtrlHist.idx, box: beforeCtrlHist.box, targeted: false })
+    await page.goForward()
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => ({
+            idx: (window as any)._history_index,
+            box: (window as any).MindBox.get(),
+            targeted: document.querySelector('.container.target')?.getAttribute('data-item-id') === window._item('#chat/vault/3', true)?.id,
+          })),
+        { message: 'Forward returns to #chat/vault/3', timeout: 10_000 },
+      )
+      .toEqual({ idx: beforeCtrlHist.idx + 1, box: '#chat/vault/3', targeted: true })
+
+    // Recent typing in an item's editor keeps the lastEditTime guard (does not clear overlay early)
+    const chat3Id = await page.evaluate(() => window._item('#chat/vault/3', true)!.id)
+    await page.locator(`#super-container-${chat3Id} .content`).click()
+    await expect(page.locator(`#textarea-${chat3Id}`)).toBeVisible({ timeout: 10_000 })
+    await expect
+      .poll(() => page.evaluate(() => !(window as any).__layoutPending && !document.querySelector('#sapper > .loading.visible')), {
+        timeout: 10_000,
+      })
+      .toBe(true)
+    await page.locator(`#textarea-${chat3Id}`).focus()
+    await page.keyboard.type('g')
+    const guardSnap = await page.evaluate(() => {
+      const w = window as any
+      const loading = document.querySelector('#sapper > .loading')!
+      let sawOverlay = loading.classList.contains('visible')
+      const mo = new MutationObserver(() => {
+        if (loading.classList.contains('visible')) sawOverlay = true
+      })
+      mo.observe(loading, { attributes: true, attributeFilter: ['class'] })
+      const sibling = w._create('#_pin edit guard probe', { save: false }) as { id: string }
+      return new Promise<{ siblingId: string; inVisibleSlice: boolean; sawOverlay: boolean; heldDuringEdit: boolean }>(resolve => {
+        const check = () => {
+          const it = (w.__items as { id: string; index: number; rendered?: boolean }[]).find(x => x.id === sibling.id)
+          if (it?.rendered) {
+            mo.disconnect()
+            resolve({
+              siblingId: sibling.id,
+              inVisibleSlice: it.index < w.__hideIndex,
+              sawOverlay,
+              heldDuringEdit: loading.classList.contains('visible') && !!w.__layoutPending,
+            })
+            return
+          }
+          requestAnimationFrame(check)
+        }
+        requestAnimationFrame(check)
+      })
+    })
+    expect(guardSnap.inVisibleSlice, 'premise: pinned edit-guard probe is before hideIndex').toBe(true)
+    expect(guardSnap.sawOverlay, 'premise: loading overlay was raised for unrendered pinned probe').toBe(true)
+    expect(guardSnap.heldDuringEdit, 'recent item-editor typing keeps the delayed tryLayout guard').toBe(true)
+    await expect
+      .poll(() => page.evaluate(() => !(window as any).__layoutPending && !document.querySelector('#sapper > .loading.visible')), {
+        timeout: 10_000,
+      })
+      .toBe(true)
+    await page.locator(`#textarea-${chat3Id}`).focus()
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('Escape')
+    await expect.poll(activeItemEditor, { timeout: 5_000 }).toBeNull()
+    await page.evaluate(id => void (window._item(id, true) as any)?.delete(false), guardSnap.siblingId)
     await userSet(page, '')
 
     // 10. Snoozed & off-list todo buttons, snooze clearing a bell, and a ringing bell unsnoozing (2026-11-25)
@@ -6036,6 +6484,152 @@ test('two windows keep one selection with w: list window holds scroll, keeps sel
 
     expect(dialogs, 'no unexpected dialogs in two-windows row').toEqual([])
     expect(errors, 'no console errors or pageerrors in two-windows row').toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+test('clicking a rendered /vault command link while another item is selected navigates to the new chat, and typed /vault applies mindbox_text without debounce', async ({
+  browser,
+}) => {
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: false })
+  const page = await context.newPage()
+  const errors: string[] = []
+  page.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(msg.text())))
+  page.on('pageerror', err => void errors.push(`pageerror: ${err.message}`))
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, VAULT_LINK_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    expect(await install(page, 'chat/vault'), '/_install chat/vault').toBeNull()
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'installed items saved', timeout: 60_000 })
+      .toBe(true)
+    await page.reload()
+    await loaded(page)
+    errors.length = 0
+
+    // Create a tall pinned spacer and a separate todo item carrying a rendered `/vault` command link
+    // inside an inert block so clicking it dispatches onCommandClick (mindbox=false).
+    const todoText = [
+      '#e2e_vlink_todo selected todo holding a command link',
+      '<!--inert-->',
+      'Start a chat with `/vault from link` now.',
+      '<!--/inert-->',
+    ].join('\n')
+    await page.evaluate(text => {
+      window._create('#e2e_vlink_pin #_pin\n\n<div style="height:1200px">spacer</div>')
+      window._create(text)
+    }, todoText)
+    await expect
+      .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { timeout: 30_000 })
+      .toBe(true)
+
+    // 1. Select the OTHER item (#e2e_vlink_todo), click the rendered `/vault from link` link, and
+    // confirm Run: MindBox must switch to #chat/vault/0, target #chat/vault/0, and scroll it into view.
+    await userSet(page, '#e2e_vlink_todo')
+    const todoId = await page.evaluate(() => window._item('#e2e_vlink_todo', true)!.id)
+    const cmdLink = page.locator(`.column:not(.hidden) .container[data-item-id="${todoId}"] .vault-result code.command-link[data-command-link="/vault from link"]`)
+    await expect(cmdLink, 'rendered /vault command link is visible').toBeVisible({ timeout: 15_000 })
+    await cmdLink.scrollIntoViewIfNeeded()
+    await expect.poll(() => page.evaluate(() => document.body.scrollTop), { timeout: 5_000 }).toBeGreaterThan(0)
+    await cmdLink.click()
+    const modal = page.locator('.modal')
+    await expect(modal, 'command confirmation dialog opens').toBeVisible({ timeout: 10_000 })
+    await expect(modal.locator('code')).toHaveText('/vault from link')
+    await modal.locator('.button.confirm', { hasText: 'Run' }).click()
+    await expect(modal).toBeHidden()
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const chat = window._item('#chat/vault/0', true) as { id: string; text: string } | null
+            const targetId = document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null
+            const chatEl = chat ? (document.getElementById('super-container-' + chat.id) as HTMLElement | null) : null
+            const rect = chatEl?.getBoundingClientRect() ?? null
+            return {
+              created: !!chat,
+              hasBody: !!chat?.text.includes('from link'),
+              box: (window as any).MindBox.get() as string,
+              targetMatchesChat: !!chat && targetId === chat.id,
+              inView: !!rect && rect.top >= -5 && rect.top < window.innerHeight - 50,
+              boxFocused: document.activeElement?.id === 'textarea-mindbox',
+            }
+          }),
+        { message: 'confirmed /vault command link navigates MindBox, target, and viewport to #chat/vault/0', timeout: 15_000 },
+      )
+      .toEqual({
+        created: true,
+        hasBody: true,
+        box: '#chat/vault/0',
+        targetMatchesChat: true,
+        inView: true,
+        boxFocused: false,
+      })
+
+    // 2. Typed `/vault` via Ctrl+Enter and Shift+Enter still apply mindbox_text on the first frame
+    // without MindBox.set debounce (fast standalone witness for command-path pins).
+    await userSet(page, '')
+    await expect
+      .poll(() => page.evaluate(() => (window as any).MindBox.get() === '' && !document.querySelector('#sapper > .loading.visible')), { timeout: 10_000 })
+      .toBe(true)
+    await focusMindbox(page)
+    await page.keyboard.type('/vault')
+    await expect(mindbox(page)).toHaveValue('/vault')
+    await page.evaluate(() => {
+      const w = window as any
+      w.__vl_first = null
+      const poll = () => {
+        const it = w._item('#chat/vault/1', true)
+        if (it) {
+          w.__vl_first = {
+            boxVal: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+            debounced: !!w._editor_change_pending,
+            targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+            itemId: it.id,
+          }
+          return
+        }
+        requestAnimationFrame(poll)
+      }
+      requestAnimationFrame(poll)
+    })
+    await page.keyboard.press('Control+Enter')
+    await expect
+      .poll(() => page.evaluate(() => (window as any).__vl_first), { message: 'Ctrl+Enter /vault sets #chat/vault/1 on first frame with no debounce', timeout: 15_000 })
+      .toEqual({
+        boxVal: '#chat/vault/1',
+        debounced: false,
+        targetId: expect.any(String),
+        itemId: expect.any(String),
+      })
+    const ctrlFirst = await page.evaluate(() => (window as any).__vl_first)
+    expect(ctrlFirst.targetId, 'Ctrl+Enter /vault targets #chat/vault/1 on first frame').toBe(ctrlFirst.itemId)
+
+    await userSet(page, '')
+    await focusMindbox(page)
+    await page.keyboard.type('/vault')
+    await expect(mindbox(page)).toHaveValue('/vault')
+    await page.keyboard.press('Shift+Enter')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const it = window._item('#chat/vault/2', true) as { id: string } | null
+            const ta = document.activeElement as HTMLTextAreaElement | null
+            return it && ta?.id === 'textarea-' + it.id
+              ? { box: (window as any).MindBox.get(), end: ta.selectionStart === ta.value.length && ta.selectionEnd === ta.value.length }
+              : null
+          }),
+        { message: 'Shift+Enter /vault focuses #chat/vault/2 editor with caret at end', timeout: 15_000 },
+      )
+      .toEqual({ box: '#chat/vault/2', end: true })
+
+    expect(errors, 'no console errors or pageerrors in /vault command-link row').toEqual([])
   } finally {
     await context.close()
   }

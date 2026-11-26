@@ -196,6 +196,7 @@
     if (!emulate_button) disableScrollingOnLayout = true
 
     // save mindbox text to be restored (or set) below
+    const prevEditorText = editorText
     if (mindbox_text !== null) {
       ignoreEditorChanges = true // ignore changes to editor from onEditorDone (e.g. by commands handled synchronously)
       mindbox_text ??= editorText
@@ -214,11 +215,16 @@
       return_alerts // return alert messages? (instead of display in alert dialog)
     )
 
-    // restore mindbox text
+    // restore (or set) mindbox text; if item creation was refused immediately (undefined/alert string),
+    // leave the box as it was (a deferred naming-dialog promise keeps the prior mindbox_text handling)
     if (mindbox_text !== null) {
       ignoreEditorChanges = false // re-enable changes to editor
-      lastEditorChangeTime = 0 // disable debounce even if editor focused
-      onEditorChange(mindbox_text)
+      if (!command && (item == null || typeof item == 'string')) {
+        editorText = prevEditorText
+      } else {
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(mindbox_text)
+      }
     }
 
     // restore scrolling to original state
@@ -2119,6 +2125,7 @@
   // nothing when the top is already in view. Returns whether it scrolled
   function scrollToTopWithHistory() {
     if (scrolledToTop()) return false
+    noteReaderScroll()
     if (historyOffEntry() || launchKeeps()) {
       scrollTo(headerdiv.offsetTop) // no entry where the session has no place in the browser's history
       return true
@@ -2170,6 +2177,7 @@
     if (!previous || (previous.editorText || '') != (current.editorText || '')) return false
     if ((editorText || '') != (current.editorText || '')) return false // a query typed, not yet in the entry
     if (!((previous.scrollPosition ?? -Infinity) > document.body.scrollTop + 2)) return false
+    noteReaderScroll()
     scrollBackPending = true
     scrollBackTimer = setTimeout(() => (scrollBackPending = false), 1000)
     history.back()
@@ -2196,6 +2204,7 @@
     // quarter disagree there, so the item can count as below the view at the very position it was brought
     // to) moves nothing and gets no entry (review 0 B1: a push per press otherwise)
     if (y == null || Math.abs(y - document.body.scrollTop) <= 2) return false
+    noteReaderScroll()
     if (historyOffEntry() || launchKeeps()) {
       scrollTo(y) // no entry where the session has no place in the browser's history
       return true
@@ -2311,7 +2320,7 @@
     return Date.now() - widthChangeTime < 2000 && (reflowScrollTop == null || Math.abs(document.body.scrollTop - reflowScrollTop) <= 2)
   }
 
-  function updateItemLayout() {
+  function updateItemLayout(earlyReaderScrollTime: number | null = null) {
     // NOTE: first layout is via checkLayout w/ 0 items, 0 height
     //       second is via initialize -> onEditorChange w/ >0 items, 0 height
     //       subsequent layouts are via onItemResized -> tryLayout w/ >0 items, >0 height
@@ -2451,11 +2460,13 @@
       else if (!div.contains(document.activeElement)) console.warn('focusedItem does not contain activeElement')
       else activeEditItem = items[focusedItem].id
     }
+    // on the early layout path (onItemResized), yield deferred scrolls if a reader scroll arrived since layout started
+    const readerScrolledSince = () => earlyReaderScrollTime != null && lastReaderScrollTime != earlyReaderScrollTime
     if (activeEditItem) {
       // console.debug('detected edit item')
       const dispatchTime = Date.now()
       update_dom().then(() => {
-        if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+        if (lastScrollTime > dispatchTime || readerScrolledSince()) return // cancel on scroll since dispatch
         // the edited item can be gone by now (a child created by Ctrl+Enter and deleted at once
         // with Ctrl+Backspace): its id resolves to no index, and there is nothing to scroll to
         const index = indexFromId.get(activeEditItem)
@@ -2495,6 +2506,7 @@
         const explicit = restored || explicitScrollQuery === editorText // an explicit scroll, or a restore's, won for this query
         update_dom().then(() => {
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
+          if (readerScrolledSince()) return
           if (!moved && !reflowCorrecting()) return // the correction superseded while the layout flushed
           // console.debug('scrolling to target')
           if (!explicit) scrollToTarget()
@@ -2506,7 +2518,7 @@
         const dispatchTime = Date.now()
         const explicit = restored || explicitScrollQuery === editorText // an explicit scroll, or a restore's, won for this query
         update_dom().then(() => {
-          if (explicit) return
+          if (explicit || readerScrolledSince()) return
           // if (lastScrollTime > dispatchTime) return // cancel on scroll since dispatch
           const itemTop = _.min(
             topMovers.map(index => {
@@ -3094,6 +3106,8 @@
       attachNotificationRelayHandshake(navigator.serviceWorker, window as unknown as RelayWindowLike)
     }
     for (const type of ['keydown', 'pointerdown', 'mousedown']) window.addEventListener(type, () => void (toggleResized = false), { capture: true }) // (see toggleResized)
+    // reader's own scroll input (wheel, touchmove; scroll keys in onMount and app key scrolls in onKeyDown)
+    for (const type of ['wheel', 'touchmove']) window.addEventListener(type, noteReaderScroll, { capture: true, passive: true })
     window['_carry_input'] = carryInput
   }
   // THE LAUNCH'S QUERY (reviews 0 and 1 of phantom_steps, blocker 3): a non-empty address has its query applied
@@ -4089,14 +4103,18 @@
     }
   }
 
+  function hasUnrenderedVisibleItems() {
+    return hideIndex > 0 && _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
+  }
+
   function checkIfRenderingVisibleItems() {
     // console.debug('checkIfRenderingVisibleItems')
     // this needs to be done wherever either item layout OR hideIndex is updated
     // we can check for height==0 or !item.rendered if we want to also wait for images/scripts/math/etc
     // we allow editing items since the rendered item (item.elem) is not visible on page
     // we would also allow below-fold items, but unfortunately that is not reliable when heights are unknown
-    renderingVisibleItems =
-      hideIndex > 0 && _.findLastIndex(items, item => !item.rendered && !item.editing, hideIndex - 1) >= 0
+    cancelEarlyLayout()
+    renderingVisibleItems = hasUnrenderedVisibleItems()
     // if (renderingVisibleItems) {
     //   console.debug(
     //     'still rendering',
@@ -7812,7 +7830,29 @@
   }
 
   let lastEditTime = 0 // updated in onItemEdited
+  let lastReaderScrollTime = 0 // reader's own scroll input (wheel, touchmove, scroll keys, app key scrolls)
+  function noteReaderScroll() {
+    lastReaderScrollTime = Date.now()
+  }
+  const READER_SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'Space', 'ArrowUp', 'ArrowDown'])
   let layoutPending = false
+  let layoutTimer: ReturnType<typeof setTimeout> | null = null
+  let earlyLayoutToken = 0
+  let earlyLayoutQueued = false
+  let earlyLayoutTimer: ReturnType<typeof setTimeout> | null = null
+  function cancelEarlyLayout() {
+    earlyLayoutToken++
+    earlyLayoutQueued = false
+    if (earlyLayoutTimer != null) {
+      clearTimeout(earlyLayoutTimer)
+      earlyLayoutTimer = null
+    }
+  }
+  const canLayoutEarly = () =>
+    renderingVisibleItems &&
+    !hasUnrenderedVisibleItems() &&
+    Date.now() - lastEditTime >= 500 &&
+    Date.now() - lastReaderScrollTime >= 500
   // A TOGGLE'S TAP, UNTIL THE OWNER'S NEXT INPUT (its resize is reported as `inert toggle` by an inert section, as
   // `toggle` by item code's toggle through the item's resize hook): the tap gives the keyboard focus back to the
   // editor that had it, and a layout pass would then scroll to that editor's caret, away from what the owner has
@@ -7906,14 +7946,38 @@
           // NOTE: checking lastEditTime helps reduce editor issues (e.g. jumping of cursor) related to resizing while editing, but does NOT solve all issues, especially those not related to resizing.
           if (Date.now() - lastEditTime < 500 || Date.now() - lastScrollTime < 500) {
             // try again later
-            setTimeout(tryLayout, 250)
+            layoutTimer = setTimeout(tryLayout, 250)
             return
           }
+          layoutTimer = null
           updateItemLayout()
           layoutPending = false
         }
         // if totalItemHeight == 0, then we have not yet done any layout with item heights available, so we do not want to delay too long, but just want to give it enough time for heights to be reasonably accurate
-        setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 50) // try now
+        layoutTimer = setTimeout(tryLayout, totalItemHeight > 0 ? 250 : 50) // try now
+      }
+      // when the last unrendered visible item finishes rendering while the loading overlay is up,
+      // queue ONE check after the sibling afterUpdate delay-0 reports from this pass and recheck
+      // the whole condition (including no recent item-editor typing and no recent reader scroll);
+      // only then cancel the delayed layout timer and lay out, else the delayed path above stands
+      if (just_rendered && index < hideIndex && canLayoutEarly() && !earlyLayoutQueued) {
+        earlyLayoutQueued = true
+        const token = ++earlyLayoutToken
+        tick().then(() => {
+          if (token != earlyLayoutToken) return
+          earlyLayoutTimer = setTimeout(() => {
+            if (token != earlyLayoutToken) return
+            earlyLayoutQueued = false
+            earlyLayoutTimer = null
+            if (!canLayoutEarly()) return
+            if (layoutTimer != null) {
+              clearTimeout(layoutTimer)
+              layoutTimer = null
+            }
+            layoutPending = false
+            updateItemLayout(lastReaderScrollTime)
+          }, 0)
+        })
       }
     }
   }
@@ -9036,6 +9100,7 @@
     // does not appear to be possible to shift-focus-on-scroll on macos
     if (rendered && Date.now() - lastScrollTime > 250 && Date.now() - lastResizeTime > 1000) focus()
     lastScrollTime = Date.now()
+    if (lastReaderScrollTime > 0 && lastScrollTime - lastReaderScrollTime < 250) lastReaderScrollTime = lastScrollTime
     // the position is written into the history ENTRY the scroll happened in (its session index), 250 ms
     // after the first scroll of a burst: a traversal (Back, Forward) or a push in the meantime moves the
     // index, and the write is dropped (a Back within the 250 ms had its destination overwritten with the
@@ -11816,6 +11881,12 @@
       }
 
       onMount(() => {
+        window.addEventListener('keydown', e => {
+          if (e.defaultPrevented || !READER_SCROLL_KEYS.has(eventKey(e))) return
+          const target = e.target as Element | null
+          if (target?.closest?.('textarea, input, [contenteditable]:not([contenteditable="false" i])')) return
+          noteReaderScroll()
+        })
         Promise.resolve(initialization).then(() => {
           focus() // focus on init (focus and checkFocus are disabled until init)
 
@@ -12083,8 +12154,10 @@
       if (toggle) {
         // if toggle is too far down, bring it to ~upper-middle of page, snapping to header
         const toggleTop = (toggle as HTMLElement).offsetTop
-        if (toggleTop > document.body.scrollTop + visualViewport.height - 200)
+        if (toggleTop > document.body.scrollTop + visualViewport.height - 200) {
+          noteReaderScroll()
           scrollTo(Math.max(headerdiv.offsetTop, toggleTop - visualViewport.height / 4))
+        }
         toggle.dispatchEvent(new Event('click'))
       }
       return
@@ -12096,8 +12169,9 @@
       const index = parseInt(key.match(/\d+/)?.shift()) - 1
       if (index == -1) {
         const target = document.querySelector(`.super-container.target`) as HTMLElement
-        if (target) scrollTo(Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4))
-        else scrollTo(headerdiv.offsetTop) // just scroll to top
+        const y = target ? Math.max(headerdiv.offsetTop, target.offsetTop - visualViewport.height / 4) : headerdiv.offsetTop
+        if (Math.abs(y - document.body.scrollTop) > 2) noteReaderScroll()
+        scrollTo(y)
         return
       }
       const item = items[index]
@@ -12513,8 +12587,15 @@
     ) {
       e.preventDefault()
       hideIndex = retreatHideIndex()
+      const creates =
+        (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
+        (key == 'KeyS' && (e.metaKey || e.ctrlKey)) ||
+        (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey)))
       // scroll up to header if necessary
-      if (document.body.scrollTop > headerdiv.offsetTop) scrollTo(headerdiv.offsetTop)
+      if (document.body.scrollTop > headerdiv.offsetTop) {
+        if (!creates && !scrolledToTop()) noteReaderScroll()
+        scrollTo(headerdiv.offsetTop)
+      }
       tick().then(() => textArea(-1).focus())
 
       // create/run new item on create/save shortcuts
@@ -13288,7 +13369,7 @@
           </div>
         {/if}
 
-        {#each items as item (item.id)}
+        {#each fixed ? items : column < columnCount ? items.slice(0, hideIndex + 1) : renderIds.size ? items.filter(it => it.index >= hideIndex && renderIds.has(it.id)) : [] as item (item.id)}
           {#if item.column == column || (item.index >= hideIndex && column == columnCount)}
             {#if column < columnCount}
               {#if item.index == hideIndex}

@@ -787,6 +787,75 @@ test('a name that is no label, that an item is labeled with already or that is #
   }
 })
 
+test('deferred _create naming dialog applies mindbox_text while pending, keeps it on cancel, selects the child on accept, and keeps the prior query only on immediate refusals', async ({ page }) => {
+  await deleteNamed()
+  await loadAdmin(page)
+  const texts = ['e2e_cn deferred cancel', 'e2e_cn deferred accept']
+  try {
+    const [uCancel, uAccept] = await createdItems(page, texts)
+
+    // (a) Deferred naming dialog cancelled: matches pre-stage-2 behavior (box holds mindbox_text
+    // while the prompt is open and after cancellation; promise resolves to undefined).
+    await selected(page, `id:${uCancel.id}`)
+    await expect(mindbox(page)).toHaveValue(`id:${uCancel.id}`)
+    const isPromiseCancel = await page.evaluate(id => {
+      const p = (window as any)._create(`id:${id}`, { history: true, mindbox_text: '#wanted' })
+      ;(window as any).__f4_cancel = p
+      return typeof p?.then === 'function'
+    }, uCancel.id)
+    expect(isPromiseCancel, 'naming-dialog _create returns a promise').toBe(true)
+    await expect.poll(() => nameInput(page), { timeout: 30_000 }).toEqual(offered('thread_0'))
+    expect(await mindbox(page).inputValue(), 'MindBox applies mindbox_text while naming dialog is open').toBe('#wanted')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('.modal')).toBeHidden()
+    expect(await page.evaluate(async () => (await (window as any).__f4_cancel) ?? null)).toBeNull()
+    expect(await mindbox(page).inputValue(), 'MindBox keeps mindbox_text after naming dialog is cancelled').toBe('#wanted')
+    expect(await page.evaluate(() => window._exists('#thread_0')), 'cancelled dialog creates no item').toBe(false)
+
+    // (b) Deferred naming dialog accepted: box holds mindbox_text while open, then selects the new child.
+    await selected(page, `id:${uAccept.id}`)
+    await expect(mindbox(page)).toHaveValue(`id:${uAccept.id}`)
+    const isPromiseAccept = await page.evaluate(id => {
+      const p = (window as any)._create(`id:${id}`, { history: true, mindbox_text: '#wanted' })
+      ;(window as any).__f4_accept = p
+      return typeof p?.then === 'function'
+    }, uAccept.id)
+    expect(isPromiseAccept, 'naming-dialog _create returns a promise before accept').toBe(true)
+    await expect.poll(() => nameInput(page), { timeout: 30_000 }).toEqual(offered('thread_0'))
+    expect(await mindbox(page).inputValue(), 'MindBox applies mindbox_text while naming dialog is open (accept path)').toBe('#wanted')
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.modal')).toBeHidden()
+    const accepted = await page.evaluate(async () => {
+      const it = await (window as any).__f4_accept
+      return it ? { name: it.name, text: it.text } : null
+    })
+    expect(accepted, 'accepted naming dialog creates #thread_0/0').toEqual({ name: '#thread_0/0', text: '#thread_0/0 ' })
+    expect(await mindbox(page).inputValue(), 'MindBox selects created child after naming dialog is accepted').toBe('#thread_0/0 ')
+
+    // (c) Immediate refusal (non-editable unnamed item): both return_alerts=true (string return) and
+    // return_alerts=false (undefined return) leave MindBox on the prior query instead of applying mindbox_text.
+    await page.evaluate(id => void ((window._item(id, true) as any).editable = false), uCancel.id)
+    try {
+      await selected(page, `id:${uCancel.id}`)
+      await expect(mindbox(page)).toHaveValue(`id:${uCancel.id}`)
+      const alertStr = await page.evaluate(id => (window as any)._create(`id:${id}`, { history: true, mindbox_text: '#wanted', return_alerts: true }), uCancel.id)
+      expect(alertStr, 'immediate refusal with return_alerts returns alert string').toBe('can not name an item that is not editable')
+      expect(await mindbox(page).inputValue(), 'immediate refusal (string alert) leaves MindBox unchanged').toBe(`id:${uCancel.id}`)
+
+      const alertUndef = await page.evaluate(id => (window as any)._create(`id:${id}`, { history: true, mindbox_text: '#wanted', return_alerts: false }) ?? null, uCancel.id)
+      expect(alertUndef, 'immediate refusal without return_alerts returns undefined').toBeNull()
+      await expect.poll(() => dialog(page), { timeout: 15_000 }).toEqual(['can not name an item that is not editable'])
+      await page.keyboard.press('Escape')
+      await expect(page.locator('.modal')).toBeHidden()
+      expect(await mindbox(page).inputValue(), 'immediate refusal (undefined return) leaves MindBox unchanged').toBe(`id:${uCancel.id}`)
+    } finally {
+      await page.evaluate(id => void ((window._item(id, true) as any).editable = true), uCancel.id)
+    }
+  } finally {
+    await deleteNamed()
+  }
+})
+
 test('the create key seeds non-collapsed page text selected outside editable fields as an unsaved draft in a new child editor, leaving the initial stored document at the scaffold, preserving characters verbatim on save, skipping macro eval while open, and quoting nothing for editable fields, empty selections, non-child or non-editing creations', async ({ page }) => {
   await deleteNamed()
   await loadAdmin(page)

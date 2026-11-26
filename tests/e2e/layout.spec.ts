@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFileSync } from 'fs'
 import { resolve } from 'path'
-import { loadAnonymous } from './helpers.js'
+import { firestore, loadAnonymous, waitForApp } from './helpers.js'
 
 // column layout (see updateItemLayout in index.svelte): columnCount is max(1, floor(width / 750)),
 // every visible item is rendered exactly once with per-column order following index order, and the
@@ -2406,4 +2406,1419 @@ test('in a phone\'s window a tap on a state circle, with the MindBox focused, is
   await expect.poll(() => page.evaluate(() => [...((window as unknown as { __pushed?: string[] }).__pushed ?? [])]), { message: `a mouse's click on the push circle pushes the item, once (${JSON.stringify(press)})`, timeout: 10_000 }).toEqual([await page.evaluate(id => window._item(id)!.name, id)])
   expect([under, press.clicked?.slice(0, 2), focusName(press.held ?? '', id), (await pressState(page, id)).editing], `under the mouse the hand and the tooltip; the click delivered to the circle, the focus kept, no editor (${JSON.stringify(press)})`).toEqual([['menu', 'pushable', 'push', 'pointer'], ['menu', 'pushable'], 'the MindBox', false])
   await context.close()
+})
+
+// the column loop's slice (index.svelte): visible columns iterate only items.slice(0, hideIndex + 1)
+// (the shown items plus the cutoff item that anchors .toggle.show) and the hidden measuring column
+// iterates only hidden items in renderIds, so the page keeps exact visible-column parity and off-screen
+// measuring without mounting empty Svelte markers per hidden item
+type SliceItem = {
+  id: string
+  index?: number
+  column?: number
+  height?: number
+  rendered?: boolean
+  editing?: boolean
+  editorText?: string
+  pinned?: boolean
+  editable?: boolean
+}
+
+async function expectColumnSlice(page: Page, opts: { expectHiddenIdle?: boolean } = {}) {
+  const { expectHiddenIdle = true } = opts
+  await expectConsistentColumns(page)
+  const snap = await page.evaluate(() => {
+    const items = window.__items as SliceItem[]
+    const hideIndex = window.__hideIndex
+    const colStats = (col: Element) => ({
+      childNodes: col.childNodes.length,
+      comments: [...col.childNodes].filter(n => n.nodeType === Node.COMMENT_NODE).length,
+      superContainers: col.querySelectorAll('.super-container').length,
+      showToggles: col.querySelectorAll('.toggle.show').length,
+      hideToggles: col.querySelectorAll('.toggle.hide').length,
+    })
+    const visibleCols = [...document.querySelectorAll('.column:not(.hidden)')].map(colStats)
+    const hiddenCol = colStats(document.querySelector('.column.hidden')!)
+    const hiddenInVisibleDom = items
+      .slice(hideIndex)
+      .filter(it => !!document.querySelector(`.column:not(.hidden) #super-container-${it.id}`))
+      .map(it => it.id)
+    return {
+      total: items.length,
+      hideIndex,
+      indicesMatch: items.every((it, i) => it.index === i),
+      cutoffColumn: hideIndex < items.length ? items[hideIndex].column! : null,
+      visibleCols,
+      hiddenCol,
+      hiddenInVisibleDom,
+    }
+  })
+
+  expect(snap.indicesMatch, 'every item.index matches its position in window.__items').toBe(true)
+  expect(snap.hiddenInVisibleDom, 'no item at or past hideIndex appears in any visible column').toEqual([])
+  if (snap.hideIndex < snap.total) {
+    const totalShow = snap.visibleCols.reduce((a, c) => a + c.showToggles, 0)
+    expect(totalShow, 'the cutoff toggle (.toggle.show) is rendered while items remain hidden').toBe(1)
+    expect(
+      snap.visibleCols[snap.cutoffColumn!].showToggles,
+      `the cutoff toggle stands in items[${snap.hideIndex}].column (${snap.cutoffColumn})`,
+    ).toBe(1)
+  }
+  // no element or Svelte comment marker per hidden item:
+  // - idle .column.hidden holds zero per-item markers (old loop emits >= total comment anchors)
+  // - when hideIndex is small (<= 6 on a >= 100-item corpus), every visible column's comment-node
+  //   count stays strictly below total (the old loop emits at least one comment anchor per item in
+  //   items, pushing every column over total even before inner toggle anchors)
+  if (expectHiddenIdle) {
+    expect(snap.hiddenCol.superContainers, 'idle hidden column mounts no items').toBe(0)
+    expect(
+      snap.hiddenCol.childNodes,
+      `idle hidden column holds no per-item markers (childNodes=${snap.hiddenCol.childNodes}, total=${snap.total})`,
+    ).toBeLessThanOrEqual(8)
+  }
+  if (snap.total >= 100 && snap.hideIndex <= 6) {
+    for (const [colIdx, col] of snap.visibleCols.entries()) {
+      expect(
+        col.comments,
+        `visible column ${colIdx} comment markers (${col.comments}) must stay below corpus size (${snap.total}) at hideIndex=${snap.hideIndex}`,
+      ).toBeLessThan(snap.total)
+    }
+  }
+  return snap
+}
+
+const setMindboxQuery = async (page: Page, query: string) => {
+  await page.evaluate(q => {
+    const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+    box.value = q
+    box.blur()
+    box.dispatchEvent(new Event('input'))
+  }, query)
+}
+
+test('the column loop renders only the shown slice and its toggle, with no per-hidden-item markers, across toggles, searches and an open edit', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await loadAnonymous(page)
+  await expect.poll(() => columns(page), { timeout: 15_000 }).toBe(2)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+
+  const initial = await expectColumnSlice(page)
+  expect(initial.total - initial.hideIndex, 'premise: corpus has a large hidden tail').toBeGreaterThan(50)
+
+  // 1. Toggle cutoff open (.toggle.show) and closed (.toggle.hide)
+  await page.locator('.column:not(.hidden) .toggle.show').first().click()
+  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 15_000 }).toBeGreaterThan(initial.hideIndex)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+  const expanded = await expectColumnSlice(page)
+  expect(expanded.visibleCols.reduce((a, c) => a + c.hideToggles, 0), '.toggle.hide appears once expanded').toBeGreaterThan(0)
+
+  await page.locator('.column:not(.hidden) .toggle.hide').last().click()
+  await expect.poll(() => page.evaluate(() => window.__hideIndex), { timeout: 15_000 }).toBe(initial.hideIndex)
+  await expectColumnSlice(page)
+
+  // 2. Search pulls a hidden item across the cutoff into a visible column, then clearing MindBox
+  // returns it past hideIndex (using a body word rather than id: so it is not soft-touched)
+  const picked = await page.evaluate(() => {
+    const items = window.__items as (SliceItem & { text?: string })[]
+    const freq = new Map<string, number>()
+    for (const it of items) {
+      const words = new Set((it.text ?? '').toLowerCase().match(/\b[a-z]{6,}\b/g) ?? [])
+      for (const w of words) freq.set(w, (freq.get(w) ?? 0) + 1)
+    }
+    for (let i = items.length - 1; i >= window.__hideIndex; i--) {
+      const words = (items[i].text ?? '').toLowerCase().match(/\b[a-z]{6,}\b/g) ?? []
+      const unique = words.find(w => freq.get(w) === 1)
+      if (unique) return { id: items[i].id, word: unique }
+    }
+    return null
+  })
+  expect(picked, 'found a hidden item with a unique body word').toBeTruthy()
+  const { id: farId, word: farWord } = picked!
+  expect(await page.evaluate(id => window._item(id)!.elem === null, farId), 'hidden item has no elem before search').toBe(true)
+
+  await setMindboxQuery(page, farWord)
+  await expect
+    .poll(() => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) #super-container-${id}`), farId), {
+      timeout: 15_000,
+    })
+    .toBe(true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+  await expectColumnSlice(page)
+
+  await setMindboxQuery(page, '')
+  await expect
+    .poll(() => page.evaluate(id => window._item(id)!.elem === null, farId), { timeout: 15_000 })
+    .toBe(true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+  await expectColumnSlice(page)
+
+  // 3. An item being edited crosses past the cutoff and returns with its unsaved draft intact.
+  // Non-log editing items are promoted above all toggles by needs_prominence; a #log item stays in
+  // place under the session toggle until a query change promotes it, so it is the real path where
+  // an open editor crosses hideIndex via .toggle.hide and returns via .toggle.show or a search
+  const editId = await page.evaluate(() => {
+    const created = window._create('#log cutoff edit test', { save: false }) as { id: string }
+    return created.id
+  })
+  await page.waitForTimeout(5)
+  // a newer non-editing unpinned item ranks ahead of the #log item so a .toggle.hide anchors above it
+  await page.evaluate(() => void window._create('cutoff edit spacer', { save: false }))
+  if (await page.evaluate(id => !document.querySelector(`.column:not(.hidden) #super-container-${id}`), editId)) {
+    await page.locator('.column:not(.hidden) .toggle.show').first().click()
+  }
+  await expect
+    .poll(() => page.evaluate(id => !!document.querySelector(`.column:not(.hidden) #super-container-${id}`), editId), {
+      timeout: 15_000,
+    })
+    .toBe(true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+
+  await page.locator(`.column:not(.hidden) #super-container-${editId} .content`).click()
+  const editorArea = page.locator(`#textarea-${editId}`)
+  await expect(editorArea, 'clicked #log item opens its editor in place').toBeVisible({ timeout: 15_000 })
+  const draftMarker = ' [draft across cutoff]'
+  await editorArea.focus()
+  await page.keyboard.press('End')
+  await page.keyboard.type(draftMarker)
+  await expect.poll(() => editorArea.inputValue(), { timeout: 10_000 }).toContain(draftMarker)
+
+  // Push the open #log editor past hideIndex via .toggle.hide
+  await page.locator('.column:not(.hidden) .toggle.hide').first().click()
+  await expect
+    .poll(() => page.evaluate(id => window._item(id)!.elem === null, editId), { timeout: 15_000 })
+    .toBe(true)
+  const hiddenEditState = await page.evaluate(id => {
+    const it = (window.__items as SliceItem[]).find(x => x.id === id)!
+    return { editing: !!it.editing, editorText: it.editorText ?? '', index: it.index!, hideIndex: window.__hideIndex }
+  }, editId)
+  expect(hiddenEditState.index, 'edited item now sits at or beyond hideIndex').toBeGreaterThanOrEqual(hiddenEditState.hideIndex)
+  expect(hiddenEditState.editing, 'item.editing persists while hidden past cutoff').toBe(true)
+  expect(hiddenEditState.editorText, 'item.editorText persists unsaved draft while hidden').toContain(draftMarker)
+  await expectColumnSlice(page)
+
+  // Bring the open editor back via .toggle.show and verify its draft survived remount
+  // (an unfocused Editor keeps its textarea visibility:hidden while .editor/.backdrop is visible)
+  const editorBox = page.locator(`.column:not(.hidden) #super-container-${editId} .editor`)
+  await page.locator('.column:not(.hidden) .toggle.show').first().click()
+  await expect(editorBox, 'editor remounts on .toggle.show').toBeVisible({ timeout: 15_000 })
+  await expect(editorArea).toBeAttached()
+  expect(await editorArea.inputValue(), 'remounted editor keeps unsaved draft after toggle').toContain(draftMarker)
+  await expectColumnSlice(page)
+
+  // Push it past hideIndex again via .toggle.hide, then run a search (a query change promotes the
+  // open #log editor back across hideIndex) and verify the draft survives again
+  await page.locator('.column:not(.hidden) .toggle.hide').first().click()
+  await expect
+    .poll(() => page.evaluate(id => window._item(id)!.elem === null, editId), { timeout: 15_000 })
+    .toBe(true)
+  await setMindboxQuery(page, farWord)
+  await expect(editorBox, 'open editor remounts when a search raises it back across the cutoff').toBeVisible({
+    timeout: 15_000,
+  })
+  await expect(editorArea).toBeAttached()
+  expect(await editorArea.inputValue(), 'remounted editor keeps unsaved draft after search').toContain(draftMarker)
+  await expectColumnSlice(page)
+})
+
+test('an item beyond the cutoff measures in the hidden column before crossing to a visible column', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await page.goto('/')
+  await page.getByText('Stay Anonymous', { exact: true }).click({ timeout: 60_000 })
+  await expect.poll(() => page.evaluate(() => window._init_time > 0), { timeout: 30_000 }).toBe(true)
+  // startup measuring (renderRange) mounts items past hideIndex inside .column.hidden via renderIds;
+  // dropping the hidden column's filter stalls window.__rendered right here
+  await expect
+    .poll(() => page.evaluate(() => window.__rendered), {
+      message: 'startup measuring in .column.hidden finishes (window.__rendered)',
+      timeout: 25_000,
+    })
+    .toBe(true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+
+  // Startup measuring measured items past hideIndex without leaving them in .column.hidden
+  const startupMeasured = await page.evaluate(() => {
+    const items = window.__items as SliceItem[]
+    const it = items[window.__hideIndex]
+    return {
+      id: it.id,
+      height: it.height ?? 0,
+      rendered: !!it.rendered,
+      elemIsNull: window._item(it.id)!.elem === null,
+    }
+  })
+  expect(startupMeasured.height, 'item at hideIndex was measured during startup').toBeGreaterThan(0)
+  expect(startupMeasured.rendered, 'item at hideIndex marked rendered during startup').toBe(true)
+  expect(startupMeasured.elemIsNull, 'item at hideIndex is not mounted in the DOM').toBe(true)
+  await expectColumnSlice(page)
+
+  // Pick an unmeasured item beyond the startup 100-item renderRange cutoff
+  const unmeasuredId = await page.evaluate(() => {
+    const items = window.__items as SliceItem[]
+    const found = items
+      .slice(window.__hideIndex)
+      .filter(it => !it.height && !it.rendered)
+      .pop()
+    return found?.id ?? null
+  })
+  expect(unmeasuredId, 'corpus has an unmeasured item past startup renderRange').toBeTruthy()
+  expect(await page.evaluate(id => window._item(id)!.elem === null, unmeasuredId!)).toBe(true)
+
+  // Measure it off-screen via _render_item: it must mount in .column.hidden and resolve with height > 0
+  const hiddenRender = await page.evaluate(async id => {
+    const elem = await Promise.race([
+      window._render_item(window._item(id)!),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 15_000)),
+    ])
+    const it = (window.__items as SliceItem[]).find(x => x.id === id)!
+    return {
+      resolved: !!elem,
+      inHiddenCol: !!elem?.closest('.column.hidden'),
+      inVisibleCol: !!elem?.closest('.column:not(.hidden)'),
+      height: it.height ?? 0,
+      rendered: !!it.rendered,
+    }
+  }, unmeasuredId!)
+  expect(hiddenRender, '_render_item measures the hidden item in .column.hidden').toEqual({
+    resolved: true,
+    inHiddenCol: true,
+    inVisibleCol: false,
+    height: expect.any(Number),
+    rendered: true,
+  })
+  expect(hiddenRender.height, 'measured height is positive').toBeGreaterThan(0)
+
+  // Now pull that same item across the cutoff into a visible column via MindBox search
+  await setMindboxQuery(page, `id:${unmeasuredId}`)
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const elem = window._item(id)!.elem
+          return !!elem && !!elem.closest('.column:not(.hidden)') && !elem.closest('.column.hidden')
+        }, unmeasuredId!),
+      { timeout: 15_000 },
+    )
+    .toBe(true)
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+  const shownState = await page.evaluate(id => {
+    const it = (window.__items as SliceItem[]).find(x => x.id === id)!
+    return { height: it.height ?? 0, rendered: !!it.rendered, inHiddenDom: !!document.querySelector(`.column.hidden #super-container-${id}`) }
+  }, unmeasuredId!)
+  expect(shownState.height, 'shown item keeps positive measured height').toBeGreaterThan(0)
+  expect(shownState.rendered, 'shown item stays rendered').toBe(true)
+  expect(shownState.inHiddenDom, 'shown item is no longer in .column.hidden').toBe(false)
+  // renderIds still holds unmeasuredId (renderItem leaves it set), so it only unmounts from
+  // .column.hidden because item.index < hideIndex now — visible columns still hold no extra markers
+  await expectColumnSlice(page, { expectHiddenIdle: false })
+
+  // Clearing the query and collapsing the session toggle pushes unmeasuredId back past hideIndex
+  // while its measured height and rendered flag remain cached on the record
+  await setMindboxQuery(page, '')
+  await expect.poll(() => page.evaluate(() => !document.querySelector('.loading.visible')), { timeout: 30_000 }).toBe(true)
+  const hideToggle = page.locator('.column:not(.hidden) .toggle.hide').last()
+  if (await hideToggle.isVisible()) await hideToggle.click()
+  await expect
+    .poll(
+      () => page.evaluate(id => !document.querySelector(`.column:not(.hidden) #super-container-${id}`), unmeasuredId!),
+      { timeout: 15_000 },
+    )
+    .toBe(true)
+  const afterPush = await page.evaluate(id => {
+    const it = (window.__items as SliceItem[]).find(x => x.id === id)!
+    return { height: it.height ?? 0, rendered: !!it.rendered, index: it.index!, hideIndex: window.__hideIndex }
+  }, unmeasuredId!)
+  expect(afterPush.index).toBeGreaterThanOrEqual(afterPush.hideIndex)
+  expect(afterPush.height).toBeGreaterThan(0)
+  expect(afterPush.rendered).toBe(true)
+})
+
+test('a shared (fixed) page keeps the full list across startup init hooks and hidden markers, and a refused creation leaves the box alone', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1600, height: 900 })
+
+  // 1. Shared startup with an _init hook that queries two unindexed shared dependencies (#h1, #h2)
+  // via _create('/_noop', { command: true, mindbox_text, return_alerts: true }): the second shared
+  // sort at startup leaves stamped indices stale ([a:2, b:3, h2:0, h1:1] at hideIndex=2), so
+  // slicing items.slice(0, 3) drops h1 on the first flush while iterating full `items` mounts both
+  // h2 and h1 as before
+  const SHARED_KEY = 'e2e_init_stale'
+  const DOCS: { id: string; text: string; indexed?: number }[] = [
+    {
+      id: 'e2e-shared-init-a',
+      indexed: 0,
+      text: [
+        '#a shared root',
+        '```js',
+        'function _init() {',
+        "  _create('/_noop', { command: true, mindbox_text: '#h1', return_alerts: true })",
+        "  _create('/_noop', { command: true, mindbox_text: '#h2', return_alerts: true })",
+        '}',
+        'function _on_command_refused_chat() {',
+        "  return { text: '#refused_chat body', mindbox_text: '#refused_chat' }",
+        '}',
+        '```',
+        '#_init #_listen',
+      ].join('\n'),
+    },
+    { id: 'e2e-shared-init-b', indexed: 1, text: '#b shared item' },
+    { id: 'e2e-shared-init-h1', text: '#h1 unindexed shared dependency one' },
+    { id: 'e2e-shared-init-h2', text: '#h2 unindexed shared dependency two' },
+  ]
+  const db = firestore()
+  const now = Date.now()
+  for (const [i, doc] of DOCS.entries()) {
+    const shared: { keys: string[]; indices?: Record<string, number> } = { keys: [SHARED_KEY] }
+    if (doc.indexed !== undefined) shared.indices = { [SHARED_KEY]: doc.indexed }
+    await db
+      .collection('items')
+      .doc(doc.id)
+      .set({ user: 'crawl_e2e', time: now - i, text: doc.text, attr: { shared } })
+  }
+  try {
+    await page.addInitScript(() => {
+      const seen: string[] = []
+      ;(window as unknown as { __e2e_visible_mounts: string[] }).__e2e_visible_mounts = seen
+      const record = (node: Node) => {
+        if (!(node instanceof Element)) return
+        const boxes = node.matches('.container[data-item-id]')
+          ? [node]
+          : [...node.querySelectorAll('.container[data-item-id]')]
+        for (const box of boxes) {
+          if (!box.closest('.column:not(.hidden)')) continue
+          const id = box.getAttribute('data-item-id')
+          if (id && !seen.includes(id)) seen.push(id)
+        }
+      }
+      new MutationObserver(muts => {
+        for (const m of muts) for (const n of m.addedNodes) record(n)
+      }).observe(document, { childList: true, subtree: true })
+    })
+    await page.goto(`/?shared=crawl_e2e/${SHARED_KEY}`)
+    await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 })
+    await waitForApp(page)
+    const state = await page.evaluate(() => {
+      const visibleIds = [...document.querySelectorAll('.column:not(.hidden) .container[data-item-id]')].map(el =>
+        el.getAttribute('data-item-id'),
+      )
+      return {
+        mountedInVisible: (window as unknown as { __e2e_visible_mounts: string[] }).__e2e_visible_mounts,
+        visibleIds,
+        hideIndex: window.__hideIndex,
+      }
+    })
+    expect(
+      state.mountedInVisible,
+      'shared startup with _init query mounts both stale-indexed dependencies (h2 and h1) on first flush',
+    ).toEqual(expect.arrayContaining(['e2e-shared-init-h2', 'e2e-shared-init-h1', 'e2e-shared-init-a', 'e2e-shared-init-b']))
+    expect(state.hideIndex, 'shared hideIndex counts indexed items').toBe(2)
+    expect(state.visibleIds, 'indexed shared items are shown once startup layout finishes').toEqual([
+      'e2e-shared-init-a',
+      'e2e-shared-init-b',
+    ])
+
+    // 2. Refused creation on a shared page (both direct _create and a command returning mindbox_text)
+    // leaves the MindBox text alone and creates no item
+    await setMindboxQuery(page, 'keep shared query')
+    await expect(page.locator('#textarea-mindbox')).toHaveValue('keep shared query')
+    const directRefused = await page.evaluate(async () => {
+      const res = window._create('#refused_direct body', { mindbox_text: '#refused_direct', return_alerts: true })
+      await (window as unknown as { _update_dom: () => Promise<void> })._update_dom()
+      return {
+        returned: res ?? null,
+        boxValue: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+        exists: window._exists('#refused_direct'),
+      }
+    })
+    expect(directRefused, 'refused _create leaves MindBox unchanged').toEqual({
+      returned: null,
+      boxValue: 'keep shared query',
+      exists: false,
+    })
+
+    // Command returning { text, mindbox_text } dispatched on a shared page (where the header editor
+    // is display:none): creation is refused inside handleCommandReturn -> _create and leaves MindBox alone
+    await page.evaluate(() => void window._create('/refused_chat', { command: true }))
+    await expect(page.locator('.modal')).toContainText('can not create new item when viewing shared items', {
+      timeout: 10_000,
+    })
+    await page.evaluate(() => (window as unknown as { _modal_close?: () => void })._modal_close?.())
+    await page.evaluate(() => (window as unknown as { _update_dom: () => Promise<void> })._update_dom())
+    expect(
+      await page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value),
+      'refused command creation leaves MindBox unchanged',
+    ).toBe('keep shared query')
+    expect(await page.evaluate(() => window._exists('#refused_chat')), 'refused command creates no item').toBe(false)
+  } finally {
+    await Promise.all(DOCS.map(doc => db.collection('items').doc(doc.id).delete()))
+  }
+
+  // 3. Seeded shared page (/?shared=markdown_e2e/markdown): fixed mode iterates full `items`
+  // rather than the notebook's sliced/filtered loop, so .column.hidden still holds per-item
+  // Svelte markers (contrasting with the notebook's <= 8 childNodes in the slice row above)
+  await page.goto('/?shared=markdown_e2e/markdown')
+  await page.getByText('View Shared Page', { exact: true }).click({ timeout: 30_000 })
+  await waitForApp(page)
+  const mdStats = await page.evaluate(() => {
+    const hiddenCol = document.querySelector('.column.hidden')!
+    return {
+      total: window.__items.length,
+      hideIndex: window.__hideIndex,
+      hiddenComments: [...hiddenCol.childNodes].filter(n => n.nodeType === Node.COMMENT_NODE).length,
+    }
+  })
+  expect(mdStats.total, 'premise: seeded shared page has multiple items').toBeGreaterThanOrEqual(10)
+  expect(
+    mdStats.hiddenComments,
+    `shared page keeps full-list markers in .column.hidden (${mdStats.hiddenComments} vs total ${mdStats.total})`,
+  ).toBeGreaterThanOrEqual(mdStats.total)
+})
+
+test('early overlay clear waits for reader wheel scroll while clearing promptly after programmatic scroll and holding for recent editor typing', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+
+  // Hold a growing image (100px placeholder -> 450px SVG) so releasing it during a reader wheel
+  // scroll moves items below it above the viewport when layout runs.
+  let releaseGrow: (() => void) | null = null
+  let growRequested: (() => void) | null = null
+  const growRequestedP = new Promise<void>(r => {
+    growRequested = r
+  })
+  const growReleaseP = new Promise<void>(r => {
+    releaseGrow = r
+  })
+  const growSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="450"><rect width="200" height="450" fill="#48f"/></svg>'
+  await page.route('https://e2e-held.invalid/grow.svg', async route => {
+    growRequested?.()
+    await growReleaseP
+    await route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Cache-Control': 'no-store' }, body: growSvg })
+  })
+
+  await loadAnonymous(page)
+
+  // 1. Reader wheel scroll: create 10 tall fillers under a non-unique query (`e2e_sg`, so
+  // target == null), let them render so the page is scrollable, scroll down with a real wheel
+  // gesture, then reveal an unrendered image item at index 0 and release the image within 500ms
+  // of the wheel. Growing the top item shifts filler 0 above the viewport: early layout would
+  // yank scrollTop up to filler 0 while the reader is still scrolling.
+  await page.evaluate(() => {
+    const base = Date.now()
+    for (let i = 0; i < 10; i++) {
+      const it = window._create(`e2e_sg filler_${i}\n\n<div style="height:260px">filler ${i}</div>`, { save: false }) as { id: string }
+      ;(window as unknown as { __item: (id: string) => { time: number } }).__item(it.id).time = base - (i + 1) * 1000
+    }
+  })
+
+  await setMindboxQuery(page, 'e2e_sg')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => ({
+          overlay: !!document.querySelector('#sapper > .loading.visible'),
+          pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+          scrollHeight: document.body.scrollHeight,
+          headerTop: (document.querySelector('.header') as HTMLElement).offsetTop,
+        })),
+      { message: 'premise: tall fillers rendered and settled with overlay off', timeout: 15_000 },
+    )
+    .toEqual({ overlay: false, pending: false, scrollHeight: expect.any(Number), headerTop: expect.any(Number) })
+
+  const headerTop = await page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+  // Reader scrolls down with a mouse wheel well past the top items.
+  await page.mouse.move(350, 450)
+  await page.mouse.wheel(0, 1400)
+  await expect
+    .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'wheel scroll moved page down', timeout: 5_000 })
+    .toBeGreaterThanOrEqual(headerTop + 1000)
+  const scrolledTop = await page.evaluate(() => document.body.scrollTop)
+
+  // Immediately reveal the held-image item at index 0 (disableScrollingOnLayout preserves
+  // scrollTop and raises the overlay while the image is pending) and release it within 500ms.
+  const imgId = await page.evaluate(() => {
+    const img = window._create(
+      'e2e_sg img_top\n\n<img src="https://e2e-held.invalid/grow.svg" _uncached style="display:block;min-height:100px">',
+      { save: false },
+    ) as { id: string }
+    return img.id
+  })
+  await growRequestedP
+  const beforeRelease = await page.evaluate(() => {
+    const visible = [...document.querySelectorAll('.column:not(.hidden) .super-container')].find(el => {
+      const r = el.getBoundingClientRect()
+      return r.top >= 0 && r.top < window.innerHeight - 100
+    }) as HTMLElement | undefined
+    return {
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+      anchorId: visible?.id ?? null,
+      anchorTop: visible ? visible.getBoundingClientRect().top : null,
+      scrollTop: document.body.scrollTop,
+    }
+  })
+  expect(beforeRelease.overlay, 'premise: loading overlay is up for held image item').toBe(true)
+  expect(beforeRelease.anchorId, 'premise: a scrolled-to filler is visible in the viewport').toBeTruthy()
+
+  // Release the held image well within the 500ms reader-scroll guard.
+  releaseGrow!()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const it = window.__items.find(x => x.id === id) as { rendered?: boolean; height?: number } | undefined
+          return { rendered: !!it?.rendered, height: it?.height ?? 0 }
+        }, imgId),
+      { message: 'held image finished loading and reported its grown height', timeout: 10_000 },
+    )
+    .toEqual({ rendered: true, height: expect.any(Number) })
+
+  // Check ~100ms after image load (still within 500ms of the wheel): early layout MUST NOT have run,
+  // the reader's scrolled viewport must NOT be yanked up toward the top mover (browser scroll
+  // anchoring keeps the visible filler at its screen position), and delayed layout stays pending.
+  await page.waitForTimeout(100)
+  const duringScroll = await page.evaluate(anchorId => {
+    const anchor = anchorId ? document.getElementById(anchorId) : null
+    return {
+      scrollTop: document.body.scrollTop,
+      anchorTop: anchor ? anchor.getBoundingClientRect().top : null,
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+      pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+    }
+  }, beforeRelease.anchorId)
+  expect(
+    duringScroll.scrollTop,
+    `reader scroll position was not yanked up when image completed during scroll (was ${scrolledTop}, now ${duringScroll.scrollTop})`,
+  ).toBeGreaterThanOrEqual(scrolledTop - 5)
+  expect(
+    Math.abs((duringScroll.anchorTop ?? Infinity) - (beforeRelease.anchorTop ?? -Infinity)),
+    `reader's visible anchor item stayed in place on screen (was ${beforeRelease.anchorTop}, now ${duringScroll.anchorTop})`,
+  ).toBeLessThanOrEqual(5)
+  expect(duringScroll.overlay, 'overlay stays up while reader scroll is still within 500ms').toBe(true)
+  expect(duringScroll.pending, 'delayed layout stays pending during reader scroll').toBe(true)
+  expect(duringScroll.layoutCount, 'early layout did not run during reader scroll').toBe(beforeRelease.layoutCount)
+
+  // Once the wheel scroll rests (>500ms), the delayed layout runs, clears the overlay, and lays out the grown image.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const it = window.__items.find(x => x.id === id) as { height?: number; layoutHeight?: number } | undefined
+          return {
+            overlay: !!document.querySelector('#sapper > .loading.visible'),
+            pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+            laidOut: (window as unknown as { __layoutCount: number }).__layoutCount > 0 && (it?.layoutHeight ?? 0) >= 400,
+          }
+        }, imgId),
+      { message: 'delayed layout runs once reader scroll rests and lays out the grown image', timeout: 10_000 },
+    )
+    .toEqual({ overlay: false, pending: false, laidOut: true })
+
+  // 2. Fast path after a PROGRAMMATIC scroll (no recent reader scroll): wait >550ms past the wheel,
+  // trigger _scroll_to (which updates lastScrollTime without updating reader scroll time), pre-schedule
+  // a 250ms tryLayout timer via a >300px resize, and reveal a new unrendered item. The overlay must
+  // clear promptly (<150ms, well below both the 250ms resize timer and 500ms lastScrollTime wait) and
+  // cancel the already-scheduled 250ms timer without it ever firing.
+  await page.waitForTimeout(600)
+  const fastItemId = await page.evaluate(() => {
+    const it = window._create('#e2e_fast_prog_scroll fast overlay item', { save: false }) as { id: string }
+    return it.id
+  })
+  const fastResult = await page.evaluate(
+    async ([targetId, resizeId]) => {
+      const w = window as unknown as {
+        _scroll_to: (y: number) => void
+        _item_hooks: Record<string, { resize: (trigger: string) => void }>
+        __layoutPending: boolean
+        __layoutCount: number
+        __items: { id: string; rendered?: boolean; editing?: boolean }[]
+        __hideIndex: number
+      }
+      const origSetTimeout = window.setTimeout.bind(window)
+      const origClearTimeout = window.clearTimeout.bind(window)
+      let preTimerId: number | null = null
+      let preTimerCleared = false
+      let preTimerFired = false
+      let capturing = false
+      window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+        let id = 0
+        const wrapped =
+          typeof fn === 'function'
+            ? (...a: unknown[]) => {
+                if (id === preTimerId) preTimerFired = true
+                return (fn as (...x: unknown[]) => unknown)(...a)
+              }
+            : fn
+        id = origSetTimeout(wrapped, delay, ...args)
+        if (capturing && delay === 250) preTimerId = id
+        return id
+      }) as typeof window.setTimeout
+      window.clearTimeout = ((id?: number) => {
+        if (id != null && id === preTimerId) preTimerCleared = true
+        return origClearTimeout(id)
+      }) as typeof window.clearTimeout
+      try {
+        // Trigger a programmatic scroll to update lastScrollTime right before the reveal.
+        const headerTop = (document.querySelector('.header') as HTMLElement).offsetTop
+        w._scroll_to(headerTop + 120)
+        // Wait one frame for the body scroll event to fire and update lastScrollTime.
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+        // Pre-schedule a 250ms delayed tryLayout timer on a currently mounted item.
+        const el = document.querySelector(`#super-container-${resizeId} .item > .content`) as HTMLElement | null
+        if (el) {
+          el.style.paddingBottom = '400px'
+          capturing = true
+          w._item_hooks?.[resizeId]?.resize('e2e_pre_timer')
+          capturing = false
+        }
+        const t0 = performance.now()
+        const loading = document.querySelector('#sapper > .loading')!
+        let sawOverlay = loading.classList.contains('visible')
+        let clearedAt: number | null = null
+        const mo = new MutationObserver(() => {
+          if (loading.classList.contains('visible')) sawOverlay = true
+          else if (sawOverlay && clearedAt === null) clearedAt = performance.now() - t0
+        })
+        mo.observe(loading, { attributes: true, attributeFilter: ['class'] })
+
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        box.value = '#e2e_fast_prog_scroll'
+        box.blur()
+        box.dispatchEvent(new Event('input'))
+
+        // Wait up to 2s for overlay clear, then wait 300ms past the 250ms timer window.
+        await new Promise<void>(resolve => {
+          const check = () => {
+            if (clearedAt !== null || performance.now() - t0 > 2000) return resolve()
+            origSetTimeout(check, 5)
+          }
+          check()
+        })
+        mo.disconnect()
+        await new Promise(r => origSetTimeout(r, 300))
+        const target = w.__items.find(x => x.id === targetId)
+        return {
+          sawOverlay,
+          preTimerScheduled: preTimerId !== null,
+          clearedMs: clearedAt,
+          preTimerCleared,
+          preTimerFired,
+          rendered: !!target?.rendered,
+        }
+      } finally {
+        window.setTimeout = origSetTimeout
+        window.clearTimeout = origClearTimeout
+      }
+    },
+    [fastItemId, imgId] as const,
+  )
+  expect(fastResult.sawOverlay, 'premise: loading overlay rose for unrendered item').toBe(true)
+  expect(fastResult.preTimerScheduled, 'premise: a 250ms delayed tryLayout timer was already scheduled').toBe(true)
+  expect(fastResult.rendered, 'target item finished rendering').toBe(true)
+  expect(
+    fastResult.clearedMs,
+    `overlay clears early after programmatic scroll without waiting for 250ms timer or 500ms lastScrollTime (took ${fastResult.clearedMs}ms)`,
+  ).toBeLessThan(180)
+  expect(fastResult.preTimerCleared, 'already-scheduled delayed tryLayout timer was cancelled on early clear').toBe(true)
+  expect(fastResult.preTimerFired, 'cancelled delayed tryLayout timer never fired').toBe(false)
+
+  // 3. Recent typing in an item's editor still holds the overlay via lastEditTime.
+  await page.locator(`#super-container-${fastItemId} .content`).click()
+  await expect(page.locator(`#textarea-${fastItemId}`)).toBeVisible({ timeout: 10_000 })
+  await page.locator(`#textarea-${fastItemId}`).focus()
+  await page.keyboard.type('z')
+  const editGuard = await page.evaluate(async () => {
+    const w = window as unknown as {
+      __items: { id: string; index: number; rendered?: boolean }[]
+      __hideIndex: number
+      __layoutPending: boolean
+    }
+    const loading = document.querySelector('#sapper > .loading')!
+    let sawOverlay = loading.classList.contains('visible')
+    const mo = new MutationObserver(() => {
+      if (loading.classList.contains('visible')) sawOverlay = true
+    })
+    mo.observe(loading, { attributes: true, attributeFilter: ['class'] })
+    const sibling = window._create('#_pin e2e edit guard probe', { save: false }) as { id: string }
+    await new Promise<void>(resolve => {
+      const check = () => {
+        const it = w.__items.find(x => x.id === sibling.id)
+        if (it?.rendered) return resolve()
+        requestAnimationFrame(check)
+      }
+      requestAnimationFrame(check)
+    })
+    // Wait 30ms past the coalesced early check (still well below the 250ms delayed timer).
+    await new Promise(r => setTimeout(r, 30))
+    mo.disconnect()
+    const it = w.__items.find(x => x.id === sibling.id)
+    return {
+      inVisibleSlice: (it?.index ?? Infinity) < w.__hideIndex,
+      sawOverlay,
+      heldDuringEdit: loading.classList.contains('visible') && !!w.__layoutPending,
+    }
+  })
+  expect(editGuard.inVisibleSlice, 'premise: pinned edit-guard item is in visible slice').toBe(true)
+  expect(editGuard.sawOverlay, 'premise: overlay rose for unrendered edit-guard item').toBe(true)
+  expect(editGuard.heldDuringEdit, 'recent item-editor typing keeps the delayed tryLayout guard').toBe(true)
+  await expect
+    .poll(
+      () => page.evaluate(() => !(window as unknown as { __layoutPending: boolean }).__layoutPending && !document.querySelector('#sapper > .loading.visible')),
+      { message: 'overlay clears once editor typing rests', timeout: 10_000 },
+    )
+    .toBe(true)
+})
+
+test('early layout deferred scroll yields to a reader wheel arriving after layout starts, and runs when no reader input arrives', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+
+  const growSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="450"><rect width="200" height="450" fill="#48f"/></svg>'
+  const gates = new Map<string, { release: () => void; requested: Promise<void>; markRequested: () => void; promise: Promise<void> }>()
+  for (const v of ['1', '2']) {
+    let release!: () => void
+    let markRequested!: () => void
+    const promise = new Promise<void>(r => {
+      release = r
+    })
+    const requested = new Promise<void>(r => {
+      markRequested = r
+    })
+    gates.set(v, { release, requested, markRequested, promise })
+  }
+  await page.route('https://e2e-held.invalid/grow_rev.svg*', async route => {
+    const ver = new URL(route.request().url()).searchParams.get('v') ?? '1'
+    const gate = gates.get(ver)
+    if (gate) {
+      gate.markRequested()
+      await gate.promise
+    }
+    await route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Cache-Control': 'no-store' }, body: growSvg })
+  })
+
+  await loadAnonymous(page)
+
+  // Non-unique query `e2e_rev` (target == null) with 10 tall fillers so growing an item at index 0
+  // moves items above the scrolled viewport and queues updateItemLayout's deferred top-mover scroll.
+  await page.evaluate(() => {
+    const base = Date.now()
+    for (let i = 0; i < 10; i++) {
+      const it = window._create(`e2e_rev filler_${i}\n\n<div style="height:360px">filler ${i}</div>`, { save: false }) as { id: string }
+      ;(window as unknown as { __item: (id: string) => { time: number } }).__item(it.id).time = base - (i + 10) * 1000
+    }
+  })
+
+  await setMindboxQuery(page, 'e2e_rev')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => ({
+          overlay: !!document.querySelector('#sapper > .loading.visible'),
+          pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+        })),
+      { message: 'premise: fillers rendered and settled with overlay off', timeout: 15_000 },
+    )
+    .toEqual({ overlay: false, pending: false })
+  // Let the initial query layout's own deferred update_dom() frames finish before scrolling down.
+  await page.evaluate(
+    () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))),
+  )
+
+  const headerTop = await page.evaluate(() => (document.querySelector('.header') as HTMLElement).offsetTop)
+
+  // Hold requestAnimationFrame once __layoutCount advances past `beforeLayoutCount` so update_dom()
+  // finishes its Svelte tick (overlay clears) and pauses right before its deferred scroll callback.
+  const holdNextLayoutRaf = async (beforeLayoutCount: number) => {
+    await page.evaluate(baseCount => {
+      const w = window as unknown as {
+        __layoutCount: number
+        __heldRafs?: FrameRequestCallback[]
+        __releaseHeldRafs?: () => void
+      }
+      const origRaf = window.requestAnimationFrame.bind(window)
+      const held: FrameRequestCallback[] = []
+      let fakeId = 900_000
+      w.__heldRafs = held
+      w.__releaseHeldRafs = () => {
+        window.requestAnimationFrame = origRaf
+        const cbs = held.splice(0)
+        for (const cb of cbs) origRaf(cb)
+        delete w.__releaseHeldRafs
+      }
+      window.requestAnimationFrame = (cb: FrameRequestCallback) => {
+        if (w.__layoutCount > baseCount) {
+          held.push(cb)
+          return ++fakeId
+        }
+        return origRaf(cb)
+      }
+    }, beforeLayoutCount)
+  }
+
+  const releaseAndFlushRafs = async () => {
+    await page.evaluate(
+      () =>
+        new Promise<void>(resolve => {
+          const w = window as unknown as { __releaseHeldRafs?: () => void }
+          w.__releaseHeldRafs?.()
+          requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+        }),
+    )
+  }
+
+  try {
+    // 1. Reverse order: scroll down programmatically (no reader input yet), reveal held image v=1,
+    // let early layout run and clear the overlay while holding update_dom()'s frames, deliver a
+    // real reader wheel scroll in between, then release the deferred scroll: the wheel must win.
+    await page.evaluate(y => {
+      ;(window as unknown as { _scroll_to: (top: number) => void })._scroll_to(y)
+    }, headerTop + 2200)
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'programmatic scroll moved page down', timeout: 5_000 })
+      .toBeGreaterThanOrEqual(headerTop + 1800)
+
+    await page.evaluate(() => {
+      window._create(
+        'e2e_rev img_top_rev1\n\n<img src="https://e2e-held.invalid/grow_rev.svg?v=1" _uncached style="display:block;min-height:100px">',
+        { save: false },
+      )
+    })
+    await gates.get('1')!.requested
+    const before1 = await page.evaluate(() => ({
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+    }))
+    expect(before1.overlay, 'premise: loading overlay is up for held image v=1').toBe(true)
+
+    await holdNextLayoutRaf(before1.layoutCount)
+    gates.get('1')!.release()
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(baseCount => {
+            const w = window as unknown as { __layoutCount: number; __layoutPending: boolean; __heldRafs?: FrameRequestCallback[] }
+            return {
+              layoutRan: w.__layoutCount > baseCount,
+              overlay: !!document.querySelector('#sapper > .loading.visible'),
+              pending: !!w.__layoutPending,
+              held: (w.__heldRafs?.length ?? 0) >= 1,
+            }
+          }, before1.layoutCount),
+        { message: 'early layout ran and cleared overlay while deferred scroll is held', timeout: 10_000 },
+      )
+      .toEqual({ layoutRan: true, overlay: false, pending: false, held: true })
+
+    const beforeWheelTop = await page.evaluate(() => document.body.scrollTop)
+    expect(beforeWheelTop, 'premise: page stayed well below top movers before wheel').toBeGreaterThanOrEqual(headerTop + 1800)
+    await page.mouse.move(350, 450)
+    await page.mouse.wheel(0, 250)
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'reader wheel moved page further down before deferred scroll ran', timeout: 5_000 })
+      .toBeGreaterThanOrEqual(beforeWheelTop + 150)
+
+    const afterWheel = await page.evaluate(() => ({
+      scrollTop: document.body.scrollTop,
+      held: ((window as unknown as { __heldRafs?: FrameRequestCallback[] }).__heldRafs?.length ?? 0) >= 1,
+    }))
+    expect(afterWheel.held, 'premise: deferred scroll remained held until after wheel input').toBe(true)
+
+    await releaseAndFlushRafs()
+    const finalTop1 = await page.evaluate(() => document.body.scrollTop)
+    expect(
+      finalTop1,
+      `deferred early-layout scroll yielded to reader wheel arriving after layout started (was ${afterWheel.scrollTop}, now ${finalTop1})`,
+    ).toBeGreaterThanOrEqual(afterWheel.scrollTop - 5)
+
+    // 2. Control case beside it: once the wheel rests (>500ms), repeat with held image v=2 and NO
+    // reader input between layout and deferred scroll (only a small programmatic scroll): the
+    // deferred scroll must still run and pull the viewport up to the top mover.
+    await page.waitForTimeout(600)
+    await page.evaluate(y => {
+      ;(window as unknown as { _scroll_to: (top: number) => void })._scroll_to(y)
+    }, headerTop + 2200)
+    await expect
+      .poll(() => page.evaluate(() => document.body.scrollTop), { message: 'programmatic scroll positioned control case', timeout: 5_000 })
+      .toBeGreaterThanOrEqual(headerTop + 1800)
+
+    await page.evaluate(() => {
+      window._create(
+        'e2e_rev img_top_rev2\n\n<img src="https://e2e-held.invalid/grow_rev.svg?v=2" _uncached style="display:block;min-height:100px">',
+        { save: false },
+      )
+    })
+    await gates.get('2')!.requested
+    const before2 = await page.evaluate(() => ({
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+    }))
+    expect(before2.overlay, 'premise: loading overlay is up for control held image v=2').toBe(true)
+
+    await holdNextLayoutRaf(before2.layoutCount)
+    gates.get('2')!.release()
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(baseCount => {
+            const w = window as unknown as { __layoutCount: number; __layoutPending: boolean; __heldRafs?: FrameRequestCallback[] }
+            return {
+              layoutRan: w.__layoutCount > baseCount,
+              overlay: !!document.querySelector('#sapper > .loading.visible'),
+              pending: !!w.__layoutPending,
+              held: (w.__heldRafs?.length ?? 0) >= 1,
+            }
+          }, before2.layoutCount),
+        { message: 'control early layout ran and cleared overlay while deferred scroll is held', timeout: 10_000 },
+      )
+      .toEqual({ layoutRan: true, overlay: false, pending: false, held: true })
+
+    // Programmatic scroll only (no reader input) must not prevent the deferred scroll from running.
+    const ctrlBeforeRelease = await page.evaluate(async () => {
+      const target = document.body.scrollTop + 20
+      ;(window as unknown as { _scroll_to: (top: number) => void })._scroll_to(target)
+      await new Promise(r => setTimeout(r, 20))
+      return document.body.scrollTop
+    })
+
+    await releaseAndFlushRafs()
+    const ctrlAfterRelease = await page.evaluate(() => document.body.scrollTop)
+    expect(
+      ctrlAfterRelease,
+      `without reader input in between, deferred early-layout scroll still moves to top mover (was ${ctrlBeforeRelease}, now ${ctrlAfterRelease})`,
+    ).toBeLessThan(ctrlBeforeRelease - 200)
+  } finally {
+    await page.evaluate(() => {
+      ;(window as unknown as { __releaseHeldRafs?: () => void }).__releaseHeldRafs?.()
+    })
+  }
+})
+
+test('Shift+ArrowDown scroll to a show-more toggle below the viewport holds early layout while an image above completes', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+
+  let releaseGrow: (() => void) | null = null
+  let growRequested: (() => void) | null = null
+  const growRequestedP = new Promise<void>(r => {
+    growRequested = r
+  })
+  const growReleaseP = new Promise<void>(r => {
+    releaseGrow = r
+  })
+  const growSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="450"><rect width="200" height="450" fill="#48f"/></svg>'
+  await page.route('https://e2e-held.invalid/grow_shortcut.svg', async route => {
+    growRequested?.()
+    await growReleaseP
+    await route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Cache-Control': 'no-store' }, body: growSvg })
+  })
+
+  await loadAnonymous(page)
+
+  // Create 16 tall plain matching items so the first slice puts `.toggle.show` well below the
+  // 900px viewport and activating it reveals only plain matching items (no external assets).
+  await page.evaluate(() => {
+    const base = Date.now()
+    for (let i = 0; i < 16; i++) {
+      const it = window._create(`e2e_sh filler_${i}\n\n<div style="height:360px">filler ${i}</div>`, { save: false }) as { id: string }
+      ;(window as unknown as { __item: (id: string) => { time: number } }).__item(it.id).time = base - (i + 10) * 1000
+    }
+  })
+
+  await setMindboxQuery(page, 'e2e_sh')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => ({
+          overlay: !!document.querySelector('#sapper > .loading.visible'),
+          pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+          hasShowToggle: !!document.querySelector('.toggle.show'),
+        })),
+      { message: 'premise: matching fillers settled with a show-more toggle', timeout: 15_000 },
+    )
+    .toEqual({ overlay: false, pending: false, hasShowToggle: true })
+  // Let the initial query layout's own deferred update_dom() frames finish before pressing Shift+ArrowDown.
+  await page.evaluate(
+    () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))),
+  )
+
+  // Reveal a held-image item at index 0 (above the viewport once Shift+ArrowDown scrolls to the
+  // show-more toggle).
+  const imgId = await page.evaluate(() => {
+    const img = window._create(
+      'e2e_sh img_top_sh\n\n<img src="https://e2e-held.invalid/grow_shortcut.svg" _uncached style="display:block;min-height:100px">',
+      { save: false },
+    ) as { id: string }
+    return img.id
+  })
+  await growRequestedP
+
+  const beforeShortcut = await page.evaluate(() => {
+    const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement | null
+    box?.blur()
+    const toggle = document.querySelector('.toggle.show') as HTMLElement | null
+    const headerTop = (document.querySelector('.header') as HTMLElement).offsetTop
+    return {
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+      hideIndex: window.__hideIndex,
+      scrollTop: document.body.scrollTop,
+      headerTop,
+      toggleTop: toggle ? toggle.offsetTop : -1,
+      viewHeight: window.visualViewport?.height ?? window.innerHeight,
+    }
+  })
+  expect(beforeShortcut.overlay, 'premise: loading overlay is up for held image above').toBe(true)
+  expect(
+    beforeShortcut.toggleTop,
+    `premise: show-more toggle (${beforeShortcut.toggleTop}) sits below the viewport band (${beforeShortcut.scrollTop + beforeShortcut.viewHeight - 200})`,
+  ).toBeGreaterThan(beforeShortcut.scrollTop + beforeShortcut.viewHeight - 200)
+
+  // Press Shift+ArrowDown: the route prevents the key, scrolls the show-more toggle into view,
+  // and activates it.
+  await page.keyboard.press('Shift+ArrowDown')
+
+  const atToggle = await page.evaluate(() => {
+    const visible = [...document.querySelectorAll('.column:not(.hidden) .super-container')].find(el => {
+      const r = el.getBoundingClientRect()
+      return r.top >= 0 && r.top < window.innerHeight - 100
+    }) as HTMLElement | undefined
+    return {
+      scrollTop: document.body.scrollTop,
+      hideIndex: window.__hideIndex,
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+      anchorId: visible?.id ?? null,
+      anchorTop: visible ? visible.getBoundingClientRect().top : null,
+    }
+  })
+  const expectedToggleScroll = Math.max(beforeShortcut.headerTop, beforeShortcut.toggleTop - beforeShortcut.viewHeight / 4)
+  expect(atToggle.hideIndex, 'Shift+ArrowDown activated the show-more toggle').toBeGreaterThan(beforeShortcut.hideIndex)
+  expect(atToggle.scrollTop, 'Shift+ArrowDown scrolled the page down to the show-more toggle').toBeGreaterThanOrEqual(
+    expectedToggleScroll - 20,
+  )
+  expect(atToggle.anchorId, 'premise: a scrolled-to filler is visible near the toggle').toBeTruthy()
+
+  // Complete the held image above the viewport right away (well within 500ms of Shift+ArrowDown).
+  releaseGrow!()
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const slice = window.__items.slice(0, window.__hideIndex) as { id: string; rendered?: boolean; height?: number }[]
+          const img = slice.find(x => x.id === id)
+          return {
+            imgRendered: !!img?.rendered,
+            imgGrown: (img?.height ?? 0) >= 400,
+            allRendered: slice.length > 0 && slice.every(x => !!x.rendered),
+          }
+        }, imgId),
+      { message: 'held image above and newly revealed plain items finished rendering', timeout: 10_000 },
+    )
+    .toEqual({ imgRendered: true, imgGrown: true, allRendered: true })
+
+  // Wait past any coalesced delay-0 check and update_dom()'s two animation frames (event-order
+  // bounded wait, still well inside the 500ms reader-scroll guard).
+  await page.evaluate(
+    () =>
+      new Promise<void>(resolve => {
+        setTimeout(() => {
+          requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+        }, 0)
+      }),
+  )
+
+  const afterImage = await page.evaluate(anchorId => {
+    const anchor = anchorId ? document.getElementById(anchorId) : null
+    return {
+      scrollTop: document.body.scrollTop,
+      anchorTop: anchor ? anchor.getBoundingClientRect().top : null,
+      overlay: !!document.querySelector('#sapper > .loading.visible'),
+      pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+      layoutCount: (window as unknown as { __layoutCount: number }).__layoutCount,
+    }
+  }, atToggle.anchorId)
+
+  expect(
+    afterImage.scrollTop,
+    `page stays at the show-more toggle when image above completes after Shift+ArrowDown (was ${atToggle.scrollTop}, now ${afterImage.scrollTop})`,
+  ).toBeGreaterThanOrEqual(atToggle.scrollTop - 5)
+  expect(
+    Math.abs((afterImage.anchorTop ?? Infinity) - (atToggle.anchorTop ?? -Infinity)),
+    `visible anchor at toggle stayed in place on screen (was ${atToggle.anchorTop}, now ${afterImage.anchorTop})`,
+  ).toBeLessThanOrEqual(5)
+  expect(afterImage.overlay, 'overlay stays up within 500ms of Shift+ArrowDown scroll').toBe(true)
+  expect(afterImage.pending, 'delayed layout stays pending after Shift+ArrowDown scroll').toBe(true)
+  expect(afterImage.layoutCount, 'early layout did not run within 500ms of Shift+ArrowDown scroll').toBe(atToggle.layoutCount)
+
+  // Once the shortcut scroll rests (>500ms), delayed layout runs and lays out the grown image.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const it = window.__items.find(x => x.id === id) as { layoutHeight?: number } | undefined
+          return {
+            overlay: !!document.querySelector('#sapper > .loading.visible'),
+            pending: !!(window as unknown as { __layoutPending: boolean }).__layoutPending,
+            laidOut: (it?.layoutHeight ?? 0) >= 400,
+          }
+        }, imgId),
+      { message: 'delayed layout runs once Shift+ArrowDown scroll rests', timeout: 10_000 },
+    )
+    .toEqual({ overlay: false, pending: false, laidOut: true })
+})
+
+test('coalesced overlay readiness waits for sibling resize reports before clearing, whichever sibling reports first', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 700, height: 900 })
+
+  const fixedSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="80"><rect width="100" height="80" fill="#4f8"/></svg>'
+  const gates = new Map<string, { release: () => void; requested: Promise<void>; markRequested: () => void; promise: Promise<void> }>()
+  for (const v of ['2', '3']) {
+    let release!: () => void
+    let markRequested!: () => void
+    const promise = new Promise<void>(r => {
+      release = r
+    })
+    const requested = new Promise<void>(r => {
+      markRequested = r
+    })
+    gates.set(v, { release, requested, markRequested, promise })
+  }
+  await page.route('https://e2e-held.invalid/fixed.svg*', async route => {
+    const ver = new URL(route.request().url()).searchParams.get('v') ?? '1'
+    const gate = gates.get(ver)
+    if (gate) {
+      gate.markRequested()
+      await gate.promise
+    }
+    await route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'Cache-Control': 'no-store' }, body: fixedSvg })
+  })
+
+  await loadAnonymous(page)
+
+  // Measure the image item once (v=1) so it holds a cached rendered=true and known height, then
+  // unmount it by navigating to an unrelated query.
+  const imgId = await page.evaluate(() => {
+    window._create('#e2e_sib_away away anchor', { save: false })
+    const img = window._create(
+      '#e2e_sib_img e2e_sib_tok\n\n<img src="https://e2e-held.invalid/fixed.svg?v=1" width="100" height="80" _uncached style="display:block">',
+      { save: false },
+    ) as { id: string }
+    return img.id
+  })
+  await setMindboxQuery(page, '#e2e_sib_img')
+  await expect
+    .poll(
+      () =>
+        page.evaluate(id => {
+          const it = window.__items.find(x => x.id === id) as { rendered?: boolean; height?: number } | undefined
+          return {
+            rendered: !!it?.rendered,
+            height: it?.height ?? 0,
+            overlay: !!document.querySelector('#sapper > .loading.visible'),
+          }
+        }, imgId),
+      { message: 'premise: image item measured and rendered initially', timeout: 15_000 },
+    )
+    .toEqual({ rendered: true, height: expect.any(Number), overlay: false })
+  const measuredHeight = await page.evaluate(id => (window.__items.find(x => x.id === id) as unknown as { height: number }).height, imgId)
+  expect(measuredHeight).toBeGreaterThanOrEqual(80)
+
+  const runOrder = async (order: 'plain-first' | 'image-first', ver: '2' | '3') => {
+    const label = order
+    // Push imgItem to the bottom of the non-matching tail so navigating away unmounts it while
+    // keeping its cached rendered=true and measuredHeight.
+    await page.evaluate(id => {
+      ;(window as unknown as { __item: (id: string) => { time: number } }).__item(id).time = 1
+    }, imgId)
+    await setMindboxQuery(page, '#e2e_sib_away')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(id => ({
+            mounted: !!document.getElementById('super-container-' + id),
+            overlay: !!document.querySelector('#sapper > .loading.visible'),
+            rendered: !!(window.__items.find(x => x.id === id) as { rendered?: boolean } | undefined)?.rendered,
+          }), imgId),
+        { message: `${label}: premise: image item unmounted with stale rendered=true`, timeout: 10_000 },
+      )
+      .toEqual({ mounted: false, overlay: false, rendered: true })
+
+    // While unmounted, point the image at the next held URL (same 100x80 dimensions so height ==
+    // prevHeight on remount), create a fresh unrendered plain sibling, spy on rendered flag writes,
+    // and intercept the flush's delay-0 afterUpdate resize timers so the test itself delivers them
+    // in either natural or reversed order on the real timer queue.
+    const plainId = await page.evaluate(
+      async ([id, ver]) => {
+        const w = window as unknown as {
+          __item: (id: string) => { time: number; rendered: boolean; height: number }
+          _update_dom: () => Promise<void>
+        }
+        ;(window._item(id) as unknown as { write: (text: string, sel: string, opts: object) => void }).write(
+          `#e2e_sib_img e2e_sib_tok\n\n<img src="https://e2e-held.invalid/fixed.svg?v=${ver}" width="100" height="80" _uncached style="display:block">`,
+          '',
+          { skip_save: true, keep_time: true },
+        )
+        const plain = window._create(`#e2e_sib_plain_${ver} e2e_sib_tok plain sibling ${ver}`, { save: false }) as { id: string }
+        const imgRec = w.__item(id)
+        const plainRec = w.__item(plain.id)
+        const now = Date.now()
+        plainRec.time = now + 5000
+        imgRec.time = now - 5000
+        await w._update_dom()
+        return plain.id
+      },
+      [imgId, ver] as const,
+    )
+
+    try {
+      const gate = gates.get(ver)!
+      await page.evaluate(
+        ([id, pId, order]) => {
+          const w = window as unknown as {
+            __item: (id: string) => { rendered: boolean }
+            _item_hooks?: Record<string, { resize: (trigger: string) => void }>
+            __sib_log?: string[]
+            __sib_restore?: () => void
+          }
+          const log: string[] = (w.__sib_log = [])
+          const wrap = (rec: { rendered: boolean }, tag: string) => {
+            let val = rec.rendered
+            Object.defineProperty(rec, 'rendered', {
+              configurable: true,
+              enumerable: true,
+              get: () => val,
+              set: (v: boolean) => {
+                val = v
+                log.push(`${tag}:${v}`)
+              },
+            })
+            return () => {
+              delete (rec as { rendered?: boolean }).rendered
+              rec.rendered = val
+            }
+          }
+          const r1 = wrap(w.__item(pId), 'plain')
+          const r2 = wrap(w.__item(id), 'image')
+
+          // Suppress Item.svelte's automatic delay-0 afterUpdate reports for this single flush,
+          // then deliver plain's and image's afterUpdate reports as two separate real delay-0
+          // macrotasks in the test's exact chosen order once both components have mounted.
+          const origSetTimeout = window.setTimeout.bind(window)
+          let capturing = true
+          let flushArmed = false
+          window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+            if (capturing && delay === 0 && typeof fn === 'function') {
+              if (!flushArmed) {
+                flushArmed = true
+                origSetTimeout(() => {
+                  capturing = false
+                  window.setTimeout = origSetTimeout
+                  const ids = order === 'plain-first' ? [pId, id] : [id, pId]
+                  for (const targetId of ids) {
+                    origSetTimeout(() => w._item_hooks?.[targetId]?.resize('afterUpdate'), 0)
+                  }
+                }, 0)
+              }
+              return 0
+            }
+            return origSetTimeout(fn, delay, ...args)
+          }) as typeof window.setTimeout
+
+          w.__sib_restore = () => {
+            capturing = false
+            window.setTimeout = origSetTimeout
+            r1()
+            r2()
+          }
+
+          const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+          box.value = 'e2e_sib_tok'
+          box.blur()
+          box.dispatchEvent(new Event('input'))
+        },
+        [imgId, plainId, order] as const,
+      )
+      await gate.requested
+      // Wait for both sibling reports to land, then wait 300ms (past the 250ms delayed timer too)
+      // to confirm the overlay stays up while the image is pending.
+      await expect
+        .poll(() => page.evaluate(() => ((window as unknown as { __sib_log?: string[] }).__sib_log ?? []).length), {
+          message: `${label}: both sibling reports arrived`,
+          timeout: 10_000,
+        })
+        .toBeGreaterThanOrEqual(2)
+      await page.waitForTimeout(300)
+
+      const whileHeld = await page.evaluate(
+        ([id, pId]) => {
+          const w = window as unknown as { __sib_log?: string[] }
+          const imgRec = window.__items.find(x => x.id === id) as { rendered?: boolean; height?: number }
+          const plainRec = window.__items.find(x => x.id === pId) as { rendered?: boolean }
+          return {
+            logHead: (w.__sib_log ?? []).slice(0, 2),
+            imgHeight: imgRec.height,
+            imgRendered: !!imgRec.rendered,
+            plainRendered: !!plainRec.rendered,
+            overlay: !!document.querySelector('#sapper > .loading.visible'),
+          }
+        },
+        [imgId, plainId] as const,
+      )
+      expect(whileHeld.logHead, `${label}: controlled sibling report order`).toEqual(
+        order === 'plain-first' ? ['plain:true', 'image:false'] : ['image:false', 'plain:true'],
+      )
+      expect(whileHeld.imgHeight, `${label}: remounted image height unchanged (hits line 7888)`).toBe(measuredHeight)
+      expect([whileHeld.plainRendered, whileHeld.imgRendered], `${label}: plain rendered, image pending`).toEqual([true, false])
+      expect(
+        whileHeld.overlay,
+        `${label} (${whileHeld.logHead.join(' -> ')}): loading overlay stays up while sibling image is pending`,
+      ).toBe(true)
+
+      // Release the held image: image completes and the overlay clears promptly without waiting 250ms.
+      await page.evaluate(() => {
+        const loading = document.querySelector('#sapper > .loading')!
+        const w = window as unknown as { __sib_t0?: number; __sib_clear_ms?: number | null; __sib_stop_mo?: () => void }
+        w.__sib_clear_ms = null
+        const mo = new MutationObserver(() => {
+          if (!loading.classList.contains('visible') && w.__sib_t0 != null && w.__sib_clear_ms === null) {
+            w.__sib_clear_ms = performance.now() - w.__sib_t0
+          }
+        })
+        mo.observe(loading, { attributes: true, attributeFilter: ['class'] })
+        w.__sib_stop_mo = () => mo.disconnect()
+        w.__sib_t0 = performance.now()
+      })
+      gate.release()
+      await expect
+        .poll(
+          () =>
+            page.evaluate(id => ({
+              imgRendered: !!(window.__items.find(x => x.id === id) as { rendered?: boolean } | undefined)?.rendered,
+              overlay: !!document.querySelector('#sapper > .loading.visible'),
+            }), imgId),
+          { message: `${label}: overlay clears once held image completes`, timeout: 10_000 },
+        )
+        .toEqual({ imgRendered: true, overlay: false })
+      const elapsed = await page.evaluate(() => {
+        const w = window as unknown as { __sib_stop_mo?: () => void; __sib_clear_ms?: number | null }
+        w.__sib_stop_mo?.()
+        return w.__sib_clear_ms
+      })
+      expect(elapsed, `${label}: overlay cleared promptly after image completed (${elapsed}ms)`).toBeLessThan(180)
+    } finally {
+      await page.evaluate(pId => {
+        ;(window as unknown as { __sib_restore?: () => void }).__sib_restore?.()
+        ;(window._item(pId, true) as unknown as { delete?: (confirm: boolean) => void })?.delete?.(false)
+      }, plainId)
+    }
+  }
+
+  await runOrder('plain-first', '2')
+  await runOrder('image-first', '3')
 })
