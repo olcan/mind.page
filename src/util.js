@@ -340,6 +340,17 @@ export function invalidateElemCache(id) {
       live = true
     }
   })
+  // also honor elements retired by an earlier quiet invalidation (a caught error or script
+  // teardown) that are still displayed on the item: an explicit invalidate_elem_cache() must still
+  // schedule a replacement render for them (e.g. #c3's zero-width callback)
+  if (!live) {
+    for (const elem of window['_retired_elems']?.[id] ?? []) {
+      if (elem.closest('.item')?.id == 'item-' + id && document.contains(elem)) {
+        live = true
+        break
+      }
+    }
+  }
   return live
 }
 

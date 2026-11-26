@@ -336,6 +336,7 @@
     Object.defineProperty(window, '_history', { get: () => sessionStateHistory.toArray() }) // sparse, by index
     Object.defineProperty(window, '_history_index', { get: () => sessionStateHistoryIndex })
     Object.defineProperty(window, '_history_update_pending', { get: () => historyUpdatePending || stopWork.length > 0 }) // the scroll listener's write, or any kept through a stop's return (tests)
+    Object.defineProperty(window, '_popstate_scroll_pending', { get: () => popStateScrollPending }) // a traversal's restore has yet to scroll (tests)
     Object.defineProperty(window, '_editor_change_pending', { get: () => editorChangePending }) // the query's debounce (tests)
     Object.defineProperty(window, '_mindbox_history', { get: () => sessionHistory })
     Object.defineProperty(window, '_mindbox_history_index', { get: () => sessionHistoryIndex })
@@ -1760,7 +1761,10 @@
         return out
       } catch (e) {
         console.error(e)
-        this.invalidate_elem_cache()
+        // drop cached elements without promoting live entries to force_render (as Item.svelte
+        // script teardown does): an erroring macro on an item with cached elements (e.g. math)
+        // otherwise triggers version++ / items = items every second forever
+        invalidateElemCache(this.id)
         throw e
       } finally {
         // ensure cleanup of stack of window state
@@ -1787,7 +1791,7 @@
           })
           .catch(e => {
             console.error(e)
-            this.invalidate_elem_cache()
+            invalidateElemCache(this.id) // drop cache without forcing a re-render loop (see eval)
           })
           .finally(() => {
             this.write_log(log_options) // can also be customized via _this.log_options
@@ -1811,7 +1815,7 @@
         return out
       } catch (e) {
         console.error(e)
-        this.invalidate_elem_cache()
+        invalidateElemCache(this.id) // drop cache without forcing a re-render loop (see eval)
         throw e
       } finally {
         if (evalStack.pop() != this.id) console.error('invalid stack')
@@ -2167,6 +2171,11 @@
   // a traversal's restore pending (onPopState): the page still shows the departed view under the
   // destination's index, so the scroll listener reads no departure from an Up's top meanwhile
   let popStateScrollPending = false
+  let popStateScrollToken = 0
+  function cancelPopStateScroll() {
+    popStateScrollToken++
+    popStateScrollPending = false
+  }
   function scrollBackWithHistory() {
     if (scrollBackPending) return true
     if (historyOffEntry()) return false // the browser's previous position is not the session's previous entry
@@ -2883,6 +2892,7 @@
     sessionEntryKey = historyKey() // the browser is on the session's entry (see onPopState, the stop)
     sessionStateHistory.set(state.index, _.cloneDeep(history.state))
     sessionStateHistory = sessionStateHistory // trigger svelte update
+    cancelPopStateScroll() // a new entry supersedes any pending traversal scroll restore
   }
 
   // an update of the entry of a VIEW (`view`: the view shown now, or the one a scroll's timer was armed in:
@@ -4364,10 +4374,13 @@
       popStateDeferred = true
       return
     }
-    // a link's traversal skips its scroll (onHistoryItemMouseDown): the mark is this traversal's, whatever
-    // it lands on (left set by a traversal that returned early, it took the scroll of the next one)
+    // a link's traversal skips its scroll (onHistoryItemMouseDown), and narration's return to entry 0
+    // scrolls to the header (onEditorChange): both marks are this traversal's, whatever it lands on, and
+    // must be captured and cleared before onEditorChange can arm another for the next traversal
     const skipScroll = skipScrollForPopState
     skipScrollForPopState = false
+    const toTop = scrollToTopOnPopState
+    scrollToTopOnPopState = false
     if (!e?.state) {
       url_fragment = null // the launch's fragment, when still pending, is superseded (see below)
       const kept = launchQueryKept // (the entry a launch kept is left behind when this navigation's query takes the position: below)
@@ -4569,21 +4582,19 @@
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
     if (typeof state.hideIndex == 'number') hideIndex = Math.max(hideIndex, state.hideIndex)
 
+    cancelPopStateScroll() // supersede any earlier traversal's pending scroll restore
     if (!skipScroll) {
-      // scroll to state.scrollPosition (unless scrollToTopOnPopState is set); the position is read NOW,
-      // since the state object is shared with history.state and a writer could reach it before the frames
-      // below (see onScroll)
+      // scroll to state.scrollPosition (unless toTop was captured at entry from scrollToTopOnPopState);
+      // the position is read NOW, since the state object is shared with history.state and a writer could
+      // reach it before the frames below (see onScroll)
       const scrollPosition = state.scrollPosition
+      const token = popStateScrollToken
       popStateScrollPending = true // no departure is read off the departed view meanwhile (onScroll)
       update_dom().then(() => {
-        if (scrollToTopOnPopState) {
-          scrollTo(headerdiv.offsetTop)
-          scrollToTopOnPopState = false
-        } else {
-          // scroll to last recorded scroll position at this state; an entry that never recorded one (written
-          // before the page's first-load scroll, see onEditorChange) is at the header, where that scroll left it
-          scrollTo(scrollPosition ?? headerdiv.offsetTop)
-        }
+        if (token != popStateScrollToken) return // a newer entry or traversal took over (cancelPopStateScroll)
+        // scroll to last recorded scroll position at this state; an entry that never recorded one (written
+        // before the page's first-load scroll, see onEditorChange) is at the header, where that scroll left it
+        scrollTo(toTop ? headerdiv.offsetTop : (scrollPosition ?? headerdiv.offsetTop))
         popStateScrollPending = false
       })
     }

@@ -565,7 +565,16 @@ test("a click on an item's number selects the item while the number is plain and
   const entry = () => page.evaluate(() => [history.state.index, history.state.editorText, history.state.final])
   const recorded = () =>
     expect
-      .poll(() => page.evaluate(() => !(window as any)._history_update_pending && (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop), { message: "the entry holds the page's position" })
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              !(window as any)._history_update_pending &&
+              !(window as any)._popstate_scroll_pending &&
+              (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop
+          ),
+        { message: "the entry holds the page's position" }
+      )
       .toBe(true)
   // a move, once its save is done: the item's time, saved by one more save
   const moved = (id: string, before: { saves: number }) =>
@@ -624,14 +633,28 @@ test("a click on an item's number selects the item while the number is plain and
     // scrolled and selected in one turn of the page, inside the 250 ms the scroll listener waits before it
     // writes: the entry being left holds the place from before the scroll, and the select writes the live one
     await recorded()
-    const scrolled = await asUser(
+    const { scrolled, beforeSelect, afterSelect } = await asUser(
       page,
       ([id, left]) => {
+        const w = window as any
+        const beforeSelect = {
+          key: (w.navigation?.currentEntry?.key ?? null) as string | null,
+          index: (history.state?.index ?? null) as number | null,
+          popPending: !!w._popstate_scroll_pending,
+          scrollTop: document.body.scrollTop,
+          scrollHeight: document.body.scrollHeight,
+        }
         const max = document.body.scrollHeight - innerHeight
         document.body.scrollTo(0, left + 48 <= max ? left + 48 : left - 48)
-        const top = document.body.scrollTop
+        const scrolled = document.body.scrollTop
         ;(window._item(id as string) as any).select()
-        return top
+        const afterSelect = {
+          storedOnDeparted: beforeSelect.index != null ? ((w._history[beforeSelect.index]?.scrollPosition ?? null) as number | null) : null,
+          index: (history.state?.index ?? null) as number | null,
+          key: (w.navigation?.currentEntry?.key ?? null) as string | null,
+          popPending: !!w._popstate_scroll_pending,
+        }
+        return { scrolled, beforeSelect, afterSelect }
       },
       [plain, left] as const,
     )
@@ -639,7 +662,29 @@ test("a click on an item's number selects the item while the number is plain and
     await expect(mindbox(page)).toHaveValue(`id:${savedPlain}`)
     await page.goBack()
     await expect(mindbox(page)).toHaveValue('')
-    await expect.poll(async () => Math.abs((await scrollTop(page)) - scrolled) <= 2, { message: 'Back returns to the place the page was scrolled to right before the select' }).toBe(true)
+    await expect
+      .poll(
+        async () => {
+          const at = await page.evaluate(() => ({
+            key: ((window as any).navigation?.currentEntry?.key ?? null) as string | null,
+            index: (history.state?.index ?? null) as number | null,
+            scrollTop: document.body.scrollTop,
+            scrollHeight: document.body.scrollHeight,
+            popPending: !!(window as any)._popstate_scroll_pending,
+            stored: ((window as any)._history[(window as any)._history_index]?.scrollPosition ?? null) as number | null,
+          }))
+          if (
+            !at.popPending &&
+            at.key === beforeSelect.key &&
+            at.index === beforeSelect.index &&
+            Math.abs(at.scrollTop - scrolled) <= 2
+          )
+            return 'arrived'
+          return { ...at, expected: scrolled, left, beforeSelect, afterSelect }
+        },
+        { message: 'Back returns to the place the page was scrolled to right before the select' },
+      )
+      .toEqual('arrived')
     expect(dialogs).toEqual([])
   })
 
@@ -2875,4 +2920,251 @@ test('Option+Down selects the newest descendant at any depth, walks consecutive 
       { message: 'fixture items removed', timeout: 15_000 }
     )
     .toBe(true)
+})
+
+test('a stale Back scroll restore is cancelled by a later select or a second Back, and narration Back onto a query matching entry 0 scrolls to the header', async ({ page, browser }) => {
+  await loadAdmin(page)
+  const A = '#e2e_stale_pop_a'
+  const B = '#e2e_stale_pop_b'
+  const body = Array.from({ length: 40 }, (_, i) => `filler line ${i + 1}`).join('\n\n')
+  const labels = [A, B]
+  const settledRecorded = (p = page) =>
+    expect
+      .poll(
+        () =>
+          p.evaluate(
+            () =>
+              !(window as any)._history_update_pending &&
+              !(window as any)._popstate_scroll_pending &&
+              (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop
+          ),
+        { message: 'entry settled and scroll recorded' }
+      )
+      .toBe(true)
+  try {
+    for (const label of labels) await page.evaluate(([l, b]) => void window._create(`${l} ${b}`), [label, body] as const)
+    await expect.poll(() => savedId(page, A), { timeout: 30_000 }).toBeTruthy()
+    await expect.poll(() => savedId(page, B), { timeout: 30_000 }).toBeTruthy()
+    const [idA, idB] = await page.evaluate(([a, b]) => [window._item(a, true)!.id, window._item(b, true)!.id] as const, [A, B] as const)
+    const top = await headerTop(page)
+
+    // 1. Stale Back restore cancelled by pushState (selectItem): Back onto entry 0 (at pos0) is held before its
+    //    2-rAF update_dom() resolves; selecting B at pos1 (where B stands in view, so selectItem's own
+    //    scrollToTarget is a no-op) supersedes it so releasing the held frames must not yank B back to pos0.
+    await asUser(page, id => void (window._item(id) as any).select(), idB)
+    await expect(mindbox(page)).toHaveValue(B)
+    await settled(page)
+    await settledRecorded()
+    const pos1 = await scrollTop(page)
+    await userSet(page, '')
+    await expect(mindbox(page)).toHaveValue('')
+    // keep pos0 within ~60 px of pos1 so B stays in scroll band at BOTH positions (as in wr12: 1297 vs 1345);
+    // otherwise selectItem(B)'s own scrollToTarget would scroll back from a stale pos0 jump and mask the bug
+    const pos0 = pos1 - 60 > top ? pos1 - 60 : pos1 + 60
+    await page.evaluate(y => document.body.scrollTo(0, y), pos0)
+    await settledRecorded()
+    await asUser(page, id => void (window._item(id) as any).select(), idA)
+    await expect(mindbox(page)).toHaveValue(A)
+    await settledRecorded()
+
+    await page.evaluate(() => {
+      window.addEventListener(
+        'popstate',
+        () => {
+          const orig = window.requestAnimationFrame.bind(window)
+          const held: FrameRequestCallback[] = []
+          ;(window as any).__releaseHeldRaf = () => {
+            window.requestAnimationFrame = orig
+            for (const cb of held.splice(0)) orig(cb)
+          }
+          window.requestAnimationFrame = (cb => {
+            held.push(cb)
+            return held.length
+          }) as typeof requestAnimationFrame
+        },
+        { capture: true, once: true }
+      )
+    })
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue('')
+    expect(await page.evaluate(() => !!(window as any)._popstate_scroll_pending), 'Back armed _popstate_scroll_pending while its frames are held').toBe(true)
+
+    await asUser(
+      page,
+      ([id, y]) => {
+        document.body.scrollTo(0, y)
+        ;(window._item(id) as any).select()
+      },
+      [idB, pos1] as const
+    )
+    await expect(mindbox(page)).toHaveValue(B)
+    expect(await page.evaluate(() => !!(window as any)._popstate_scroll_pending), 'pushState cleared _popstate_scroll_pending immediately').toBe(false)
+    await page.evaluate(() => {
+      ;(window as any).__releaseHeldRaf?.()
+      return new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    })
+    expect(Math.abs((await scrollTop(page)) - pos1) <= 2, `stale Back restore must not yank B from ${pos1} back to ${pos0} (got ${await scrollTop(page)})`).toBe(true)
+
+    // 2. Rapid double-Back: Back #1's stale 2nd rAF firing after Back #2 starts must neither jump to Back #1's
+    //    position nor clear _popstate_scroll_pending before Back #2's restore finishes.
+    await userSet(page, '')
+    await expect(mindbox(page)).toHaveValue('')
+    const posA = top + 300
+    const posB = top + 60
+    const posC = top + 180
+    await page.evaluate(y => document.body.scrollTo(0, y), posA)
+    await settledRecorded()
+    await asUser(page, id => void (window._item(id) as any).select(), idA)
+    await expect(mindbox(page)).toHaveValue(A)
+    await settled(page)
+    await page.evaluate(y => document.body.scrollTo(0, y), posB)
+    await settledRecorded()
+    await asUser(page, id => void (window._item(id) as any).select(), idB)
+    await expect(mindbox(page)).toHaveValue(B)
+    await settled(page)
+    await page.evaluate(y => document.body.scrollTo(0, y), posC)
+    await settledRecorded()
+
+    await page.evaluate(() => {
+      const w = window as any
+      const orig = window.requestAnimationFrame.bind(window)
+      w.__origRaf = orig
+      w.__q1 = [] as FrameRequestCallback[]
+      w.__q2 = [] as FrameRequestCallback[]
+      w.__activeQ = w.__q1
+      window.requestAnimationFrame = (cb => {
+        if (w.__activeQ) {
+          w.__activeQ.push(cb)
+          return w.__activeQ.length
+        }
+        return orig(cb)
+      }) as typeof requestAnimationFrame
+    })
+    await page.goBack() // Back #1: B -> A (posB)
+    await expect(mindbox(page)).toHaveValue(A)
+    // wait one macrotask so tick().then(() => rAF(...)) has queued Back #1's 1st rAF in __q1, fire it so
+    // Back #1's 2nd (final) rAF lands in __q1, then switch capture to __q2 before Back #2
+    const stepped = await page.evaluate(
+      () =>
+        new Promise<{ first: number; queuedSecond: number }>(resolve =>
+          setTimeout(() => {
+            const w = window as any
+            const first = w.__q1.splice(0)
+            for (const cb of first) cb(performance.now())
+            const queuedSecond = w.__q1.length as number
+            w.__activeQ = w.__q2
+            resolve({ first: first.length, queuedSecond })
+          }, 0)
+        )
+    )
+    expect(stepped.queuedSecond, `premise: Back #1 queued its 2nd rAF (stepped=${JSON.stringify(stepped)})`).toBeGreaterThan(0)
+    await page.goBack() // Back #2: A -> '' (posA)
+    await expect(mindbox(page)).toHaveValue('')
+    // fire Back #1's stale final callback BEFORE Back #2's frames run
+    const midDoubleBack = await page.evaluate(async () => {
+      const w = window as any
+      await Promise.resolve()
+      await Promise.resolve()
+      const stale = w.__q1.splice(0)
+      for (const cb of stale) cb(performance.now())
+      await Promise.resolve()
+      await Promise.resolve()
+      return {
+        staleFired: stale.length,
+        pendingAfterStale: !!w._popstate_scroll_pending,
+        scrollAfterStale: document.body.scrollTop,
+      }
+    })
+    expect(midDoubleBack.staleFired, 'premise: Back #1 had a queued final rAF callback').toBeGreaterThan(0)
+    expect(midDoubleBack.pendingAfterStale, 'stale Back #1 callback must not clear _popstate_scroll_pending while Back #2 is pending').toBe(true)
+    expect(Math.abs(midDoubleBack.scrollAfterStale - posB) > 20, `stale Back #1 callback must not scroll to posB (${posB})`).toBe(true)
+    // now flush Back #2's frames and restore real rAF
+    await page.evaluate(() => {
+      const w = window as any
+      const orig = w.__origRaf as typeof requestAnimationFrame
+      window.requestAnimationFrame = orig
+      w.__activeQ = null
+      for (const cb of w.__q2.splice(0)) orig(cb)
+    })
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            target => !(window as any)._popstate_scroll_pending && Math.abs(document.body.scrollTop - target) <= 2,
+            posA
+          ),
+        { message: 'Back #2 finishes restoring posA' }
+      )
+      .toBe(true)
+
+    // 3. Narration mode: Back onto a nonzero entry whose query matches entry 0 queues history.go(-index)
+    //    with scrollToTopOnPopState = true. Capturing and clearing that flag at the START of onPopState
+    //    (before onEditorChange) keeps the intermediate entry from consuming it, so entry 0 lands at the
+    //    header instead of its older saved scroll position.
+    const nCtx = await browser.newContext()
+    try {
+      await nCtx.addInitScript(() => {
+        if (window !== window.top || !location.protocol.startsWith('http')) return
+        localStorage.setItem('mindpage_narrating', '{}')
+        Object.defineProperty(navigator, 'mediaDevices', {
+          value: { enumerateDevices: () => Promise.resolve([]), getUserMedia: () => new Promise(() => {}) },
+          configurable: true,
+        })
+      })
+      const nPage = await nCtx.newPage()
+      await loadAdmin(nPage)
+      const nErrors: string[] = []
+      nPage.on('pageerror', err => nErrors.push(String(err)))
+      const nTop = await headerTop(nPage)
+      // passive MindBox.set replaces entry 0 with non-empty query A, then scroll entry 0 well below the header
+      await nPage.evaluate(q => void (window as any).MindBox.set(q), A)
+      await expect(mindbox(nPage)).toHaveValue(A)
+      await settled(nPage)
+      const savedPos = nTop + 250
+      await nPage.evaluate(y => document.body.scrollTo(0, y), savedPos)
+      await settledRecorded(nPage)
+      // Up shortcut saves savedPos on entry 0 and pushes entry 1 with the same query A at the header
+      await nPage.keyboard.press('Control+Alt+ArrowUp')
+      await expect.poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'Up pushed entry 1' }).toBe(1)
+      await settledRecorded(nPage)
+      const beforeBack = await nPage.evaluate(() => ({
+        h0: (window as any)._history[0],
+        h1: (window as any)._history[1],
+      }))
+      expect(beforeBack.h0.editorText, 'premise: entry 0 holds query A').toBe(A)
+      expect(beforeBack.h1.editorText, 'premise: entry 1 holds the same query A').toBe(A)
+      expect(Math.abs(beforeBack.h0.scrollPosition - savedPos) <= 2, 'premise: entry 0 saved below header').toBe(true)
+      // push entry 2 with a different query B, scrolled to a third position distinct from both nTop and savedPos
+      await asUser(nPage, name => void (window._item(name, true) as any).select(), B)
+      await expect(mindbox(nPage)).toHaveValue(B)
+      await expect.poll(() => nPage.evaluate(() => (window as any)._history_index)).toBe(2)
+      await settled(nPage)
+      await nPage.evaluate(y => document.body.scrollTo(0, y), nTop + 120)
+      await settledRecorded(nPage)
+      // Back lands on entry 1 (same query as entry 0) -> onEditorChange arms scrollToTopOnPopState + history.go(-1)
+      await nPage.goBack()
+      await expect
+        .poll(
+          () => nPage.evaluate(() => (window as any)._history_index === 0 && !(window as any)._popstate_scroll_pending),
+          { message: 'narration Back hops from entry 1 back to entry 0 and settles' }
+        )
+        .toBe(true)
+      const landed = await scrollTop(nPage)
+      expect(
+        Math.abs(landed - nTop) <= 2,
+        `narration Back onto a query matching entry 0 scrolls to header ${nTop}, not entry 0 saved position ${savedPos} (got ${landed})`
+      ).toBe(true)
+      expect(nErrors, 'no pageerror in narration mode').toEqual([])
+    } finally {
+      await nCtx.close()
+    }
+  } finally {
+    await page.evaluate(ls => {
+      for (const l of ls) window._item(l, true)?.delete(false)
+    }, labels)
+    await userSet(page, '')
+    await expect
+      .poll(() => page.evaluate(ls => ls.every(l => !window._item(l, true)), labels), { message: 'stale-pop fixtures removed', timeout: 15_000 })
+      .toBe(true)
+  }
 })

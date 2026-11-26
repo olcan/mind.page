@@ -5355,3 +5355,164 @@ test('drawn child tags stay in sync when a #template toggle opens and closes', a
     ).toEqual({ spanVisible: true, divVisible: false, kept: true, editing: false })
   }
 })
+
+test('erroring macros, start, and invoke on items with cached math drop cache entries without triggering a force_render loop', async ({ page }) => {
+  await loadAdmin(page)
+  const A = '#e2e_err_loop_a'
+  const B = '#e2e_err_loop_b'
+  const C = '#e2e_err_loop_plain'
+  const D = '#e2e_err_loop_async'
+  const inert = (body: string) => `<!--inert-->\n${body}\n<!--/inert-->`
+  const labels = [A, B, C, D]
+  const macroHits = { a: 0, b: 0 }
+  const onConsole = (msg: { type: () => string; text: () => string }) => {
+    if (msg.type() != 'error') return
+    const t = msg.text()
+    if (t.includes('e2e_missing_macro_a')) macroHits.a++
+    if (t.includes('e2e_missing_macro_b')) macroHits.b++
+  }
+  page.on('console', onConsole)
+  try {
+    for (const text of [
+      `${A} errloop <<e2e_missing_macro_a>> $` + '`y^2`$\n' + inert('frame math $`x^2`$'),
+      `${B} errloop <<e2e_missing_macro_b>>\n` + inert('frame math $`x^3`$'),
+      `${C} errloop plain sibling`,
+      `${D} errloop clean math $` + '`z^2`$',
+    ])
+      await page.evaluate(t => void window._create(t), text)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ls => ls.every(l => { const it = (window as any).__items.find((x: any) => x.label == l); return !!it?.savedId && !it.saving }),
+            labels
+          ),
+        { message: 'error-loop fixtures saved', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    // query to render all four freshly so A, B, and D populate _elem_cache with live math spans
+    await page.evaluate(() => void (window as any).MindBox.set('errloop'))
+    const ids = await page.evaluate(
+      ls => Object.fromEntries(ls.map(l => [l, (window as any)._item(l, true).id as string])),
+      labels
+    )
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ([aId, bId, dId]) => {
+              const ready = (id: string) => {
+                const it = (window as any).__items.find((x: any) => x.id == id)
+                const elem = document.getElementById('item-' + id)
+                return !!it?.rendered && !!elem?.querySelector('mjx-container')
+              }
+              return ready(aId) && ready(bId) && ready(dId) && ((window as any)._elem_cache?.[dId]?.size ?? 0) > 0
+            },
+            [ids[A], ids[B], ids[D]] as const
+          ),
+        { message: 'math spans rendered on A, B, and D (and cached on D)', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    // stamp live math nodes and record versions, then trigger a normal items = items update via sibling C
+    const baseline = await page.evaluate(
+      ([aId, bId]) => {
+        const w = window as any
+        for (const id of [aId, bId]) {
+          const mjx = document.querySelector(`#item-${id} mjx-container`) as any
+          mjx.__e2eKeptMath = true
+        }
+        const ver = (id: string) => w.__items.find((x: any) => x.id == id).version as number
+        return { versions: [ver(aId), ver(bId)] }
+      },
+      [ids[A], ids[B]] as const
+    )
+    macroHits.a = 0
+    macroHits.b = 0
+    // saving sibling C runs `items = items`, which re-evaluates toHTML() on error items A and B
+    await page.evaluate(cId => void (window._item(cId) as any).touch(true), ids[C])
+    await expect
+      .poll(
+        async () =>
+          macroHits.a > 0 &&
+          macroHits.b > 0 &&
+          (await page.evaluate(cId => !(window as any).__items.find((x: any) => x.id == cId).saving, ids[C])),
+        { message: 'failing macros on A and B ran again after sibling update', timeout: 15_000 }
+      )
+      .toBe(true)
+    const afterMacro = await page.evaluate(
+      ([aId, bId]) => {
+        const w = window as any
+        const inspect = (id: string) => {
+          const it = w.__items.find((x: any) => x.id == id)
+          const mjx = document.querySelector(`#item-${id} mjx-container`) as any
+          return {
+            version: it.version as number,
+            forceRenderTask: !!it.tasks?.force_render,
+            cacheSize: (w._elem_cache?.[id]?.size ?? 0) as number,
+            keptMath: !!mjx?.__e2eKeptMath,
+          }
+        }
+        return [inspect(aId), inspect(bId)]
+      },
+      [ids[A], ids[B]] as const
+    )
+    expect(afterMacro, 'macro errors on items with cached math drop _elem_cache without forcing re-renders').toEqual([
+      { version: baseline.versions[0], forceRenderTask: false, cacheSize: 0, keptMath: true },
+      { version: baseline.versions[1], forceRenderTask: false, cacheSize: 0, keptMath: true },
+    ])
+
+    // invoke() error on clean math item D drops _elem_cache without forcing a re-render
+    const vInvoke = await page.evaluate(dId => {
+      const w = window as any
+      const before = w.__items.find((x: any) => x.id == dId).version as number
+      try {
+        w._item(dId).invoke(() => {
+          throw new Error('e2e invoke boom')
+        })
+      } catch {}
+      const it = w.__items.find((x: any) => x.id == dId)
+      return { before, cacheSize: (w._elem_cache?.[dId]?.size ?? 0) as number, forceRenderTask: !!it.tasks?.force_render }
+    }, ids[D])
+    expect(vInvoke, 'invoke() error drops _elem_cache and schedules no force_render').toEqual({ before: vInvoke.before, cacheSize: 0, forceRenderTask: false })
+
+    // explicit invalidate_elem_cache() (without force_render: true) after a caught error must still honor
+    // the retired node displayed on D, scheduling a replacement render and repopulating _elem_cache
+    const recoveredTask = await page.evaluate(dId => {
+      const w = window as any
+      w._item(dId).invalidate_elem_cache({ render_delay: 0 })
+      return !!w.__items.find((x: any) => x.id == dId).tasks?.force_render
+    }, ids[D])
+    expect(recoveredTask, 'explicit invalidate_elem_cache() honors a retired live node and schedules force_render').toBe(true)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(dId => {
+            const it = (window as any).__items.find((x: any) => x.id == dId)
+            return !!it?.rendered && !it.tasks?.force_render && ((window as any)._elem_cache?.[dId]?.size ?? 0) > 0
+          }, ids[D]),
+        { message: 'explicit invalidate_elem_cache() repopulates _elem_cache on D', timeout: 15_000 }
+      )
+      .toBe(true)
+
+    // verify start() rejection behaves the same as invoke()
+    // (filter: () => false keeps start()'s finally write_log from writing a _log block, which would force_render)
+    const vStart = await page.evaluate(async dId => {
+      const w = window as any
+      const before = w.__items.find((x: any) => x.id == dId).version as number
+      await w._item(dId).start(() => Promise.reject(new Error('e2e start boom')), { filter: () => false })
+      const it = w.__items.find((x: any) => x.id == dId)
+      return { before, cacheSize: (w._elem_cache?.[dId]?.size ?? 0) as number, forceRenderTask: !!it.tasks?.force_render }
+    }, ids[D])
+    expect(vStart, 'start() error drops _elem_cache and schedules no force_render').toEqual({ before: vStart.before, cacheSize: 0, forceRenderTask: false })
+  } finally {
+    page.off('console', onConsole)
+    await page.evaluate(ls => {
+      for (const l of ls) window._item(l, true)?.delete(false)
+    }, labels)
+    await expect
+      .poll(() => page.evaluate(ls => ls.every(l => !window._item(l, true)), labels), { message: 'error-loop fixtures removed', timeout: 15_000 })
+      .toBe(true)
+  }
+})
