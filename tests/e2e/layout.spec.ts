@@ -1490,8 +1490,7 @@ function stateCircles(menu: HTMLElement) {
     if (marks.contains(document.elementFromPoint(pixel + 0.5, (own.top + own.bottom) / 2))) box[0] = [number.left - pixel, box[0]?.[1] ?? number.left - pixel - 1]
   return { box, width: drawn.width, placed: [drawn.alignSelf, drawn.position, drawn.top, drawn.font == getComputedStyle(index).font], still: drawn.animationName == 'none' }
 }
-// the circles of an item in the shown column, and where its menu stands in its box (a bordered
-// item's is 1 px further in)
+// the circles of an item in the shown column, and where its menu stands in its box
 const circlesOf = (page: Page, id: string) =>
   page.evaluate(id => {
     const menu = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu`) as HTMLElement
@@ -1506,6 +1505,116 @@ const circlesInk = async (page: Page, id: string) => {
 }
 // one circle at [from, to] px left of the digits, 15 px wide and high
 const inks = (at: { cols: number[]; size: number[] } | null, cols: number[]) => !!at && marksAre([at.cols], [cols]) && at.size[0] == 15 && at.size[1] == 15
+// the place of the menu's digits, state circles, running ring and (when present) run button,
+// RELATIVE TO THE ITEM'S OWN BOX (`.container`), both by layout boxes and by pixels (a screenshot
+// anchored at the container's outer top-right corner, with the ring standing still). Every offset is
+// measured from the box's outer top (`y - box.top`) and outer right (`box.right - x`), so a move
+// of the item in the page cancels out; for a runnable item, the top two pixel rows across the
+// button's span also check whether the 1 px top border stays clear above the button
+const cornerPlace = async (page: Page, id: string) => {
+  const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
+  const layout = await page.evaluate(async id => {
+    const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`) as HTMLElement
+    box.scrollIntoView({ block: 'center' })
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const menu = box.querySelector('.item-menu') as HTMLElement
+    const index = menu.querySelector(':scope > .index') as HTMLElement
+    const digitsRange = document.createRange()
+    digitsRange.selectNodeContents(index.firstChild!)
+    const whole = box.getBoundingClientRect()
+    const round = (n: number) => Math.round(n * 100) / 100
+    const rel = (rect: DOMRect | null) =>
+      rect ? [round(rect.top - whole.top), round(whole.right - rect.right), round(whole.right - rect.left)] : null
+    const run = menu.querySelector(':scope > .run')?.getBoundingClientRect() ?? null
+    const pushable = menu.querySelector('.pushable-mark')?.getBoundingClientRect() ?? null
+    const previewable = menu.querySelector('.previewable-mark')?.getBoundingClientRect() ?? null
+    const ring = index.querySelector(':scope > .running-mark')?.getBoundingClientRect() ?? null
+    const digits = digitsRange.getBoundingClientRect()
+    const menuRect = menu.getBoundingClientRect()
+    const left = Math.floor(Math.min(run?.left ?? Infinity, ring?.left ?? Infinity, previewable?.left ?? Infinity, pushable?.left ?? Infinity, digits.left)) - 2
+    const clipX = Math.max(Math.floor(whole.left), left)
+    const clipY = Math.round(whole.top)
+    const clipRight = Math.round(whole.right)
+    return {
+      bordered: box.classList.contains('bordered'),
+      border: getComputedStyle(box).borderTopColor,
+      number: index.firstChild!.textContent!.trim(),
+      boxTop: round(whole.top),
+      docTop: round(whole.top + document.body.scrollTop + document.documentElement.scrollTop),
+      menuSize: [menu.clientWidth, menu.clientHeight],
+      radius: getComputedStyle(index).borderTopRightRadius,
+      menu: rel(menuRect),
+      digits: rel(digits),
+      pushable: rel(pushable),
+      previewable: rel(previewable),
+      ring: rel(ring),
+      run: run ? [round(run.top - whole.top), round(run.left - whole.left), round(whole.right - run.right)] : null,
+      clip: { x: clipX, y: clipY, width: clipRight - clipX, height: 28 },
+      digitsLeftInClip: digits.left - clipX,
+      runRightInClip: run ? Math.ceil(run.right) - clipX : 0,
+      runSpanInClip: run ? [Math.ceil(run.left) + 2 - clipX, Math.floor(run.right) - 3 - clipX] : null,
+    }
+  }, id)
+  const png = (await page.screenshot({ clip: layout.clip })).toString('base64')
+  await still.evaluate(style => (style as Element).remove())
+  const ink = await page.evaluate(
+    async ([png, digitsLeft, runRight, runSpan]) => {
+      const image = new Image()
+      image.src = 'data:image/png;base64,' + png
+      await image.decode()
+      const canvas = Object.assign(document.createElement('canvas'), { width: image.width, height: image.height })
+      const context = canvas.getContext('2d')!
+      context.drawImage(image, 0, 0)
+      const { data, width, height } = context.getImageData(0, 0, image.width, image.height)
+      const inked: Record<string, number[][]> = { ring: [], pushable: [], previewable: [], digits: [] }
+      for (let y = 0; y < height; y++)
+        for (let x = 0; x < width; x++) {
+          const [r, g, b] = [0, 1, 2].map(channel => data[4 * (y * width + x) + channel])
+          if (x + 0.5 > digitsLeft) {
+            if (r > 50 && g > 50 && Math.abs(r - b) <= 4) inked.digits.push([x, y, g])
+          } else if (x >= runRight && b - r > 25) inked.ring.push([x, y])
+          else if (r - b > 50 && g < 0.7 * r) inked.pushable.push([x, y])
+          else if (r - g > 40 && b - g > 40) inked.previewable.push([x, y])
+        }
+      if (inked.digits.length) {
+        const most = Math.max(...inked.digits.map(pixel => pixel[2]))
+        inked.digits = inked.digits.filter(pixel => pixel[2] - 17 > (most - 17) / 2)
+      }
+      const bounds = (pixels: number[][]) => {
+        if (!pixels.length) return null
+        const [xs, ys] = [pixels.map(p => p[0]), pixels.map(p => p[1])]
+        return { rows: [Math.min(...ys), Math.max(...ys) + 1], fromRight: [width - (Math.max(...xs) + 1), width - Math.min(...xs)] }
+      }
+      let runTopRow: { border: number; button: number; total: number } | null = null
+      let runSecondRow: { border: number; button: number; total: number } | null = null
+      if (runSpan && runSpan[1] > runSpan[0]) {
+        const scanRow = (y: number) => {
+          let border = 0
+          let button = 0
+          const total = runSpan[1] - runSpan[0]
+          for (let x = runSpan[0]; x < runSpan[1]; x++) {
+            const [r, g, b] = [0, 1, 2].map(channel => data[4 * (y * width + x) + channel])
+            if (Math.abs(r - 34) <= 6 && Math.abs(g - 68) <= 6 && Math.abs(b - 34) <= 6) border++
+            if (b - r > 100 && g > 120) button++
+          }
+          return { border, button, total }
+        }
+        runTopRow = scanRow(0)
+        runSecondRow = scanRow(1)
+      }
+      return {
+        digits: bounds(inked.digits),
+        pushable: bounds(inked.pushable),
+        previewable: bounds(inked.previewable),
+        ring: bounds(inked.ring),
+        runTopRow,
+        runSecondRow,
+      }
+    },
+    [png, layout.digitsLeftInClip, layout.runRightInClip, layout.runSpanInClip] as const,
+  )
+  return { ...layout, ink }
+}
 
 test('an item that can be pushed or previewed is marked by a still circle left of its number, in place of its border', async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 })
@@ -1562,7 +1671,7 @@ test('an item that can be pushed or previewed is marked by a still circle left o
     }, id)
 
   // an item whose ONLY border was the state's: it has none now, and its menu stands where a plain
-  // item's does (a bordered item's is 1 px further in); the circle is there all the same
+  // item's does; the circle is there all the same
   const apart = await marked(other, true)
   expect([apart.bordered, apart.border, apart.inset], 'pushable alone: no border class, the transparent border of a plain item, the menu not inset').toEqual([false, 'rgba(0, 0, 0, 0)', ['-1px', '-1px']])
   const apartInk = await circlesInk(page, other)
@@ -1580,6 +1689,30 @@ test('an item that can be pushed or previewed is marked by a still circle left o
   // (its ink read in the focused window: unfocused, the menu is at 0.5 and the item at 0.75)
   const pinkInk = await circlesInk(page, other)
   expect([inks(pinkInk.previewable, [18, 3]), pinkInk.pushable], `with its own circle, pink (${JSON.stringify(pinkInk)})`).toEqual([true, null])
+  // SELECTING AN ITEM DOES NOT SHIFT ITS MENU: with both circles and the running ring showing,
+  // measure their places and the number's digits relative to the item's own box while it is NOT
+  // the target, then again for the same item as the target (whose border turns green and whose
+  // place in the page moves). Both layout boxes and inked pixels must agree to the pixel
+  await run(other, true)
+  await marked(other, true, true)
+  const beforeTarget = await cornerPlace(page, other)
+  await open(other)
+  const asTarget = await cornerPlace(page, other)
+  expect([beforeTarget.bordered, beforeTarget.border, asTarget.bordered, asTarget.border], 'premise: plain to target border').toEqual([false, 'rgba(0, 0, 0, 0)', true, 'rgb(34, 68, 34)'])
+  expect([beforeTarget.number.length, asTarget.number.length], 'premise: one-digit number before and after').toEqual([1, 1])
+  const placeDiff = JSON.stringify({
+    before: { boxTop: beforeTarget.boxTop, docTop: beforeTarget.docTop, number: beforeTarget.number, menu: beforeTarget.menu, digits: beforeTarget.digits, pushable: beforeTarget.pushable, previewable: beforeTarget.previewable, ring: beforeTarget.ring, ink: beforeTarget.ink },
+    after: { boxTop: asTarget.boxTop, docTop: asTarget.docTop, number: asTarget.number, menu: asTarget.menu, digits: asTarget.digits, pushable: asTarget.pushable, previewable: asTarget.previewable, ring: asTarget.ring, ink: asTarget.ink },
+  })
+  expect(
+    [asTarget.radius, asTarget.menu, asTarget.digits, asTarget.pushable, asTarget.previewable, asTarget.ring],
+    `selecting an item does not shift its menu, digits, circles or running ring (${placeDiff})`,
+  ).toEqual(['5px', beforeTarget.menu, beforeTarget.digits, beforeTarget.pushable, beforeTarget.previewable, beforeTarget.ring])
+  expect(
+    [asTarget.ink.digits?.rows, asTarget.ink.pushable, asTarget.ink.previewable, asTarget.ink.ring],
+    `and by pixels relative to the item's box (${placeDiff})`,
+  ).toEqual([beforeTarget.ink.digits?.rows, beforeTarget.ink.pushable, beforeTarget.ink.previewable, beforeTarget.ink.ring])
+  await run(other, false)
   await mark(other, false) // (in no state the item goes back to its rank, which need not be on the page)
 
   // the item the address names (its place in the page is then the same in every state). No state:
@@ -1670,6 +1803,56 @@ test('an item that can be pushed or previewed is marked by a still circle left o
   expect([fiveAll.menu, marksAre(fiveAll.marks, [[22, 4], [58, 43]]), marksAre(fiveAll.circles!.box, [[43, 25]]), fiveAll.run], `five digits, running: still the natural width (${JSON.stringify(fiveAll.marks)})`).toEqual([natural.menu, true, true, 4 + 58])
   await run(runnable, false)
   await marked(runnable, false)
+
+  // A RUNNABLE TARGET ITEM: the run button alone steps 1 px down so the border's top line stays
+  // clear above it (checked by pixels), while keeping the same side-to-side place as on a plain
+  // item and without growing the menu (so circles and the ring stay at the exact same pixels too)
+  const runTarget = await page.evaluate(async () => ((await window._create('e2e_runnable_target_probe\n```js_input\nreturn 1\n```')) as unknown as { id: string }).id)
+  const searchPlain = async (query: string, id: string) => {
+    await page.evaluate(query => {
+      location.hash = ''
+      ;(window as unknown as { MindBox: { set: (value: string) => void } }).MindBox.set(query)
+    }, query)
+    await expect
+      .poll(() => page.evaluate(id => (box => !!box && !box.classList.contains('target') && !box.classList.contains('bordered'))(document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"]`)), id), { timeout: 30_000 })
+      .toBe(true)
+  }
+  await searchPlain('e2e_runnable_target_probe', runTarget)
+  const runPlain = await cornerPlace(page, runTarget)
+  await open(runTarget)
+  const runSelected = await cornerPlace(page, runTarget)
+  expect([runPlain.bordered, runSelected.bordered, runSelected.border, runPlain.number.length, runSelected.number.length], 'premise: plain runnable to target runnable (one-digit)').toEqual([false, true, 'rgb(34, 68, 34)', 1, 1])
+  expect([runSelected.radius, runSelected.menuSize], 'a bordered runnable item keeps the outer corner radius and the same menu size (25 px high)').toEqual(['5px', runPlain.menuSize])
+  expect(runSelected.run!.slice(1), `the run button keeps its side-to-side place on a target item (${JSON.stringify({ runPlain: runPlain.run, runSelected: runSelected.run })})`).toEqual(runPlain.run!.slice(1))
+  expect(
+    [
+      runSelected.ink.runTopRow!.total >= 20,
+      runSelected.ink.runTopRow!.border,
+      runSelected.ink.runTopRow!.button,
+      runSelected.ink.runSecondRow!.button,
+      runSelected.ink.runSecondRow!.border,
+    ],
+    `by pixels: the target border's top line stays clear above the run button (${JSON.stringify({ top: runSelected.ink.runTopRow, second: runSelected.ink.runSecondRow })})`,
+  ).toEqual([true, runSelected.ink.runTopRow!.total, 0, runSelected.ink.runSecondRow!.total, 0])
+  expect([runPlain.run![0], runSelected.run![0]], 'the run button steps 1 px down on a bordered item').toEqual([0, 1])
+  // and with state circles and the running ring on the same runnable item: stepping the button
+  // must not grow the menu or shift the circles, ring or digits
+  await searchPlain('e2e_runnable_target_probe', runTarget)
+  await run(runTarget, true)
+  await marked(runTarget, true, true)
+  const runMarkedPlain = await cornerPlace(page, runTarget)
+  await open(runTarget)
+  const runMarkedTarget = await cornerPlace(page, runTarget)
+  expect(
+    [runMarkedTarget.menuSize, runMarkedTarget.digits, runMarkedTarget.pushable, runMarkedTarget.previewable, runMarkedTarget.ring, runMarkedTarget.run!.slice(1)],
+    `runnable with circles and ring: selecting keeps menu size, digits, circles, ring and button x (${JSON.stringify({ plain: runMarkedPlain, target: runMarkedTarget })})`,
+  ).toEqual([runMarkedPlain.menuSize, runMarkedPlain.digits, runMarkedPlain.pushable, runMarkedPlain.previewable, runMarkedPlain.ring, runMarkedPlain.run!.slice(1)])
+  expect(
+    [runMarkedTarget.ink.digits?.rows, runMarkedTarget.ink.pushable, runMarkedTarget.ink.previewable, runMarkedTarget.ink.ring],
+    'and by pixels on the runnable item',
+  ).toEqual([runMarkedPlain.ink.digits?.rows, runMarkedPlain.ink.pushable, runMarkedPlain.ink.previewable, runMarkedPlain.ink.ring])
+  await run(runTarget, false)
+  await mark(runTarget, false)
 
   // THE RE-WRAP (the circles' code review, 2026-11-19: the movement is the owner's to accept). While
   // a circle shows, the text's placeholder is 18 px wider (36 px for both), so at a wrap boundary a

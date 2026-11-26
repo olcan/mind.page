@@ -1927,7 +1927,7 @@
       div.style.height = size.height + 'px'
       div.setAttribute('_digits', digits.toString())
       if (!inserted) {
-        /* -10px to remove .item padding, +1px for inset (when .bordered), +1px extra clearing space */
+        /* -10px to remove .item padding, +2px clearing space (3px clear of the menu, 2px below a bordered run button) */
         div.style.marginTop = div.style.marginRight = '-8px'
         div.style.float = 'right'
         // div.style.background = "red";
@@ -2910,18 +2910,19 @@
     margin-left: 2px;
   }
 
-  .bordered .item-menu {
-    top: 0;
-    right: 0;
+  /* only the opaque run button steps 1px down for a bordered item so the border's top line stays
+     clear above it (the negative bottom margin keeps .item-menu's height at 25px so .state-marks,
+     centred in the menu, and menuSize do not shift); the transparent number and marks keep their
+     place */
+  .bordered .item-menu > .run {
+    margin-top: 1px;
+    margin-bottom: -1px;
   }
   .item-menu > .button:first-child {
     border-top-left-radius: 0;
   }
   .item-menu > .button:last-child {
     border-bottom-right-radius: 0;
-  }
-  .bordered .item-menu > .button:last-child {
-    border-top-right-radius: 4px;
   }
 
   .edit-menu {
@@ -3269,9 +3270,6 @@
      that corner hits) */
   .item-menu > .button:has(+ .state-marks) {
     border-top-right-radius: 5px;
-  }
-  .bordered .item-menu > .button:has(+ .state-marks) {
-    border-top-right-radius: 4px;
   }
   /* and the ring left of them, by its margins (the same room in the number's line, moved) */
   .container:is(.pushable, .previewable) .item-menu > .index > .running-mark {

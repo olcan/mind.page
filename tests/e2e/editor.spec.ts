@@ -46,9 +46,29 @@ test('a transitive missing dependency logs one diagnostic at the red border; cle
   await mindbox(page).fill('root with a macro')
   await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false)).toBe(true)
   expect(diagnostics.length).toBe(1)
+  // the error border does not inset the menu: the number stands where a plain item's does
+  const numberPlace = () =>
+    page.evaluate(root => {
+      const box = document.querySelector(`.column:not(.hidden) .container[data-item-id="${window._item(root, true)!.id}"]`) as HTMLElement
+      const index = box.querySelector('.item-menu > .index') as HTMLElement
+      const digits = document.createRange()
+      digits.selectNodeContents(index.firstChild!)
+      const [whole, num] = [box.getBoundingClientRect(), digits.getBoundingClientRect()]
+      return {
+        bordered: box.classList.contains('bordered'),
+        border: getComputedStyle(box).borderTopColor,
+        top: Math.round((num.top - whole.top) * 100) / 100,
+        right: Math.round((whole.right - num.right) * 100) / 100,
+      }
+    }, root)
+  const errored = await numberPlace()
+  expect([errored.bordered, errored.border], 'premise: the item carries the red error border').toEqual([true, 'rgb(102, 51, 51)'])
   // the missing dependency arrives: the root re-expands, the border clears, nothing is logged
   await page.evaluate(text => void window._create(text), '#e2e_dep_absent\nnow present')
   await expect.poll(bordered, { timeout: 30_000 }).toBe(false)
+  const cleared = await numberPlace()
+  expect([cleared.bordered, cleared.border], 'premise: the error border cleared').toEqual([false, 'rgba(0, 0, 0, 0)'])
+  expect([errored.top, errored.right], `an error item's number stands where a plain item's does (${JSON.stringify({ errored, cleared })})`).toEqual([cleared.top, cleared.right])
   expect(diagnostics.length).toBe(1)
   // it disappears again: the SAME failure logs again (the item was forgotten on recovery)
   await page.evaluate(() => void window._item('#e2e_dep_absent', true)?.delete(false))
