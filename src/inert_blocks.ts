@@ -243,6 +243,13 @@ export function forgetSearch(query: string): void {
   unmark(document)
 }
 
+// THE SAME SEARCH UNDER A NEW NAME (index.svelte upgradeSettledQuery, when an unnamed creation's
+// tab id upgrades in place to its saved id): moves the active key without forgetting open toggles,
+// so a later re-rank of the saved query keeps them while any other query still forgets them
+export function renameSearch(from: string, to: string): void {
+  if (search == from) search = to
+}
+
 // WHAT HAD THE KEYBOARD FOCUS AT A PRESS ON A BLOCK, for the tap that gives it back (inertBlocks). ONE
 // note, for one gesture: a primary press writes it, the click on THAT block takes it, once, and the
 // gesture's end drops it whatever ended it, a moment after the release (a click stopped inside the

@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-import { blockOpen, focusNoted, holdsTag, holdsTerm, inertBlocks, remembered, sectionKeys, sectionName, toggled, type Toggle } from '../../src/inert_blocks.js'
+import { blockOpen, focusNoted, forgetSearch, holdsTag, holdsTerm, inertBlocks, remembered, renameSearch, sectionKeys, sectionName, toggled, type Toggle } from '../../src/inert_blocks.js'
 
 // what decides whether an inert section shows open (src/inert_blocks.ts): what a manual toggle
 // left while it stands, the search, the selection; a region's small name; and the keys a toggle is remembered by. The blocks themselves (the
@@ -109,7 +109,12 @@ class Elem {
       else set.delete(name)
       this.className = [...set].join(' ')
     }
-    return { contains: (name: string) => names().has(name), toggle }
+    const remove = (...drop: string[]) => {
+      const set = names()
+      drop.forEach(name => set.delete(name))
+      this.className = [...set].join(' ')
+    }
+    return { contains: (name: string) => names().has(name), toggle, remove }
   }
   setAttribute() {}
   appendChild(child: Elem) {
@@ -268,4 +273,28 @@ test("one outstanding note at most, whatever interrupts a press: a cancelled poi
   s.doc.activeElement = null
   s.click()
   expect([s.editor.focused, focusNoted(), s.doc.heard.length]).toEqual([[], null, 0])
+})
+
+test('renameSearch moves the active search key without forgetting open toggles, while a different query still forgets them', () => {
+  const s = staged(new Doc(), 'rename_item')
+  const prevDocument = (globalThis as any).document
+  ;(globalThis as any).document = {
+    querySelectorAll: () => (s.block.classList.contains('opened') || s.block.classList.contains('closed') ? [s.block] : []),
+  }
+  try {
+    forgetSearch(' id:tab_old')
+    s.click()
+    expect(s.block.classList.contains('opened'), 'manual click opens the block').toBe(true)
+    renameSearch(' id:tab_old', ' id:saved_new')
+    expect(s.block.classList.contains('opened'), 'renameSearch preserves an already-open toggle').toBe(true)
+    forgetSearch(' id:saved_new')
+    expect(s.block.classList.contains('opened'), 'same-query forgetSearch after renameSearch keeps the toggle').toBe(true)
+    renameSearch(' id:unrelated', ' id:other')
+    forgetSearch(' id:saved_new')
+    expect(s.block.classList.contains('opened'), 'renameSearch with a non-matching old key leaves the active key alone').toBe(true)
+    forgetSearch(' different_query')
+    expect(s.block.classList.contains('opened'), 'a genuinely different query forgets the toggle').toBe(false)
+  } finally {
+    ;(globalThis as any).document = prevDocument
+  }
 })

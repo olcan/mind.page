@@ -3159,6 +3159,63 @@
   let ignoreEditorChanges = false
   let recentWalk: RecentWalk | null = null // Option+Down's walk (see onKeyDown); ended by any other change of the box
 
+  // the key inert_blocks tracks the active search under (trimmed lowercase query plus whether a
+  // leading slash disables search): shared by onEditorChange (forgetSearch) and
+  // upgradeSettledQuery (renameSearch)
+  const inertSearchKey = (raw: string, normalized = raw.toLowerCase().trim()) => (raw.startsWith('/') ? '/' : ' ') + normalized
+
+  // update the MindBox session history entry (replacing in place when upgrading a settled query)
+  function recordSessionHistory(text: string, replaceFrom?: string) {
+    if (replaceFrom !== undefined && sessionHistory[sessionHistoryIndex] === replaceFrom) {
+      sessionHistory[sessionHistoryIndex] = text
+      return
+    }
+    sessionHistoryIndex = 0
+    if (sessionHistory.length == 0) sessionHistory = [text]
+    else sessionHistory[0] = text
+  }
+
+  // invoke a MindBox listener hook (_on_change or _on_search) on all #_listen items; shared by
+  // onEditorChange and upgradeSettledQuery so both deliver the same contract
+  function notifyMindboxListeners(hook: '_on_change' | '_on_search') {
+    setTimeout(() => {
+      items.forEach(item => {
+        if (!item.listen) return
+        if (!itemDefinesFunction(item, hook)) return
+        Promise.resolve(
+          _item(item.id).eval(`${hook}(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
+            trigger: 'listen',
+            async: item.deepasync, // run async if item is async or has async deps
+            async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
+          })
+        ).catch(e => {}) // already logged
+      })
+    })
+  }
+
+  // upgrade an already-settled query in place (at save acknowledgement when an unnamed creation's
+  // `id:<tabId>` becomes `id:<savedId>`): returns false when a change is pending or the ranked
+  // query differs so the caller falls back to full onEditorChange. keeps ranking, layout, scroll
+  // and open toggles untouched while advancing query keys, history entry, and both listener hooks
+  function upgradeSettledQuery(from: string, to: string, targetItem): boolean {
+    const oldLower = from.toLowerCase().trim()
+    if (ignoreEditorChanges || editorChangePending || lastRankedQuery !== oldLower) return false
+    const newLower = to.toLowerCase().trim()
+    editorText = to
+    if (recentWalk && to !== recentWalk.query) recentWalk = null
+    recordSessionHistory(to, from)
+    lastRankedQuery = newLower
+    if (explicitScrollQuery === from) explicitScrollQuery = to
+    if (restoredScrollQuery === from) restoredScrollQuery = to
+    renameSearch(inertSearchKey(from, oldLower), inertSearchKey(to, newLower))
+    const matchIdx = targetItem.matchingTerms?.indexOf(oldLower) ?? -1
+    if (matchIdx >= 0) targetItem.matchingTerms[matchIdx] = newLower
+    notifyMindboxListeners('_on_change')
+    updateState({ editorText: to })
+    notifyMindboxListeners('_on_search')
+    return true
+  }
+
   function onEditorChange(text: string, keep_times = false) {
     // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
@@ -3219,28 +3276,14 @@
     // keep history entry 0 updated, reset index on changes
     // NOTE: these include rapid changes, unlike e.g. history.state.editorText, but not debounces (editorText has already changed)
     if (text != sessionHistory[sessionHistoryIndex]) {
-      sessionHistoryIndex = 0
-      if (sessionHistory.length == 0) sessionHistory = [text]
-      else sessionHistory[0] = text
+      recordSessionHistory(text)
       // update highlighting state used in Item.svelte
       window['_mindboxLastModified'] = Date.now()
       window['_mindboxDebounced'] = true
       window['_highlight_counts'] = {}
 
       // invoke _on_change on all _listen items
-      setTimeout(() => {
-        items.forEach(item => {
-          if (!item.listen) return
-          if (!itemDefinesFunction(item, '_on_change')) return
-          Promise.resolve(
-            _item(item.id).eval(`_on_change(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
-              trigger: 'listen',
-              async: item.deepasync, // run async if item is async or has async deps
-              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-            })
-          ).catch(e => {}) // already logged
-        })
-      })
+      notifyMindboxListeners('_on_change')
     }
 
     // if editor is non-empty, has focus, and it is too soon since last change/return, debounce
@@ -3288,7 +3331,7 @@
     window['_mindboxDebounced'] = false
     if (explicitScrollQuery !== null && explicitScrollQuery !== editorText) explicitScrollQuery = null // a new query: its layouts scroll as usual
     const start = Date.now()
-    forgetSearch((editorText.startsWith('/') ? '/' : ' ') + text) // the search, where it is applied (its text, and whether a first slash turns it off, below): a change of it forgets the inert sections' manual toggles (src/inert_blocks.ts)
+    forgetSearch(inertSearchKey(editorText, text)) // the search, where it is applied (its text, and whether a first slash turns it off, below): a change of it forgets the inert sections' manual toggles (src/inert_blocks.ts)
 
     const tags = parseTags(text)
     let terms = _.uniq(
@@ -4054,21 +4097,7 @@
     launchStateOnEditorChange = false // processed above
 
     // invoke _on_search on all _listen items, but only if editor text was modified (i.e. not for ranking changes)
-    if (editorTextModified) {
-      setTimeout(() => {
-        items.forEach(item => {
-          if (!item.listen) return
-          if (!itemDefinesFunction(item, '_on_search')) return
-          Promise.resolve(
-            _item(item.id).eval(`_on_search(\`${editorText.replace(/[`\\$]/g, '\\$&')}\`)`, {
-              trigger: 'listen',
-              async: item.deepasync, // run async if item is async or has async deps
-              async_simple: true, // use simple wrapper (e.g. no output/logging into item) if async
-            })
-          ).catch(e => {}) // already logged
-        })
-      })
-    }
+    if (editorTextModified) notifyMindboxListeners('_on_search')
 
     const elapsed = Date.now() - start
     if (elapsed > 250) {
@@ -7580,7 +7609,18 @@
 
     // hideIndex++; // show one more item
     lastEditorChangeTime = 0 // disable debounce even if editor focused
-    onEditorChange(editorText) // integrate new item at index 0
+    // when opening an editor on the new item, suppress updateItemLayout's deferred scroll
+    // (which is scheduled here before focus is set and would run 2 frames later, after tick()
+    // has focused and positioned the new editor): tick() below focuses and scrolls once before
+    // first paint
+    const prevDisableScroll = disableScrollingOnLayout
+    if (editing) disableScrollingOnLayout = true
+    try {
+      onEditorChange(editorText) // integrate new item at index 0
+    } finally {
+      disableScrollingOnLayout = prevDisableScroll
+    }
+    if (editing && item.target) lastScrolledTarget = item.id
     // retreat to minimal hide index to focus on new item
     // hideIndex = hideIndexMinimal;
 
@@ -7622,7 +7662,20 @@
           console.error('missing textarea for new item')
           return
         }
-        textarea.focus()
+        // focus without browser-native scroll (which otherwise centers the textarea into
+        // .column-padding above the header or disagrees with the scroll band), then bring the
+        // new item into view ONCE before first paint and record it as the focused edit element
+        // so the first resize layout does not refocus or re-scroll it
+        textarea.focus({ preventScroll: true })
+        lastFocusedEditElement = textarea
+        item.lastVisible = index < hideIndex
+        const sc = document.getElementById('super-container-' + item.id) as HTMLElement
+        if (sc && !sc.closest('.column')?.classList.contains('hidden')) {
+          const edOffsetTop = sc.offsetTop + (textarea.getBoundingClientRect().top - sc.getBoundingClientRect().top)
+          if (sc.offsetTop < document.body.scrollTop || edOffsetTop > document.body.scrollTop + visualViewport.height - 200) {
+            scrollTo(Math.max(headerdiv ? headerdiv.offsetTop : 0, sc.offsetTop - visualViewport.height / 4))
+          }
+        }
         // collapse at the end of a new child (past any ZWSPs Editor inserted, e.g. into a quoted URL)
         if (selection_end) selectionStart = selectionEnd = textarea.value.length
         textarea.selectionStart = selectionStart
@@ -7728,9 +7781,14 @@
                   box && document.activeElement === box
                     ? { start: box.selectionStart, end: box.selectionEnd, dir: box.selectionDirection }
                     : null
-                replaceStateOnEditorChange = true // update current entry in place, no new history step
-                lastEditorChangeTime = 0 // apply immediately even if MindBox is focused
-                onEditorChange(savedQuery)
+                // when the page has already settled on this tab-id query with no change pending,
+                // upgrade box text, query/inert bookkeeping, history entry, and listeners in place;
+                // otherwise fall back to full onEditorChange
+                if (!upgradeSettledQuery(createdBoxId, savedQuery, item)) {
+                  replaceStateOnEditorChange = true // update current entry in place, no new history step
+                  lastEditorChangeTime = 0 // apply immediately even if MindBox is focused
+                  onEditorChange(savedQuery)
+                }
                 if (selection) {
                   const map = (offset: number) =>
                     offset >= createdBoxId.length ? savedQuery.length : Math.min(offset, savedQuery.length)
@@ -9527,7 +9585,7 @@
     literalText,
     oneTapCommand,
   } from '../command_links'
-  import { forgetSearch } from '../inert_blocks'
+  import { forgetSearch, renameSearch } from '../inert_blocks'
   // TYPE-ONLY: the firestore facade itself is the global destructured at the top of this file, so
   // nothing here reaches the bundle. it exists to type the ONE seam where an SDK value enters a
   // discriminated contract (the allocation call below)
@@ -12583,22 +12641,30 @@
     ) {
       e.preventDefault()
       hideIndex = retreatHideIndex()
-      const creates =
-        (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
-        (key == 'KeyS' && (e.metaKey || e.ctrlKey)) ||
-        (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey)))
-      // scroll up to header if necessary
-      if (document.body.scrollTop > headerdiv.offsetTop) {
-        if (!creates && !scrolledToTop()) noteReaderScroll()
-        scrollTo(headerdiv.offsetTop)
-      }
-      tick().then(() => textArea(-1).focus())
-
-      // create/run new item on create/save shortcuts
-      if (
+      const createKey =
         (key == 'Enter' && (e.shiftKey || e.metaKey || e.ctrlKey || e.altKey)) ||
         (key == 'KeyS' && (e.metaKey || e.ctrlKey))
-      ) {
+      const creates = createKey || (key == 'KeyI' && ((e.metaKey && e.shiftKey) || (e.ctrlKey && e.altKey)))
+      const createsEmptyEditor =
+        createKey &&
+        !fixed &&
+        !editorText.trim() &&
+        (e.metaKey ? 1 : 0) + (e.ctrlKey ? 1 : 0) + (e.altKey ? 1 : 0) < 2
+      // scroll up to header if necessary; for an unfocused empty-box create shortcut that directly
+      // opens a new item's editor, onEditorDone itself focuses and scrolls once to the new editor
+      // (avoiding a scroll-to-header -> scroll-to-editor yoyo when pinned items sit above it).
+      // every other path (commands, fixed/shared views, unnamed-id prompts, 2-modifier non-editing
+      // creates) keeps the header scroll and MindBox focus
+      if (!createsEmptyEditor) {
+        if (document.body.scrollTop > headerdiv.offsetTop) {
+          if (!creates && !scrolledToTop()) noteReaderScroll()
+          scrollTo(headerdiv.offsetTop)
+        }
+        tick().then(() => textArea(-1).focus())
+      }
+
+      // create/run new item on create/save shortcuts
+      if (createKey) {
         onEditorDone(editorText, e, false, e.metaKey || e.ctrlKey /*run*/)
       }
 

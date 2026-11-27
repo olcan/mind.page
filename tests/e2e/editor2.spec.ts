@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { mindbox, focusMindbox, focusMindboxInPlace, savedId, itemText, visible, asUser, entries, settled } from './editor_helpers.js'
+import { mindbox, focusMindbox, focusMindboxInPlace, savedId, itemText, visible, asUser, entries, settled, blur, headerTop, noWritePending } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
 // the editor lane's longest rows, on their own lane (playwright.config.ts: `editor2`) so the two
@@ -1552,6 +1552,7 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
   const NOEDIT = 'e2e_bc noedit note'
   const RESELECT = 'e2e_bc reselect note'
   const FAIL_VIEW = 'e2e_bc fail view note'
+  const createdEmptyIds: string[] = []
   try {
     await page.evaluate(text => void window._create(text), `${PRIOR} prior target`)
     await saved(page, [PRIOR])
@@ -1756,11 +1757,712 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
       'view-update error was reported via console.error'
     ).toBe(true)
 
+    // empty-box (and tag-query) Shift+Enter frame stability across top, scrolled, and unfocused starts,
+    // plus in-place id upgrade (listeners, inert toggles, and guard fallbacks) through save ack
+    const waitQueryReady = async () => {
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const w = window as any
+              return !w._editor_change_pending && !w._mindboxDebounced && !w.__layoutPending
+            }),
+          { message: 'query debounce and layout settled', timeout: 10_000 }
+        )
+        .toBe(true)
+      await expect(page.locator('#sapper > .loading')).not.toHaveClass(/visible/, { timeout: 15_000 })
+      await settled(page)
+    }
+
+    const waitResizeLayout = async (minLayoutCount: number) => {
+      await expect
+        .poll(
+          () =>
+            page.evaluate(min => {
+              const w = window as any
+              return !w.__layoutPending && (w.__layoutCount as number) >= min
+            }, minLayoutCount),
+          { message: 'resize layout pass completed', timeout: 10_000 }
+        )
+        .toBe(true)
+      await settled(page)
+    }
+
+    const expandQueryList = async (minVisible: number, boxText: string) => {
+      await focusMindboxInPlace(page)
+      await mindbox(page).fill(boxText)
+      await waitQueryReady()
+      for (let i = 0; i < 8; i++) {
+        const before = await page.evaluate(() => (window as any).__hideIndex as number)
+        if (before >= minVisible) break
+        const toggle = page.locator('.column:not(.hidden) .toggle.show').first()
+        if ((await toggle.count()) === 0) break
+        await toggle.click()
+        await expect.poll(() => page.evaluate(() => (window as any).__hideIndex as number), { timeout: 5_000 }).toBeGreaterThan(before)
+      }
+      await waitQueryReady()
+    }
+
+    // delete a saved test item on the server and wait until the browser's snapshot listener has
+    // removed it locally (keeps Firestore's client write queue empty across offline transitions so
+    // an unacked client deleteDoc cannot be retried on reconnect and trigger a rollback snapshot)
+    const removeSavedItem = async (id: string) => {
+      await waitNoBcSaves(page)
+      await firestore().collection('items').doc(id).delete()
+      await expect.poll(() => page.evaluate(docId => window._item('id:' + docId, true), id), { timeout: 10_000 }).toBeNull()
+      await waitQueryReady()
+    }
+
+    const measureShiftEnter = async (opts: {
+      boxText?: string
+      expandTo: number
+      scrollOffset: number
+      fromWindow?: boolean
+      holdOffline?: boolean
+      expandBeforeAck?: boolean
+      checkListeners?: boolean
+      scrollAfterFocus?: boolean
+    }) => {
+      const boxText = opts.boxText ?? ''
+      if (opts.expandTo > 0) await expandQueryList(opts.expandTo, boxText)
+      else {
+        await focusMindboxInPlace(page)
+        await mindbox(page).fill(boxText)
+        await waitQueryReady()
+        // collapse any session-created items so hideIndex starts at pinnedCount (matching a fresh load)
+        for (let i = 0; i < 4; i++) {
+          const { hide, pinned } = await page.evaluate(() => {
+            const w = window as any
+            return { hide: w.__hideIndex as number, pinned: (w.__items as any[]).filter(it => it.pinned).length }
+          })
+          if (hide <= pinned) break
+          const hideToggle = page.locator('.column:not(.hidden) .toggle.hide').first()
+          if ((await hideToggle.count()) === 0) break
+          await hideToggle.click()
+          await expect.poll(() => page.evaluate(() => (window as any).__hideIndex as number), { timeout: 5_000 }).toBeLessThan(hide)
+        }
+        await waitQueryReady()
+      }
+      const { hideBefore, pinnedCount } = await page.evaluate(() => {
+        const w = window as any
+        return { hideBefore: w.__hideIndex as number, pinnedCount: (w.__items as any[]).filter(it => it.pinned).length }
+      })
+      if (opts.fromWindow) {
+        await blur(page)
+      } else {
+        await focusMindboxInPlace(page)
+        await expect(mindbox(page)).toBeFocused()
+      }
+      const hdrTop = await headerTop(page)
+      const maxScroll = await page.evaluate(() => document.body.scrollHeight - document.body.clientHeight)
+      const preY = Math.min(hdrTop + opts.scrollOffset, maxScroll)
+      await page.evaluate(y => document.body.scrollTo(0, y), preY)
+      await settled(page)
+      await noWritePending(page)
+      await expect.poll(() => page.evaluate(() => !(window as any).__layoutPending), { timeout: 10_000 }).toBe(true)
+
+      if (opts.holdOffline) {
+        await page.context().setOffline(true)
+      }
+
+      // install per-frame recorder plus focus/scrollTo wrappers before the new item mounts
+      await page.evaluate(scrollAfterFocus => {
+        const w = window as any
+        const origFocus = HTMLElement.prototype.focus
+        const origScrollTo = Element.prototype.scrollTo
+        const rec = {
+          active: true,
+          rafId: 0,
+          existingIds: new Set((w.__items as any[]).map(i => i.id)),
+          frames: [] as any[],
+          focusCalls: [] as { id: string; delta: number }[],
+          scrollToCalls: [] as { before: number; after: number }[],
+          mindboxFocused: false,
+          ignoreFocus: false,
+          userScrolledAfterFocus: false,
+          restore() {
+            this.active = false
+            cancelAnimationFrame(this.rafId)
+            HTMLElement.prototype.focus = origFocus
+            Element.prototype.scrollTo = origScrollTo
+          },
+        }
+        HTMLElement.prototype.focus = function (...args: any[]) {
+          const before = document.body.scrollTop
+          const res = origFocus.apply(this, args as any)
+          const after = document.body.scrollTop
+          if (rec.active && !rec.ignoreFocus) {
+            if (this.id === 'textarea-mindbox') rec.mindboxFocused = true
+            else if (this.id?.startsWith('textarea-')) {
+              const itemId = this.id.slice('textarea-'.length)
+              if (!rec.existingIds.has(itemId)) {
+                rec.focusCalls.push({ id: this.id, delta: Math.round(after - before) })
+                if (scrollAfterFocus && !rec.userScrolledAfterFocus) {
+                  rec.userScrolledAfterFocus = true
+                  // scroll on the next animation frame (after tick(), before update_dom()'s 2nd rAF)
+                  requestAnimationFrame(() => {
+                    const hdr = (document.querySelector('.header') as HTMLElement).offsetTop
+                    origScrollTo.call(document.body, 0, hdr)
+                  })
+                }
+              }
+            }
+          }
+          return res
+        }
+        Element.prototype.scrollTo = function (...args: any[]) {
+          const before = this === document.body ? document.body.scrollTop : 0
+          const res = origScrollTo.apply(this, args as any)
+          if (rec.active && this === document.body) {
+            rec.scrollToCalls.push({ before: Math.round(before), after: Math.round(document.body.scrollTop) })
+          }
+          return res
+        }
+        const sample = () => {
+          if (!rec.active) return
+          const newIt = (w.__items as any[]).find(i => !rec.existingIds.has(i.id)) || null
+          const sc = newIt ? document.querySelector(`.column:not(.hidden) #super-container-${newIt.id}`) : null
+          const ta = newIt ? (document.getElementById(`textarea-${newIt.id}`) as HTMLTextAreaElement | null) : null
+          const active = document.activeElement as HTMLTextAreaElement | null
+          rec.frames.push({
+            scrollTop: Math.round(document.body.scrollTop),
+            headerTop: Math.round((document.querySelector('.header') as HTMLElement).offsetTop),
+            boxText: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement | null)?.value ?? '',
+            activeId: active?.id ?? null,
+            caret: active?.tagName === 'TEXTAREA' ? [active.selectionStart, active.selectionEnd] : null,
+            itemTop: sc ? Math.round(sc.getBoundingClientRect().top) : null,
+            edTop: ta ? Math.round(ta.getBoundingClientRect().top) : null,
+            hideIndex: w.__hideIndex as number,
+          })
+          rec.rafId = requestAnimationFrame(sample)
+        }
+        rec.rafId = requestAnimationFrame(sample)
+        w.__se1_rec = rec
+      }, !!opts.scrollAfterFocus)
+
+      const layoutBefore = await page.evaluate(clearListeners => {
+        const w = window as any
+        if (clearListeners) {
+          w.__se3_changes = []
+          w.__se3_searches = []
+        }
+        return w.__layoutCount as number
+      }, !!opts.checkListeners)
+
+      await page.keyboard.press('Shift+Enter')
+
+      let tabId = ''
+      await expect
+        .poll(
+          async () => {
+            const id = await page.evaluate(() => {
+              const rec = (window as any).__se1_rec
+              return ((window as any).__items as any[]).find(i => !rec.existingIds.has(i.id))?.id ?? null
+            })
+            if (id) tabId = id
+            return id
+          },
+          { message: 'empty-box Shift+Enter created new item', timeout: 10_000 }
+        )
+        .toBeTruthy()
+      await expect(page.locator(`#textarea-${tabId}`), 'new empty item editor is focused').toBeFocused()
+
+      let preAck: { scrollTop: number; itemTop: number; hideIndex: number; hideBeforeExpand: number } | null = null
+      let postAck: {
+        scrollTop: number
+        itemTop: number
+        hideIndex: number
+        activeId: string | null
+        caret: [number, number] | null
+        val: string
+      } | null = null
+
+      if (opts.holdOffline) {
+        // witness the creation's own resize layout pass while still offline on id:<tabId>
+        await waitResizeLayout(layoutBefore + 2)
+        await expect(mindbox(page), 'offline empty creation holds id:<tabId>').toHaveValue(`id:${tabId}`)
+        if (opts.checkListeners) {
+          await expect
+            .poll(
+              () =>
+                page.evaluate(() => ({
+                  changes: (window as any).__se3_changes ?? [],
+                  searches: (window as any).__se3_searches ?? [],
+                })),
+              { message: 'offline creation delivers tab id query to _on_change and _on_search listeners', timeout: 5_000 }
+            )
+            .toEqual({ changes: [`id:${tabId}`], searches: [`id:${tabId}`] })
+        }
+        await page.keyboard.type('abc')
+        await page.evaluate(id => {
+          const ta = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+          ta.setSelectionRange(2, 2)
+        }, tabId)
+        const hideBeforeExpand = await page.evaluate(() => (window as any).__hideIndex as number)
+        if (opts.expandBeforeAck) {
+          const showToggle = page.locator('.column:not(.hidden) .toggle.show').first()
+          await expect(showToggle, 'offline creation exposes a .toggle.show control to expand').toBeVisible({ timeout: 5_000 })
+          await page.evaluate(() => {
+            ;(document.querySelector('.column:not(.hidden) .toggle.show') as HTMLElement).click()
+          })
+          await expect
+            .poll(() => page.evaluate(() => (window as any).__hideIndex as number), {
+              message: 'clicking .toggle.show strictly increases hideIndex before reconnect',
+              timeout: 5_000,
+            })
+            .toBeGreaterThan(hideBeforeExpand)
+          await waitQueryReady()
+          await page.evaluate(id => {
+            const rec = (window as any).__se1_rec
+            const ta = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+            rec.ignoreFocus = true
+            try {
+              ta.focus({ preventScroll: true })
+              ta.setSelectionRange(2, 2)
+            } finally {
+              rec.ignoreFocus = false
+            }
+          }, tabId)
+        }
+        preAck = await page.evaluate(
+          ([id, beforeExpand]) => {
+            const w = window as any
+            const sc = document.querySelector(`.column:not(.hidden) #super-container-${id}`)!
+            return {
+              scrollTop: Math.round(document.body.scrollTop),
+              itemTop: Math.round(sc.getBoundingClientRect().top),
+              hideIndex: w.__hideIndex as number,
+              hideBeforeExpand: beforeExpand,
+            }
+          },
+          [tabId, hideBeforeExpand] as const
+        )
+        await page.context().setOffline(false)
+      }
+
+      const [savedDocId] = await saved(page, [tabId])
+      createdEmptyIds.push(savedDocId)
+      if (boxText === '') {
+        await expect(mindbox(page), 'empty-box creation upgrades to id:<savedId>').toHaveValue(`id:${savedDocId}`)
+      } else {
+        await expect(mindbox(page), 'tag-query creation keeps tag in box').toHaveValue(boxText)
+      }
+      if (opts.holdOffline) {
+        if (opts.checkListeners) {
+          await expect
+            .poll(() => page.evaluate(() => (window as any).__se3_changes ?? []), {
+              message: 'save ack delivers saved id query once to _on_change listeners',
+              timeout: 5_000,
+            })
+            .toEqual([`id:${tabId}`, `id:${savedDocId}`])
+          await expect
+            .poll(() => page.evaluate(() => (window as any).__se3_searches ?? []), {
+              message: 'save ack delivers saved id query once to _on_search listeners',
+              timeout: 5_000,
+            })
+            .toEqual([`id:${tabId}`, `id:${savedDocId}`])
+        }
+        await expect.poll(() => page.evaluate(() => !(window as any).__layoutPending), { timeout: 10_000 }).toBe(true)
+        await settled(page)
+        if (opts.checkListeners) {
+          expect(
+            await page.evaluate(() => ({
+              changes: (window as any).__se3_changes ?? [],
+              searches: (window as any).__se3_searches ?? [],
+            })),
+            'save ack notifies _on_change and _on_search exactly once each'
+          ).toEqual({ changes: [`id:${tabId}`, `id:${savedDocId}`], searches: [`id:${tabId}`, `id:${savedDocId}`] })
+        }
+        postAck = await page.evaluate(id => {
+          const w = window as any
+          const sc = document.querySelector(`.column:not(.hidden) #super-container-${id}`)!
+          const ta = document.getElementById(`textarea-${id}`) as HTMLTextAreaElement
+          const active = document.activeElement as HTMLTextAreaElement | null
+          return {
+            scrollTop: Math.round(document.body.scrollTop),
+            itemTop: Math.round(sc.getBoundingClientRect().top),
+            hideIndex: w.__hideIndex as number,
+            activeId: active?.id ?? null,
+            caret: active?.tagName === 'TEXTAREA' ? ([active.selectionStart, active.selectionEnd] as [number, number]) : null,
+            val: ta.value,
+          }
+        }, tabId)
+      } else {
+        // witness the creation's resize layout pass (and any ack layout if mutated)
+        await waitResizeLayout(layoutBefore + 2)
+      }
+
+      const result = await page.evaluate(id => {
+        const rec = (window as any).__se1_rec
+        rec.restore()
+        delete (window as any).__se1_rec
+        const sc = document.querySelector(`.column:not(.hidden) #super-container-${id}`) as HTMLElement | null
+        return {
+          frames: rec.frames as any[],
+          focusCalls: rec.focusCalls as { id: string; delta: number }[],
+          scrollToCalls: rec.scrollToCalls as { before: number; after: number }[],
+          mindboxFocused: rec.mindboxFocused as boolean,
+          viewportHeight: visualViewport!.height,
+          newItemOffsetTop: sc ? Math.round(sc.offsetTop) : -1,
+        }
+      }, tabId)
+
+      // collapse consecutive equal scrollTops (within 2px) starting from preY
+      const visitedScrolls: number[] = [preY]
+      for (const f of result.frames) {
+        if (Math.abs(f.scrollTop - visitedScrolls[visitedScrolls.length - 1]) > 2) visitedScrolls.push(f.scrollTop)
+      }
+      const distinctItemTops: number[] = []
+      for (const f of result.frames) {
+        if (f.itemTop != null && (distinctItemTops.length === 0 || Math.abs(f.itemTop - distinctItemTops[distinctItemTops.length - 1]) > 2)) {
+          distinctItemTops.push(f.itemTop)
+        }
+      }
+      const firstItemTop = result.frames.find(f => f.itemTop != null)?.itemTop as number | undefined
+      const firstEdTop = result.frames.find(f => f.edTop != null)?.edTop as number | undefined
+      await removeSavedItem(savedDocId)
+
+      return {
+        ...result,
+        hideBefore,
+        pinnedCount,
+        preY,
+        headerTop: hdrTop,
+        tabId,
+        savedDocId,
+        visitedScrolls,
+        distinctItemTops,
+        firstItemTop,
+        firstEdTop,
+        preAck,
+        postAck,
+      }
+    }
+
+    // (1) unexpanded page at top, offline -> online: exercises edOffsetTop band scroll,
+    // preventScroll focus, item.lastVisible + lastFocusedEditElement across tryLayout,
+    // real #_listen _on_change/_on_search delivery across save ack, and in-place ack upgrade
+    const listenText = [
+      '#e2e_se3_listener #_listen',
+      '```js',
+      'function _on_change(text) { (window.__se3_changes ??= []).push(text) }',
+      'function _on_search(text) { (window.__se3_searches ??= []).push(text) }',
+      '```',
+    ].join('\n')
+    const listenTabId = await page.evaluate(text => (window._create(text) as any).id as string, listenText)
+    const [listenSavedId] = await saved(page, [listenTabId])
+    createdEmptyIds.push(listenSavedId)
+    const unexpTop = await measureShiftEnter({ expandTo: 0, scrollOffset: 0, holdOffline: true, expandBeforeAck: true, checkListeners: true })
+    await removeSavedItem(listenSavedId)
+    expect(unexpTop.hideBefore, 'unexpanded start collapses unpinned items so new item sits at old hideIndex').toBe(unexpTop.pinnedCount)
+    expect(unexpTop.focusCalls[0]?.delta, 'empty-box Shift+Enter focus must not trigger browser-native scroll').toBe(0)
+    expect(unexpTop.visitedScrolls.length, 'unexpanded top: at most one scroll').toBeLessThanOrEqual(2)
+    expect(new Set(unexpTop.visitedScrolls).size, 'unexpanded top: no scroll position visited and left again').toBe(unexpTop.visitedScrolls.length)
+    expect(unexpTop.visitedScrolls.every(y => y >= unexpTop.headerTop - 2), 'unexpanded top: never scrolls above header').toBe(true)
+    expect(unexpTop.firstItemTop, 'empty-box creation brings new editor into comfortable view band').toBeGreaterThanOrEqual(0)
+    expect(unexpTop.firstEdTop, 'empty-box creation brings new editor into comfortable view band').toBeLessThanOrEqual(unexpTop.viewportHeight - 200)
+    expect(unexpTop.distinctItemTops.length, 'unexpanded top: new item stays at one screen position').toBe(1)
+    expect(unexpTop.focusCalls.length, 'no redundant refocus on first resize layout (unexpanded)').toBe(1)
+    expect(unexpTop.preAck!.hideIndex, 'pre-ack hideIndex strictly increased after clicking .toggle.show').toBeGreaterThan(unexpTop.preAck!.hideBeforeExpand)
+    expect(unexpTop.postAck, 'save ack id upgrade keeps manually expanded items open without re-ranking, moving page, or losing caret').toEqual({
+      scrollTop: unexpTop.preAck!.scrollTop,
+      itemTop: unexpTop.preAck!.itemTop,
+      hideIndex: unexpTop.preAck!.hideIndex,
+      activeId: `textarea-${unexpTop.tabId}`,
+      caret: [2, 2],
+      val: 'abc',
+    })
+
+    // (2) expanded 60+ items, scrolled +500px with MindBox focused (where itemTop=498, edTop=527 used to jump +360px at ack)
+    const exp500 = await measureShiftEnter({ expandTo: 60, scrollOffset: 500 })
+    expect(exp500.visitedScrolls.length, 'expanded scrolled +500: at most one scroll').toBeLessThanOrEqual(2)
+    expect(new Set(exp500.visitedScrolls).size, 'expanded scrolled +500: no scroll position visited and left again').toBe(exp500.visitedScrolls.length)
+    expect(exp500.distinctItemTops.length, 'expanded scrolled +500: new item does not jump after first paint').toBe(1)
+    expect(exp500.focusCalls.length, 'no redundant refocus on first resize layout (expanded)').toBe(1)
+
+    // (3) expanded non-unique tag list (#features ), scrolled past the new item (+1500px) with MindBox focused:
+    // making #features non-unique prevents child creation and target-collapse, so the list stays tall and
+    // scrollTop stays past sc.offsetTop until creation scrolls up to unclip the new item
+    const dupTabId = await page.evaluate(() => (window._create('#features e2e_sc_dup') as any).id as string)
+    const [dupFeaturesId] = await saved(page, [dupTabId])
+    createdEmptyIds.push(dupFeaturesId)
+    const expPast = await measureShiftEnter({ boxText: '#features ', expandTo: 18, scrollOffset: 1500 })
+    await removeSavedItem(dupFeaturesId)
+    expect(expPast.preY, 'scrolled-past premise: started scrolled past new item').toBeGreaterThan(expPast.newItemOffsetTop)
+    expect(expPast.visitedScrolls.length, 'scrolled-past creation: at most one scroll').toBeLessThanOrEqual(2)
+    expect(new Set(expPast.visitedScrolls).size, 'scrolled-past creation: no position visited and left again').toBe(expPast.visitedScrolls.length)
+    expect(expPast.visitedScrolls.every(y => y >= expPast.headerTop - 2), 'scrolled-past creation: never scrolls above header').toBe(true)
+    expect(expPast.firstItemTop, 'scrolled-past creation keeps new item unclipped in view').toBeGreaterThanOrEqual(0)
+
+    // (4) expanded 60+ items, scrolled +500px with MindBox blurred (window.onKeyDown): must not visit header or focus MindBox
+    const expWin = await measureShiftEnter({ expandTo: 60, scrollOffset: 500, fromWindow: true })
+    expect(expWin.mindboxFocused, 'unfocused scrolled Shift+Enter does not visit header or focus MindBox before new editor').toBe(false)
+    expect(expWin.scrollToCalls.length, 'unfocused scrolled Shift+Enter does not visit header or focus MindBox before new editor').toBeLessThanOrEqual(1)
+    expect(expWin.visitedScrolls.length, 'unfocused scrolled Shift+Enter: at most one scroll').toBeLessThanOrEqual(2)
+    expect(new Set(expWin.visitedScrolls).size, 'unfocused scrolled Shift+Enter: no position visited and left again').toBe(expWin.visitedScrolls.length)
+
+    // (4b) same unfocused scrolled Shift+Enter with a command that opens no editor (/_green_screen):
+    // must still scroll up to the header and focus MindBox, matching base behavior
+    await expandQueryList(60, '/_green_screen')
+    const greenBefore = await page.evaluate(() => !!(window as any)._green_screen)
+    await blur(page)
+    const cmdHdrTop = await headerTop(page)
+    const cmdMaxScroll = await page.evaluate(() => document.body.scrollHeight - document.body.clientHeight)
+    const cmdPreY = Math.min(cmdHdrTop + 500, cmdMaxScroll)
+    expect(cmdPreY, 'command fallback premise: page scrolled well below header').toBeGreaterThan(cmdHdrTop + 200)
+    await page.evaluate(y => document.body.scrollTo(0, y), cmdPreY)
+    await settled(page)
+    await noWritePending(page)
+    await page.keyboard.press('Shift+Enter')
+    await settled(page)
+    expect(await page.evaluate(() => !!(window as any)._green_screen), '/_green_screen command ran').toBe(!greenBefore)
+    const cmdAfter = await page.evaluate(() => ({
+      scrollTop: Math.round(document.body.scrollTop),
+      activeId: document.activeElement?.id ?? null,
+    }))
+    expect(
+      { atHeader: Math.abs(cmdAfter.scrollTop - cmdHdrTop) <= 2, activeId: cmdAfter.activeId },
+      'unfocused scrolled Shift+Enter with a command that opens no editor visits header and focuses MindBox'
+    ).toEqual({ atHeader: true, activeId: 'textarea-mindbox' })
+    // restore green_screen toggle so later cases see clean state
+    await page.keyboard.press('Shift+Enter')
+    await expect.poll(() => page.evaluate(() => !!(window as any)._green_screen)).toBe(greenBefore)
+
+    // (5) stale creation layout scroll must not yank a scroll made right after editor focus (between tick() and update_dom())
+    const noYank = await measureShiftEnter({ expandTo: 60, scrollOffset: 0, scrollAfterFocus: true })
+    expect(
+      Math.abs(noYank.frames[noYank.frames.length - 1].scrollTop - noYank.headerTop),
+      'stale creation layout scroll must not yank a scroll made right after editor focus'
+    ).toBeLessThanOrEqual(2)
+
+    // (6) inert section toggle opened after save ack survives a same-query remote re-rank, then
+    // closes when the user moves to a genuinely different query
+    const INERT_LABEL = '#e2e_se3_inert'
+    const REMOTE_LABEL = '#e2e_se3_remote'
+    const inertHolderTab = await page.evaluate(
+      text => (window._create(text) as any).id as string,
+      `${INERT_LABEL} #_pin inert holder\n<!--inert-->\nagent\n- working: inert check\n    - [x] step one\n    - [ ] step two\n<!--/inert-->\ntail line`
+    )
+    const remoteTab = await page.evaluate(text => (window._create(text) as any).id as string, `${REMOTE_LABEL} remote initial`)
+    const [inertHolderSavedId, remoteSavedId] = await saved(page, [inertHolderTab, remoteTab])
+    createdEmptyIds.push(inertHolderSavedId, remoteSavedId)
+    await waitQueryReady()
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('')
+    await waitQueryReady()
+    await page.keyboard.press('Shift+Enter')
+    let inertTabId = ''
+    await expect
+      .poll(
+        async () => {
+          const it = await page.evaluate(() => ((window as any).__items as any[]).find(i => i.savedId == null && i.editing))
+          if (it) inertTabId = it.id
+          return it ? { id: it.id, target: !!it.target } : null
+        },
+        { message: 'offline empty item created for inert-section check', timeout: 10_000 }
+      )
+      .toMatchObject({ target: true })
+    await expect(mindbox(page)).toHaveValue(`id:${inertTabId}`)
+    await page.context().setOffline(false)
+    const [inertSavedId] = await saved(page, [inertTabId])
+    createdEmptyIds.push(inertSavedId)
+    await expect(mindbox(page)).toHaveValue(`id:${inertSavedId}`)
+    await settled(page)
+    const inertState = () =>
+      page.evaluate(label => {
+        const it = window._item(label, true)
+        const block = it
+          ? document.querySelector(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${it.id}"] .inert-block`)
+          : null
+        if (!block) return null
+        return {
+          opened: block.classList.contains('opened'),
+          says: block.querySelector(':scope > .inert-line > .inert-toggle')?.getAttribute('aria-expanded') ?? null,
+        }
+      }, INERT_LABEL)
+    await expect.poll(inertState, { message: 'inert section on pinned item starts closed after save ack', timeout: 5_000 }).toEqual({
+      opened: false,
+      says: 'false',
+    })
+    const inertHolderLocalId = await page.evaluate(label => window._item(label, true)!.id as string, INERT_LABEL)
+    await page
+      .locator(`.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id="${inertHolderLocalId}"] .inert-block > .inert-line`)
+      .first()
+      .click({ position: { x: 5, y: 8 } })
+    await expect.poll(inertState, { message: 'clicking inert section head after save ack opens it', timeout: 5_000 }).toEqual({
+      opened: true,
+      says: 'true',
+    })
+    const layoutBeforeRemote = await page.evaluate(() => (window as any).__layoutCount as number)
+    await firestore()
+      .collection('items')
+      .doc(remoteSavedId)
+      .update({ text: `${REMOTE_LABEL} remote updated`, time: Date.now() })
+    await expect
+      .poll(
+        async () => {
+          const text = await itemText(page, REMOTE_LABEL)
+          const done = await page.evaluate(
+            min => !(window as any).__layoutPending && ((window as any).__layoutCount as number) > min,
+            layoutBeforeRemote
+          )
+          return text === `${REMOTE_LABEL} remote updated` && done
+        },
+        { message: 'remote edit arrived and re-ranked the saved query', timeout: 15_000 }
+      )
+      .toBe(true)
+    await settled(page)
+    expect(await inertState(), 'same-query re-rank after save ack keeps inert section opened after ack').toEqual({
+      opened: true,
+      says: 'true',
+    })
+    await asUser(page, () => void (window as any).MindBox.set('e2e_se3_different_query'))
+    await waitQueryReady()
+    expect(await inertState(), 'a genuinely different query after save ack still closes the inert section').toEqual({
+      opened: false,
+      says: 'false',
+    })
+    for (const id of [inertSavedId, inertHolderSavedId, remoteSavedId]) await removeSavedItem(id)
+
+    // synchronously dispatch one or more MindBox input events while holding only the 500ms
+    // editorChangeTimer they schedule (unwrapping window.setTimeout before returning so no
+    // background/Firestore timer is ever caught or delayed)
+    const fillHoldingDebounce = async (values: string[]) => {
+      const heldCount = await page.evaluate(vals => {
+        const w = window as any
+        const origSetTimeout = window.setTimeout.bind(window)
+        const heldIds: number[] = []
+        w.__se1_restore_timer = () => {
+          window.setTimeout = origSetTimeout
+          for (const id of heldIds) clearTimeout(id)
+          heldIds.length = 0
+          delete w.__se1_restore_timer
+        }
+        window.setTimeout = ((fn: any, ms?: number, ...rest: any[]) => {
+          if (ms === 500) {
+            const id = origSetTimeout(fn, 60_000, ...rest)
+            heldIds.push(id)
+            return id
+          }
+          return origSetTimeout(fn, ms, ...rest)
+        }) as any
+        try {
+          const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+          for (const val of vals) {
+            box.value = val
+            box.dispatchEvent(new Event('input', { bubbles: true }))
+          }
+        } finally {
+          window.setTimeout = origSetTimeout
+        }
+        return heldIds.length
+      }, values)
+      expect(heldCount, 'captured the MindBox 500ms debounce timer').toBe(1)
+    }
+
+    // (7a) save ack over a different ranked query (user typed another query, let debounce apply, then typed back id:<tabId> while debouncing)
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('')
+    await waitQueryReady()
+    await page.keyboard.press('Shift+Enter')
+    let guardTabId = ''
+    await expect
+      .poll(
+        async () => {
+          const it = await page.evaluate(() => ((window as any).__items as any[]).find(i => i.savedId == null && i.editing))
+          if (it) guardTabId = it.id
+          return it ? { id: it.id, target: !!it.target } : null
+        },
+        { message: 'offline empty item created for guard check', timeout: 10_000 }
+      )
+      .toMatchObject({ target: true })
+    await expect(mindbox(page)).toHaveValue(`id:${guardTabId}`)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('e2e_bc_other_query')
+    await waitQueryReady() // let debounce apply so lastRankedQuery becomes 'e2e_bc_other_query'
+    await expect
+      .poll(() => page.evaluate(id => !!((window as any).__items as any[]).find(i => i.id === id)?.target, guardTabId))
+      .toBe(false)
+    await fillHoldingDebounce([`id:${guardTabId}`])
+    expect(await page.evaluate(() => (window as any)._editor_change_pending), 'debounce pending before save ack').toBe(true)
+    await page.context().setOffline(false)
+    const [guardSavedId] = await saved(page, [guardTabId])
+    await page.evaluate(() => (window as any).__se1_restore_timer?.())
+    createdEmptyIds.push(guardSavedId)
+    await expect(mindbox(page), 'save ack over a different ranked query still selects the saved item').toHaveValue(`id:${guardSavedId}`)
+    expect(
+      await page.evaluate(id => !!((window as any).__items as any[]).find(i => i.id === id)?.target, guardTabId),
+      'save ack over a different ranked query still selects the saved item'
+    ).toBe(true)
+    await removeSavedItem(guardSavedId)
+
+    // (7b) save ack with a pending change while lastRankedQuery is STILL id:<tabId> (typed away
+    // and back inside one debounce interval): must take the full path and settle
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill('')
+    await waitQueryReady()
+    await page.keyboard.press('Shift+Enter')
+    let pendTabId = ''
+    await expect
+      .poll(
+        async () => {
+          const it = await page.evaluate(() => ((window as any).__items as any[]).find(i => i.savedId == null && i.editing))
+          if (it) pendTabId = it.id
+          return it ? { id: it.id, target: !!it.target } : null
+        },
+        { message: 'offline empty item created for pending same-query guard check', timeout: 10_000 }
+      )
+      .toMatchObject({ target: true })
+    await expect(mindbox(page)).toHaveValue(`id:${pendTabId}`)
+    await waitQueryReady()
+    await focusMindboxInPlace(page)
+    await fillHoldingDebounce(['e2e_se3_typed_away', `id:${pendTabId}`])
+    expect(
+      await page.evaluate(id => {
+        const w = window as any
+        return {
+          pending: !!w._editor_change_pending,
+          debounced: !!w._mindboxDebounced,
+          target: !!(w.__items as any[]).find(i => i.id === id)?.target,
+        }
+      }, pendTabId),
+      'pending same-query premise: change pending with lastRankedQuery still on id:<tabId>'
+    ).toEqual({ pending: true, debounced: true, target: true })
+    const layoutBeforePendAck = await page.evaluate(() => (window as any).__layoutCount as number)
+    await page.context().setOffline(false)
+    const [pendSavedId] = await saved(page, [pendTabId])
+    createdEmptyIds.push(pendSavedId)
+    await expect(mindbox(page), 'pending same-query save ack upgrades box to id:<savedId>').toHaveValue(`id:${pendSavedId}`)
+    expect(
+      await page.evaluate(before => {
+        const w = window as any
+        return {
+          pending: !!w._editor_change_pending,
+          debounced: !!w._mindboxDebounced,
+          reranked: (w.__layoutCount as number) > before,
+        }
+      }, layoutBeforePendAck),
+      'save ack with a pending change on the same ranked query takes the full path and settles'
+    ).toEqual({ pending: false, debounced: false, reranked: true })
+    await page.evaluate(() => (window as any).__se1_restore_timer?.())
+    await removeSavedItem(pendSavedId)
+
     await waitNoBcSaves(page)
     expect(errors, 'no page errors').toEqual([])
   } finally {
-    await page.evaluate(() => (window as any).__bc_restore_replace?.()).catch(() => {})
+    await page.evaluate(() => {
+      ;(window as any).__bc_restore_replace?.()
+      ;(window as any).__se1_rec?.restore?.()
+      ;(window as any).__se1_restore_timer?.()
+      delete (window as any).__se3_changes
+      delete (window as any).__se3_searches
+      localStorage.removeItem('mindpage_green_screen')
+    }).catch(() => {})
     await page.context().setOffline(false)
+    for (const id of createdEmptyIds) await firestore().collection('items').doc(id).delete().catch(() => {})
     await deleteBoxAfterCreation()
   }
 })
@@ -1836,9 +2538,10 @@ test('unnamed creation leaves a changed box alone on save, keeps named, child, c
     await expect(mindbox(page), 'child creation still holds child label + space after save').toHaveValue(`${NAMED}/0 `)
     await page.keyboard.press('Shift+Enter')
 
-    // (d) other box creation triggers on unnamed text: Ctrl+S, Create button, Run key (Ctrl/Cmd+Enter)
+    // (d) other box creation triggers on unnamed text: Ctrl+S, Alt+Enter, Create button, Run key (Ctrl/Cmd+Enter)
     for (const [label, text, trigger] of [
       ['Ctrl+S', 'e2e_bc created via ctrl+s', () => page.keyboard.press('Control+s')],
+      ['Alt+Enter', 'e2e_bc created via alt+enter', () => page.keyboard.press('Alt+Enter')],
       ['create button', 'e2e_bc created via create button', () => page.locator('.header .button.create').click()],
     ] as const) {
       await focusBox()
