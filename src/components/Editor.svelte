@@ -85,7 +85,7 @@
   import { eventKey } from '../event_key'
   import { collectLinkDefs, highlightLinks } from '../editor_links'
   import { inertCandidateSpan, scanInert } from '../inert'
-  import { isRecentDownKey, isRecentUpKey } from '../recent_descendant'
+  import { isRecentDownKey, isRecentPageDownKey, isRecentPageUpKey, isRecentUpKey } from '../recent_descendant'
 
   const placeholder = ' '
   let spellcheck = false
@@ -542,8 +542,8 @@
     }
 
     // ignore modifier keys, and otherwise stop propagation outside of editor
-    // only keys we propagate are unmodified ArrowUp/Down at start/end of editor, plus Option+Down
-    // (Alt+ArrowDown alone) at end and Option+Up (Alt+ArrowUp alone) at start of editor (MindBox)
+    // only keys we propagate are unmodified ArrowUp/Down at start/end of editor, plus Option+Down /
+    // Option+PageDown at end and Option+Up / Option+PageUp at start of editor (MindBox)
     const modified = e.metaKey || e.ctrlKey || e.altKey || e.shiftKey
     if (key.match(/^(Meta|Alt|Control|Shift)/)) return
     else if (propagateArrowUpDownAtEdges && key == 'ArrowUp' && !modified && textarea.selectionEnd == 0) return
@@ -557,8 +557,9 @@
       return
     } else if (
       propagateArrowUpDownAtEdges &&
-      ((isRecentDownKey(key, e) && textarea.selectionStart == textarea.value.length) ||
-        (isRecentUpKey(key, e) && textarea.selectionEnd == 0))
+      (((isRecentDownKey(key, e) || isRecentPageDownKey(key, e)) &&
+        textarea.selectionStart == textarea.value.length) ||
+        ((isRecentUpKey(key, e) || isRecentPageUpKey(key, e)) && textarea.selectionEnd == 0))
     ) {
       createClosure = createClosureModifierKeys = null
       return

@@ -3190,7 +3190,7 @@
   let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
   let ignoreEditorChanges = false
-  let recentWalk: RecentWalk | null = null // Option+Down/Option+Up walk (see onKeyDown); ended by any other change of the box
+  let recentWalk: RecentWalk | null = null // Option+Down/Up/PageDown/PageUp walk (see onKeyDown); ended by Option release, window focus loss, or any other change of the box
   let skipNarrationJump = false // true while applyWalkStep settles a pending debounce before pushing the walk step
 
   // the key inert_blocks tracks the active search under (trimmed lowercase query plus whether a
@@ -3274,14 +3274,22 @@
 
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top (not during an
-      // active Option+Down/Option+Up walk or its debounce settle, where the walk step promises a
-      // history entry and stays active; a real Back clears recentWalk in onPopState first)
+      // active Option+Down/Up/PageDown/PageUp walk or its debounce settle, where the walk step promises a
+      // history entry and stays active, and not on a same-query refresh of the entry already shown —
+      // e.g. a remote edit or soft-touch after Option is released on entry 2; a popstate traversal onto
+      // such an entry sets ignoreStateOnEditorChange, and a change that replaces a different typed draft
+      // still pending (a tag's click over it, or typing back to the query) is told by the draft the
+      // debounce recorded: both still hop to entry 0. The shared ...OnEditorChange flags are not read
+      // here: one can outlive an ignored call, as a creation's does into the restore of the box)
       if (
         !recentWalk &&
         !skipNarrationJump &&
         editorText.trim() &&
         sessionStateHistoryIndex > 0 &&
         !positionUnknown && // no distance can be said from a position that holds no entry
+        (ignoreStateOnEditorChange ||
+          (editorChangePending && editorChangeInput !== null && editorChangeInput.trim() !== editorText.trim()) ||
+          editorText.trim() != (currentState().editorText?.trim() ?? '')) &&
         editorText.trim() == (sessionStateHistory.get(0)?.editorText.trim() ?? '')
       ) {
         scrollToTopOnPopState = true
@@ -4655,6 +4663,7 @@
       onEditorChange(editorText, true /* keep_times */)
     } finally {
       restoredHideIndex = 0
+      ignoreStateOnEditorChange = false
     }
 
     // restore (lower) hide index _after_ onEditorChange which sets it to default index given query
@@ -4830,7 +4839,10 @@
   // the facts ride the instance record (see updateInstance) for the #status item
   const resumeSchedule = new ResumeSchedule() // what is due (src/page_lifecycle.ts, review 1 R4)
   function onVisibilityChange() {
-    if (document.visibilityState == 'hidden') endStopNote() // its timer can be held while hidden (see noteStop)
+    if (document.visibilityState == 'hidden') {
+      endStopNote() // its timer can be held while hidden (see noteStop)
+      endRecentWalk() // a release while hidden is not seen
+    }
     if (!instance) return
     if (document.visibilityState == 'hidden') {
       instance.hidden_time = Date.now()
@@ -9745,7 +9757,18 @@
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
-  import { isRecentDownKey, isRecentUpKey, stepRecentWalk, stepRecentWalkBack, type RecentWalk } from '../recent_descendant'
+  import {
+    isRecentDownKey,
+    isRecentPageDownKey,
+    isRecentPageUpKey,
+    isRecentUpKey,
+    isRecentWalkEndKey,
+    jumpRecentWalkOldest,
+    jumpRecentWalkStart,
+    stepRecentWalk,
+    stepRecentWalkBack,
+    type RecentWalk,
+  } from '../recent_descendant'
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import {
     NOTIFICATION_CLICK_TYPE,
@@ -12665,11 +12688,15 @@
         return
       }
     }
-    // Option+Down (Alt+ArrowDown alone) starts a time-ordered walk from the uniquely labeled item the
-    // box names (or globally from an empty box) and walks on without wrapping; Option+Up (Alt+ArrowUp
-    // alone) steps back through the active walk to its start and stops there; neither does anything
-    // else (the owner, 2026-11-24 and 2026-11-26)
-    if (isRecentDownKey(key, e) || isRecentUpKey(key, e)) {
+    // One hold of Option is one walk: Option+Down (Alt+ArrowDown alone) starts a time-ordered walk
+    // from the uniquely labeled item the box names (or globally from an empty box) and walks on
+    // without wrapping; Option+Up (Alt+ArrowUp alone) steps back through the active walk to its
+    // start and stops there; Option+PageDown (Alt+PageDown alone) jumps straight to the oldest item
+    // (or starts a walk there as the first key of a hold); Option+PageUp (Alt+PageUp alone) jumps
+    // straight back to the start; releasing Option (onKeyUpCapture) or losing window focus
+    // (endRecentWalk) ends the walk so the next hold starts fresh from what the box names, and none
+    // of the four keys does anything else (the owner, 2026-11-24, 2026-11-26 and 2026-11-27)
+    if (isRecentDownKey(key, e) || isRecentUpKey(key, e) || isRecentPageDownKey(key, e) || isRecentPageUpKey(key, e)) {
       e.preventDefault()
       const queryOf = chosen =>
         chosen.labelUnique && chosen.label ? (labelTextOf(chosen.labelText, chosen.label) || chosen.label) + ' ' : selectName(chosen)
@@ -12703,8 +12730,16 @@
         const { item: next, walk } = stepRecentWalk(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
         if (next && walk) applyWalkStep(walk)
         else recentWalk = walk
-      } else {
+      } else if (isRecentPageDownKey(key, e)) {
+        const { item: oldest, walk } = jumpRecentWalkOldest(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
+        if (oldest && walk) applyWalkStep(walk)
+        else recentWalk = walk
+      } else if (isRecentUpKey(key, e)) {
         const { query, walk } = stepRecentWalkBack(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
+        if (query !== null && walk) applyWalkStep(walk)
+        else recentWalk = walk
+      } else {
+        const { query, walk } = jumpRecentWalkStart(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
         if (query !== null && walk) applyWalkStep(walk)
         else recentWalk = walk
       }
@@ -12876,6 +12911,18 @@
     if (window['_on_key']) window['_on_key'](key, e)
   }
 
+  function endRecentWalk() {
+    recentWalk = null
+  }
+
+  // capture-phase keyup on window: sees Option release wherever focus sits (body, MindBox, item
+  // editor, modal, or a widget that stops keyup propagation) without altering keyup dispatch
+  function onKeyUpCapture(e: KeyboardEvent) {
+    if (!recentWalk) return
+    const key = eventKey(e) // physical code, except a character on a remapped keycode
+    if (key && isRecentWalkEndKey(key, e)) endRecentWalk()
+  }
+
   function onKeyUp(e: KeyboardEvent) {
     const key = eventKey(e) // physical code, except a character on a remapped keycode
     if (!key) return // can be empty for pencil input on ios
@@ -12996,6 +13043,7 @@
       return
     }
     focused = false
+    endRecentWalk()
     // hideIndex = hideIndexMinimal;
     // NOTE: blurring on defocus enables touch-to-focus-on-other-window on ipad, which seems to require the original window to not have focus (double tap is needed if first tap is to blur), but also inhibits cmd-tilde switching on ipad (since blurring means there is nothing to switch back to), which is particularly problematic as this switching seems to be undetectable (see comments in onEditorFocus) -- we are able to work around this by restoring focus on last blurred element but an additional touch or keydown (e.g. Shift or Alt) is still needed (true regardless of whether we blur on defocus or not)
     lastFocusedElem = document.activeElement as HTMLElement
@@ -13773,11 +13821,13 @@
 <svelte:window
   on:keydown|capture={endStopNote}
   on:pointerdown|capture={endStopNote}
+  on:keyup|capture={onKeyUpCapture}
   on:keydown={onKeyDown}
   on:keyup={onKeyUp}
   on:focus={onFocus}
   on:focusin={onFocus}
   on:blur={onFocus}
+  on:blur={endRecentWalk}
   on:error={onError}
   on:touchstart|passive={onTouchStart}
   on:mousedown={onMouseDown}
@@ -13788,6 +13838,7 @@
   on:pagehide={dropUnsavedNotice}
   on:pagehide={retireReturn}
   on:pagehide={endStopNote}
+  on:pagehide={endRecentWalk}
   on:online={onOnline}
   on:offline={onOffline}
 />

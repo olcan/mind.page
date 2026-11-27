@@ -1,4 +1,4 @@
-import { expect, test, type Locator } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { asUser, mindbox, focusMindbox, savedId, itemText, userSet, visible, SOURCE_TEXT, scrollTop, headerTop, entries, scrollDown, nearTop, asSet, expand, focusMindboxInPlace, blur, noWritePending, settled } from './editor_helpers.js'
 import { firestore, loadAdmin, waitForApp } from './helpers.js'
 
@@ -2591,6 +2591,16 @@ test('time rows: a fresh load groups the corpus although layouts ran over an emp
   await cold.close()
 })
 
+// one hold of Option is one walk: hold Alt across every arrow step of a single walk
+const withAlt = async <T>(page: Page, fn: () => Promise<T>, key = 'Alt'): Promise<T> => {
+  await page.keyboard.down(key)
+  try {
+    return await fn()
+  } finally {
+    await page.keyboard.up(key)
+  }
+}
+
 test('Option+Down selects the newest descendant at any depth, walks consecutive presses to the end without wrapping, handles the global case including unnamed items, and yields inside an item editor', async ({ page }) => {
   // the owner (2026-11-24): Option+Down (Alt+ArrowDown alone) selects the newest item below the selected one
   // at any depth by item.time, walks consecutive presses to the next newest from the same start without going
@@ -2670,40 +2680,42 @@ test('Option+Down selects the newest descendant at any depth, walks consecutive 
   await blur(page)
   const [len0, idx0] = await entries(page)
 
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: '1st Option+Down lands on newest descendant two levels down' }).toBe(`${DEEP} `)
-  expect(await entries(page), '1st Option+Down pushes a history entry').toEqual([len0 + 1, idx0 + 1])
-  expect(await descTimes(), 'Option+Down keeps item times').toEqual(times)
+  await withAlt(page, async () => {
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: '1st Option+Down lands on newest descendant two levels down' }).toBe(`${DEEP} `)
+    expect(await entries(page), '1st Option+Down pushes a history entry').toEqual([len0 + 1, idx0 + 1])
+    expect(await descTimes(), 'Option+Down keeps item times').toEqual(times)
 
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: '2nd Option+Down walks to next newest below the same parent' }).toBe(`${CHILD_A} `)
-  expect(await entries(page), '2nd Option+Down pushes a history entry').toEqual([len0 + 2, idx0 + 2])
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: '2nd Option+Down walks to next newest below the same parent' }).toBe(`${CHILD_A} `)
+    expect(await entries(page), '2nd Option+Down pushes a history entry').toEqual([len0 + 2, idx0 + 2])
 
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: '3rd Option+Down walks to oldest descendant below the same parent' }).toBe(`${CHILD_B} `)
-  expect(await entries(page), '3rd Option+Down pushes a history entry').toEqual([len0 + 3, idx0 + 3])
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: '3rd Option+Down walks to oldest descendant below the same parent' }).toBe(`${CHILD_B} `)
+    expect(await entries(page), '3rd Option+Down pushes a history entry').toEqual([len0 + 3, idx0 + 3])
 
-  // at the walk's end: default prevented, no box change, no history entry, no scroll, no wrap
-  const scrollBeforeEnd = await scrollTop(page)
-  await page.evaluate(() => {
-    ;(window as any).__odEndPrevented = null
-    const onEndKey = (e: KeyboardEvent) => {
-      if (e.code == 'ArrowDown' && e.altKey) {
-        ;(window as any).__odEndPrevented = e.defaultPrevented
-        window.removeEventListener('keydown', onEndKey)
+    // at the walk's end: default prevented, no box change, no history entry, no scroll, no wrap
+    const scrollBeforeEnd = await scrollTop(page)
+    await page.evaluate(() => {
+      ;(window as any).__odEndPrevented = null
+      const onEndKey = (e: KeyboardEvent) => {
+        if (e.code == 'ArrowDown' && e.altKey) {
+          ;(window as any).__odEndPrevented = e.defaultPrevented
+          window.removeEventListener('keydown', onEndKey)
+        }
       }
-    }
-    window.addEventListener('keydown', onEndKey)
+      window.addEventListener('keydown', onEndKey)
+    })
+    await page.keyboard.press('ArrowDown')
+    expect(await page.evaluate(() => (window as any).__odEndPrevented), 'default prevented at walk end').toBe(true)
+    expect(await query(), 'walk end changes nothing').toBe(`${CHILD_B} `)
+    expect(await entries(page), 'walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
+    expect(await scrollTop(page), 'walk end does not scroll').toBe(scrollBeforeEnd)
+    // a second press at the end still does not wrap
+    await page.keyboard.press('ArrowDown')
+    expect(await query(), 'repeated press at walk end does not wrap').toBe(`${CHILD_B} `)
+    expect(await entries(page), 'repeated press at walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
   })
-  await page.keyboard.press('Alt+ArrowDown')
-  expect(await page.evaluate(() => (window as any).__odEndPrevented), 'default prevented at walk end').toBe(true)
-  expect(await query(), 'walk end changes nothing').toBe(`${CHILD_B} `)
-  expect(await entries(page), 'walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
-  expect(await scrollTop(page), 'walk end does not scroll').toBe(scrollBeforeEnd)
-  // a second press at the end still does not wrap
-  await page.keyboard.press('Alt+ArrowDown')
-  expect(await query(), 'repeated press at walk end does not wrap').toBe(`${CHILD_B} `)
-  expect(await entries(page), 'repeated press at walk end adds no history entry').toEqual([len0 + 3, idx0 + 3])
 
   // Back steps back through the walk one entry at a time
   await page.goBack()
@@ -2713,36 +2725,40 @@ test('Option+Down selects the newest descendant at any depth, walks consecutive 
   await page.goBack()
   await expect.poll(query, { message: 'Back 3 returns to parent' }).toMatch(/^#e2e_od ?$/)
 
-  // 2. Plain Down is as before, and a plain Down or a click in between starts the walk anew
+  // 2. Plain Down is as before, and a click during a hold starts the walk anew
   await blur(page)
   await page.keyboard.press('ArrowDown')
   await expect.poll(query, { message: 'plain Down from parent still selects first direct child' }).toBe(`${CHILD_A} `)
 
-  // plain Down in between: start walk from parent -> deep -> child a, then plain Down to deep (leaf), then Option+Down must do nothing (not continue to child b)
+  // plain Down after a released hold: walk parent -> deep -> child a, release Option (ending the walk), then plain Down enters child a's direct child (deep, a leaf) and a fresh Option+Down starts anew there and does nothing
   await userSet(page, PARENT, { scroll: true })
   await expect.poll(query).toMatch(/^#e2e_od ?$/)
   await blur(page)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query).toBe(`${DEEP} `)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query).toBe(`${CHILD_A} `)
+  await withAlt(page, async () => {
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query).toBe(`${DEEP} `)
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query).toBe(`${CHILD_A} `)
+  })
   await page.keyboard.press('ArrowDown')
   await expect.poll(query, { message: 'plain Down enters direct child of child a' }).toBe(`${DEEP} `)
   await page.keyboard.press('Alt+ArrowDown')
-  expect(await query(), 'Option+Down after plain Down starts anew on leaf and does nothing').toBe(`${DEEP} `)
+  expect(await query(), 'fresh Option+Down after release and plain Down starts anew on leaf and does nothing').toBe(`${DEEP} `)
 
-  // click in between: start walk from parent -> deep, then click child a on parent context, then Option+Down starts anew from child a (-> deep, not child b)
+  // click in between (while Option stays held): start walk from parent -> deep, then click child a on parent context, then Option+Down starts anew from child a (-> deep, not child b)
   await userSet(page, PARENT, { scroll: true })
   await expect.poll(query).toMatch(/^#e2e_od ?$/)
   await blur(page)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query).toBe(`${DEEP} `)
-  await expect.poll(() => page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).count()).toBeGreaterThan(0)
-  await page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).first().click()
-  await expect.poll(query, { message: 'click on child a selects child a' }).toBe(`${CHILD_A} `)
-  await blur(page)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: 'Option+Down after click starts anew from child a' }).toBe(`${DEEP} `)
+  await withAlt(page, async () => {
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query).toBe(`${DEEP} `)
+    await expect.poll(() => page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).count()).toBeGreaterThan(0)
+    await page.locator(`#item-${parentId} mark[title="${CHILD_A}"]`).first().click()
+    await expect.poll(query, { message: 'click on child a selects child a' }).toBe(`${CHILD_A} `)
+    await blur(page)
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: 'Option+Down after click starts anew from child a' }).toBe(`${DEEP} `)
+  })
 
   // 3. MindBox context (at end edge) and second-modifier rejection
   await userSet(page, PARENT, { scroll: true })
@@ -2803,10 +2819,12 @@ test('Option+Down selects the newest descendant at any depth, walks consecutive 
   await userSet(page, '')
   await expect.poll(query).toBe('')
   await blur(page)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: 'Option+Down on empty box skips pinned and selects newest unnamed item by id' }).toBe(`id:${unnamedSavedId}`)
-  await page.keyboard.press('Alt+ArrowDown')
-  await expect.poll(query, { message: '2nd global Option+Down walks on to next newest item' }).toBe(`${DEEP} `)
+  await withAlt(page, async () => {
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: 'Option+Down on empty box skips pinned and selects newest unnamed item by id' }).toBe(`id:${unnamedSavedId}`)
+    await page.keyboard.press('ArrowDown')
+    await expect.poll(query, { message: '2nd global Option+Down walks on to next newest item' }).toBe(`${DEEP} `)
+  })
 
   // a fresh Option+Down on an item selected by id has nothing below it (even if uniquely labeled with descendants)
   await userSet(page, `id:${parentSavedId}`)
@@ -3030,7 +3048,7 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
       if (wantTarget) await expect.poll(targetInBand, { message: `${msg}: scrolled to target` }).toBe(true)
     }
 
-    const expectAltNoOp = async (code: 'ArrowUp' | 'ArrowDown', msg: string) => {
+    const expectAltNoOp = async (code: 'ArrowUp' | 'ArrowDown', msg: string, held = false) => {
       await expect
         .poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { message: `${msg}: query settled` })
         .toBe(true)
@@ -3053,7 +3071,7 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
           focused: document.activeElement?.id === 'textarea-mindbox',
         }
       }, code)
-      await page.keyboard.press(`Alt+${code}`)
+      await page.keyboard.press(held ? code : `Alt+${code}`)
       const after = await page.evaluate(() => ({
         probe: (window as any).__ouNoOpProbe as { seen: boolean; prevented: boolean | null },
         view: {
@@ -3068,48 +3086,50 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
       expect(after.view, `${msg}: view unchanged`).toEqual(before)
     }
 
-    await page.keyboard.press('Alt+ArrowDown')
-    await expectStep(`${DEEP} `, deepId, 1, '1st Option+Down')
-    await page.keyboard.press('Alt+ArrowDown')
-    await expectStep(`${CHILD_A} `, childAId, 2, '2nd Option+Down')
-    await page.keyboard.press('Alt+ArrowDown')
-    await expectStep(`${CHILD_B} `, childBId, 3, '3rd Option+Down')
-
-    // scroll away so the first Option+Up must visibly scroll back to its target
     const top = await headerTop(page)
-    const scrollAwayTo = await page.evaluate(header => {
-      const target = document.querySelector('.super-container.target') as HTMLElement
-      return target.offsetTop < header + 300 ? header + 600 : header
-    }, top)
-    await expect
-      .poll(
-        async () => {
-          await page.evaluate(y => document.body.scrollTo(0, y), scrollAwayTo)
-          await page.waitForTimeout(100)
-          return targetInBand()
-        },
-        { message: 'scrolled away from target before stepping back' }
-      )
-      .toBe(false)
-    const scrolledBeforeUp = await scrollTop(page)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expectStep(`${DEEP} `, deepId, 1, '1st Option+Down')
+      await page.keyboard.press('ArrowDown')
+      await expectStep(`${CHILD_A} `, childAId, 2, '2nd Option+Down')
+      await page.keyboard.press('ArrowDown')
+      await expectStep(`${CHILD_B} `, childBId, 3, '3rd Option+Down')
 
-    await page.keyboard.press('Alt+ArrowUp')
-    await expectStep(`${CHILD_A} `, childAId, 4, '1st Option+Up back to child a')
-    await expect.poll(async () => Math.abs((await scrollTop(page)) - scrolledBeforeUp), { message: 'Option+Up scrolled to target' }).toBeGreaterThan(100)
+      // scroll away so the first Option+Up must visibly scroll back to its target
+      const scrollAwayTo = await page.evaluate(header => {
+        const target = document.querySelector('.super-container.target') as HTMLElement
+        return target.offsetTop < header + 300 ? header + 600 : header
+      }, top)
+      await expect
+        .poll(
+          async () => {
+            await page.evaluate(y => document.body.scrollTo(0, y), scrollAwayTo)
+            await page.waitForTimeout(100)
+            return targetInBand()
+          },
+          { message: 'scrolled away from target before stepping back' }
+        )
+        .toBe(false)
+      const scrolledBeforeUp = await scrollTop(page)
 
-    await page.keyboard.press('Alt+ArrowUp')
-    await expectStep(`${DEEP} `, deepId, 5, '2nd Option+Up back to deep')
+      await page.keyboard.press('ArrowUp')
+      await expectStep(`${CHILD_A} `, childAId, 4, '1st Option+Up back to child a')
+      await expect.poll(async () => Math.abs((await scrollTop(page)) - scrolledBeforeUp), { message: 'Option+Up scrolled to target' }).toBeGreaterThan(100)
 
-    await page.keyboard.press('Alt+ArrowUp')
-    await expectStep(`${START} `, startId, 6, '3rd Option+Up back to start')
+      await page.keyboard.press('ArrowUp')
+      await expectStep(`${DEEP} `, deepId, 5, '2nd Option+Up back to deep')
 
-    // at the start: stops quietly (does NOT climb to GRAND), default prevented, no history entry, no scroll, stays blurred
-    await expectAltNoOp('ArrowUp', 'Option+Up at walk start (does not climb to grandparent)')
+      await page.keyboard.press('ArrowUp')
+      await expectStep(`${START} `, startId, 6, '3rd Option+Up back to start')
 
-    // walk is still on at the start: Option+Down goes forward again to the 1st item, times kept
-    await page.keyboard.press('Alt+ArrowDown')
-    await expectStep(`${DEEP} `, deepId, 7, 'Option+Down from start goes forward to 1st again')
-    expect(await descTimes(), 'walk down and back up keeps item times').toEqual(times)
+      // at the start: stops quietly (does NOT climb to GRAND), default prevented, no history entry, no scroll, stays blurred
+      await expectAltNoOp('ArrowUp', 'Option+Up at walk start (does not climb to grandparent)', true)
+
+      // walk is still on at the start: Option+Down goes forward again to the 1st item, times kept
+      await page.keyboard.press('ArrowDown')
+      await expectStep(`${DEEP} `, deepId, 7, 'Option+Down from start goes forward to 1st again')
+      expect(await descTimes(), 'walk down and back up keeps item times').toEqual(times)
+    })
 
     // Back returns step by step through the walk
     const backSteps: [string, string][] = [
@@ -3129,19 +3149,21 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
     await expect.poll(query, { message: 'Back 7 returns to initial start entry' }).toMatch(/^#e2e_ou\/p ?$/)
     await expect.poll(targetId, { message: 'Back 7 target' }).toBe(startId)
 
-    // 2. Plain Up in a walk goes to parent and ends the walk; Option+Up outside a walk does nothing (and plain Up from the same place still goes to parent); Option+Down does nothing where box names no starting point
+    // 2. Plain Up after a released hold goes to parent (not former walk-previous); Option+Up outside a walk does nothing (and plain Up from the same place still goes to parent); Option+Down does nothing where box names no starting point
     await blur(page)
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query).toBe(`${DEEP} `)
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query).toBe(`${CHILD_A} `)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
+    })
     await expect.poll(targetId).toBe(childAId)
-    // in walk at CHILD_A: walk-previous is DEEP, while parent is START
+    // after releasing Option at CHILD_A (ending the walk): plain Up goes to parent START, not the former walk-previous DEEP
     await page.keyboard.press('ArrowUp')
-    await expect.poll(query, { message: 'plain Up in walk goes to parent START, not walk-previous DEEP' }).toBe(`${START} `)
+    await expect.poll(query, { message: 'plain Up after released walk goes to parent START, not former walk-previous DEEP' }).toBe(`${START} `)
     await expect.poll(targetId).toBe(startId)
-    // plain Up ended the walk, so Option+Up on START now does nothing (does NOT climb to GRAND)
-    await expectAltNoOp('ArrowUp', 'Option+Up after plain Up ended walk')
+    // with no walk active, Option+Up on START does nothing (does NOT climb to GRAND)
+    await expectAltNoOp('ArrowUp', 'Option+Up after release and plain Up does nothing')
     // plain Up from the same place still goes to parent GRAND
     await page.keyboard.press('ArrowUp')
     await expect.poll(query, { message: 'plain Up from START goes to parent GRAND' }).toBe(`${GRAND} `)
@@ -3180,106 +3202,115 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
     await expectAltNoOp('ArrowUp', 'Option+Up with no walk on empty box (no focus, no header scroll)')
     const [gLen, gIdx] = await entries(page)
 
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query, { message: '1st global Option+Down' }).toBe(`id:${unnamedSavedId}`)
-    await expect.poll(targetId).toBe(unnamedId)
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query, { message: '2nd global Option+Down' }).toBe(`${DEEP} `)
-    await expect.poll(targetId).toBe(deepId)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: '1st global Option+Down' }).toBe(`id:${unnamedSavedId}`)
+      await expect.poll(targetId).toBe(unnamedId)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: '2nd global Option+Down' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
 
-    await page.keyboard.press('Alt+ArrowUp')
-    await expect.poll(query, { message: '1st global Option+Up returns to unnamed item' }).toBe(`id:${unnamedSavedId}`)
-    await expect.poll(targetId).toBe(unnamedId)
-    await page.keyboard.press('Alt+ArrowUp')
-    await expect.poll(query, { message: '2nd global Option+Up returns to empty box' }).toBe('')
-    await expect.poll(targetId, { message: 'empty box has no target' }).toBeNull()
-    expect(await entries(page), 'global walk down x2 + up x2 pushed 4 entries').toEqual([gLen + 4, gIdx + 4])
-    await expect(mindbox(page), 'step back to empty box blurs MindBox').not.toBeFocused()
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: '1st global Option+Up returns to unnamed item' }).toBe(`id:${unnamedSavedId}`)
+      await expect.poll(targetId).toBe(unnamedId)
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: '2nd global Option+Up returns to empty box' }).toBe('')
+      await expect.poll(targetId, { message: 'empty box has no target' }).toBeNull()
+      expect(await entries(page), 'global walk down x2 + up x2 pushed 4 entries').toEqual([gLen + 4, gIdx + 4])
+      await expect(mindbox(page), 'step back to empty box blurs MindBox').not.toBeFocused()
 
-    // further Option+Up at global start stops quietly (default prevented, no history entry, no scroll, no MindBox focus)
-    await expectAltNoOp('ArrowUp', 'Option+Up at global start')
+      // further Option+Up at global start stops quietly (default prevented, no history entry, no scroll, no MindBox focus)
+      await expectAltNoOp('ArrowUp', 'Option+Up at global start', true)
 
-    // forward again from global start returns to 1st item
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query, { message: 'Option+Down from global start returns to 1st item' }).toBe(`id:${unnamedSavedId}`)
-    await expect.poll(targetId).toBe(unnamedId)
-    expect(await entries(page)).toEqual([gLen + 5, gIdx + 5])
+      // forward again from global start returns to 1st item
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'Option+Down from global start returns to 1st item' }).toBe(`id:${unnamedSavedId}`)
+      await expect.poll(targetId).toBe(unnamedId)
+      expect(await entries(page)).toEqual([gLen + 5, gIdx + 5])
+    })
 
     // 4. MindBox editor (start edge only, Shift+Alt rejected, pending debounce settled) and item editor
     await setFixtureTimes()
     await userSet(page, START, { scroll: true })
     await expect.poll(targetId).toBe(startId)
     await blur(page)
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query).toBe(`${DEEP} `)
-    await page.keyboard.press('Alt+ArrowDown')
-    await expect.poll(query).toBe(`${CHILD_A} `)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
 
-    // caret at end of MindBox text: Option+Up does NOT propagate or step back
-    await focusMindboxInPlace(page, `${CHILD_A} `.length)
-    await page.evaluate(() => {
-      ;(window as any).__ouMidReachedWindow = false
-      const onKey = (e: KeyboardEvent) => {
-        if (e.code == 'ArrowUp' && e.altKey) (window as any).__ouMidReachedWindow = true
+      // caret at end of MindBox text: Option+Up does NOT propagate or step back
+      await focusMindboxInPlace(page, `${CHILD_A} `.length)
+      await page.evaluate(() => {
+        ;(window as any).__ouMidReachedWindow = false
+        const onKey = (e: KeyboardEvent) => {
+          if (e.code == 'ArrowUp' && e.altKey) (window as any).__ouMidReachedWindow = true
+        }
+        ;(window as any).__ouMidCleanup = () => window.removeEventListener('keydown', onKey)
+        window.addEventListener('keydown', onKey)
+      })
+      await page.keyboard.press('ArrowUp')
+      const midReached = await page.evaluate(() => {
+        ;(window as any).__ouMidCleanup?.()
+        delete (window as any).__ouMidCleanup
+        return (window as any).__ouMidReachedWindow as boolean
+      })
+      expect(midReached, 'Option+Up away from MindBox start edge does not propagate').toBe(false)
+      expect(await query(), 'Option+Up away from start edge does not step back').toBe(`${CHILD_A} `)
+      await expect(mindbox(page), 'MindBox stays focused').toBeFocused()
+
+      // Shift+Alt+ArrowUp at start edge (0) does NOT propagate (keep Alt held across the Shift press)
+      await focusMindboxInPlace(page, 0)
+      await page.evaluate(() => {
+        ;(window as any).__ouShiftAltReachedWindow = false
+        const onKey = (e: KeyboardEvent) => {
+          if (e.code == 'ArrowUp' && e.altKey && e.shiftKey) (window as any).__ouShiftAltReachedWindow = true
+        }
+        ;(window as any).__ouShiftAltCleanup = () => window.removeEventListener('keydown', onKey)
+        window.addEventListener('keydown', onKey)
+      })
+      await page.keyboard.down('Shift')
+      try {
+        await page.keyboard.press('ArrowUp')
+      } finally {
+        await page.keyboard.up('Shift')
       }
-      ;(window as any).__ouMidCleanup = () => window.removeEventListener('keydown', onKey)
-      window.addEventListener('keydown', onKey)
-    })
-    await page.keyboard.press('Alt+ArrowUp')
-    const midReached = await page.evaluate(() => {
-      ;(window as any).__ouMidCleanup?.()
-      delete (window as any).__ouMidCleanup
-      return (window as any).__ouMidReachedWindow as boolean
-    })
-    expect(midReached, 'Option+Up away from MindBox start edge does not propagate').toBe(false)
-    expect(await query(), 'Option+Up away from start edge does not step back').toBe(`${CHILD_A} `)
-    await expect(mindbox(page), 'MindBox stays focused').toBeFocused()
+      const shiftAltReached = await page.evaluate(() => {
+        ;(window as any).__ouShiftAltCleanup?.()
+        delete (window as any).__ouShiftAltCleanup
+        return (window as any).__ouShiftAltReachedWindow as boolean
+      })
+      expect(shiftAltReached, 'Shift+Alt+ArrowUp at MindBox start edge does not propagate').toBe(false)
+      expect(await query()).toBe(`${CHILD_A} `)
+      await expect(mindbox(page)).toBeFocused()
 
-    // Shift+Alt+ArrowUp at start edge (0) does NOT propagate
-    await focusMindboxInPlace(page, 0)
-    await page.evaluate(() => {
-      ;(window as any).__ouShiftAltReachedWindow = false
-      const onKey = (e: KeyboardEvent) => {
-        if (e.code == 'ArrowUp' && e.altKey && e.shiftKey) (window as any).__ouShiftAltReachedWindow = true
-      }
-      ;(window as any).__ouShiftAltCleanup = () => window.removeEventListener('keydown', onKey)
-      window.addEventListener('keydown', onKey)
-    })
-    await page.keyboard.press('Shift+Alt+ArrowUp')
-    const shiftAltReached = await page.evaluate(() => {
-      ;(window as any).__ouShiftAltCleanup?.()
-      delete (window as any).__ouShiftAltCleanup
-      return (window as any).__ouShiftAltReachedWindow as boolean
-    })
-    expect(shiftAltReached, 'Shift+Alt+ArrowUp at MindBox start edge does not propagate').toBe(false)
-    expect(await query()).toBe(`${CHILD_A} `)
-    await expect(mindbox(page)).toBeFocused()
+      // Alt+ArrowUp alone at start edge (0) DOES propagate, steps back, and blurs MindBox
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'Option+Up from MindBox at start edge steps back to deep' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+      await expect(mindbox(page), 'Option+Up from MindBox blurs MindBox after stepping back').not.toBeFocused()
 
-    // Alt+ArrowUp alone at start edge (0) DOES propagate, steps back, and blurs MindBox
-    await page.keyboard.press('Alt+ArrowUp')
-    await expect.poll(query, { message: 'Option+Up from MindBox at start edge steps back to deep' }).toBe(`${DEEP} `)
-    await expect.poll(targetId).toBe(deepId)
-    await expect(mindbox(page), 'Option+Up from MindBox blurs MindBox after stepping back').not.toBeFocused()
-
-    // pending debounce in MindBox while walk is active: settled before the step back, final entry, blurred
-    await focusMindboxInPlace(page, 0)
-    await expect(mindbox(page)).toBeFocused()
-    const debouncedTurn = await asUser(page, () => {
-      const w = window as any
-      const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
-      box.setSelectionRange(0, 0)
-      box.dispatchEvent(new Event('input'))
-      const pending = w._editor_change_pending as boolean
-      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }))
-      return { pending, still: w._editor_change_pending as boolean, focused: document.activeElement == box, entry: [history.state.editorText, history.state.final] }
+      // pending debounce in MindBox while walk is active: settled before the step back, final entry, blurred
+      await focusMindboxInPlace(page, 0)
+      await expect(mindbox(page)).toBeFocused()
+      const debouncedTurn = await asUser(page, () => {
+        const w = window as any
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        box.setSelectionRange(0, 0)
+        box.dispatchEvent(new Event('input'))
+        const pending = w._editor_change_pending as boolean
+        box.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', code: 'ArrowUp', altKey: true, bubbles: true, cancelable: true }))
+        return { pending, still: w._editor_change_pending as boolean, focused: document.activeElement == box, entry: [history.state.editorText, history.state.final] }
+      })
+      expect(debouncedTurn, 'Option+Up settles a pending debounce and steps back to start in a final entry, blurred').toEqual({
+        pending: true,
+        still: false,
+        focused: false,
+        entry: [`${START} `, true],
+      })
+      await expect.poll(targetId).toBe(startId)
     })
-    expect(debouncedTurn, 'Option+Up settles a pending debounce and steps back to start in a final entry, blurred').toEqual({
-      pending: true,
-      still: false,
-      focused: false,
-      entry: [`${START} `, true],
-    })
-    await expect.poll(targetId).toBe(startId)
 
     // inside an item's open editor, Option+Up is NOT taken and keeps its text-movement meaning
     const secondLine = page.locator(`#item-${startId} p`).nth(1)
@@ -3371,6 +3402,870 @@ test('Option+Up steps back through an Option+Down walk to its start, stops there
           return snaps.every(s => !s.exists)
         },
         { message: 'fixture items removed locally and on server', timeout: 15_000 }
+      )
+      .toBe(true)
+  }
+})
+
+const setupWalkReleaseTree = async (page: Page, prefix: string) => {
+  await loadAdmin(page)
+  const PARENT = prefix
+  const CHILD_A = `${PARENT}/a`
+  const DEEP = `${CHILD_A}/deep`
+  const CHILD_B = `${PARENT}/b`
+  const labels = [PARENT, CHILD_A, DEEP, CHILD_B]
+  const fixtures = [
+    `${PARENT} parent`,
+    `${CHILD_A} child a\n\nsecond line`,
+    `${DEEP} grandchild deep`,
+    `${CHILD_B} child b`,
+  ]
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const targetId = () =>
+    page.evaluate(() => document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null)
+
+  const setFixtureTimes = () =>
+    page.evaluate(ls => {
+      const list = (window as any).__items as any[]
+      const maxTime = Math.max(Date.now(), ...list.map(i => (Number.isFinite(i.time) ? i.time : 0)))
+      const base = maxTime + 60_000
+      const byLabel = (l: string) => list.find(i => i.label == l)
+      const plan: [any, number][] = [
+        [byLabel(ls[2]), base + 3000], // DEEP: newest descendant of both PARENT and CHILD_A (leaf)
+        [byLabel(ls[1]), base + 2000], // CHILD_A: 2nd newest descendant of PARENT (has child DEEP)
+        [byLabel(ls[3]), base + 1000], // CHILD_B: 3rd newest descendant of PARENT (leaf)
+        [byLabel(ls[0]), base + 500], // PARENT
+      ]
+      for (const [it, t] of plan) it.time = it.savedTime = t
+      return {
+        parentId: byLabel(ls[0]).id as string,
+        childAId: byLabel(ls[1]).id as string,
+        deepId: byLabel(ls[2]).id as string,
+      }
+    }, labels)
+
+  let parentId = ''
+  const create = async () => {
+    await page.evaluate(texts => texts.forEach(text => void window._create(text)), fixtures)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(ls => {
+            const list = (window as any).__items as any[]
+            const found = ls.map(l => list.find(i => i.label == l))
+            return found.every(i => i && i.savedId && !i.saving && !i.saveTask && !(i.unackedWrites?.length))
+          }, labels),
+        { message: 'walk-release fixtures saved and idle', timeout: 30_000 }
+      )
+      .toBe(true)
+    const ids = await setFixtureTimes()
+    parentId = ids.parentId
+    return ids
+  }
+
+  const expectAltNoOp = async (code: 'ArrowUp' | 'ArrowDown', msg: string, held = false) => {
+    await expect
+      .poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { message: `${msg}: query settled` })
+      .toBe(true)
+    const before = await page.evaluate(async wanted => {
+      await Promise.resolve((window as any)._update_dom?.())
+      await new Promise(r => requestAnimationFrame(() => r(undefined)))
+      ;(window as any).__wrNoOpProbe = { seen: false, prevented: null as boolean | null }
+      const onKey = (e: KeyboardEvent) => {
+        if (e.code == wanted && e.altKey) {
+          ;(window as any).__wrNoOpProbe = { seen: true, prevented: e.defaultPrevented }
+          window.removeEventListener('keydown', onKey)
+        }
+      }
+      window.addEventListener('keydown', onKey)
+      return {
+        box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+        target: document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null,
+        entries: [(window as any)._history.length, (window as any)._history_index] as [number, number],
+        scroll: document.body.scrollTop,
+        focused: document.activeElement?.id === 'textarea-mindbox',
+      }
+    }, code)
+    await page.keyboard.press(held ? code : `Alt+${code}`)
+    const after = await page.evaluate(() => ({
+      probe: (window as any).__wrNoOpProbe as { seen: boolean; prevented: boolean | null },
+      view: {
+        box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+        target: document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null,
+        entries: [(window as any)._history.length, (window as any)._history_index] as [number, number],
+        scroll: document.body.scrollTop,
+        focused: document.activeElement?.id === 'textarea-mindbox',
+      },
+    }))
+    expect(after.probe, `${msg}: key reached window and default prevented`).toEqual({ seen: true, prevented: true })
+    expect(after.view, `${msg}: view unchanged`).toEqual(before)
+  }
+
+  const startAtParent = async () => {
+    await setFixtureTimes() // restore deterministic times after any soft-touch or edit
+    await userSet(page, PARENT, { scroll: true })
+    await expect.poll(targetId).toBe(parentId)
+    await blur(page)
+  }
+
+  const cleanup = async () => {
+    const deletedSavedIds = await page.evaluate(ls => {
+      const matches = ((window as any).__items as any[]).filter(i => ls.includes(i.label))
+      const sids = matches.map(i => i.savedId).filter((s): s is string => !!s)
+      for (const item of matches) window._item(item.id, true)?.delete(false)
+      return sids
+    }, labels)
+    await userSet(page, '')
+    await expect
+      .poll(
+        async () => {
+          const localGone = await page.evaluate(ls => !((window as any).__items as any[]).some(i => ls.includes(i.label)), labels)
+          if (!localGone) return false
+          const snaps = await Promise.all(deletedSavedIds.map(id => firestore().collection('items').doc(id).get()))
+          return snaps.every(s => !s.exists)
+        },
+        { message: 'walk-release fixtures removed locally and on server', timeout: 15_000 }
+      )
+      .toBe(true)
+  }
+
+  return { PARENT, CHILD_A, DEEP, CHILD_B, create, query, targetId, expectAltNoOp, startAtParent, cleanup }
+}
+
+test('releasing Option ends the walk: a new hold starts from the item stopped on, stops there on Option+Up, and a fresh Option+Up does nothing', async ({ page }) => {
+  // the owner (2026-11-27): one hold of Option is one walk (LRU switcher without wrap-around);
+  // releasing Option ends the walk with no state carried over to the next hold
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(String(err)))
+  const tree = await setupWalkReleaseTree(page, '#e2e_wr')
+  const { CHILD_A, DEEP, create, query, targetId, expectAltNoOp, startAtParent, cleanup } = tree
+
+  try {
+    const { childAId, deepId } = await create()
+
+    // 1. Two steps in one hold (PARENT -> DEEP -> CHILD_A), release Option, new hold:
+    // Option+Down goes under CHILD_A (DEEP, not CHILD_B), and Option+Up stops at CHILD_A (not PARENT)
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'hold 1 step 1 lands on DEEP' }).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'hold 1 step 2 lands on CHILD_A' }).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+    })
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'hold 2 Option+Down starts under CHILD_A (goes to DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'hold 2 Option+Up returns to new start CHILD_A' }).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+      await expectAltNoOp('ArrowUp', 'hold 2 Option+Up stops at CHILD_A, not first start PARENT', true)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'hold 2 Option+Down still goes forward again from CHILD_A to DEEP' }).toBe(`${DEEP} `)
+    })
+
+    // 2. Stopped on a leaf (DEEP, while PARENT still has unvisited CHILD_A and CHILD_B):
+    // after releasing Option, a new hold's Option+Down and Option+Up both do nothing
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'leaf case: hold 1 lands on leaf DEEP' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+    })
+    await withAlt(page, async () => {
+      await expectAltNoOp('ArrowDown', 'new hold Option+Down on leaf DEEP does nothing (does not continue PARENT walk)', true)
+      await expectAltNoOp('ArrowUp', 'new hold Option+Up on leaf DEEP after release does nothing', true)
+    })
+
+    // 3. Fresh Option+Up after a two-step walk and release does nothing (does not step back to DEEP or PARENT)
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+    })
+    await expectAltNoOp('ArrowUp', 'fresh Option+Up after release on CHILD_A does nothing')
+
+    // 4. Right Option (AltRight) release ends the walk the same way as Left Option
+    await startAtParent()
+    await withAlt(
+      page,
+      async () => {
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query).toBe(`${DEEP} `)
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query).toBe(`${CHILD_A} `)
+      },
+      'AltRight'
+    )
+    await withAlt(
+      page,
+      async () => {
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query, { message: 'AltRight new hold starts under CHILD_A (DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+      },
+      'AltRight'
+    )
+
+    // 5. Option released while MindBox has focus ends the walk
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
+      await focusMindboxInPlace(page, `${CHILD_A} `.length)
+      await expect(mindbox(page), 'MindBox focused before Option release').toBeFocused()
+    })
+    await expect(mindbox(page), 'MindBox stays focused across Option release').toBeFocused()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'new hold from MindBox after release starts under CHILD_A (DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+    })
+
+    // 6. Option released while an item's editor has focus ends the walk
+    await startAtParent()
+    const itemTextarea = page.locator(`#textarea-${childAId}`)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+      const bodyLine = page.locator(`#item-${childAId} p`).nth(1)
+      await expect(bodyLine).toBeVisible()
+      await bodyLine.click()
+      await expect(itemTextarea, 'item editor focused before Option release').toBeFocused()
+    })
+    await page.keyboard.press('Escape')
+    await expect(itemTextarea).toBeHidden()
+    expect(await query(), 'closing item editor leaves walk query in box').toBe(`${CHILD_A} `)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'new hold after release in item editor starts under CHILD_A (DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+    })
+
+    // 7. Option released while ArrowDown is still held ends the walk
+    await startAtParent()
+    await page.keyboard.down('Alt')
+    let arrowHeld = false
+    let altHeld = true
+    try {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.down('ArrowDown')
+      arrowHeld = true
+      await expect.poll(query).toBe(`${CHILD_A} `)
+      await page.keyboard.up('Alt')
+      altHeld = false
+      await page.keyboard.up('ArrowDown')
+      arrowHeld = false
+    } finally {
+      if (arrowHeld) await page.keyboard.up('ArrowDown')
+      if (altHeld) await page.keyboard.up('Alt')
+    }
+    await expectAltNoOp('ArrowUp', 'fresh Option+Up after release while ArrowDown held does nothing')
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'new hold after release while ArrowDown held starts under CHILD_A (DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+    })
+
+    expect(pageErrors, 'no pageerror during release-ends-walk row').toEqual([])
+  } finally {
+    await cleanup()
+  }
+})
+
+test('blurring the window while Option is held ends the walk', async ({ page }) => {
+  // the owner (2026-11-27): when the window loses focus while a walk is on, the release of Option
+  // is not seen, so the blur itself ends the walk; refocusing with Option still held starts a new
+  // walk on Option+Down and does nothing on Option+Up
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(String(err)))
+  const tree = await setupWalkReleaseTree(page, '#e2e_wrb')
+  const { CHILD_A, DEEP, create, query, targetId, expectAltNoOp, startAtParent, cleanup } = tree
+  const cdp = await page.context().newCDPSession(page)
+  const { windowId } = await cdp.send('Browser.getWindowForTarget')
+  const away = async () => {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } })
+    await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'window lost system focus' }).toBe(false)
+  }
+  const back = async () => {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+    await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'window regained system focus' }).toBe(true)
+  }
+
+  try {
+    const { childAId, deepId } = await create()
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+
+    // 1. Blur & refocus while Option stays held -> next ArrowDown starts a new walk under CHILD_A
+    // (goes to DEEP, not CHILD_B) and ArrowUp stops at CHILD_A (not first start PARENT)
+    await startAtParent()
+    await page.evaluate(() => {
+      ;(window as any).__wrBlurProbe = { blurs: 0, altUps: 0 }
+      const onBlur = () => {
+        ;(window as any).__wrBlurProbe.blurs++
+      }
+      const onUp = (e: KeyboardEvent) => {
+        if (/^Alt/.test(e.code || e.key)) (window as any).__wrBlurProbe.altUps++
+      }
+      window.addEventListener('blur', onBlur)
+      window.addEventListener('keyup', onUp, true)
+      ;(window as any).__wrBlurCleanup = () => {
+        window.removeEventListener('blur', onBlur)
+        window.removeEventListener('keyup', onUp, true)
+      }
+    })
+    try {
+      await withAlt(page, async () => {
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query, { message: 'step 1 before blur lands on DEEP' }).toBe(`${DEEP} `)
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query, { message: 'step 2 before blur lands on CHILD_A' }).toBe(`${CHILD_A} `)
+        await expect.poll(targetId).toBe(childAId)
+        await away()
+        await back()
+        const probe = await page.evaluate(() => (window as any).__wrBlurProbe as { blurs: number; altUps: number })
+        expect(probe.blurs, 'premise: window blur fired').toBeGreaterThanOrEqual(1)
+        expect(probe.altUps, 'premise: Option was not released across blur').toBe(0)
+        await page.keyboard.press('ArrowDown')
+        await expect.poll(query, { message: 'ArrowDown after blur starts new walk under CHILD_A (DEEP, not CHILD_B)' }).toBe(`${DEEP} `)
+        await expect.poll(targetId).toBe(deepId)
+        await page.keyboard.press('ArrowUp')
+        await expect.poll(query, { message: 'ArrowUp returns to post-blur start CHILD_A' }).toBe(`${CHILD_A} `)
+        await expectAltNoOp('ArrowUp', 'ArrowUp after blur stops at CHILD_A, not first start PARENT', true)
+      })
+    } finally {
+      await page.evaluate(() => {
+        ;(window as any).__wrBlurCleanup?.()
+        delete (window as any).__wrBlurCleanup
+      })
+    }
+
+    // 2. Blur & refocus while Option stays held -> ArrowUp does nothing (does not step back to DEEP)
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${DEEP} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+      await away()
+      await back()
+      await expectAltNoOp('ArrowUp', 'ArrowUp right after window blur while Option stays held does nothing', true)
+    })
+
+    expect(pageErrors, 'no pageerror during blur-ends-walk row').toEqual([])
+  } finally {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+    await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await cleanup()
+  }
+})
+
+test('Option+PageDown jumps to the oldest item and Option+PageUp jumps back to the start within a hold, preventing browser page scroll while leaving plain PageDown/PageUp and editors intact', async ({ page }) => {
+  // the owner (2026-11-27): Option+PageDown (Alt+PageDown alone) jumps straight to the oldest item
+  // under the start (or starts a walk there as the first key of a hold), Option+PageUp (Alt+PageUp
+  // alone) jumps straight back to the start; both keep the walk going in the same hold, take one
+  // history entry each, prevent browser PageDown/PageUp scrolling while leaving plain PageDown and
+  // PageUp intact, reset on Option release, and act in the same places as Option+Down / Option+Up
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(String(err)))
+  await loadAdmin(page)
+
+  const PARENT = '#e2e_wj'
+  const CHILD_A = `${PARENT}/a`
+  const DEEP = `${CHILD_A}/deep`
+  const CHILD_B = `${PARENT}/b`
+  const OLD_SUB = `${CHILD_B}/sub`
+  const PIN = '#e2e_wj_pin'
+  const filler = Array.from({ length: 50 }, (_, i) => `wj filler line ${i + 1}`).join('\n\n')
+  const labels = [PARENT, CHILD_A, DEEP, CHILD_B, OLD_SUB, PIN]
+  const fixtures = [
+    `${PARENT} parent\n\nsecond line`,
+    `${CHILD_A} child a`,
+    `${DEEP} grandchild deep`,
+    `${CHILD_B} child b (oldest under parent, has sub)`,
+    `${OLD_SUB} sub under oldest child b`,
+    `${PIN} #_pin pinned filler\n\n${filler}`,
+  ]
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const targetId = () =>
+    page.evaluate(() => document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null)
+  const targetInBand = () =>
+    page.evaluate(() => {
+      const elem = document.querySelector('.super-container.target') as HTMLElement | null
+      if (!elem) return false
+      return elem.offsetTop >= document.body.scrollTop && elem.offsetTop <= document.body.scrollTop + visualViewport!.height - 200
+    })
+
+  try {
+    await page.evaluate(texts => texts.forEach(text => void window._create(text)), fixtures)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(ls => {
+            const list = (window as any).__items as any[]
+            const found = ls.map(l => list.find(i => i.label == l))
+            return found.every(i => i && i.savedId && !i.saving && !i.saveTask && !(i.unackedWrites?.length))
+          }, labels),
+        { message: 'walk-jump fixtures saved and idle', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    const setFixtureTimes = () =>
+      page.evaluate(ls => {
+        const list = (window as any).__items as any[]
+        const maxTime = Math.max(Date.now(), ...list.map(i => (Number.isFinite(i.time) ? i.time : 0)))
+        const base = maxTime + 60_000
+        const byLabel = (l: string) => list.find(i => i.label == l)
+        const plan: [any, number][] = [
+          [byLabel(ls[5]), base + 5000], // PIN: pinned filler so the page is tall and scrollable
+          [byLabel(ls[2]), base + 4000], // DEEP: 1st / newest under PARENT
+          [byLabel(ls[1]), base + 3000], // CHILD_A: 2nd newest under PARENT
+          [byLabel(ls[4]), base + 2000], // OLD_SUB: 3rd newest under PARENT (child of CHILD_B)
+          [byLabel(ls[3]), base + 1000], // CHILD_B: 4th / OLDEST under PARENT (has child OLD_SUB)
+          [byLabel(ls[0]), base + 500], // PARENT
+        ]
+        for (const [it, t] of plan) it.time = it.savedTime = t
+        return {
+          parentId: byLabel(ls[0]).id as string,
+          childAId: byLabel(ls[1]).id as string,
+          deepId: byLabel(ls[2]).id as string,
+          childBId: byLabel(ls[3]).id as string,
+          oldSubId: byLabel(ls[4]).id as string,
+        }
+      }, labels)
+    const { parentId, childAId, deepId, childBId, oldSubId } = await setFixtureTimes()
+
+    const expectAltNoOp = async (
+      code: 'ArrowUp' | 'ArrowDown' | 'PageUp' | 'PageDown',
+      msg: string,
+      held = false
+    ) => {
+      await expect
+        .poll(() => page.evaluate(() => !(window as any)._editor_change_pending), { message: `${msg}: query settled` })
+        .toBe(true)
+      const before = await page.evaluate(async wanted => {
+        await Promise.resolve((window as any)._update_dom?.())
+        await new Promise(r => requestAnimationFrame(() => r(undefined)))
+        ;(window as any).__wjNoOpProbe = { seen: false, prevented: null as boolean | null }
+        const onKey = (e: KeyboardEvent) => {
+          if (e.code == wanted && e.altKey) {
+            ;(window as any).__wjNoOpProbe = { seen: true, prevented: e.defaultPrevented }
+            window.removeEventListener('keydown', onKey)
+          }
+        }
+        window.addEventListener('keydown', onKey)
+        return {
+          box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+          target: document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null,
+          entries: [(window as any)._history.length, (window as any)._history_index] as [number, number],
+          scroll: document.body.scrollTop,
+          focused: document.activeElement?.id === 'textarea-mindbox',
+        }
+      }, code)
+      await page.keyboard.press(held ? code : `Alt+${code}`)
+      const after = await page.evaluate(async () => {
+        // wait two frames + brief tick so any unprevented native PageDown/PageUp scroll would show up
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 80))))
+        return {
+          probe: (window as any).__wjNoOpProbe as { seen: boolean; prevented: boolean | null },
+          view: {
+            box: (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value,
+            target: document.querySelector('.super-container.target')?.getAttribute('id')?.replace(/^super-container-/, '') ?? null,
+            entries: [(window as any)._history.length, (window as any)._history_index] as [number, number],
+            scroll: document.body.scrollTop,
+            focused: document.activeElement?.id === 'textarea-mindbox',
+          },
+        }
+      })
+      expect(after.probe, `${msg}: key reached window and default prevented`).toEqual({ seen: true, prevented: true })
+      expect(after.view, `${msg}: view unchanged`).toEqual(before)
+    }
+
+    const startAtParent = async () => {
+      await setFixtureTimes()
+      await userSet(page, PARENT, { scroll: true })
+      await expect.poll(targetId).toBe(parentId)
+      await blur(page)
+    }
+
+    // 1. In ONE hold of Option (active walk): ArrowDown -> PageDown (oldest, shown, +1 history) ->
+    //    PageDown/ArrowDown no-op at oldest -> ArrowUp (next newer OLD_SUB) -> PageUp (back to
+    //    start PARENT, shown, +1 history) -> PageUp/ArrowUp no-op at start -> ArrowDown (newest DEEP)
+    await startAtParent()
+    const [len0, idx0] = await entries(page)
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'one-hold step 1 ArrowDown lands on newest DEEP' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+      expect(await entries(page), 'step 1 pushes 1 history entry').toEqual([len0 + 1, idx0 + 1])
+
+      await page.keyboard.press('PageDown')
+      await expect.poll(query, { message: 'one-hold PageDown jumps to oldest CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId, { message: 'one-hold PageDown targets oldest CHILD_B' }).toBe(childBId)
+      await expect(page.locator(`#item-${childBId}`), 'oldest CHILD_B is visible on page').toBeVisible()
+      await expect.poll(targetInBand, { message: 'oldest CHILD_B scrolled into view' }).toBe(true)
+      expect(await entries(page), 'PageDown jump pushes 1 history entry').toEqual([len0 + 2, idx0 + 2])
+
+      await expectAltNoOp('PageDown', 'PageDown at oldest already does nothing', true)
+      await expectAltNoOp('ArrowDown', 'ArrowDown at oldest already does nothing', true)
+
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'one-hold ArrowUp from oldest steps to next newer OLD_SUB' }).toBe(`${OLD_SUB} `)
+      await expect.poll(targetId, { message: 'one-hold ArrowUp targets OLD_SUB' }).toBe(oldSubId)
+      expect(await entries(page), 'ArrowUp after PageDown pushes 1 history entry').toEqual([len0 + 3, idx0 + 3])
+
+      await page.keyboard.press('PageUp')
+      await expect.poll(query, { message: 'one-hold PageUp jumps back to start PARENT' }).toBe(`${PARENT} `)
+      await expect.poll(targetId, { message: 'one-hold PageUp targets start PARENT' }).toBe(parentId)
+      await expect.poll(targetInBand, { message: 'start PARENT scrolled into view' }).toBe(true)
+      expect(await entries(page), 'PageUp jump pushes 1 history entry').toEqual([len0 + 4, idx0 + 4])
+
+      await expectAltNoOp('PageUp', 'PageUp at start already does nothing', true)
+      await expectAltNoOp('ArrowUp', 'ArrowUp at start already does nothing', true)
+
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'one-hold ArrowDown from start goes to newest DEEP again' }).toBe(`${DEEP} `)
+      await expect.poll(targetId, { message: 'one-hold ArrowDown from start targets DEEP' }).toBe(deepId)
+      expect(await entries(page), 'ArrowDown after PageUp pushes 1 history entry').toEqual([len0 + 5, idx0 + 5])
+    })
+
+    // 2. PageDown as the FIRST key of a hold: jumps straight to oldest CHILD_B in 1 history entry,
+    //    then ArrowUp -> OLD_SUB, PageUp -> PARENT, ArrowDown -> DEEP in the same hold
+    await startAtParent()
+    const [len1, idx1] = await entries(page)
+    await withAlt(page, async () => {
+      await page.keyboard.press('PageDown')
+      await expect.poll(query, { message: 'first-key PageDown jumps straight to oldest CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId, { message: 'first-key PageDown targets CHILD_B' }).toBe(childBId)
+      await expect.poll(targetInBand, { message: 'first-key PageDown shows CHILD_B in view' }).toBe(true)
+      expect(await entries(page), 'first-key PageDown pushes 1 history entry').toEqual([len1 + 1, idx1 + 1])
+
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'ArrowUp after first-key PageDown steps to next newer OLD_SUB' }).toBe(`${OLD_SUB} `)
+      await expect.poll(targetId).toBe(oldSubId)
+
+      await page.keyboard.press('PageUp')
+      await expect.poll(query, { message: 'PageUp after first-key PageDown returns to PARENT' }).toBe(`${PARENT} `)
+      await expect.poll(targetId).toBe(parentId)
+
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'ArrowDown after PageUp goes to newest DEEP' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+    })
+
+    // 3. PageUp as the FIRST key of a hold (no walk yet) does nothing on a parent, a child, and empty box
+    await startAtParent()
+    await expectAltNoOp('PageUp', 'first-key PageUp on PARENT does nothing')
+    await userSet(page, CHILD_B, { scroll: true })
+    await expect.poll(targetId).toBe(childBId)
+    await blur(page)
+    await expectAltNoOp('PageUp', 'first-key PageUp on CHILD_B does nothing')
+    await userSet(page, '')
+    await expect.poll(query).toBe('')
+    await blur(page)
+    await expectAltNoOp('PageUp', 'first-key PageUp on empty box does nothing')
+
+    // 4. Option released after a jump: the next hold starts from the item stopped on (CHILD_B -> OLD_SUB)
+    await startAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('PageDown')
+      await expect.poll(query, { message: 'release-after-jump hold 1 lands on oldest CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId).toBe(childBId)
+    })
+    // fresh Option+PageUp right after release does nothing (does not return to PARENT)
+    await expectAltNoOp('PageUp', 'fresh PageUp after release on CHILD_B does nothing')
+    // new hold starts from CHILD_B: ArrowDown -> OLD_SUB, PageUp -> CHILD_B (not PARENT) and stops there
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'new hold after jump starts under CHILD_B (lands on OLD_SUB)' }).toBe(`${OLD_SUB} `)
+      await expect.poll(targetId).toBe(oldSubId)
+      await page.keyboard.press('PageUp')
+      await expect.poll(query, { message: 'new hold PageUp returns to new start CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId).toBe(childBId)
+      await expectAltNoOp('PageUp', 'new hold PageUp stops at CHILD_B, not first start PARENT', true)
+    })
+
+    // 5. Browser PageDown/PageUp scroll is blocked for Option+PageDown/Option+PageUp, while plain
+    //    PageDown and PageUp WITHOUT Option scroll the tall page as before
+    await setFixtureTimes()
+    await userSet(page, DEEP, { scroll: true }) // DEEP is a leaf (Option+PageDown is a no-op; PIN keeps page tall)
+    await expect.poll(targetId).toBe(deepId)
+    await expect.poll(targetInBand, { message: 'premise: DEEP scroll settled before scrolling to header' }).toBe(true)
+    await settled(page)
+    const top = await headerTop(page)
+    // scroll to the header and wait until the position holds (no late layout scroll), then click
+    // the neutral background margin of .items so Chromium's keyboard scroll targets document.body
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(y => document.body.scrollTo(0, y), top)
+          await page.waitForTimeout(150)
+          return Math.abs((await scrollTop(page)) - top) <= 2
+        },
+        { message: 'premise: page positioned at header' }
+      )
+      .toBe(true)
+    const bgPoint = await page.evaluate(() => {
+      const x = window.innerWidth - 20
+      const y = Math.round(visualViewport!.height / 2)
+      const hit = document.elementFromPoint(x, y)
+      return { x, y, hitClass: hit?.className ?? '' }
+    })
+    expect(bgPoint.hitClass, 'premise: background click target is .items').toContain('items')
+    await page.mouse.click(bgPoint.x, bgPoint.y)
+    await expect(mindbox(page), 'premise: MindBox unfocused after background click').not.toBeFocused()
+    const scrollSetup = await page.evaluate(() => ({
+      scrollTop: document.body.scrollTop,
+      scrollHeight: document.body.scrollHeight,
+      viewportHeight: visualViewport!.height,
+    }))
+    expect(scrollSetup.scrollHeight - scrollSetup.scrollTop, 'premise: page has more than a page below').toBeGreaterThan(
+      scrollSetup.viewportHeight * 1.8
+    )
+    const startScroll = scrollSetup.scrollTop
+
+    await expectAltNoOp('PageDown', 'Alt+PageDown on scrollable page prevents native PageDown scroll')
+    expect(await scrollTop(page), 'Alt+PageDown keeps scrollTop unchanged').toBe(startScroll)
+
+    await page.keyboard.press('PageDown')
+    await expect
+      .poll(() => scrollTop(page), { message: 'plain PageDown without Option scrolls page down' })
+      .toBeGreaterThan(startScroll + 100)
+    // wait for smooth scroll to settle so we compare exact scrollTop across Alt+PageUp
+    await expect
+      .poll(
+        () =>
+          page.evaluate(async minScroll => {
+            const a = document.body.scrollTop
+            await new Promise(r => setTimeout(r, 120))
+            return document.body.scrollTop === a && a > minScroll
+          }, startScroll + 100),
+        { message: 'plain PageDown scroll settled' }
+      )
+      .toBe(true)
+    const scrolledDown = await scrollTop(page)
+    expect(scrolledDown, 'plain PageDown scrolled by roughly one page').toBeLessThan(
+      startScroll + scrollSetup.viewportHeight * 1.5
+    )
+
+    await expectAltNoOp('PageUp', 'Alt+PageUp on scrolled page prevents native PageUp scroll')
+    expect(await scrollTop(page), 'Alt+PageUp keeps scrollTop unchanged').toBe(scrolledDown)
+
+    await page.keyboard.press('PageUp')
+    await expect
+      .poll(() => scrollTop(page), { message: 'plain PageUp without Option scrolls page back up' })
+      .toBeLessThan(scrolledDown - 100)
+
+    // 6. Same places as Option+Down / Option+Up: MindBox at end/start edges propagates; MindBox away
+    //    from edge and item editor stop propagation
+    await startAtParent()
+    // MindBox away from end edge (caret 0): Alt+PageDown does not propagate or jump
+    await focusMindboxInPlace(page, 0)
+    await page.evaluate(() => {
+      ;(window as any).__wjMidBoxReached = false
+      const onKey = (e: KeyboardEvent) => {
+        if (e.code == 'PageDown' && e.altKey) (window as any).__wjMidBoxReached = true
+      }
+      ;(window as any).__wjMidBoxCleanup = () => window.removeEventListener('keydown', onKey)
+      window.addEventListener('keydown', onKey)
+    })
+    await page.keyboard.press('Alt+PageDown')
+    const midBoxDownReached = await page.evaluate(() => {
+      ;(window as any).__wjMidBoxCleanup?.()
+      delete (window as any).__wjMidBoxCleanup
+      return (window as any).__wjMidBoxReached as boolean
+    })
+    expect(midBoxDownReached, 'Alt+PageDown away from MindBox end edge does not propagate').toBe(false)
+    expect(await query(), 'Alt+PageDown away from MindBox end edge keeps query').toBe(PARENT)
+    await expect(mindbox(page), 'MindBox keeps focus away from end edge').toBeFocused()
+
+    // MindBox at end edge: Alt+PageDown propagates, jumps to oldest CHILD_B, blurs MindBox;
+    // then in the same hold, MindBox at start edge: Alt+PageUp propagates, jumps back to PARENT
+    await focusMindboxInPlace(page, PARENT.length)
+    await withAlt(page, async () => {
+      await page.keyboard.press('PageDown')
+      await expect.poll(query, { message: 'MindBox end-edge PageDown jumps to oldest CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId).toBe(childBId)
+      await expect(mindbox(page), 'MindBox end-edge PageDown blurs MindBox').not.toBeFocused()
+
+      // MindBox away from start edge (caret at end): Alt+PageUp does not propagate or jump
+      await focusMindboxInPlace(page, `${CHILD_B} `.length)
+      await page.evaluate(() => {
+        ;(window as any).__wjMidBoxUpReached = false
+        const onKey = (e: KeyboardEvent) => {
+          if (e.code == 'PageUp' && e.altKey) (window as any).__wjMidBoxUpReached = true
+        }
+        ;(window as any).__wjMidBoxUpCleanup = () => window.removeEventListener('keydown', onKey)
+        window.addEventListener('keydown', onKey)
+      })
+      await page.keyboard.press('PageUp')
+      const midBoxUpReached = await page.evaluate(() => {
+        ;(window as any).__wjMidBoxUpCleanup?.()
+        delete (window as any).__wjMidBoxUpCleanup
+        return (window as any).__wjMidBoxUpReached as boolean
+      })
+      expect(midBoxUpReached, 'Alt+PageUp away from MindBox start edge does not propagate').toBe(false)
+      expect(await query(), 'Alt+PageUp away from MindBox start edge keeps query').toBe(`${CHILD_B} `)
+
+      // MindBox at start edge (caret 0): Alt+PageUp propagates, jumps back to PARENT, blurs MindBox
+      await focusMindboxInPlace(page, 0)
+      await page.keyboard.press('PageUp')
+      await expect.poll(query, { message: 'MindBox start-edge PageUp jumps back to PARENT' }).toBe(`${PARENT} `)
+      await expect.poll(targetId).toBe(parentId)
+      await expect(mindbox(page), 'MindBox start-edge PageUp blurs MindBox').not.toBeFocused()
+    })
+
+    // Inside an item's open editor, both Option+PageDown (at end) and Option+PageUp (at 0) stop propagation
+    await startAtParent()
+    const secondLine = page.locator(`#item-${parentId} p`).nth(1)
+    await expect(secondLine).toBeVisible()
+    await secondLine.click()
+    const itemTextarea = page.locator(`#textarea-${parentId}`)
+    await expect(itemTextarea).toBeFocused()
+    await page.evaluate(id => {
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      t.setSelectionRange(t.value.length, t.value.length)
+      ;(window as any).__wjItemProbe = { windowSaw: [] as string[], prevented: [] as boolean[] }
+      const onTaKey = (e: KeyboardEvent) => {
+        if ((e.code == 'PageDown' || e.code == 'PageUp') && e.altKey) (window as any).__wjItemProbe.prevented.push(e.defaultPrevented)
+      }
+      const onWinKey = (e: KeyboardEvent) => {
+        if ((e.code == 'PageDown' || e.code == 'PageUp') && e.altKey) (window as any).__wjItemProbe.windowSaw.push(e.code)
+      }
+      t.addEventListener('keydown', onTaKey)
+      window.addEventListener('keydown', onWinKey)
+      ;(window as any).__wjItemCleanup = () => {
+        t.removeEventListener('keydown', onTaKey)
+        window.removeEventListener('keydown', onWinKey)
+      }
+    }, parentId)
+    await page.keyboard.press('Alt+PageDown')
+    await page.evaluate(id => {
+      const t = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+      t.setSelectionRange(0, 0)
+    }, parentId)
+    await page.keyboard.press('Alt+PageUp')
+    const itemProbe = await page.evaluate(() => {
+      ;(window as any).__wjItemCleanup?.()
+      delete (window as any).__wjItemCleanup
+      return (window as any).__wjItemProbe as { windowSaw: string[]; prevented: boolean[] }
+    })
+    expect(itemProbe.windowSaw, 'item editor stops Alt+PageDown and Alt+PageUp propagation').toEqual([])
+    expect(itemProbe.prevented, 'item editor leaves Alt+PageDown and Alt+PageUp default intact').toEqual([false, false])
+    expect(await query(), 'Alt+PageDown/PageUp in item editor do not navigate').toBe(PARENT)
+    await expect(itemTextarea, 'item editor keeps focus').toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(itemTextarea).toBeHidden()
+
+    // 7. Nested fixture with tied times (review 0 of walk_release): start at PARENT with OLD_SUB
+    //    newest, CHILD_A 2nd, and CHILD_B + DEEP (child of CHILD_A) tied oldest. On PARENT, direct
+    //    child CHILD_B ranks ahead of grandchild DEEP; stepping onto CHILD_A moves its direct child
+    //    DEEP ahead of sibling CHILD_B in __items. Keeping the starting tie order for the hold makes
+    //    Option+PageDown and repeated Option+Down land on the same item (DEEP) and step back identically
+    const setTiedFixtureTimes = () =>
+      page.evaluate(ls => {
+        const list = (window as any).__items as any[]
+        const maxTime = Math.max(Date.now(), ...list.map(i => (Number.isFinite(i.time) ? i.time : 0)))
+        const base = maxTime + 60_000
+        const byLabel = (l: string) => list.find(i => i.label == l)
+        const plan: [any, number][] = [
+          [byLabel(ls[5]), base + 5000], // PIN
+          [byLabel(ls[4]), base + 4000], // OLD_SUB: 1st / newest under PARENT
+          [byLabel(ls[1]), base + 3000], // CHILD_A: 2nd newest (parent of DEEP)
+          [byLabel(ls[3]), base + 2000], // CHILD_B: tied oldest (direct child of PARENT)
+          [byLabel(ls[2]), base + 2000], // DEEP: tied oldest (child of CHILD_A, grandchild of PARENT)
+          [byLabel(ls[0]), base + 500], // PARENT
+        ]
+        for (const [it, t] of plan) it.time = it.savedTime = t
+      }, labels)
+    const itemRanks = () =>
+      page.evaluate(
+        ([b, d]) => {
+          const list = (window as any).__items as any[]
+          const bIdx = list.findIndex(i => i.label == b)
+          const dIdx = list.findIndex(i => i.label == d)
+          return { bIdx, dIdx, bTime: list[bIdx]?.time, dTime: list[dIdx]?.time }
+        },
+        [CHILD_B, DEEP] as const
+      )
+    const startTiedAtParent = async () => {
+      await setTiedFixtureTimes()
+      await userSet(page, PARENT, { scroll: true })
+      await expect.poll(targetId).toBe(parentId)
+      await blur(page)
+      const ranks = await itemRanks()
+      expect(ranks.bTime, 'premise: CHILD_B and DEEP have equal times').toBe(ranks.dTime)
+      expect(ranks.bIdx, 'premise: on PARENT, direct child CHILD_B ranks ahead of grandchild DEEP').toBeLessThan(ranks.dIdx)
+    }
+
+    // Hold A: Option+PageDown from PARENT lands on DEEP; Option+Up steps back to CHILD_B
+    await startTiedAtParent()
+    let jumpLanded = ''
+    let jumpStepBack = ''
+    await withAlt(page, async () => {
+      await page.keyboard.press('PageDown')
+      await expect.poll(query, { message: 'tied Option+PageDown lands on DEEP' }).toBe(`${DEEP} `)
+      await expect.poll(targetId).toBe(deepId)
+      jumpLanded = await query()
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'tied Option+Up after PageDown steps back to CHILD_B' }).toBe(`${CHILD_B} `)
+      await expect.poll(targetId).toBe(childBId)
+      jumpStepBack = await query()
+    })
+
+    // Hold B: from the exact same starting ranks, repeated Option+Down lands on the same item as
+    // Option+PageDown even though selecting CHILD_A reorders DEEP ahead of CHILD_B in __items
+    await startTiedAtParent()
+    await withAlt(page, async () => {
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'tied step 1 lands on OLD_SUB' }).toBe(`${OLD_SUB} `)
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'tied step 2 lands on CHILD_A' }).toBe(`${CHILD_A} `)
+      await expect.poll(targetId).toBe(childAId)
+      const midRanks = await itemRanks()
+      expect(midRanks.dIdx, 'premise: selecting CHILD_A moves its child DEEP ahead of CHILD_B').toBeLessThan(midRanks.bIdx)
+
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'tied step 3 advances past CHILD_A' }).not.toBe(`${CHILD_A} `)
+      const step3 = await query()
+      await page.keyboard.press('ArrowDown')
+      await expect.poll(query, { message: 'tied step 4 advances past step 3' }).not.toBe(step3)
+      const stepLanded = await query()
+      expect(stepLanded, 'repeated Option+Down lands on same tied item as Option+PageDown').toBe(jumpLanded)
+      expect(step3, 'tied step 3 follows starting rank (CHILD_B before DEEP)').toBe(`${CHILD_B} `)
+      await expect.poll(targetId).toBe(deepId)
+
+      await page.keyboard.press('ArrowUp')
+      await expect.poll(query, { message: 'tied Option+Up after repeated Down steps back' }).not.toBe(stepLanded)
+      expect(await query(), 'Option+Up after repeated Option+Down matches step back after Option+PageDown').toBe(jumpStepBack)
+      await expect.poll(targetId).toBe(childBId)
+    })
+
+    expect(pageErrors, 'no pageerror during walk-jump row').toEqual([])
+  } finally {
+    const deletedSavedIds = await page.evaluate(ls => {
+      const matches = ((window as any).__items as any[]).filter(i => ls.includes(i.label))
+      const sids = matches.map(i => i.savedId).filter((s): s is string => !!s)
+      for (const item of matches) window._item(item.id, true)?.delete(false)
+      return sids
+    }, labels)
+    await userSet(page, '')
+    await expect
+      .poll(
+        async () => {
+          const localGone = await page.evaluate(ls => !((window as any).__items as any[]).some(i => ls.includes(i.label)), labels)
+          if (!localGone) return false
+          const snaps = await Promise.all(deletedSavedIds.map(id => firestore().collection('items').doc(id).get()))
+          return snaps.every(s => !s.exists)
+        },
+        { message: 'walk-jump fixtures removed locally and on server', timeout: 15_000 }
       )
       .toBe(true)
   }
@@ -3614,27 +4509,175 @@ test('a stale Back scroll restore is cancelled by a later select or a second Bac
         `narration Back onto a query matching entry 0 scrolls to header ${nTop}, not entry 0 saved position ${savedPos} (got ${landed})`
       ).toBe(true)
 
-      // Option+Down/Option+Up walk from entry 0 (query A): Option+Up returning to A must push
-      // entry 2 rather than firing narration's history.go(-1) hop back to entry 0, so Back returns
-      // to the child instead of losing the step
+      // Option+Down/Option+Up (and Option+PageUp) walk from entry 0 (query A): returning to A must
+      // push entry 2 rather than hopping to entry 0, and after Option is released a passive
+      // same-query refresh (soft-touching unrelated B) must keep entry 2 so Back still reaches the
+      // child at entry 1 (review 0 of walk_release)
+      const passiveTouchAndSettle = async () => {
+        const touched = await nPage.evaluate(label => {
+          const it = window._item(label, true) as any
+          if (!it) return false
+          it.touch()
+          return true
+        }, B)
+        expect(touched, 'premise: unrelated fixture B found for passive touch').toBe(true)
+        // allow any async history.go(-2) traversal and its popstate/scroll restore to land
+        await nPage.evaluate(
+          () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))))
+        )
+        await settled(nPage)
+      }
+
       await blur(nPage)
-      await nPage.keyboard.press('Alt+ArrowDown')
-      await expect(mindbox(nPage)).toHaveValue(`${A_CHILD} `)
-      await expect
-        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+Down pushes entry 1' })
-        .toBe(1)
-      await nPage.keyboard.press('Alt+ArrowUp')
-      await expect
-        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+Up pushes entry 2' })
-        .toBe(2)
+      await withAlt(nPage, async () => {
+        await nPage.keyboard.press('ArrowDown')
+        await expect(mindbox(nPage)).toHaveValue(`${A_CHILD} `)
+        await expect
+          .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+Down pushes entry 1' })
+          .toBe(1)
+        await nPage.keyboard.press('ArrowUp')
+        await expect
+          .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+Up pushes entry 2' })
+          .toBe(2)
+      })
       await expect(mindbox(nPage)).toHaveValue(`${A} `)
       await settled(nPage)
       expect(await nPage.evaluate(() => (window as any)._history_index), 'entry 2 stays settled after Option+Up').toBe(2)
+      // a child made through the app's own creation after the release (review 2 of walk_release): its inner
+      // editor update is ignored and the restore of the box's query follows at once, with the creation's
+      // forced state still set; that restore must not leave entry 2 either
+      const madeChild = await nPage.evaluate(b => ((window._create(b, { history: true }) as any)?.text ?? null) as string | null, B)
+      expect(madeChild, 'premise: a numbered child of fixture B was made after the release').toMatch(new RegExp(`^${B}/\\d+ $`))
+      labels.push(madeChild!.trim())
+      await nPage.evaluate(
+        () => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(resolve, 150))))
+      )
+      await settled(nPage)
+      expect(
+        await nPage.evaluate(() => (window as any)._history_index),
+        'a child made through the app after Option+Up release stays on entry 2'
+      ).toBe(2)
+      await expect(mindbox(nPage), 'a child made through the app after the release keeps query A').toHaveValue(`${A} `)
+      await passiveTouchAndSettle()
+      expect(
+        await nPage.evaluate(() => (window as any)._history_index),
+        'passive refresh after Option+Up release stays on entry 2'
+      ).toBe(2)
+      await expect(mindbox(nPage), 'passive refresh after Option+Up release keeps query A').toHaveValue(`${A} `)
       await nPage.goBack()
       await expect(mindbox(nPage)).toHaveValue(`${A_CHILD} `)
       await expect
         .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'Back after narration Option+Up returns to child at entry 1' })
         .toBe(1)
+
+      // same for Option+PageUp returning to entry 0's query A
+      await nPage.goBack()
+      await expect
+        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'Back returns to entry 0 before PageUp check' })
+        .toBe(0)
+      await blur(nPage)
+      await withAlt(nPage, async () => {
+        await nPage.keyboard.press('ArrowDown')
+        await expect(mindbox(nPage)).toHaveValue(`${A_CHILD} `)
+        await expect
+          .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+Down before PageUp pushes entry 1' })
+          .toBe(1)
+        await nPage.keyboard.press('PageUp')
+        await expect
+          .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'narration Option+PageUp pushes entry 2' })
+          .toBe(2)
+      })
+      await expect(mindbox(nPage)).toHaveValue(`${A} `)
+      await settled(nPage)
+      await passiveTouchAndSettle()
+      expect(
+        await nPage.evaluate(() => (window as any)._history_index),
+        'passive refresh after Option+PageUp release stays on entry 2'
+      ).toBe(2)
+      await expect(mindbox(nPage), 'passive refresh after Option+PageUp release keeps query A').toHaveValue(`${A} `)
+      await nPage.goBack()
+      await expect(mindbox(nPage)).toHaveValue(`${A_CHILD} `)
+      await expect
+        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'Back after narration Option+PageUp returns to child at entry 1' })
+        .toBe(1)
+
+      // Explicit tag selection over a different pending draft still hops back to entry 0 even when
+      // the saved history entry already holds entry 0's query (review 1 of walk_release): return to
+      // entry 0 on `#p `, scroll down and push entry 1 with the same query via Ctrl+Alt+Up, then
+      // in one turn type `x` into the focused box (leaving a pending debounce) and activate the
+      // rendered `#p` tag before the 500 ms debounce finishes.
+      await nPage.goBack()
+      await expect
+        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'premise: Back returns to entry 0 before pending-draft tag click' })
+        .toBe(0)
+      await nPage.evaluate(q => void (window as any).MindBox.set(q), `${A} `)
+      await expect(mindbox(nPage)).toHaveValue(`${A} `)
+      await settled(nPage)
+      await nPage.evaluate(y => document.body.scrollTo(0, y), savedPos)
+      await settledRecorded(nPage)
+      await nPage.keyboard.press('Control+Alt+ArrowUp')
+      await expect
+        .poll(() => nPage.evaluate(() => (window as any)._history_index), { message: 'premise: Ctrl+Alt+Up pushed entry 1 for pending-draft tag click' })
+        .toBe(1)
+      await settledRecorded(nPage)
+      await focusMindboxInPlace(nPage)
+      await expect(mindbox(nPage)).toBeFocused()
+      const tagTurn = await asUser(
+        nPage,
+        a => {
+          const w = window as any
+          const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+          const draft = `${a} x`
+          box.value = draft
+          box.setSelectionRange(draft.length, draft.length)
+          box.dispatchEvent(new Event('input'))
+          const before = {
+            pending: !!w._editor_change_pending,
+            box: box.value,
+            entry: (history.state?.editorText ?? null) as string | null,
+            index: w._history_index as number,
+          }
+          const mark = w._item(a, true)?.elem?.querySelector('mark.label') as HTMLElement | null
+          const rect = mark?.getBoundingClientRect()
+          if (mark && rect) {
+            mark.dispatchEvent(
+              new MouseEvent('mousedown', {
+                bubbles: true,
+                cancelable: true,
+                clientX: rect.left + rect.width / 2,
+                clientY: rect.top + rect.height / 2,
+              })
+            )
+          }
+          return { before, markFound: !!mark }
+        },
+        A
+      )
+      expect(tagTurn.before, 'premise: pending draft differs from saved entry 1 before tag click').toEqual({
+        pending: true,
+        box: `${A} x`,
+        entry: `${A} `,
+        index: 1,
+      })
+      expect(tagTurn.before.box.trim(), 'premise: box and history entry differ before tag click').not.toBe(
+        tagTurn.before.entry?.trim()
+      )
+      expect(tagTurn.markFound, 'premise: rendered tag A present before tag click').toBe(true)
+      await expect
+        .poll(
+          () => nPage.evaluate(() => (window as any)._history_index === 0 && !(window as any)._popstate_scroll_pending),
+          { message: 'clicking rendered tag A over a pending draft hops from entry 1 back to entry 0' }
+        )
+        .toBe(true)
+      expect(
+        await nPage.evaluate(() => [history.state?.editorText ?? null, (window as any)._mindboxApplied]),
+        'tag click over pending draft settles entry 0 query A'
+      ).toEqual([`${A} `, `${A} `])
+      const landedAfterTag = await scrollTop(nPage)
+      expect(
+        Math.abs(landedAfterTag - nTop) <= 2,
+        `tag click over pending draft scrolls entry 0 to header ${nTop}, not saved position ${savedPos} (got ${landedAfterTag})`
+      ).toBe(true)
 
       expect(nErrors, 'no pageerror in narration mode').toEqual([])
     } finally {
