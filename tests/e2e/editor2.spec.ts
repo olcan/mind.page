@@ -174,7 +174,34 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
   expect(start).toBe(0)
   expect(end, 'the mapped selection reaches the true end of the augmented value').toBe(value.length)
   expect(value.slice(start, end).replaceAll('\u200B', ''), 'the selection strips back to the exact raw text').toBe(TODO)
-  await page.keyboard.press('Escape') // nothing was changed: closes without the discard modal
+
+  // editor backdrop address colouring: a markdown link whose address carries a balanced bracket
+  // pair and a colon tail keeps the whole address in its grey inner span, and a definition line
+  // keeps its whole colon-tail address in one bare blue span
+  const MD_URL = 'https://example.org/Mercury_(planet)#:~:text=small'
+  const DEF_URL = 'https://alexwang.ai/posts/associative-memory/#rw=01m8:~:text=about%201.2%20million'
+  await textarea.press('Backspace') // replaces the already-selected text
+  await textarea.pressSequentially(`#e2e_zwsp [web](${MD_URL})`)
+  await textarea.press('Enter')
+  await textarea.pressSequentially(`[w1]: ${DEF_URL}`)
+  const linkSpans = await textarea.evaluate((el: HTMLTextAreaElement) =>
+    [...el.closest('.editor')!.querySelectorAll('.backdrop span.link')].map(s => ({
+      text: (s.textContent ?? '').replaceAll('\u200B', ''),
+      color: getComputedStyle(s).color,
+      nested: s.parentElement?.matches('span.link') ?? false,
+    }))
+  )
+  expect(linkSpans, 'markdown link inner address (grey) and definition address (blue) are coloured whole').toEqual([
+    { text: `[web](${MD_URL})`, color: 'rgb(85, 119, 187)', nested: false },
+    { text: MD_URL, color: 'rgb(136, 136, 136)', nested: true },
+    { text: DEF_URL, color: 'rgb(85, 119, 187)', nested: false },
+  ])
+
+  // the edit is discarded: the item stays as the row always left it
+  await page.keyboard.press('Escape')
+  const discard = page.locator('.modal .button.confirm', { hasText: 'Discard' })
+  await expect(discard).toBeVisible()
+  await discard.click()
   await expect(textarea).toBeHidden()
 })
 

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { Marked } from 'marked'
 import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
@@ -15,6 +16,7 @@ const lodash = createRequire(import.meta.url)('lodash')
 
 // @ts-expect-error util.js is plain js (the app's client lib) without a declaration file
 import { escapedUrlChar, escapedUrlEntity, highlight, urlRegExp } from '../../src/util.js'
+import { highlightLinks } from '../../src/editor_links.js'
 
 // each url the rule matches in `text`, marked in place as «url» (the text around it stays)
 const mark = (text: string): string => text.replace(urlRegExp(), (m: string, pfx: string, url: string) => `${pfx}«${url}»`)
@@ -115,16 +117,7 @@ test('an escaped ampersand stays inside the url', () => {
   )
 })
 
-// the editor overlay's own function, READ FROM THE COMPONENT and evaluated here (as the modal's
-// is below), so the reported line goes through the REAL highlight path: updateTextDivs feeds it
-// `lodash.escape(line)`, and the overlay kept showing the closing `&quot;` inside the highlighted url
-// after the raw-text fix of rounds 1+2 -- the report this round started from
-const highlightLinks: (text: string) => string = (() => {
-  const source = readFileSync(new URL('../../src/components/Editor.svelte', import.meta.url), 'utf8')
-  const picked = source.match(/\n {2}function highlightLinks\(text\) \{[\s\S]*?\n {2}\}\n/)
-  if (!picked) throw new Error('function highlightLinks not found in Editor.svelte')
-  return new Function('urlRegExp', `${picked[0]}\nreturn highlightLinks`)(urlRegExp)
-})()
+// highlightLinks is imported directly from src/editor_links.ts (the pure module Editor.svelte imports)
 
 test('the editor overlay highlights the reported line without the closing quote', () => {
   expect(highlightLinks(lodash.escape(IMPORTED))).toContain('humor <span class="link">https://t.co/ojSOHeMFT2</span>&quot; / X')
@@ -153,7 +146,8 @@ test('every call site reads the text it actually gets: escaped or raw', () => {
   // [file, calls that must pass `escaped: true`, calls that must not]
   const sites: [string, number, number][] = [
     ['src/util.js', 1, 0], // the `_log`/`_output` highlighter, over `_.escape(code)`
-    ['src/components/Editor.svelte', 2, 0], // highlightLinks and the comment link_urls, over `_.escape(line)`
+    ['src/editor_links.ts', 1, 0], // highlightLinks, over `_.escape(line)`
+    ['src/components/Editor.svelte', 1, 0], // the comment link_urls, over `_.escape(line)`
     ['src/components/Item.svelte', 1, 1], // the code-comment linkifier, over hljs output; replaceURLs is RAW item text
     ['src/zwsp.ts', 0, 1], // insertZWSP, over the raw textarea
   ]
@@ -232,4 +226,267 @@ test('an already-escaped href is not escaped again', () => {
     `<span class="console-info">INFO: see <a href="${url}" title="${url}" target="_blank">${url}</a></span>`
   )
   delete (globalThis as any).window.hljs
+})
+
+// readwise links (2026-11-27): text-fragment destinations carry `:~:text=...` after the host,
+// where bare urlRegExp stops before `:`, leaving the tail of the destination outside the inner
+// span.link (blue instead of grey). inside a markdown link the inner span covers the whole
+// destination (keeping balanced round brackets inside it, and any title and the link's own
+// closing `)` outside the inner span), and on a definition line the address gets one bare span
+const READWISE_APP_URL = 'https://read.readwise.io/read/01m8b6pz0vv3wqhn3syg19ycvg'
+const READWISE_ARTICLE_URL =
+  'https://alexwang.ai/posts/associative-memory/?__readwiseLocation=0%2F152%3A104%2C0%2F152%3A285#rw=01m8b6pz0vv3wqhn3syg19ycvg:~:text=the%20capacity%20is%20about,about%201.2%20million%20too'
+const READWISE_TWITTER_URL =
+  'https://twitter.com/PredictParity/status/2033696078889927043/?rw_tt_thread=True&__readwiseLocation=0%2F2%2F0%3A0%2C0%2F3%2F0%3A112#rw=01m8b6sae695kjkf8nm4t7s22k:~:text=Out%20of%20146%2C960%20resolved,yes%20as%20a%20outcome'
+const READWISE_TWITTER_URL_ESCAPED = lodash.escape(READWISE_TWITTER_URL)
+const READWISE_DEF_W1_URL =
+  'https://alexwang.ai/posts/associative-memory/?__readwiseLocation=0%2F152%3A104%2C0%2F152%3A285#rw=01m8b6pz0vv3wqhn3syg19ycvg;lead=With:~:text=the%20capacity%20is%20about,about%201.2%20million%20too'
+
+// the released helper (Editor.svelte's own `highlightLinks` before it moved to src/editor_links.ts),
+// copied here as the reference of the comparisons below
+function masterHighlightLinks(text: string): string {
+  return text
+    .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
+    .replace(
+      // same as in link_urls above, see comments there
+      urlRegExp({ suffix: /[^\s)<>:,."]/, escaped: true }),
+      (_m: string, pfx: string, href: string) => pfx + `<span class="link">${href}</span>`
+    )
+}
+
+test('markdown link with a colon after its host keeps the whole destination in one inner span', () => {
+  // link without a colon after its host: one outer span, one inner span, closing `)` outside
+  expect(highlightLinks(lodash.escape(`[app](${READWISE_APP_URL})`))).toBe(
+    `<span class="link">[app](<span class="link">${READWISE_APP_URL}</span>)</span>`
+  )
+  // readwise article link with `:~:text=`: whole destination inside the inner span, `)` outside
+  expect(highlightLinks(lodash.escape(`[web](${READWISE_ARTICLE_URL})`))).toBe(
+    `<span class="link">[web](<span class="link">${READWISE_ARTICLE_URL}</span>)</span>`
+  )
+  // shortcut host with a colon after the host gets the same full-destination span
+  ;(globalThis as any).window._shortcut_hosts = ['go']
+  try {
+    expect(highlightLinks(lodash.escape('[doc](go/item:tail)'))).toBe(
+      '<span class="link">[doc](<span class="link">go/item:tail</span>)</span>'
+    )
+  } finally {
+    ;(globalThis as any).window._shortcut_hosts = []
+  }
+})
+
+test('markdown link with an escaped ampersand and colon tail keeps both inside one inner span', () => {
+  expect(READWISE_TWITTER_URL_ESCAPED).toContain('rw_tt_thread=True&amp;__readwiseLocation=')
+  expect(highlightLinks(lodash.escape(`[web](${READWISE_TWITTER_URL})`))).toBe(
+    `<span class="link">[web](<span class="link">${READWISE_TWITTER_URL_ESCAPED}</span>)</span>`
+  )
+  // a title after a colon-bearing destination stays outside the inner span, and a `(` + url
+  // inside the destination never opens a third nested span
+  expect(highlightLinks(lodash.escape('[note](https://example.com/a:~:text=x "My Title")'))).toBe(
+    '<span class="link">[note](<span class="link">https://example.com/a:~:text=x</span> &quot;My Title&quot;)</span>'
+  )
+  expect(highlightLinks(lodash.escape('[nested](https://example.com/q=(https://other.com/b))'))).toBe(
+    '<span class="link">[nested](<span class="link">https://example.com/q=(https://other.com/b)</span>)</span>'
+  )
+})
+
+test('two readwise links in round brackets after prose highlight each whole destination', () => {
+  const withAppAndArticle = `Note on associative memory ([app](${READWISE_APP_URL}) [web](${READWISE_ARTICLE_URL}))`
+  expect(highlightLinks(lodash.escape(withAppAndArticle))).toBe(
+    'Note on associative memory (' +
+      `<span class="link">[app](<span class="link">${READWISE_APP_URL}</span>)</span> ` +
+      `<span class="link">[web](<span class="link">${READWISE_ARTICLE_URL}</span>)</span>)`
+  )
+  const withBothWeb = `Note on forecasts ([web](${READWISE_ARTICLE_URL}), [web](${READWISE_TWITTER_URL}))`
+  expect(highlightLinks(lodash.escape(withBothWeb))).toBe(
+    'Note on forecasts (' +
+      `<span class="link">[web](<span class="link">${READWISE_ARTICLE_URL}</span>)</span>, ` +
+      `<span class="link">[web](<span class="link">${READWISE_TWITTER_URL_ESCAPED}</span>)</span>)`
+  )
+})
+
+test('link definition lines colour the whole address including colon tails, titles, and up to three leading spaces', () => {
+  // owner's two definition lines: exact HTML, single bare-address span over the full URL
+  expect(highlightLinks(lodash.escape(`[a1]: ${READWISE_APP_URL}`))).toBe(
+    `[a1]: <span class="link">${READWISE_APP_URL}</span>`
+  )
+  expect(highlightLinks(lodash.escape(`[w1]: ${READWISE_DEF_W1_URL}`))).toBe(
+    `[w1]: <span class="link">${READWISE_DEF_W1_URL}</span>`
+  )
+  // escaped ampersand and colon tail together in a definition address
+  expect(highlightLinks(lodash.escape(`[t1]: ${READWISE_TWITTER_URL}`))).toBe(
+    `[t1]: <span class="link">${READWISE_TWITTER_URL_ESCAPED}</span>`
+  )
+  // shortcut host with a colon tail on a definition line
+  ;(globalThis as any).window._shortcut_hosts = ['go']
+  try {
+    expect(highlightLinks(lodash.escape('[doc]: go/item:tail'))).toBe(
+      '[doc]: <span class="link">go/item:tail</span>'
+    )
+  } finally {
+    ;(globalThis as any).window._shortcut_hosts = []
+  }
+  // definitions with double-quoted, single-quoted, and parenthesized titles: title stays outside the span
+  expect(highlightLinks(lodash.escape('[w1]: https://alexwang.ai/posts/a:~:text=x "Associative Memory"'))).toBe(
+    '[w1]: <span class="link">https://alexwang.ai/posts/a:~:text=x</span> &quot;Associative Memory&quot;'
+  )
+  expect(highlightLinks(lodash.escape("[w1]: https://alexwang.ai/posts/a:~:text=x 'Associative Memory'"))).toBe(
+    '[w1]: <span class="link">https://alexwang.ai/posts/a:~:text=x</span> &#39;Associative Memory&#39;'
+  )
+  expect(highlightLinks(lodash.escape('[w1]: https://alexwang.ai/posts/a:~:text=x (Associative Memory)'))).toBe(
+    '[w1]: <span class="link">https://alexwang.ai/posts/a:~:text=x</span> (Associative Memory)'
+  )
+  // indented up to three spaces: still a definition line, coloured whole
+  expect(highlightLinks(lodash.escape(`   [w1]: ${READWISE_DEF_W1_URL}`))).toBe(
+    `   [w1]: <span class="link">${READWISE_DEF_W1_URL}</span>`
+  )
+  // angle-bracketed destination on a definition line
+  expect(highlightLinks(lodash.escape('[w1]: <https://example.org/a:~:text=x> "Title"'))).toBe(
+    '[w1]: &lt;<span class="link">https://example.org/a:~:text=x</span>&gt; &quot;Title&quot;'
+  )
+  // a bare url inside a definition title keeps its highlight
+  expect(highlightLinks(lodash.escape('[w1]: https://alexwang.ai/posts/a:~:text=x "see https://other.org/b"'))).toBe(
+    '[w1]: <span class="link">https://alexwang.ai/posts/a:~:text=x</span> &quot;see <span class="link">https://other.org/b</span>&quot;'
+  )
+})
+
+test('non-url link definitions (tags, fragments) and four-space definitions stay as on master', () => {
+  // four leading spaces: not a definition line (0-3 spaces only), falls back to master's bare url
+  const fourSpaces = lodash.escape(`    [w1]: ${READWISE_DEF_W1_URL}`)
+  expect(highlightLinks(fourSpaces)).toBe(masterHighlightLinks(fourSpaces))
+  expect(highlightLinks(fourSpaces)).toContain(';lead=With</span>:~:text=')
+  // a definition of a tag (raw and as highlightTags hands it to highlightLinks) or a fragment
+  for (const line of [
+    '[t1]: <mark>#mytag</mark>',
+    lodash.escape('[t1]: #mytag'),
+    lodash.escape('[s1]: #heading-1'),
+    lodash.escape('[bad]: https://example.org/a:~:text=x extra words'),
+  ]) {
+    expect(highlightLinks(line), line).toBe(masterHighlightLinks(line))
+  }
+})
+
+test('balanced round brackets in a destination and titles holding a closing bracket stay inside the link', () => {
+  const markedPlain = new Marked({ gfm: true, breaks: true })
+  // reviewer's exact example: balanced pair followed by a text fragment
+  const mercury = 'https://example.org/Mercury_(planet)#:~:text=small'
+  expect(markedPlain.parseInline(`[web](${mercury})`)).toContain(`href="${mercury}"`)
+  const cases: [string, string, string][] = [
+    [
+      'fragment after a balanced pair',
+      `[web](${mercury})`,
+      `<span class="link">[web](<span class="link">${mercury}</span>)</span>`,
+    ],
+    [
+      'balanced pair at the end of a destination',
+      '[Mercury](https://en.wikipedia.org/wiki/Mercury_(planet))',
+      '<span class="link">[Mercury](<span class="link">https://en.wikipedia.org/wiki/Mercury_(planet)</span>)</span>',
+    ],
+    [
+      'nested balanced pairs followed by a fragment',
+      '[web](https://example.org/A_(b_(c))#:~:text=tail)',
+      '<span class="link">[web](<span class="link">https://example.org/A_(b_(c))#:~:text=tail</span>)</span>',
+    ],
+    [
+      'surrounding prose parentheses stay outside the link',
+      `Note ([web](${mercury}))`,
+      `Note (<span class="link">[web](<span class="link">${mercury}</span>)</span>)`,
+    ],
+    [
+      'double-quoted title holding a closing bracket leaves the link delimiter in the outer span',
+      '[note](https://example.org/a "hello ) world")',
+      '<span class="link">[note](<span class="link">https://example.org/a</span> &quot;hello ) world&quot;)</span>',
+    ],
+    [
+      'single-quoted title holding a closing bracket',
+      "[note](https://example.org/a 'hello ) world')",
+      '<span class="link">[note](<span class="link">https://example.org/a</span> &#39;hello ) world&#39;)</span>',
+    ],
+    [
+      'double-quoted title with escaped quote and closing bracket',
+      '[note](https://example.org/a "say \\" ) hi")',
+      '<span class="link">[note](<span class="link">https://example.org/a</span> &quot;say \\&quot; ) hi&quot;)</span>',
+    ],
+    [
+      'parenthesized title leaves the link delimiter in the outer span',
+      '[note](https://example.org/a (My Title))',
+      '<span class="link">[note](<span class="link">https://example.org/a</span> (My Title))</span>',
+    ],
+    [
+      'parenthesized title with escaped closing bracket',
+      '[note](https://example.org/a (paren \\) title))',
+      '<span class="link">[note](<span class="link">https://example.org/a</span> (paren \\) title))</span>',
+    ],
+    [
+      'balanced pair + fragment + quoted title holding a closing bracket',
+      `[web](${mercury} "see ) 1")`,
+      `<span class="link">[web](<span class="link">${mercury}</span> &quot;see ) 1&quot;)</span>`,
+    ],
+    [
+      'angle-bracketed destination holding a closing bracket + quoted title holding one',
+      '[web](<https://example.org/a)b> "see ) 1")',
+      '<span class="link">[web](&lt;<span class="link">https://example.org/a)b</span>&gt; &quot;see ) 1&quot;)</span>',
+    ],
+    [
+      'near neighbour: apostrophe inside bare destination still closes normally',
+      "[wiki](https://en.wikipedia.org/wiki/Murphy's_law)",
+      '<span class="link">[wiki](<span class="link">https://en.wikipedia.org/wiki/Murphy&#39;s_law</span>)</span>',
+    ],
+    [
+      'near neighbour: unclosed title quote does not form a broken outer link span',
+      '[x](https://example.org/a "unclosed)',
+      '[x](<span class="link">https://example.org/a</span> &quot;unclosed)',
+    ],
+  ]
+  for (const [name, raw, expected] of cases) {
+    expect(highlightLinks(lodash.escape(raw)), name).toBe(expected)
+  }
+  expect(markedPlain.parseInline('[x](https://example.org/a "unclosed)')).not.toContain('>x</a>')
+})
+
+// the released helper's output is kept for the lines listed here, not for every line. Two known
+// differences, both kept: in `[see https://example.org/x](rel)` the released grey span ran on over
+// `](rel`, and here the label's address ends at `/x`; and `[x](https://example.org/a "unclosed)`
+// was wrapped as a link by the released helper and is none here (the case above)
+test('the listed lines without a colon-tail destination or url definition match the released helper', () => {
+  const masterLines: [string, string][] = [
+    ['tag link (raw)', lodash.escape('[tag](#mytag)')],
+    ['tag link (after highlightTags)', '[tag](<mark>#mytag</mark>)'],
+    ['fragment link', lodash.escape('[section](#heading-1)')],
+    ['script link', lodash.escape('[run](javascript:window._x=1)')],
+    ['label that is an address', lodash.escape('[https://example.com/a](https://example.com/b)')],
+    ['label containing an address', lodash.escape('[see https://example.com/a here](https://example.com/b)')],
+    ['two links in a line', lodash.escape('see [one](https://example.com/1) and [two](https://example.com/2)')],
+    ['link inside a code span', 'see <span class="code">`[a](https://example.com/a)`</span> here'],
+    ['link inside math', '<span class="math">$`[a](https://example.com/a)`$</span>'],
+    [
+      'link inside a macro',
+      '<span class="macro"><span class="macro-delimiter">&lt;&lt;</span>[a](https://example.com/a)<span class="macro-delimiter">&gt;&gt;</span></span>',
+    ],
+    ['earlier-pass code span inside target', '[x](https://example.com/a<span class="code">`code`</span>)'],
+    [
+      'bare address with a colon after its host',
+      lodash.escape('see https://alexwang.ai/posts/associative-memory/#rw=01m8:~:text=foo end'),
+    ],
+    ['bare address in round brackets with a colon after its host', lodash.escape('(https://example.com/a:~:text=foo)')],
+    ['reference [app][a1]', lodash.escape('see [app][a1] here')],
+    ['wiki link', lodash.escape('see [[docs/mind_page]] and [[docs/mind_page|MindPage]]')],
+    ['x[i][j]', lodash.escape('x[i][j]')],
+    ['unfinished link (address)', lodash.escape('[unfinished](https://example.com/a')],
+    ['unfinished link (colon tail)', lodash.escape('[unfinished](https://example.com/a:~:text=foo')],
+    ['unfinished link (tag)', lodash.escape('[unfinished](#mytag')],
+    ['unfinished link (empty)', lodash.escape('[unfinished](')],
+    ['ordinary link', lodash.escape(`[app](${READWISE_APP_URL})`)],
+    ['double-quoted title', lodash.escape('[note](https://example.com/a "My Title")')],
+    ['single-quoted title', lodash.escape("[note](https://example.com/a 'My Title')")],
+    ['definition inside a code span', '<span class="code">`[w1]: https://example.com/a:~:text=x`</span>'],
+    ['tag inside label', '[see <mark>#tag</mark>](https://example.com/a)'],
+    ['link inside a heading title', '# <span class="title">Heading [a](https://example.com/a)</span>'],
+  ]
+  // sanity check: master really does colour links inside code spans, math and macros, and so do we
+  expect(masterHighlightLinks('see <span class="code">`[a](https://example.com/a)`</span> here')).toContain(
+    '<span class="link">[a](<span class="link">https://example.com/a</span>)</span>'
+  )
+  for (const [name, line] of masterLines) {
+    expect(highlightLinks(line), name).toBe(masterHighlightLinks(line))
+  }
 })

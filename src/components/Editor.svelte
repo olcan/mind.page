@@ -83,6 +83,7 @@
   } from '../util.js'
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
   import { eventKey } from '../event_key'
+  import { highlightLinks } from '../editor_links'
   import { inertCandidateSpan, scanInert } from '../inert'
   import { isRecentDownKey, isRecentUpKey } from '../recent_descendant'
 
@@ -209,16 +210,6 @@
   }
   function highlightTitles(text) {
     return text.replace(/^(\s{0,3}#{1,6}\s+)(.+)$/, (_, pfx, title) => pfx + `<span class="title">${title}</span>`)
-  }
-
-  function highlightLinks(text) {
-    return text
-      .replace(/\[(?:[^\]]|\\\])*[^\\]\]\((?:[^\)]|\\\))*[^\\)]\)/g, link => `<span class="link">${link}</span>`)
-      .replace(
-        // same as in link_urls above, see comments there
-        urlRegExp({ suffix: /[^\s)<>:,."]/, escaped: true }),
-        (m, pfx, href) => pfx + `<span class="link">${href}</span>`
-      )
   }
 
   function getMatchingDelimiter(char) {
