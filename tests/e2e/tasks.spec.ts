@@ -5216,8 +5216,8 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     answer.accept = false
     await userSet(page, '')
 
-    // 11. Cycling j/k walk with delegated list ABOVE main list: union of belled rows and main list in page order,
-    //     unbelled delegated rows passed over, nearest-neighbour jump on click (2026-11-25)
+    // 11. Cycling j/k walk with delegated list ABOVE main list: every row of every mounted list in page order
+    //     (including unbelled delegated rows), wrapping at both ends, and delegated buttons/keys match click (2026-11-26)
     const widgetKinds = () =>
       page.evaluate(() =>
         [...document.querySelectorAll('.todoer-widget')]
@@ -5301,7 +5301,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
 
     const mainRows11 = (await mainRowNames()).filter((n): n is string => !!n)
     expect(mainRows11.length, 'main list holds multiple rows below delegated list').toBeGreaterThanOrEqual(2)
-    const expectedSeq11 = [delBelled, ...mainRows11]
+    const expectedSeq11 = [...delRows11, ...mainRows11]
 
     const pressAndRead = async (key: 'j' | 'k', expected: string, msg: string) => {
       await page.keyboard.press(key)
@@ -5309,25 +5309,26 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       return await boxNow()
     }
 
-    // Forward walk from nothing selected: lands on delegated bell row, walks main list, wraps back to delegated bell row
+    // Forward walk from nothing selected: lands on first delegated row (unbelled), walks all delegated rows
+    // and main list in page order, then wraps back to first delegated row
     await userSet(page, '')
     await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
     await unfocus()
     const fwdWalk: string[] = []
-    for (const [i, target] of [...expectedSeq11, delBelled].entries()) {
+    for (const [i, target] of [...expectedSeq11, delBefore].entries()) {
       fwdWalk.push(await pressAndRead('j', target, `j step ${i + 1} lands on ${target}`))
     }
-    expect(fwdWalk, 'j from empty walks delegated bell row, then main list, then wraps back to delegated bell row').toEqual([...expectedSeq11, delBelled])
-    expect(fwdWalk.includes(delBefore) || fwdWalk.includes(delAfter), 'j walk never lands on unbelled delegated rows').toBe(false)
+    expect(fwdWalk, 'j from empty walks every delegated row (unbelled included), then main list, then wraps back to first row').toEqual([...expectedSeq11, delBefore])
+    expect(fwdWalk.includes(delBefore) && fwdWalk.includes(delAfter), 'j walk stops on unbelled delegated rows').toBe(true)
 
-    // Backward walk from delegated bell row: wraps to last main row, walks main list in reverse, returns to delegated bell row
-    const bwdExpected = [...[...mainRows11].reverse(), delBelled]
+    // Backward walk from first delegated row: wraps to last main row, walks main list and delegated list in reverse
+    const bwdExpected = [...expectedSeq11.slice(1).reverse(), delBefore]
     const bwdWalk: string[] = []
     for (const [i, target] of bwdExpected.entries()) {
       bwdWalk.push(await pressAndRead('k', target, `k step ${i + 1} lands on ${target}`))
     }
-    expect(bwdWalk, 'k walks backward from delegated bell row across main list and back').toEqual(bwdExpected)
-    expect(bwdWalk.includes(delBefore) || bwdWalk.includes(delAfter), 'k walk never lands on unbelled delegated rows').toBe(false)
+    expect(bwdWalk, 'k walks backward across main list and every delegated row and wraps back').toEqual(bwdExpected)
+    expect(bwdWalk.includes(delBefore) && bwdWalk.includes(delAfter), 'k walk stops on unbelled delegated rows').toBe(true)
 
     // From nothing selected, k lands on last row of sequence (last main row)
     await userSet(page, '')
@@ -5335,8 +5336,32 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await unfocus()
     await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from empty selects last row of sequence')
 
-    // Click unbelled delegated row AFTER the bell row (between delBelled and mainRows11[0]):
-    // j goes to nearest sequence row AFTER it (mainRows11[0], not delBelled), k to nearest BEFORE it (delBelled)
+    // Unbelled delegated row reached by j shows and takes the same buttons and keys as reached by click
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+    await unfocus()
+    await pressAndRead('j', delBefore, 'j 1 lands on delBefore')
+    await pressAndRead('j', delBelled, 'j 2 lands on delBelled')
+    await pressAndRead('j', delAfter, 'j 3 lands on unbelled delAfter')
+    await expect
+      .poll(() => guestState().then(s => ({ names: s.names, titles: s.titles, nav: [s.colors.up, s.colors.down] })), {
+        message: 'unbelled delegated row reached by j shows delegated list buttons with lit arrows',
+        timeout: 5_000,
+      })
+      .toEqual({
+        names: ['up', 'down', 'agent', 'owner'],
+        titles: ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Take back from the agent (u)'],
+        nav: [LIT_COLOR, LIT_COLOR],
+      })
+    await keys()
+    await priorKeys()
+    await page.keyboard.press('d')
+    await page.waitForTimeout(150)
+    expect(
+      [await boxNow(), (await itemText(delAfter))?.saved?.includes('#done') ?? false, await keys(), await priorKeys()],
+      'd on unbelled delegated row reached by j leaves it undone and forwards to prior hook',
+    ).toEqual([delAfter, false, [['KeyD', false, false]], ['KeyD']])
+
     const clickDelRow = async (id: string, name: string) => {
       // click mark.age inside the row so the click hits the row's own onclick (never a #todo tag mark)
       await page.locator(`.column:not(.hidden) .todoer-widget .list-item-container[data-id="${id}"] .list-item mark.age`).first().click()
@@ -5354,20 +5379,29 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         .toBe(true)
       await unfocus()
     }
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
     await clickDelRow(delAfterId!, delAfter)
     await expect
-      .poll(() => guestState().then(s => [s.colors.up, s.colors.down]), { message: 'unbelled delegated row lights up/down when sequence is non-empty', timeout: 5_000 })
-      .toEqual([LIT_COLOR, LIT_COLOR])
-    await pressAndRead('j', mainRows11[0]!, 'j from unbelled delegated row between bell and main lands on first main row')
+      .poll(() => guestState().then(s => ({ names: s.names, titles: s.titles, nav: [s.colors.up, s.colors.down] })), {
+        message: 'clicking unbelled delegated row shows identical buttons to reaching it by j',
+        timeout: 5_000,
+      })
+      .toEqual({
+        names: ['up', 'down', 'agent', 'owner'],
+        titles: ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Take back from the agent (u)'],
+        nav: [LIT_COLOR, LIT_COLOR],
+      })
+    await pressAndRead('j', delRows11[3] ?? mainRows11[0]!, 'j from unbelled delegated row steps to next row in page order')
     await clickDelRow(delAfterId!, delAfter)
-    await pressAndRead('k', delBelled, 'k from unbelled delegated row between bell and main lands on delegated bell row')
+    await pressAndRead('k', delBelled, 'k from unbelled delegated row steps to previous row in page order')
 
     // Click unbelled delegated row BEFORE the bell row:
-    // j goes to nearest AFTER it (delBelled), k wraps past start to last row of sequence (mainRows11[last])
+    // j steps to delBelled, k wraps past start to last row of sequence (mainRows11[last])
     await clickDelRow(delBeforeId!, delBefore)
-    await pressAndRead('j', delBelled, 'j from unbelled delegated row before bell lands on delegated bell row')
+    await pressAndRead('j', delBelled, 'j from first unbelled delegated row steps to delBelled')
     await clickDelRow(delBeforeId!, delBefore)
-    await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from unbelled delegated row before bell wraps to last row of sequence')
+    await pressAndRead('k', mainRows11[mainRows11.length - 1]!, 'k from first unbelled delegated row wraps to last row of sequence')
 
     // Narrow 420 px delegated project row cut on the left (#jk_del_b) with long stats/wake age mark
     // and an uncleared checkin bell: bell stays whole, trailing #todo fits and clicks into MindBox,
@@ -5480,6 +5514,32 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       if (pinned) (window._item('id:' + pinned.id, true) as any).write(raw, '', { skip_save: false })
     }, origPinnedText!)
     await expect.poll(widgetKinds, { message: 'pinned widgets restored to main above delegated', timeout: 15_000 }).toEqual(['main', 'delegated'])
+    await userSet(page, '')
+    await expect.poll(boxNow, { timeout: 5_000 }).toBe('')
+
+    // Walk across main list ABOVE delegated list (including an unbelled delegated row), wrapping at both ends
+    const mainRows11b = (await mainRowNames()).filter((n): n is string => !!n)
+    const delRows11b = (await delegatedRowNames()).filter((n): n is string => !!n)
+    expect(mainRows11b.length, 'main list holds rows above delegated list').toBeGreaterThanOrEqual(2)
+    expect(delRows11b.length, 'delegated list holds rows below main list').toBeGreaterThanOrEqual(3)
+    const unbelledDel11b = await page.evaluate(() => {
+      const del = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !!w._delegated)
+      const row = [...(del?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].find(r => !r.querySelector('mark.waits'))
+      return row ? (window._item(row.getAttribute('data-id')!, true)?.name ?? null) : null
+    })
+    expect(unbelledDel11b, 'delegated list has at least one row without a bell').toBeTruthy()
+    await unfocus()
+    const mainFirstSeq = [...mainRows11b, ...delRows11b]
+    const mainFirstWalk: string[] = []
+    for (const [i, target] of [...mainFirstSeq, mainRows11b[0]!].entries()) {
+      mainFirstWalk.push(await pressAndRead('j', target, `main-above-delegated j step ${i + 1} lands on ${target}`))
+    }
+    expect(mainFirstWalk, 'main-above-delegated j walks main list first, then every delegated row (unbelled included), and wraps to main[0]').toEqual([
+      ...mainFirstSeq,
+      mainRows11b[0]!,
+    ])
+    expect(mainFirstWalk, 'main-above-delegated j walk visits unbelled delegated row').toContain(unbelledDel11b)
+    await pressAndRead('k', delRows11b[delRows11b.length - 1]!, 'k at main[0] wraps to last delegated row')
     await userSet(page, '')
 
     // Narrow 430 px linked list window with installed #key_buttons second-floor strip:
@@ -5808,7 +5868,7 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
       .toEqual(['window', ['window'], null, [['todoer', 14]]])
     const windowRows = await rowsShown()
     expect(windowRows[0], 'reference view includes condition in brackets').toBe(
-      'j\tthe next row (a row is selected: through the rows with a bell and the main list, round and round)',
+      'j\tthe next row (a row is selected: through every list on the page, round and round)',
     )
     expect(windowRows, 'reference view lists h history entry with its condition').toContain(
       'h\topen item history (a row of an item an agent wrote is selected, and the pusher has a destination)',
