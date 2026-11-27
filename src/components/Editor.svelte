@@ -83,7 +83,7 @@
   } from '../util.js'
   import { insertZWSP, removeZWSP, zwspOffset } from '../zwsp'
   import { eventKey } from '../event_key'
-  import { highlightLinks } from '../editor_links'
+  import { collectLinkDefs, highlightLinks } from '../editor_links'
   import { inertCandidateSpan, scanInert } from '../inert'
   import { isRecentDownKey, isRecentUpKey } from '../recent_descendant'
 
@@ -269,6 +269,7 @@
     const rawText = textarea.value || placeholder
     const markerSpans = new Map(inertScan.candidates.map(c => [c.marker, inertCandidateSpan(c)]))
     let text = textarea.value ? inertScan.grammarText : placeholder
+    const linkDefs = collectLinkDefs(text)
     let insideBlock = false
     let language = ''
     let code = ''
@@ -315,7 +316,8 @@
         code += line + '\n'
       } else {
         if (line.match(/^     *[^-*+ ]/)) html += _.escape(line) + '\n'
-        else html += highlightLinks(highlightTitles(highlightOther(highlightTags(_.escape(line), tags)))) + '\n'
+        else
+          html += highlightLinks(highlightTitles(highlightOther(highlightTags(_.escape(line), tags))), linkDefs) + '\n'
       }
     })
     // append unclosed block as regular markdown

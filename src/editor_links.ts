@@ -1,8 +1,10 @@
 // Editor overlay link highlighting (Editor.svelte).
-// Pure module imported directly by both Editor.svelte and unit tests (tests/unit/url_regexp.spec.ts).
+// Pure module imported directly by both Editor.svelte and unit tests
+// (tests/unit/url_regexp.spec.ts, tests/unit/editor_links.spec.ts).
 
 // @ts-ignore -- util.js is untyped; see src/zwsp.ts
 import { urlRegExp } from './util.js'
+import { wikiLinkRegExp, wikiLinkTarget } from './wiki_links.js'
 
 // HTML-escaped Markdown title (`"..."`, `'...'`, or `(...)`) and angle-bracketed destination `<...>`
 // with disjoint branches at every step so unmatched quotes/brackets scan in linear time
@@ -56,7 +58,7 @@ function scanBareDest(text: string, start: number): { end: number; hitTag: boole
   return depth == 0 && p > start ? { end: p, hitTag: false } : null
 }
 
-export function highlightLinks(text: string): string {
+export function highlightLinks(text: string, defs?: ReadonlySet<string> | null): string {
   // same options as in Editor.svelte's comment link_urls, see comments there
   const bareUrl = urlRegExp({ suffix: /[^\s)<>:,."]/, escaped: true })
   const startsWithUrl = new RegExp(`^(?:${bareUrl.source})`, 'i')
@@ -141,5 +143,91 @@ export function highlightLinks(text: string): string {
     last = end
     mdLabelRe.lastIndex = last
   }
-  return out + linkBare(text.slice(last), last ? '>' : '')
+  const result = out + linkBare(text.slice(last), last ? '>' : '')
+  return defs ? highlightRefsAndWikis(result, defs) : result
+}
+
+const lodash = (): { unescape: (s: string) => string } =>
+  (globalThis as unknown as { _: { unescape: (s: string) => string } })._
+
+// Same single-line definition shape (`0-3` spaces, `[label]: dest [title]`) as `DEF_LINE`,
+// over raw item text. One pass over lines: no block, fence, paragraph or comment state.
+const DEF_LINE_RAW =
+  /^ {0,3}\[((?!\s*\])(?:\\.|[^\[\]\\])+)\]:[ \t]*(?:<(?:\\.|[^<>\\\n])+>|[^\s<>]+)(?:[ \t]+(?:"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\((?:\\.|[^()\\\n])*\)))?[ \t]*$/
+
+const normLabel = (label: string): string => label.trim().replace(/\s+/g, ' ').toLowerCase()
+
+export function collectLinkDefs(text: string): Set<string> {
+  const defs = new Set<string>()
+  for (const line of text.split('\n')) {
+    const def = DEF_LINE_RAW.exec(line)
+    if (def) defs.add(normLabel(def[1]))
+  }
+  return defs
+}
+
+const REF_LINK_RE =
+  /\[(?:<mark>[^<]*<\/mark>|<span class="code">[^<]*<\/span>|\\.|[^\[\]\\<>\n])+\]\[(?!\s*\])((?:<mark>[^<]*<\/mark>|\\.|[^\[\]\\<>\n])+)\]/y
+const WIKI_LINK_RE = new RegExp(wikiLinkRegExp().source, 'y')
+const NEW_SHAPE_TOKEN_RE = /<span class="(?:link|code|math|macro|hljs-[^"]*)">|!?\[\[|\[/g
+const SPAN_TAG_RE = /<\/?span\b[^>]*>/g
+
+function endOfSpan(html: string, start: number): number {
+  SPAN_TAG_RE.lastIndex = start
+  let depth = 0
+  let m: RegExpExecArray | null
+  while ((m = SPAN_TAG_RE.exec(html))) {
+    depth += m[0][1] == '/' ? -1 : 1
+    if (depth == 0) return m.index + m[0].length
+  }
+  return html.length
+}
+
+function isEscaped(text: string, pos: number): boolean {
+  let n = 0
+  while (pos - 1 - n >= 0 && text[pos - 1 - n] == '\\') n++
+  return n % 2 == 1
+}
+
+function highlightRefsAndWikis(html: string, defs: ReadonlySet<string>): string {
+  if (!html.includes('[')) return html
+  let out = ''
+  let last = 0
+  NEW_SHAPE_TOKEN_RE.lastIndex = 0
+  let tm: RegExpExecArray | null
+  while ((tm = NEW_SHAPE_TOKEN_RE.exec(html))) {
+    const idx = tm.index
+    if (tm[0][0] == '<') {
+      NEW_SHAPE_TOKEN_RE.lastIndex = endOfSpan(html, idx)
+      continue
+    }
+    if (tm[0].endsWith('[[') && !isEscaped(html, idx)) {
+      WIKI_LINK_RE.lastIndex = idx
+      const wm = WIKI_LINK_RE.exec(html)
+      if (wm && !/[<>]/.test(wm[0].replace(/<\/?mark>/g, ''))) {
+        const end = idx + wm[0].length
+        if (wikiLinkTarget(lodash().unescape(wm[2].replace(/<\/?mark>/g, ''))) !== null) {
+          out += html.slice(last, idx) + `<span class="link">${wm[0]}</span>`
+          last = end
+        }
+        NEW_SHAPE_TOKEN_RE.lastIndex = end
+        continue
+      }
+    }
+    if (html[idx] == '[' && defs.size > 0 && !isEscaped(html, idx)) {
+      REF_LINK_RE.lastIndex = idx
+      const rm = REF_LINK_RE.exec(html)
+      if (rm) {
+        const key = normLabel(lodash().unescape(rm[1].replace(/<\/?mark>/g, '')))
+        if (defs.has(key)) {
+          out += html.slice(last, idx) + `<span class="link">${rm[0]}</span>`
+          last = idx + rm[0].length
+          NEW_SHAPE_TOKEN_RE.lastIndex = last
+          continue
+        }
+      }
+    }
+    NEW_SHAPE_TOKEN_RE.lastIndex = idx + 1
+  }
+  return last ? out + html.slice(last) : html
 }

@@ -112,10 +112,12 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
   // the todoer-shaped case: raw-domain offsets over an item whose long urls get ZWSP-augmented
   // in the textarea (src/zwsp.ts) — unmapped, a full-text selection ends one raw character
   // short per preceding ZWSP, leaving the url tail unselected (the 2026-08-29 todoer bug)
+  const REF_URL = 'https://example.org/ref-saved'
   const TODO =
     '#e2e_zwsp Ask vedant about the mail thread below ' +
     '[gmail](https://mail.google.com/mail/u/0/#inbox/19f0c2748522c278) ' +
-    '[mail](message://%3CCAFXOJNHzgNtJc7CbqiMf%2BNeH%2B0gGYVpZYT%3DyNoKquDvL3Vo5Lw%40mail.gmail.com%3E)'
+    '[mail](message://%3CCAFXOJNHzgNtJc7CbqiMf%2BNeH%2B0gGYVpZYT%3DyNoKquDvL3Vo5Lw%40mail.gmail.com%3E) ' +
+    `[notes][r1]\n\n[r1]: ${REF_URL}`
   await page.evaluate(text => void window._create(text), TODO)
   await focusMindbox(page)
   await mindbox(page).pressSequentially('#e2e_zwsp')
@@ -147,6 +149,20 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
       { timeout: 15_000, message: 'the paragraph in the viewport and at rest' }
     )
     .toBe(true)
+  // before the editor opens, the saved item's reference renders as an anchor on the page
+  const renderedRef = await page.evaluate(
+    ({ id, href }) => {
+      const a = [...document.querySelectorAll<HTMLAnchorElement>(`#item-${id} a`)].find(
+        el => el.getAttribute('href') == href
+      )
+      return a ? { text: a.textContent, href: a.getAttribute('href') } : null
+    },
+    { id, href: REF_URL }
+  )
+  expect(renderedRef, 'the saved item renders the reference as an anchor on the page').toEqual({
+    text: 'notes',
+    href: REF_URL,
+  })
   // click the plain text: the CENTER OF ITS TEXT NODE, not the paragraph's midpoint -- with the
   // 2026-09-05 column widths (1000px columns) the whole line fits on one row and the paragraph
   // midpoint lands on a link, which navigates instead of opening the editor
@@ -175,25 +191,57 @@ test('a data-selection over url text maps past the zero-width spaces in the edit
   expect(end, 'the mapped selection reaches the true end of the augmented value').toBe(value.length)
   expect(value.slice(start, end).replaceAll('\u200B', ''), 'the selection strips back to the exact raw text').toBe(TODO)
 
-  // editor backdrop address colouring: a markdown link whose address carries a balanced bracket
-  // pair and a colon tail keeps the whole address in its grey inner span, and a definition line
-  // keeps its whole colon-tail address in one bare blue span
+  // editor backdrop link colouring: for the saved item the editor colours the same reference that
+  // the page anchored; while editing, a markdown link keeps its whole address (including balanced
+  // brackets and a colon tail) in its grey inner span, a defined reference and a wiki link colour
+  // blue, a definition line keeps its whole colon-tail address in one bare blue span, and deleting
+  // the empty line above the definition leaves the reference coloured (by choice: line-shape rule)
   const MD_URL = 'https://example.org/Mercury_(planet)#:~:text=small'
   const DEF_URL = 'https://alexwang.ai/posts/associative-memory/#rw=01m8:~:text=about%201.2%20million'
+  const readLinkSpans = () =>
+    textarea.evaluate((el: HTMLTextAreaElement) =>
+      [...el.closest('.editor')!.querySelectorAll('.backdrop span.link')].map(s => ({
+        text: (s.textContent ?? '').replaceAll('\u200B', ''),
+        color: getComputedStyle(s).color,
+        nested: s.parentElement?.matches('span.link') ?? false,
+      }))
+    )
+  expect(await readLinkSpans(), 'the editor colours the same saved reference as the page anchored').toContainEqual({
+    text: '[notes][r1]',
+    color: 'rgb(85, 119, 187)',
+    nested: false,
+  })
   await textarea.press('Backspace') // replaces the already-selected text
-  await textarea.pressSequentially(`#e2e_zwsp [web](${MD_URL})`)
+  await textarea.pressSequentially(`#e2e_zwsp [web](${MD_URL}) [app][w1] [[notes/first]]`)
+  await textarea.press('Enter')
   await textarea.press('Enter')
   await textarea.pressSequentially(`[w1]: ${DEF_URL}`)
-  const linkSpans = await textarea.evaluate((el: HTMLTextAreaElement) =>
-    [...el.closest('.editor')!.querySelectorAll('.backdrop span.link')].map(s => ({
-      text: (s.textContent ?? '').replaceAll('\u200B', ''),
-      color: getComputedStyle(s).color,
-      nested: s.parentElement?.matches('span.link') ?? false,
-    }))
-  )
-  expect(linkSpans, 'markdown link inner address (grey) and definition address (blue) are coloured whole').toEqual([
+  expect(
+    await readLinkSpans(),
+    'markdown link (grey inner address), defined reference, wiki link and definition address all colour'
+  ).toEqual([
     { text: `[web](${MD_URL})`, color: 'rgb(85, 119, 187)', nested: false },
     { text: MD_URL, color: 'rgb(136, 136, 136)', nested: true },
+    { text: '[app][w1]', color: 'rgb(85, 119, 187)', nested: false },
+    { text: '[[notes/first]]', color: 'rgb(85, 119, 187)', nested: false },
+    { text: DEF_URL, color: 'rgb(85, 119, 187)', nested: false },
+  ])
+
+  // delete the empty line above `[w1]: ...`: by choice, any line matching the definition shape
+  // still defines its label, so `[app][w1]` keeps its span alongside the other links
+  await textarea.evaluate((el: HTMLTextAreaElement) => {
+    const emptyLine = el.value.indexOf('\n\n')
+    el.setSelectionRange(emptyLine + 1, emptyLine + 1)
+  })
+  await textarea.press('Backspace')
+  expect((await textarea.inputValue()).replaceAll('\u200B', '')).toBe(
+    `#e2e_zwsp [web](${MD_URL}) [app][w1] [[notes/first]]\n[w1]: ${DEF_URL}`
+  )
+  expect(await readLinkSpans(), 'deleting the empty line above the definition keeps the reference span').toEqual([
+    { text: `[web](${MD_URL})`, color: 'rgb(85, 119, 187)', nested: false },
+    { text: MD_URL, color: 'rgb(136, 136, 136)', nested: true },
+    { text: '[app][w1]', color: 'rgb(85, 119, 187)', nested: false },
+    { text: '[[notes/first]]', color: 'rgb(85, 119, 187)', nested: false },
     { text: DEF_URL, color: 'rgb(85, 119, 187)', nested: false },
   ])
 
