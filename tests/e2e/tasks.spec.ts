@@ -6633,6 +6633,49 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       )
       return r ? window._item(r.getAttribute('data-id')!, true)?.name ?? null : null
     })
+  const GREEN_BAR = 'rgb(102, 204, 102) -4px 0px 0px 0px'
+  const GREEN_TINT = 'rgba(102, 204, 102, 0.1)'
+  const CYAN_BAR = 'rgb(102, 255, 255) -4px 0px 0px 0px'
+  const CYAN_TINT = 'rgba(102, 255, 255, 0.1)'
+  const CYAN_DRAG = 'rgb(26, 41, 41)'
+  const SQUARE_LEFT = ['0px', '4px', '4px', '0px']
+  const ROUND_ALL = ['4px', '4px', '4px', '4px']
+  const TRANSPARENT = 'rgba(0, 0, 0, 0)'
+  const selectedRowStyle = (page: Page, selector = '.todoer-widget .list-item-container.selected') =>
+    page.evaluate(sel => {
+      const r = [...document.querySelectorAll(sel)].find(
+        el => !el.closest('#cache-div, .column.hidden, .super-container.hidden'),
+      )
+      const li = r?.querySelector(':scope > .list-item') as HTMLElement | null
+      if (!r || !li) return null
+      const c = getComputedStyle(li)
+      return {
+        other: r.classList.contains('other'),
+        shadow: c.boxShadow,
+        bg: c.backgroundColor,
+        border: c.border,
+        borderColor: c.borderColor,
+        color: c.color,
+        radii: [c.borderTopLeftRadius, c.borderTopRightRadius, c.borderBottomRightRadius, c.borderBottomLeftRadius],
+      }
+    }, selector)
+  const listClip = (page: Page) =>
+    page.evaluate(() => {
+      const main = [...document.querySelectorAll('.todoer-widget')].find(
+        (w: any) => !w.closest('#cache-div, .column.hidden, .super-container.hidden') && !w._snoozed && !w._delegated,
+      )
+      const sc = main?.closest('.super-container') as HTMLElement | null
+      if (!sc) return undefined
+      const r = sc.getBoundingClientRect()
+      const pad = 16
+      const x = Math.max(0, Math.floor(r.left - pad))
+      return {
+        x,
+        y: 0,
+        width: Math.min(window.innerWidth - x, Math.ceil(r.width + 2 * pad)),
+        height: Math.min(window.innerHeight, Math.ceil(r.bottom + pad)),
+      }
+    })
   const rowBox = (page: Page, name: string | null = null) =>
     page.evaluate(name => {
       const id = name ? window._item(name, true)?.id : null
@@ -6813,6 +6856,15 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     const stripButtons = (page: Page) =>
       page.evaluate(() => [...document.querySelectorAll('.todoer-bin-buttons button')].map(b => [b.className.split(' ')[0], (b as HTMLElement).title]))
 
+    // Unlinked own target: selected row bar and tint are green
+    await expect.poll(() => selectedRowStyle(a), { message: 'unlinked own target marks row green', timeout: 5_000 }).toMatchObject({
+      other: false,
+      shadow: GREEN_BAR,
+      bg: GREEN_TINT,
+      radii: SQUARE_LEFT,
+      border: `1px dashed ${TRANSPARENT}`,
+    })
+
     // Under a target (names[2]), the #_todo/pin snoozed list is hidden on the page
     await expect.poll(() => snoozedListState(a), { message: 'snoozed list is hidden under a target query', timeout: 5_000 }).toEqual({
       visible: false,
@@ -6849,6 +6901,36 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       'list window row click: no frame elsewhere',
     ).toEqual([])
     expect(await boxNow(a), 'list window keeps #todo in its box after row click').toBe('#todo')
+    if (TASKS_SHOTS) {
+      await taskShot(a, 'list_window', await listClip(a))
+      await resetScroll(b, headerTop)
+      await taskShot(b, 'own_target', await listClip(b))
+    }
+    // List window A shows cyan bar & tint; target window B shows green bar & tint on its own row
+    await expect.poll(() => selectedRowStyle(a), { message: 'list window marks row cyan', timeout: 5_000 }).toMatchObject({
+      other: true,
+      shadow: CYAN_BAR,
+      bg: CYAN_TINT,
+      radii: SQUARE_LEFT,
+      border: `1px dashed ${TRANSPARENT}`,
+    })
+    await expect.poll(() => selectedRowStyle(b), { message: 'target window marks its own row green', timeout: 5_000 }).toMatchObject({
+      other: false,
+      shadow: GREEN_BAR,
+      bg: GREEN_TINT,
+      radii: SQUARE_LEFT,
+      border: `1px dashed ${TRANSPARENT}`,
+    })
+    // Grabbed cyan row keeps cyan bar, opaque cyan drag tint, transparent border, and square left corners
+    await a.evaluate(() => document.querySelector('.todoer-widget .list-item-container.selected')!.classList.add('sortable-chosen'))
+    expect(await selectedRowStyle(a), 'grabbed cyan row keeps cyan bar, opaque #1a2929 tint, transparent border, and square left corners').toMatchObject({
+      other: true,
+      shadow: CYAN_BAR,
+      bg: CYAN_DRAG,
+      borderColor: TRANSPARENT,
+      radii: SQUARE_LEFT,
+    })
+    await a.evaluate(() => document.querySelector('.todoer-widget .list-item-container.selected')!.classList.remove('sortable-chosen'))
     expect(await stripButtons(a), 'list window shows strip buttons for marked row').toEqual([
       ['up', 'Previous row (k)'],
       ['down', 'Next row (j)'],
@@ -6887,6 +6969,11 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       visible: true,
       hasRow: true,
       marked: true,
+    })
+    await expect.poll(() => selectedRowStyle(a), { message: 'reloaded list window keeps cyan mark on #ow_snz', timeout: 5_000 }).toMatchObject({
+      other: true,
+      shadow: CYAN_BAR,
+      bg: CYAN_TINT,
     })
     await expect
       .poll(async () => (await stripButtons(a)).find(([cls]) => cls == 'snooze'), {
@@ -7355,6 +7442,102 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       'second window row click: every animation frame in B stays at headerTopB',
     ).toEqual([])
     expect([await boxNow(b), Math.abs((await top(b)) - headerTopB) <= 2], 'second window B keeps #todo and headerTopB').toEqual(['#todo', true])
+    // After role swap: list window B is cyan and target window A is green
+    await expect.poll(() => selectedRowStyle(b), { message: 'after role swap, list window B marks row cyan', timeout: 5_000 }).toMatchObject({
+      other: true,
+      shadow: CYAN_BAR,
+      bg: CYAN_TINT,
+      radii: SQUARE_LEFT,
+    })
+    await expect.poll(() => selectedRowStyle(a), { message: 'after role swap, target window A marks row green', timeout: 5_000 }).toMatchObject({
+      other: false,
+      shadow: GREEN_BAR,
+      bg: GREEN_TINT,
+      radii: SQUARE_LEFT,
+    })
+    // Real drag of cyan row in list window B: clone keeps cyan bar + opaque #1a2929 tint, ghost clears bar/tint,
+    // hovering done bin adopts #6f6 colour and #171717 background without bar
+    const mainWidgetB = b.locator('.todoer-widget').first()
+    let cyanDragging = false
+    for (let attempt = 0; attempt < 5 && !cyanDragging; attempt++) {
+      const dragBox = (await mainWidgetB.locator('.list-item-container.selected.other').boundingBox())!
+      await b.mouse.move(dragBox.x + dragBox.width / 2, dragBox.y + dragBox.height / 2)
+      await b.mouse.down()
+      await b.waitForTimeout(400)
+      await b.mouse.move(dragBox.x + dragBox.width / 2 + 10, dragBox.y + dragBox.height / 2 + 8, { steps: 5 })
+      cyanDragging = /dragging/.test((await mainWidgetB.getAttribute('class')) ?? '')
+      if (!cyanDragging) {
+        await b.mouse.up()
+        await b.waitForTimeout(400)
+      }
+    }
+    expect(cyanDragging, 'cyan row entered real drag').toBe(true)
+    const cyanClone = await selectedRowStyle(b, '.todoer-widget .list-item-container.selected.other.sortable-drag')
+    const cyanGhost = await selectedRowStyle(b, '.todoer-widget .list-item-container.selected.other.sortable-ghost')
+    expect(
+      [cyanClone?.shadow, cyanClone?.bg, cyanClone?.borderColor, cyanClone?.radii],
+      'dragged cyan clone keeps cyan bar, opaque #1a2929 tint, transparent border, and square left corners',
+    ).toEqual([CYAN_BAR, CYAN_DRAG, TRANSPARENT, SQUARE_LEFT])
+    expect(
+      [cyanGhost?.border, cyanGhost?.shadow, cyanGhost?.bg, cyanGhost?.radii],
+      'cyan drag ghost clears bar and tint with dashed #666 border and round corners',
+    ).toEqual(['1px dashed rgb(102, 102, 102)', 'none', TRANSPARENT, ROUND_ALL])
+    if (TASKS_SHOTS) await taskShot(b, 'list_window_drag', await listClip(b))
+    const doneBinB = (await mainWidgetB.locator('.bin.done').boundingBox())!
+    await b.mouse.move(doneBinB.x + doneBinB.width / 2, doneBinB.y + doneBinB.height / 2, { steps: 10 })
+    await expect
+      .poll(
+        () =>
+          selectedRowStyle(b, '.todoer-widget .list-item-container.selected.other.sortable-drag').then(s => [
+            s?.border,
+            s?.color,
+            s?.shadow,
+            s?.bg,
+            s?.radii,
+          ]),
+        {
+          message: 'cyan clone over done bin adopts #6f6 colour, #171717 background, round corners, and drops bar',
+          timeout: 5_000,
+        },
+      )
+      .toEqual(['1px solid rgb(102, 255, 102)', 'rgb(102, 255, 102)', 'none', 'rgb(23, 23, 23)', ROUND_ALL])
+    const listBoxB = (await mainWidgetB.locator('.list').boundingBox())!
+    await b.mouse.move(listBoxB.x + listBoxB.width / 2, listBoxB.y + listBoxB.height / 2, { steps: 10 })
+    await b.mouse.up()
+    await expect.poll(() => mainWidgetB.evaluate(el => el.classList.contains('dragging')), { timeout: 5_000 }).toBe(false)
+    await b.waitForTimeout(300) // past todoer.js's 250 ms post-drag click guard
+
+    // 7c. Unlink while B is list window (#todo, cyan) and A shows own target (green):
+    //     B's mark clears completely (no own target); A keeps green; selecting in unlinked B opens & marks green
+    await b.bringToFront()
+    await unfocus(b)
+    await b.keyboard.press('w')
+    await expect.poll(() => on(a), { message: 'w in list window B ends link', timeout: 5_000 }).toBeNull()
+    await expect.poll(() => selectedRowName(b), { message: 'unlinked list window B clears its mark', timeout: 5_000 }).toBeNull()
+    expect(await selectedRowStyle(b), 'unlinked list window B has no selected row style').toBeNull()
+    expect(
+      await b.evaluate(() => document.querySelectorAll('.todoer-widget .list-item-container.other').length),
+      'unlinked list window B leaves no .other row',
+    ).toBe(0)
+    await expect.poll(() => selectedRowStyle(a), { message: 'unlinked target window A keeps green mark', timeout: 5_000 }).toMatchObject({
+      other: false,
+      shadow: GREEN_BAR,
+      bg: GREEN_TINT,
+    })
+    await resetScroll(b, headerTopB)
+    expect(await clickRow(b, names[5]!), 'click row in unlinked B').toBe(true)
+    await expect.poll(() => boxNow(b), { message: 'unlinked B opens clicked row as own target', timeout: 5_000 }).toBe(names[5])
+    await expect.poll(() => selectedRowStyle(b), { message: 'unlinked B marks its own target green', timeout: 5_000 }).toMatchObject({
+      other: false,
+      shadow: GREEN_BAR,
+      bg: GREEN_TINT,
+    })
+    // Re-link from A before step 8 closes B
+    await a.bringToFront()
+    await unfocus(a)
+    await a.keyboard.press('w')
+    await expect.poll(() => isOn(a), { message: 're-link A before closing B', timeout: 5_000 }).toBe(true)
+    await expect.poll(() => windowButton(b), { timeout: 5_000 }).toEqual(LIT_BTN)
 
     // 8. Close B: selection shown in A after all; button stays whole-lit while on; timestamp survives reload; w turns off & hides button
     await allSaved(a)
