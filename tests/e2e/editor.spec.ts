@@ -4521,3 +4521,616 @@ test('a child delete yields to a pending Back restore and mid-wait wheel input, 
   }
   expect(pageErrors, 'no page errors').toEqual([])
 })
+
+test('deleting a parent with items under it asks in the app modal, lists them, offers subtree deletion, and leaves childless and code deletes unchanged', async ({
+  page,
+}) => {
+  await loadAdmin(page)
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(err.message))
+  const nativeDialogs: string[] = []
+  page.on('dialog', dialog => {
+    nativeDialogs.push(dialog.message())
+    void dialog.dismiss()
+  })
+
+  const PREFIX = '#e2e_del_ask'
+  const P1 = `${PREFIX}_p1`
+  const P2 = `${PREFIX}_p2`
+  const P3 = `${PREFIX}_p3`
+  const P4 = `${PREFIX}_long`
+  const P5 = `${PREFIX}_fresh`
+  const createdIds = new Set<string>()
+  const origViewport = page.viewportSize()
+
+  const modal = page.locator('.background.visible .modal')
+
+  const waitSaved = async (label: string) => {
+    await expect.poll(() => savedId(page, label), { message: `${label} savedId`, timeout: 30_000 }).toBeTruthy()
+    const id = (await savedId(page, label))!
+    createdIds.add(id)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(l => {
+            const item = window.__items.find(i => i.id == window._item(l, true)?.id)
+            return !!item && !item.saving && !!item.savedText
+          }, label),
+        { message: `${label} save settled`, timeout: 30_000 }
+      )
+      .toBe(true)
+    return id
+  }
+
+  const waitGone = async (label: string, id: string) => {
+    await expect
+      .poll(() => page.evaluate(l => window._exists(l), label), {
+        message: `${label} removed locally`,
+        timeout: 10_000,
+      })
+      .toBe(false)
+    await expect
+      .poll(async () => (await firestore().collection('items').doc(id).get()).exists, {
+        message: `${label} removed on server`,
+        timeout: 30_000,
+      })
+      .toBe(false)
+  }
+
+  const createTree = async (root: string) => {
+    const entries: readonly [string, string][] = [
+      [root, `${root}\nparent body`],
+      [`${root}/a`, `${root}/a\nchild a body`],
+      [`${root}/b`, `${root}/b\nchild b body`],
+      [`${root}/a/c`, `${root}/a/c\ngrandchild c body`],
+    ]
+    for (const [, text] of entries) await page.evaluate(t => void window._create(t), text)
+    const ids: Record<string, string> = {}
+    for (const [label] of entries) ids[label] = await waitSaved(label)
+    return ids
+  }
+
+  const existing = (labels: string[]) =>
+    page.evaluate(ls => ls.filter(l => window._exists(l)), labels)
+
+  const target = async (name: string) => {
+    await userSet(page, name, { scroll: true })
+    await blur(page)
+  }
+
+  // count every time the modal backdrop transitions to visible (catches transient flashes too)
+  await page.evaluate(() => {
+    const w = window as any
+    w.__modalOpens = 0
+    const bg = document.querySelector('.background')!
+    let wasVisible = bg.classList.contains('visible')
+    const obs = new MutationObserver(() => {
+      const nowVisible = bg.classList.contains('visible')
+      if (nowVisible && !wasVisible) w.__modalOpens++
+      wasVisible = nowVisible
+    })
+    obs.observe(bg, { attributes: true, attributeFilter: ['class'] })
+    w.__modalObs = obs
+  })
+  const modalOpens = () => page.evaluate(() => (window as any).__modalOpens as number)
+  const resetModalOpens = () => page.evaluate(() => { (window as any).__modalOpens = 0 })
+
+  try {
+    // 1. window delete key on parent: two dispatches in one turn open ONE modal (pending guard),
+    //    listing descendants deepest-first, deleting nothing
+    const ids1 = await createTree(P1)
+    const tree1 = [P1, `${P1}/a`, `${P1}/b`, `${P1}/a/c`]
+    await target(P1)
+    await resetModalOpens()
+    await page.evaluate(() => {
+      for (let n = 0; n < 2; n++) {
+        window.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', ctrlKey: true, bubbles: true, cancelable: true })
+        )
+      }
+    })
+    await expect(modal, 'step 1: delete modal visible on parent with children').toBeVisible({ timeout: 10_000 })
+    const modalText1 = await modal.innerText()
+    expect(modalText1, 'step 1: names parent and descendant count').toContain(
+      `${P1} has 3 items under it that would be left behind:`
+    )
+    expect(modalText1, 'step 1: lists descendants deepest first').toContain(`${P1}/a/c\n${P1}/a\n${P1}/b`)
+    expect(await existing(tree1), 'step 1: nothing deleted while modal is open').toEqual(tree1)
+
+    // 2. one cancellation closes the question with no second dialog behind it (then Escape too)
+    await modal.locator('.button.cancel', { hasText: /^Cancel$/ }).click()
+    await expect(modal, 'step 2: one cancel closes dialog with none stacked behind').toBeHidden({ timeout: 5_000 })
+    expect(await modalOpens(), 'step 2: same-turn double delete opened only one dialog').toBe(1)
+    expect(await existing(tree1), 'step 2: cancel button leaves all items').toEqual(tree1)
+
+    await target(P1)
+    await page.keyboard.press('Control+Backspace')
+    await expect(modal, 'step 2: modal reopens on delete key').toBeVisible({ timeout: 10_000 })
+    await page.keyboard.press('Escape')
+    await expect(modal, 'step 2: Escape closes dialog').toBeHidden({ timeout: 5_000 })
+    expect(await existing(tree1), 'step 2: Escape leaves all items').toEqual(tree1)
+
+    // 3. delete alone: parent is gone, children stay and are listed where items without a parent appear today
+    await target(P1)
+    await page.keyboard.press('Control+Backspace')
+    await expect(modal, 'step 3: modal opens').toBeVisible({ timeout: 10_000 })
+    await modal.locator('.button.confirm', { hasText: /^Delete item$/ }).click()
+    await expect(modal, 'step 3: confirm closes dialog').toBeHidden({ timeout: 5_000 })
+    await waitGone(P1, ids1[P1])
+    expect(await mindbox(page).inputValue(), 'step 3: box clears after deleting top-level parent').toBe('')
+    expect(await existing(tree1), 'step 3: children and grandchild remain').toEqual([`${P1}/a`, `${P1}/b`, `${P1}/a/c`])
+    // direct children now have no parent item and remain listed in the page's main list and under a query for P1
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            labels =>
+              labels.every(l => {
+                const it = window._item(l, true) as any
+                return !!it && !!document.querySelector(`.column:not(.hidden) .super-container:not(.hidden)#super-container-${it.id}`)
+              }),
+            [`${P1}/a`, `${P1}/b`, `${P1}/a/c`]
+          ),
+        { message: 'step 3: orphaned descendants remain listed visibly on the page', timeout: 10_000 }
+      )
+      .toBe(true)
+    const directParents = await page.evaluate(
+      ls => ls.map(l => (window.__items.find(i => i.labelText?.toLowerCase() == l) as any)?.parentId ?? null),
+      [`${P1}/a`, `${P1}/b`]
+    )
+    expect(directParents, 'step 3: direct children have no parent item').toEqual([null, null])
+    await target(P1)
+    const matchingUnderP1 = await page.evaluate(
+      ls => ls.filter(l => window.__items.find(i => i.labelText?.toLowerCase() == l)?.matching),
+      [`${P1}/a`, `${P1}/b`, `${P1}/a/c`]
+    )
+    expect(matchingUnderP1, 'step 3: querying deleted parent still lists its left-behind descendants').toEqual([
+      `${P1}/a`,
+      `${P1}/b`,
+      `${P1}/a/c`,
+    ])
+
+    // 4. secondary button on destructive controls does not confirm; replacing a listed child while
+    //    the question is open refreshes the list without deleting; then Delete subtree removes all
+    const ids2 = await createTree(P2)
+    const tree2 = [P2, `${P2}/a`, `${P2}/b`, `${P2}/a/c`]
+    await target(P2)
+    await resetModalOpens()
+    await page.keyboard.press('Control+Backspace')
+    await expect(modal, 'step 4: modal opens for parent').toBeVisible({ timeout: 10_000 })
+
+    // right-click on Delete subtree and on Delete item must leave the same question open and every item intact
+    await modal.locator('.button.extra', { hasText: /^Delete subtree$/ }).click({ button: 'right' })
+    await expect(modal, 'step 4: right-click on Delete subtree keeps modal open').toBeVisible()
+    expect(await existing(tree2), 'step 4: right-click on Delete subtree deletes nothing').toEqual(tree2)
+    expect(await modalOpens(), 'step 4: right-click on Delete subtree kept same dialog').toBe(1)
+    await modal.locator('.button.confirm', { hasText: /^Delete item$/ }).click({ button: 'right' })
+    await expect(modal, 'step 4: right-click on Delete item keeps modal open').toBeVisible()
+    expect(await existing(tree2), 'step 4: right-click on Delete item deletes nothing').toEqual(tree2)
+    expect(await modalOpens(), 'step 4: right-click on Delete item kept same dialog').toBe(1)
+
+    // Control-click (macOS context-menu gesture: button === 0 with ctrlKey === true) on either destructive
+    // button must also leave the same question open and every item intact
+    await modal.locator('.button.extra', { hasText: /^Delete subtree$/ }).click({ modifiers: ['Control'] })
+    await expect(modal, 'step 4: Control-click on Delete subtree keeps modal open').toBeVisible()
+    expect(await existing(tree2), 'step 4: Control-click on Delete subtree deletes nothing').toEqual(tree2)
+    expect(await modalOpens(), 'step 4: Control-click on Delete subtree kept same dialog').toBe(1)
+    await modal.locator('.button.confirm', { hasText: /^Delete item$/ }).click({ modifiers: ['Control'] })
+    await expect(modal, 'step 4: Control-click on Delete item keeps modal open').toBeVisible()
+    expect(await existing(tree2), 'step 4: Control-click on Delete item deletes nothing').toEqual(tree2)
+    expect(await modalOpens(), 'step 4: Control-click on Delete item kept same dialog').toBe(1)
+
+    // while the question is open, replace a listed child with a new one (same count, different membership)
+    await page.evaluate(
+      ([gone, added]) => {
+        window._item(gone, true)!.delete(false)
+        void window._create(`${added}\nreplacement child body`)
+      },
+      [`${P2}/b`, `${P2}/d`]
+    )
+    ids2[`${P2}/d`] = await waitSaved(`${P2}/d`)
+    await waitGone(`${P2}/b`, ids2[`${P2}/b`])
+    const tree2Updated = [P2, `${P2}/a`, `${P2}/a/c`, `${P2}/d`]
+    await modal.locator('.button.extra', { hasText: /^Delete subtree$/ }).click()
+    await expect(modal, 'step 4: replaced child refreshes question instead of deleting').toBeVisible({ timeout: 5_000 })
+    await expect(modal, 'step 4: refreshed question lists the replacement child').toContainText(`${P2}/d`, {
+      timeout: 5_000,
+    })
+    const refreshedText = await modal.innerText()
+    expect(refreshedText, 'step 4: refreshed question drops the removed child').not.toContain(`${P2}/b`)
+    expect(refreshedText, 'step 4: refreshed question lists current descendants deepest first').toContain(
+      `${P2}/a/c\n${P2}/a\n${P2}/d`
+    )
+    expect(await existing(tree2Updated), 'step 4: nothing deleted when membership changed').toEqual(tree2Updated)
+
+    // now confirm the intended Delete subtree against the current list
+    await modal.locator('.button.extra', { hasText: /^Delete subtree$/ }).click()
+    await expect(modal, 'step 4: subtree button closes refreshed dialog').toBeHidden({ timeout: 5_000 })
+    for (const label of tree2Updated) await waitGone(label, ids2[label])
+    expect(nativeDialogs, 'step 4: no second browser confirm dialog').toEqual([])
+    expect(await mindbox(page).inputValue(), 'step 4: box clears after subtree delete').toBe('')
+
+    // 5. an item with nothing under it: no dialog, deleted immediately as today
+    await target(`${P1}/b`)
+    await resetModalOpens()
+    await page.keyboard.press('Control+Backspace')
+    await waitGone(`${P1}/b`, ids1[`${P1}/b`])
+    await expect(modal, 'step 5: no modal for childless item').toBeHidden()
+    expect(await modalOpens(), 'step 5: zero modals opened for childless item').toBe(0)
+    expect(nativeDialogs, 'step 5: no browser confirm for childless item').toEqual([])
+
+    // 6. from the parent's own editor (the key, plus edit-menu delete and emptied-item save):
+    //    same dialog; cancel keeps editor open with text intact; Enter confirms single-item delete
+    const ids3 = await createTree(P3)
+    const tree3 = [P3, `${P3}/a`, `${P3}/b`, `${P3}/a/c`]
+    await target(P3)
+    const p3TabId = await page.evaluate(l => window._item(l, true)!.id as string, P3)
+    await page.locator(`#item-${p3TabId} p`, { hasText: 'parent body' }).click()
+    const p3Editor = page.locator(`#textarea-${p3TabId}`)
+    await expect(p3Editor, 'step 6: parent editor opened').toBeVisible({ timeout: 10_000 })
+    await expect(p3Editor, 'step 6: parent editor focused').toBeFocused()
+    await resetModalOpens()
+    await page.evaluate(id => {
+      const ta = document.querySelector(`#textarea-${id}`)!
+      for (let n = 0; n < 2; n++) {
+        ta.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Backspace', code: 'Backspace', ctrlKey: true, bubbles: true, cancelable: true })
+        )
+      }
+    }, p3TabId)
+    await expect(modal, 'step 6: editor delete key opens modal on parent').toBeVisible({ timeout: 10_000 })
+    expect(await modal.innerText(), 'step 6: editor modal lists descendants').toContain(
+      `${P3} has 3 items under it that would be left behind:`
+    )
+    expect(await modal.innerText(), 'step 6: editor modal lists names deepest first').toContain(
+      `${P3}/a/c\n${P3}/a\n${P3}/b`
+    )
+    expect(await existing(tree3), 'step 6: nothing deleted while editor modal is open').toEqual(tree3)
+    await expect(p3Editor, 'step 6: editor remains open with text while modal is open').toHaveValue(`${P3}\nparent body`)
+    await page.keyboard.press('Escape')
+    await expect(modal, 'step 6: one Escape closes editor delete modal with none stacked behind').toBeHidden({
+      timeout: 5_000,
+    })
+    expect(await modalOpens(), 'step 6: same-turn double delete in editor opened only one dialog').toBe(1)
+    await expect(p3Editor, 'step 6: Escape keeps editor open and focused').toBeFocused()
+    expect(await existing(tree3), 'step 6: Escape from editor modal deletes nothing').toEqual(tree3)
+
+    // window focus restore timer must not refocus the parent's editor behind the open delete question,
+    // while still restoring focus to a control inside an active dialog (uses the system-blur row's timer hold)
+    const p3Draft = `${P3}\nparent body edited`
+    await p3Editor.fill(p3Draft)
+    await expect(p3Editor, 'step 6: editor holds modified draft').toBeFocused()
+    const cdp = await page.context().newCDPSession(page)
+    const { windowId } = await cdp.send('Browser.getWindowForTarget')
+    const away = async () => {
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } })
+      await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'step 6: no system focus' }).toBe(false)
+    }
+    const back = async () => {
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } })
+      await expect.poll(() => page.evaluate(() => document.hasFocus()), { message: 'step 6: system focus back' }).toBe(true)
+    }
+    const holdRestore = () =>
+      page.evaluate(() => {
+        const w = window as any
+        const held: { id: number; cb: () => void }[] = (w.__heldRestore = [])
+        const setTimeout_ = (w.__setTimeout = window.setTimeout)
+        const clearTimeout_ = (w.__clearTimeout = window.clearTimeout)
+        w.__fakeTimerId ??= 1 << 30
+        ;(window as any).setTimeout = (cb: () => void, ms?: number, ...args: unknown[]) =>
+          ms == 250 ? (held.push({ id: ++w.__fakeTimerId, cb }), w.__fakeTimerId) : setTimeout_(cb, ms, ...args)
+        ;(window as any).clearTimeout = (id?: number) => {
+          const i = held.findIndex(h => h.id == id)
+          if (i >= 0) held.splice(i, 1)
+          else clearTimeout_(id)
+        }
+      })
+    const releaseRestore = () =>
+      page.evaluate(() => {
+        const w = window as any
+        if (w.__setTimeout) window.setTimeout = w.__setTimeout
+        if (w.__clearTimeout) window.clearTimeout = w.__clearTimeout
+        delete w.__setTimeout
+        delete w.__clearTimeout
+        const late = (w.__heldRestore?.splice(0) ?? []) as { cb: () => void }[]
+        late.forEach(h => h.cb())
+        return late.length
+      })
+    try {
+      await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: false })
+      await away() // records p3Editor in lastFocusedElem
+      await holdRestore()
+      await back() // arms the 250 ms focus restore timer (held)
+      // focus the parent editor inside the 250 ms window (as clicking back into the window's editor does)
+      await page.locator(`#super-container-${p3TabId} .editor .backdrop`).click()
+      await expect(p3Editor, 'step 6: editor active on window return').toBeFocused()
+      await resetModalOpens()
+      await page.keyboard.press('Control+Backspace')
+      await expect(modal, 'step 6: delete modal opens while focus restore is pending').toBeVisible({ timeout: 10_000 })
+      await expect(p3Editor, 'step 6: modal blurred editor before restore timer fires').not.toBeFocused()
+      expect(await releaseRestore(), 'step 6: window focus armed at least one 250 ms timer').toBeGreaterThanOrEqual(1)
+      // one real Escape closes the delete question (not captured by the editor behind it), keeps the draft,
+      // and queues no Discard question
+      await page.keyboard.press('Escape')
+      await expect(modal, 'step 6: one Escape after focus restore closes delete question').toBeHidden({
+        timeout: 5_000,
+      })
+      expect(await modalOpens(), 'step 6: no Discard question shown after Escape').toBe(1)
+      await expect(p3Editor, 'step 6: editor keeps modified draft after focus-restore Escape').toHaveValue(p3Draft)
+      await expect(p3Editor, 'step 6: editor regains focus after focus-restore Escape').toBeFocused()
+      await expect(modal, 'step 6: no Discard question opened behind delete question').toBeHidden()
+      expect(await existing(tree3), 'step 6: nothing deleted after focus-restore Escape').toEqual(tree3)
+
+      // a control inside an active dialog is still restored by the same timer
+      await page.evaluate(
+        () =>
+          void (window as any)._modal('focus restore inside active dialog', {
+            input: 'keep',
+            confirm: 'OK',
+            cancel: 'Cancel',
+          })
+      )
+      const modalInput = page.locator('#modal-input')
+      await expect(modalInput, 'step 6: active dialog input focused').toBeFocused({ timeout: 5_000 })
+      await away() // records #modal-input in lastFocusedElem
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur()) // silent while away
+      expect(
+        await page.evaluate(() => document.activeElement?.tagName),
+        'step 6: premise — active dialog input blurred while away'
+      ).toBe('BODY')
+      await holdRestore()
+      await back()
+      await expect(modalInput, 'step 6: dialog input not focused before restore timer fires').not.toBeFocused()
+      expect(await releaseRestore(), 'step 6: dialog return armed at least one 250 ms timer').toBeGreaterThanOrEqual(1)
+      await expect(
+        modalInput,
+        'step 6: restore timer still restores focus to control inside active dialog'
+      ).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(modal, 'step 6: active dialog closed after restore check').toBeHidden({ timeout: 5_000 })
+      await expect(p3Editor, 'step 6: editor regains focus after active dialog closes').toBeFocused()
+      await expect(p3Editor, 'step 6: editor still holds modified draft').toHaveValue(p3Draft)
+    } finally {
+      await page
+        .evaluate(() => {
+          const w = window as any
+          if (w.__setTimeout) window.setTimeout = w.__setTimeout
+          if (w.__clearTimeout) window.clearTimeout = w.__clearTimeout
+          delete w.__setTimeout
+          delete w.__clearTimeout
+          delete w.__heldRestore
+        })
+        .catch(() => {})
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }).catch(() => {})
+      await cdp.send('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
+      await cdp.detach().catch(() => {})
+    }
+
+    // confirm via Enter from the editor's delete dialog: deletes parent alone
+    await page.keyboard.press('Control+Backspace')
+    await expect(modal, 'step 6: modal reopens from editor').toBeVisible({ timeout: 10_000 })
+    await page.keyboard.press('Enter')
+    await expect(modal, 'step 6: Enter confirms and closes dialog').toBeHidden({ timeout: 5_000 })
+    await waitGone(P3, ids3[P3])
+    expect(await existing(tree3), 'step 6: Enter deletes parent alone, children stay').toEqual([
+      `${P3}/a`,
+      `${P3}/b`,
+      `${P3}/a/c`,
+    ])
+
+    // edit menu's delete button and emptied-item save on P3/a (which still has grandchild P3/a/c under it)
+    await target(`${P3}/a`)
+    const p3aTabId = await page.evaluate(l => window._item(l, true)!.id as string, `${P3}/a`)
+    await page.locator(`#item-${p3aTabId} p`, { hasText: 'child a body' }).click()
+    const p3aEditor = page.locator(`#textarea-${p3aTabId}`)
+    await expect(p3aEditor).toBeVisible({ timeout: 10_000 })
+    await page.locator(`#super-container-${p3aTabId} .edit-menu .button.delete`).click()
+    await expect(modal, 'step 6: edit menu delete opens modal').toBeVisible({ timeout: 10_000 })
+    expect(await modal.innerText(), 'step 6: edit menu modal names grandchild').toContain(
+      `${P3}/a has 1 item under it that would be left behind:`
+    )
+    expect(await modal.innerText()).toContain(`${P3}/a/c`)
+    await modal.locator('.button.cancel').click()
+    await expect(modal).toBeHidden({ timeout: 5_000 })
+    await expect(p3aEditor, 'step 6: cancelling edit-menu delete keeps editor text intact').toHaveValue(
+      `${P3}/a\nchild a body`
+    )
+    await p3aEditor.fill('')
+    await page.keyboard.press('Shift+Enter')
+    await expect(modal, 'step 6: saving emptied parent opens modal').toBeVisible({ timeout: 10_000 })
+    await expect(p3aEditor, 'step 6: emptied editor stays open empty while asking').toHaveValue('')
+    await modal.locator('.button.cancel').click()
+    await expect(modal).toBeHidden({ timeout: 5_000 })
+    await expect(p3aEditor, 'step 6: cancelling emptied-parent modal keeps empty editor focused').toBeFocused()
+    expect(await itemText(page, `${P3}/a`), 'step 6: item text stayed intact on cancel').toBe(`${P3}/a\nchild a body`)
+    await page.keyboard.press('Escape')
+    await expect(modal, 'step 6: Escape after empty draft asks to discard').toBeVisible({ timeout: 10_000 })
+    await modal.locator('.button.confirm', { hasText: /^Discard$/ }).click()
+    await expect(p3aEditor).toBeHidden({ timeout: 5_000 })
+
+    // 7. delete by code on a parent with children: synchronous, no dialog, parent gone, child stays
+    await resetModalOpens()
+    const codeResult = await page.evaluate(l => window._item(l)!.delete(false) === true, `${P3}/a`)
+    expect(codeResult, 'step 7: code delete returns true synchronously').toBe(true)
+    await waitGone(`${P3}/a`, ids3[`${P3}/a`])
+    expect(await page.evaluate(l => window._exists(l), `${P3}/a/c`), 'step 7: child stays').toBe(true)
+    await expect(modal, 'step 7: code delete opens no modal').toBeHidden()
+    expect(await modalOpens(), 'step 7: zero modals opened for code delete').toBe(0)
+    expect(nativeDialogs, 'step 7: no browser confirm for code delete').toEqual([])
+
+    // 8. short landscape window (740x360) with 12 long-named children that wrap:
+    //    all three buttons stay inside the window, Cancel is clickable, list shows 10 names and "… and 2 more"
+    const longChildren = Array.from(
+      { length: 12 },
+      (_, idx) => `${P4}/child_${String(idx + 1).padStart(2, '0')}_with_a_name_long_enough_to_wrap_across_two_lines`
+    )
+    await page.evaluate(
+      labels => {
+        for (const l of labels) void window._create(`${l}\nbody`)
+      },
+      [P4, ...longChildren]
+    )
+    await waitSaved(P4)
+    for (const c of longChildren) await waitSaved(c)
+    await page.setViewportSize({ width: 740, height: 360 })
+    try {
+      await target(P4)
+      await page.keyboard.press('Control+Backspace')
+      await expect(modal, 'step 8: modal opens on 740x360 viewport').toBeVisible({ timeout: 10_000 })
+      const longModalText = await modal.innerText()
+      expect(longModalText, 'step 8: names parent and 12 children').toContain(
+        `${P4} has 12 items under it that would be left behind:`
+      )
+      for (const c of longChildren.slice(0, 10)) {
+        expect(longModalText, `step 8: lists ${c}`).toContain(c)
+      }
+      expect(longModalText, 'step 8: shows "… and 2 more"').toContain('… and 2 more')
+      expect(longModalText, 'step 8: omits 11th child').not.toContain(longChildren[10])
+      expect(longModalText, 'step 8: omits 12th child').not.toContain(longChildren[11])
+      const layout = await page.evaluate(() => {
+        const vh = window.innerHeight
+        const vw = window.innerWidth
+        const modalEl = document.querySelector('.background.visible .modal') as HTMLElement
+        const list = modalEl.querySelector('.delete-list') as HTMLElement | null
+        const buttons = ['.button.cancel', '.button.extra', '.button.confirm'].map(sel => {
+          const rect = modalEl.querySelector(sel)!.getBoundingClientRect()
+          return { sel, top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right }
+        })
+        return {
+          vh,
+          vw,
+          listScrollHeight: list?.scrollHeight ?? 0,
+          listClientHeight: list?.clientHeight ?? 0,
+          buttons,
+        }
+      })
+      expect(layout.vh, 'step 8: viewport height is 360').toBe(360)
+      for (const b of layout.buttons) {
+        expect(b.top, `step 8: ${b.sel} top inside viewport`).toBeGreaterThanOrEqual(0)
+        expect(b.bottom, `step 8: ${b.sel} bottom inside viewport`).toBeLessThanOrEqual(layout.vh)
+        expect(b.left, `step 8: ${b.sel} left inside viewport`).toBeGreaterThanOrEqual(0)
+        expect(b.right, `step 8: ${b.sel} right inside viewport`).toBeLessThanOrEqual(layout.vw)
+      }
+      expect(layout.listScrollHeight, 'step 8: premise — 10 wrapped names exceed 10 single lines').toBeGreaterThan(400)
+      expect(layout.listScrollHeight, 'step 8: list scrolls vertically inside bounded height').toBeGreaterThan(
+        layout.listClientHeight
+      )
+      await modal.locator('.button.cancel', { hasText: /^Cancel$/ }).click()
+      await expect(modal, 'step 8: Cancel closes long-list dialog').toBeHidden({ timeout: 5_000 })
+    } finally {
+      if (origViewport) await page.setViewportSize(origViewport)
+    }
+
+    // 9. fresh parent (save: false, edit: true) over an existing child:
+    //    Escape -> Discard -> Cancel keeps editor open with typed draft, item text and label intact, child intact;
+    //    Escape -> Discard -> Delete item deletes the fresh parent and leaves the child
+    const P5Child = `${P5}/child`
+    await page.evaluate(t => void window._create(t), `${P5Child}\nexisting child body`)
+    await waitSaved(P5Child)
+    const freshTabId = await page.evaluate(
+      l => (window._create(l, { save: false, edit: true }) as any).id as string,
+      P5
+    )
+    await expect.poll(() => savedId(page, P5), { message: `${P5} fresh savedId`, timeout: 30_000 }).toBeTruthy()
+    const freshSavedId = (await savedId(page, P5))!
+    createdIds.add(freshSavedId)
+    const freshEditor = page.locator(`#textarea-${freshTabId}`)
+    await expect(freshEditor, 'step 9: fresh parent editor opened').toBeVisible({ timeout: 10_000 })
+    const typedDraft = `${P5}\ntyped draft text`
+    await freshEditor.fill(typedDraft)
+    await expect(freshEditor, 'step 9: fresh parent editor focused').toBeFocused()
+    const beforeEscape = await page.evaluate(id => {
+      const it = window.__items.find(i => i.id == id) as any
+      return { text: it.text, label: it.label, savedText: it.savedText, saving: it.saving }
+    }, freshTabId)
+    expect(beforeEscape, 'step 9: premise — fresh unsaved parent before Escape').toEqual({
+      text: P5,
+      label: P5,
+      savedText: '',
+      saving: false,
+    })
+
+    await page.keyboard.press('Escape')
+    await expect(modal, 'step 9: Escape asks Discard').toContainText(`Discard unsaved changes to ${P5}?`, {
+      timeout: 10_000,
+    })
+    await modal.locator('.button.confirm', { hasText: /^Discard$/ }).click()
+    await expect(modal, 'step 9: Discard leads to delete-with-descendants question').toContainText(
+      `${P5} has 1 item under it that would be left behind:`,
+      { timeout: 10_000 }
+    )
+    expect(await modal.innerText(), 'step 9: delete question lists existing child').toContain(P5Child)
+    await modal.locator('.button.cancel', { hasText: /^Cancel$/ }).click()
+    await expect(modal, 'step 9: Cancel closes delete question').toBeHidden({ timeout: 5_000 })
+    await expect(freshEditor, 'step 9: editor stays open after Discard -> Cancel').toBeVisible()
+    await expect(freshEditor, 'step 9: editor keeps typed draft after Discard -> Cancel').toHaveValue(typedDraft)
+    await expect(freshEditor, 'step 9: editor regains focus after Cancel').toBeFocused()
+    const afterCancel = await page.evaluate(id => {
+      const it = window.__items.find(i => i.id == id) as any
+      return {
+        editing: it.editing,
+        text: it.text,
+        label: it.label,
+        savedText: it.savedText,
+        saving: it.saving,
+        editorText: (it.editorText ?? '').replace(/\u200B/g, ''),
+      }
+    }, freshTabId)
+    expect(afterCancel, 'step 9: item text, label, draft, and unsaved state preserved after Discard -> Cancel').toEqual({
+      editing: true,
+      text: P5,
+      label: P5,
+      savedText: '',
+      saving: false,
+      editorText: typedDraft,
+    })
+    expect(await page.evaluate(l => window._exists(l), P5Child), 'step 9: child stays after Cancel').toBe(true)
+
+    await page.keyboard.press('Escape')
+    await expect(modal, 'step 9: Escape asks Discard again').toContainText(`Discard unsaved changes to ${P5}?`, {
+      timeout: 10_000,
+    })
+    await modal.locator('.button.confirm', { hasText: /^Discard$/ }).click()
+    await expect(modal, 'step 9: Discard opens delete question again').toContainText(
+      `${P5} has 1 item under it that would be left behind:`,
+      { timeout: 10_000 }
+    )
+    await modal.locator('.button.confirm', { hasText: /^Delete item$/ }).click()
+    await expect(modal, 'step 9: Delete item closes dialog').toBeHidden({ timeout: 5_000 })
+    await waitGone(P5, freshSavedId)
+    expect(await page.evaluate(l => window._exists(l), P5Child), 'step 9: child stays after deleting fresh parent').toBe(
+      true
+    )
+  } finally {
+    if (origViewport) await page.setViewportSize(origViewport).catch(() => {})
+    await page
+      .evaluate(() => {
+        const w = window as any
+        w.__modalObs?.disconnect?.()
+        delete w.__modalObs
+        delete w.__modalOpens
+        w._modal_close?.()
+      })
+      .catch(() => {})
+    await blur(page).catch(() => {})
+    await page.evaluate(() => void (window as any).MindBox.set('')).catch(() => {})
+    await expect
+      .poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 })
+      .toBe(true)
+      .catch(() => {})
+    await page
+      .evaluate(prefix => {
+        const remaining = window.__items
+          .filter(i => (i.labelText?.toLowerCase() ?? '').startsWith(prefix))
+          .map(i => i.id)
+        for (const id of remaining) window._item(id, true)?.delete(false)
+      }, PREFIX)
+      .catch(() => {})
+    for (const id of createdIds) {
+      const ref = firestore().collection('items').doc(id)
+      if ((await ref.get()).exists) await ref.delete().catch(() => {})
+    }
+  }
+  expect(nativeDialogs, 'no browser confirm dialog').toEqual([])
+  expect(pageErrors, 'no page errors').toEqual([])
+})

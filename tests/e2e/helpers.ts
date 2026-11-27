@@ -27,7 +27,7 @@ declare global {
       dependencies: string[] // runtime dependency ids (itemDeps)
       global_store: Record<string, unknown>
       write: (text: string, type?: string) => boolean | void
-      delete: (confirm?: boolean) => void
+      delete: (confirm?: boolean) => boolean
       delete_subtree: (confirm?: boolean) => boolean
       share: (key: string, index?: number) => void
       unshare: (key: string) => void

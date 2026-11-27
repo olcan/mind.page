@@ -2475,7 +2475,7 @@
       // console.debug('detected edit item')
       const dispatchTime = Date.now()
       update_dom().then(() => {
-        if (lastScrollTime > dispatchTime || readerScrolledSince()) return // cancel on scroll since dispatch
+        if (lastScrollTime > dispatchTime || readerScrolledSince() || modal.visible() || deleteConfirmPending) return // cancel on scroll or open modal since dispatch
         // the edited item can be gone by now (a child created by Ctrl+Enter and deleted at once
         // with Ctrl+Backspace): its id resolves to no index, and there is nothing to scroll to
         const index = indexFromId.get(activeEditItem)
@@ -8422,19 +8422,77 @@
   // the selection and its order are fixed before the first deletion (each deletion re-derives the
   // lineage), each index looked up by id just before deleteItem, so the undelete list holds every
   // one, the item first (the owner's shortcut for chat subtrees, 2026-10-02)
-  function deleteSubtree(index: number, confirm_delete = true): boolean {
+  function subtreeDescendants(item) {
+    const descendants = item?.label ? items.filter(other => (other.ancestors ?? []).includes(item.label)) : []
+    descendants.sort(
+      (a, b) => (b.ancestors?.length ?? 0) - (a.ancestors?.length ?? 0) || a.label.localeCompare(b.label)
+    )
+    return descendants
+  }
+
+  function formatSubtreeList(descendants) {
+    const names = descendants.map(other => other.name)
+    return names.slice(0, 10).join('\n') + (names.length > 10 ? `\n… and ${names.length - 10} more` : '')
+  }
+
+  // guards against stacking a second delete-with-children confirmation (or deleting behind it)
+  // before Modal.svelte's show() microtask flips modal.visible() to true
+  let deleteConfirmPending = false
+
+  function confirmDeleteWithDescendants(index: number, { fromEditor = false, descendants = null } = {}) {
+    if (deleteConfirmPending || modal.visible()) return
+    const item = items[index]
+    const shown = descendants ?? subtreeDescendants(item)
+    if (!shown.length) return
+    const { id } = item
+    const shownIds = new Set(shown.map(other => other.id))
+    const count = `${shown.length} item${shown.length == 1 ? '' : 's'}`
+    const heading = literalText(`${item.name} has ${count} under it that would be left behind:`)
+    const list = literalText(formatSubtreeList(shown)).replace(/\n/g, '<br>')
+    const content = `${heading}\n\n<div class="delete-list">${list}</div>`
+    deleteConfirmPending = true
+    const apply = carryInput((choice: boolean | 'extra' | undefined) => {
+      deleteConfirmPending = false
+      const i = indexFromId.get(id)
+      if (i === undefined) return
+      if (choice === true || choice === 'extra') {
+        const current = subtreeDescendants(items[i])
+        if (current.length && (current.length != shownIds.size || current.some(other => !shownIds.has(other.id)))) {
+          // descendant membership changed while the question was open: delete nothing and ask again
+          confirmDeleteWithDescendants(i, { fromEditor, descendants: current })
+          return
+        }
+        items[i].editing = false
+        items[i].focused = false
+        const ta = textArea(i)
+        if (ta && document.activeElement == ta) ta.blur()
+        if (choice === 'extra' && current.length) deleteSubtree(i, false /* confirmed in modal */, current)
+        else deleteItem(i, false /* confirmed in modal */)
+      } else if (fromEditor && items[i].editing) {
+        textArea(i)?.focus()
+      }
+    })
+    _modal(content, {
+      confirm: 'Delete item',
+      extra: 'Delete subtree',
+      cancel: 'Cancel',
+      background: 'cancel',
+      style: 'display: flex; flex-direction: column; max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px)',
+    }).then(apply, err => {
+      deleteConfirmPending = false
+      console.error(err)
+    })
+  }
+
+  function deleteSubtree(index: number, confirm_delete = true, preselected = null): boolean {
     if (fixed) {
       _modal('can not delete items when viewing shared items')
       return false
     }
     const item = items[index]
-    const descendants = item.label ? items.filter(other => (other.ancestors ?? []).includes(item.label)) : []
-    descendants.sort(
-      (a, b) => (b.ancestors?.length ?? 0) - (a.ancestors?.length ?? 0) || a.label.localeCompare(b.label)
-    )
+    const descendants = preselected ?? subtreeDescendants(item)
     if (confirm_delete) {
-      const names = descendants.map(other => other.name)
-      const listed = names.slice(0, 10).join('\n') + (names.length > 10 ? `\n… and ${names.length - 10} more` : '')
+      const listed = formatSubtreeList(descendants)
       const count = `${descendants.length} item${descendants.length == 1 ? '' : 's'}`
       const msg = descendants.length ? `Delete ${item.name} and ${count} under it?\n\n${listed}` : `Delete ${item.name}?`
       if (!confirm(msg)) return false
@@ -8468,13 +8526,19 @@
 
     // copy item.text to item.editorText or vice versa
     // make sure to remove any ZWSPs from editorText
-    // (a cancellation that has to ask first copies nothing: the draft stays in the editor while the app asks
-    // and after a Cancel, so that asking changes nothing. the item's own text, which its code reads, a save of
+    // (a cancellation or deletion that has to ask first copies nothing: the draft stays in the editor while the app
+    // asks and after a Cancel, so that asking changes nothing. the item's own text, which its code reads, a save of
     // its time or attributes writes and the bridge is sent, changes only when an edit ends)
     const draft = editing ? null : item.editorText.replace(/\u200B/g, '')
     const asks = !editing && cancelled && draft != item.savedText && !item.saving
+    const deleteIntent =
+      !editing &&
+      !asks &&
+      (cancelled
+        ? !(item.savingText ?? item.savedText).trim()
+        : !!e?.['_delete'] || !!e?.['_deleteClick'] || (draft ?? '').trim().length == 0)
     if (editing) item.editorText = item.text
-    else if (!asks) item.text = draft
+    else if (!asks && !deleteIntent) item.text = draft
 
     // if cancelled, restore savedText (or savingText if saving)
     // we do not restore time so item remains "soft touched"
@@ -8499,48 +8563,79 @@
         }).then(
           // (the discard is the key's or the click's that asked for it: its intent is captured before the dialog's wait)
           carryInput((confirmed: boolean) => {
-          if (confirmed) {
-            discardEdits()
-            item.editing = false
-            onItemEditing(item.index, false, false /* do not treat as cancellation, already discarded */)
-          }
+            if (confirmed) {
+              const current = indexFromId.get(item.id)
+              if (current === undefined) return
+              const target = items[current]
+              if (!(target.savingText ?? target.savedText).trim()) {
+                // discarding this edit would delete the item: if items are under it, decide
+                // the deletion before clearing its backing text or saving attributes
+                if (fixed) {
+                  _modal('can not delete item when viewing shared items').then(() => textArea(target.index)?.focus())
+                  target.editing = true
+                  return
+                }
+                if (deleteConfirmPending || modal.visible()) {
+                  target.editing = true
+                  return
+                }
+                const descendants = subtreeDescendants(target)
+                if (descendants.length) {
+                  target.editing = true
+                  confirmDeleteWithDescendants(current, { fromEditor: true, descendants })
+                  return
+                }
+              }
+              discardEdits()
+              target.editing = false
+              onItemEditing(current, false, false /* do not treat as cancellation, already discarded */)
+            }
           })
         )
         item.editing = true // back to editing for now (the editor keeps its draft, the item its text)
         return
       }
-      discardEdits()
+      if (!deleteIntent) discardEdits()
+    }
+
+    if (deleteIntent) {
+      // deletion in fixed (shared) mode is disallowed
+      if (fixed) {
+        _modal('can not delete item when viewing shared items').then(() => textArea(item.index)?.focus())
+        item.editing = true
+        return
+      }
+      // do not stack a second delete dialog or delete behind an open modal
+      if (deleteConfirmPending || modal.visible()) {
+        item.editing = true
+        return
+      }
+      // if this item has items under it in the tree, ask in the app's modal before deleting
+      const descendants = subtreeDescendants(item)
+      if (descendants.length) {
+        item.editing = true
+        confirmDeleteWithDescendants(index, { fromEditor: true, descendants })
+        return
+      }
+      // no items under it: preserve existing single-item delete behavior
+      if (cancelled) {
+        item.text = item.savingText ?? item.savedText
+        item.editorText = item.text
+        if (!_.isEqual(item.attr, item.savedAttr)) saveItem(item.id)
+      }
+      if (!item.log) item.time = Date.now()
+      // skip confirmation for editor shortcut on non-empty draft for consistency with global shortcut
+      const confirm_delete = (draft ?? '').trim() && e?.['_delete'] ? false : null
+      const confirm_msg = `Delete ${item.uniqueLabel || 'item'}?`
+      if (!deleteItem(index, confirm_delete, confirm_msg)) {
+        textArea(item.index)?.focus() // refocus on editor
+        item.editing = true
+      }
+      return // item deleted (or kept open on cancel)
     }
 
     // update time for non-log item
     if (!item.log) item.time = Date.now()
-
-    // check for deletion triggered by editor via e._delete (w/o clearing out)
-    // we skip confirmation in this case for consistency with global shortcut
-    let confirm_delete = null // use default defined in deleteItem
-    if (item.text.trim() && e?.['_delete']) {
-      item.text = item.editorText = ''
-      confirm_delete = false // already confirmed
-    }
-
-    // check for deletion by emptying out item, which is disallowed in fixed mode
-    if (item.text.trim().length == 0 && fixed) {
-      _modal('can not delete item when viewing shared items').then(() => textArea(item.index)?.focus())
-      item.editing = true
-      return
-    }
-
-    // attempt deletion of emptied out item, restore text (just before delete) otherwise
-    // note delete may be subject to confirmation (see deleteItem for default conditions)
-    if (item.text.trim().length == 0) {
-      const confirm_msg = `Delete ${item.uniqueLabel || 'item'}?`
-      if (!deleteItem(index, confirm_delete, confirm_msg)) {
-        item.text = item.editorText = textArea(item.index).value // should work as long as delete is handled sync
-        textArea(item.index).focus() // refocus on editor
-        item.editing = true
-      }
-      return // item deleted
-    }
 
     if (editing) {
       // started editing
@@ -9072,7 +9167,7 @@
       // before the scroll below (two waits of two frames each): the caret scroll otherwise landed after an
       // explicit scroll made in those frames and pulled the page back to the editor (the global scroll to
       // the top right after an editor opened; arrow_edges reviews 0-1, 2026-10-03)
-      if (lastScrollTime > dispatchTime) return
+      if (lastScrollTime > dispatchTime || modal.visible() || deleteConfirmPending) return
       const textarea = textArea(indexFromId.get(id))
       if (!textarea) return
       textarea.focus()
@@ -12614,13 +12709,20 @@
     }
 
     // delete target item with Cmd/Ctrl+Backspace/Delete; with Shift, the item AND every item under
-    // it in the tree (deleteSubtree), confirmed as one batch (the owner's chat subtrees, 2026-10-02)
+    // it in the tree (deleteSubtree), confirmed as one batch (the owner's chat subtrees, 2026-10-02);
+    // without Shift, ask in the app's modal if the item has descendants that would be left behind
     // if trimmed editor text matches a unique item, then delete that item
     if ((key == 'Backspace' || key == 'Delete') && (e.metaKey || e.ctrlKey)) {
       e.preventDefault()
+      if (deleteConfirmPending) return
       if (_exists(editorText.trim(), false /* allow_multiple */)) {
-        if (e.shiftKey) _item(editorText.trim()).delete_subtree(true /* confirm the batch */)
-        else _item(editorText.trim()).delete(false /* skip confirmation */)
+        const target = _item(editorText.trim())
+        if (e.shiftKey) target.delete_subtree(true /* confirm the batch */)
+        else {
+          const descendants = subtreeDescendants(items[target.index])
+          if (descendants.length) confirmDeleteWithDescendants(target.index, { descendants })
+          else target.delete(false /* skip confirmation */)
+        }
         return
       }
     }
@@ -12798,7 +12900,11 @@
       clearTimeout(restoreFocusTimer)
       restoreFocusTimer = setTimeout(() => {
         restoreFocusTimer = null
-        lastFocusedElem?.focus({ preventScroll: true })
+        // do not refocus an element behind a visible or pending dialog (a control inside an active dialog still restores)
+        const modalOpen = modal?.visible()
+        if ((!modalOpen && !deleteConfirmPending) || (modalOpen && modal.contains(lastFocusedElem))) {
+          lastFocusedElem?.focus({ preventScroll: true })
+        }
         lastFocusedElem = null
       }, 250)
     }

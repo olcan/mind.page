@@ -485,7 +485,7 @@
   function onDeleteClick(e) {
     e.stopPropagation()
     e.preventDefault()
-    editorText = text = '' // indicates deletion
+    e._deleteClick = true // indicates deletion via edit menu (keeps text intact while confirming)
     onEditing(index, (editing = false), false /* cancelled */, false /* run */, e)
   }
 

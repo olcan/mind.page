@@ -8,6 +8,7 @@
   let content = ''
   let confirm = ''
   let cancel = ''
+  let extra = ''
   let input = null
   let password = false
   let username = ''
@@ -17,6 +18,7 @@
   let canConfirm = (input: string) => input == null || input.length > 0 // confirm by default for non-input modal
   let onConfirm = (input = null) => {}
   let onCancel = () => {}
+  let onExtra = () => {}
   let background = '' // can be "confirm", "cancel", or "block"; default ("") is block OR close if no confirm/cancel buttons
   let passthrough = false // pass clicks on non-input/button/_clickable elements to background?
   let selected_images = [] // used internally for file input
@@ -33,6 +35,7 @@
     content,
     confirm,
     cancel,
+    extra,
     input,
     password,
     username,
@@ -42,6 +45,7 @@
     canConfirm,
     onConfirm,
     onCancel,
+    onExtra,
     background,
     passthrough,
   }
@@ -77,6 +81,7 @@
             content,
             confirm,
             cancel,
+            extra,
             input,
             password,
             username,
@@ -86,6 +91,7 @@
             canConfirm,
             onConfirm,
             onCancel,
+            onExtra,
             background,
             passthrough,
           } = Object.assign({ ...defaults }, options))
@@ -139,6 +145,7 @@
       content,
       confirm,
       cancel,
+      extra,
       input,
       password,
       username,
@@ -148,6 +155,7 @@
       canConfirm,
       onConfirm,
       onCancel,
+      onExtra,
       background,
       passthrough,
     } = Object.assign(
@@ -155,6 +163,7 @@
         content,
         confirm,
         cancel,
+        extra,
         input,
         password,
         username,
@@ -164,6 +173,7 @@
         canConfirm,
         onConfirm,
         onCancel,
+        onExtra,
         background,
         passthrough,
       },
@@ -211,6 +221,7 @@
   }
 
   function _onConfirm(e = null) {
+    if (e?.button != null && (e.button !== 0 || e.ctrlKey)) return
     e?.stopPropagation()
     e?.preventDefault()
     if (!enabled) return
@@ -242,7 +253,21 @@
     resolve_visible = null
   }
 
+  function _onExtra(e = null) {
+    if (e?.button != null && (e.button !== 0 || e.ctrlKey)) return
+    e?.stopPropagation()
+    e?.preventDefault()
+    if (!extra) return
+    onExtra()
+    // resolve and close visible modal (unless already closed in onExtra)
+    if (_visible) close(promise_visible, 'extra')
+  }
+
   let modaldiv
+  // returns true iff elem is inside the modal dialog
+  export function contains(elem: Node | null = null) {
+    return Boolean(elem && modaldiv?.contains(elem))
+  }
   function onBackgroundClick(e = null) {
     if (modaldiv.contains(e?.target)) {
       if (!passthrough) return // ignore click on modal w/o passthrough mode
@@ -256,7 +281,7 @@
     }
     e?.stopPropagation()
     e?.preventDefault()
-    if (!confirm && !cancel && background.toLowerCase() != 'block') close(promise_visible)
+    if (!confirm && !cancel && !extra && background.toLowerCase() != 'block') close(promise_visible)
     else if (confirm && background.toLowerCase() == 'confirm') _onConfirm(e)
     else if (cancel && background.toLowerCase() == 'cancel') _onCancel(e)
     // else block
@@ -394,9 +419,13 @@
         </div>
       {/if}
     {/if}
-    {#if confirm || cancel}
+    {#if confirm || cancel || extra}
       <div class="buttons">
         {#if cancel}<div class="button cancel" on:mousedown={_onCancel} on:touchend={_onCancel}>{cancel}</div>{/if}
+        {#if extra}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div class="button extra" on:mousedown={_onExtra} on:touchend={_onExtra}>{extra}</div>
+        {/if}
         {#if confirm}
           <div class="button confirm" class:enabled on:mousedown={_onConfirm} on:touchend={_onConfirm}>
             {confirm}
@@ -492,11 +521,20 @@
   }
 
   .buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-shrink: 0;
     font-size: 20px;
     margin-left: auto;
     width: fit-content;
     padding-top: 15px;
     font-weight: 600;
+  }
+  :global(.modal .delete-list) {
+    overflow-y: auto;
+    min-height: 0;
   }
   .button {
     display: inline-flex;
@@ -508,10 +546,15 @@
     border: 1px solid #ddd;
     color: #59f; /* neutral enabled color */
     padding: 10px;
-    margin-left: 10px;
     -webkit-touch-callout: none;
     -webkit-user-select: none;
     user-select: none;
+  }
+  .extra:hover,
+  .extra:active {
+    background: #59f;
+    color: white;
+    border-color: white;
   }
   .confirm {
     color: #4b4;
