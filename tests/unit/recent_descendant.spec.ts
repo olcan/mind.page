@@ -2,15 +2,17 @@ import { expect, test } from '@playwright/test'
 
 import {
   isRecentDownKey,
+  isRecentUpKey,
   nextRecentItem,
   recentStart,
   stepRecentWalk,
+  stepRecentWalkBack,
   type RecentItem,
   type RecentWalk,
 } from '../../src/recent_descendant.js'
 
-// pure choice and walk state for Option+Down (src/recent_descendant.ts); the browser row is in
-// tests/e2e/editor.spec.ts
+// pure choice and walk state for Option+Down / Option+Up (src/recent_descendant.ts); the browser
+// rows are in tests/e2e/editor.spec.ts
 
 type Item = RecentItem & { query: string }
 
@@ -161,8 +163,11 @@ test('a start by id, #log, non-unique label, or search query has nothing below i
     item('child', 400, ['#p'], { query: '#p/child ' }),
     item('dup1', 300, [], { query: 'id:dup1' }),
     item('dup_child', 350, ['#dup'], { query: '#dup/child ' }),
+    item('log_item', 360, [], { query: '#log ' }),
+    item('log_child', 370, ['#log'], { query: '#log/child ' }),
   ]
-  const unique = (label: string) => label == '#p' || label == '#p/child' || label == '#dup/child'
+  const unique = (label: string) =>
+    label == '#p' || label == '#p/child' || label == '#dup/child' || label == '#log' || label == '#log/child'
 
   for (const box of ['id:p', 'id:unnamed123', 'id:p ', '#log', '#dup', '#missing', '#p extra', 'search', '/cmd']) {
     expect(recentStart(box, unique), box).toBeUndefined()
@@ -210,4 +215,306 @@ test('key predicate matches Alt+ArrowDown alone and rejects any second modifier 
   // plain ArrowDown and other keys rejected
   expect(isRecentDownKey('ArrowDown', {})).toBe(false)
   expect(isRecentDownKey('ArrowUp', { altKey: true })).toBe(false)
+
+  // Option+Up predicate matches Alt+ArrowUp alone and rejects any second modifier or other key
+  expect(isRecentUpKey('ArrowUp', { altKey: true })).toBe(true)
+  expect(isRecentUpKey('ArrowUp', { altKey: true, shiftKey: false, ctrlKey: false, metaKey: false })).toBe(true)
+  expect(isRecentUpKey('ArrowUp', { altKey: true, shiftKey: true })).toBe(false)
+  expect(isRecentUpKey('ArrowUp', { altKey: true, ctrlKey: true })).toBe(false)
+  expect(isRecentUpKey('ArrowUp', { altKey: true, metaKey: true })).toBe(false)
+  expect(isRecentUpKey('ArrowUp', { altKey: true, ctrlKey: true, metaKey: true })).toBe(false)
+  expect(isRecentUpKey('ArrowUp', {})).toBe(false)
+  expect(isRecentUpKey('ArrowDown', { altKey: true })).toBe(false)
+})
+
+test('Option+Up steps back from each place of a labelled walk, stops at the start, and Option+Down goes forward again', () => {
+  const items: Item[] = [
+    item('p', 50, [], { query: '#P ' }),
+    item('a', 200, ['#p'], { query: '#p/a ' }),
+    item('deep', 300, ['#p/a', '#p'], { query: '#p/a/deep ' }),
+    item('b', 100, ['#p'], { query: '#p/b ' }),
+  ]
+  const labelOf = (i: Item) => i.query.trim().toLowerCase()
+  const unique = (label: string) => items.filter(i => labelOf(i) == label).length == 1
+  const selects = (box: string) => {
+    const name = box.trim().toLowerCase()
+    const named = items.filter(i => labelOf(i) == name)
+    return named.length == 1 ? named[0].id : null
+  }
+
+  let walk: RecentWalk | null = null
+  let box = '#p'
+  const down = () => {
+    const res = stepRecentWalk(items, box, walk, i => i.query, unique, selects)
+    walk = res.walk
+    if (res.item && res.walk) box = res.walk.query
+    return { id: res.item?.id ?? null, box }
+  }
+  const up = () => {
+    const res = stepRecentWalkBack(items, box, walk, i => i.query, unique, selects)
+    walk = res.walk
+    if (res.query !== null) box = res.query
+    return { id: res.item?.id ?? null, query: res.query, box }
+  }
+
+  // walk forward to the end (including a no-op press at the end)
+  expect(down()).toEqual({ id: 'deep', box: '#p/a/deep ' })
+  expect(down()).toEqual({ id: 'a', box: '#p/a ' })
+  expect(down()).toEqual({ id: 'b', box: '#p/b ' })
+  expect(down()).toEqual({ id: null, box: '#p/b ' })
+
+  // step back from each place to the start (preserving start item's cased query '#P ')
+  expect(up()).toEqual({ id: 'a', query: '#p/a ', box: '#p/a ' })
+  expect(up()).toEqual({ id: 'deep', query: '#p/a/deep ', box: '#p/a/deep ' })
+  expect(up()).toEqual({ id: 'p', query: '#P ', box: '#P ' })
+
+  // at the start: stops quietly, keeping the walk on
+  const walkAtStart = walk
+  expect(up()).toEqual({ id: null, query: null, box: '#P ' })
+  expect(walk).toBe(walkAtStart)
+
+  // forward again from the start visits the same items in the same order
+  expect(down()).toEqual({ id: 'deep', box: '#p/a/deep ' })
+  expect(down()).toEqual({ id: 'a', box: '#p/a ' })
+  // partial step back, then forward again resumes the remaining items in order
+  expect(up()).toEqual({ id: 'deep', query: '#p/a/deep ', box: '#p/a/deep ' })
+  expect(down()).toEqual({ id: 'a', box: '#p/a ' })
+  expect(down()).toEqual({ id: 'b', box: '#p/b ' })
+  expect(down()).toEqual({ id: null, box: '#p/b ' })
+
+  // if an item's time changes while stepped back, forward reflects the new live order among unvisited items
+  expect(up()).toEqual({ id: 'a', query: '#p/a ', box: '#p/a ' })
+  expect(up()).toEqual({ id: 'deep', query: '#p/a/deep ', box: '#p/a/deep ' })
+  const reordered = items.map(i => (i.id == 'b' ? { ...i, time: 250 } : i))
+  const afterTimeChange = stepRecentWalk(reordered, box, walk, i => i.query, unique, selects)
+  expect(afterTimeChange.item?.id).toBe('b')
+
+  // without selectedId, stepping back to the start falls back to `${walk.start} `
+  const wNoSel = stepRecentWalk(items, '#p ', null, i => i.query, unique).walk
+  expect(stepRecentWalkBack(items, '#p/a/deep ', wNoSel, i => i.query, unique)).toMatchObject({
+    item: null,
+    query: '#p ',
+    walk: { start: '#p', startId: null, visited: [], query: '#p ' },
+  })
+})
+
+test('Option+Up steps back through a global walk to the empty box, stops there, and goes forward again', () => {
+  const items: Item[] = [
+    item('pinned', 900, [], { pinned: true, query: '#pin ' }),
+    item('u1', 800, [], { query: 'id:u1' }),
+    item('mid', 700, [], { query: '#mid ' }),
+    item('u2', 600, [], { query: 'id:u2' }),
+  ]
+  const labelOf = (i: Item) => i.query.trim().toLowerCase()
+  const unique = (label: string) => items.filter(i => labelOf(i) == label).length == 1
+  const selects = (box: string) => {
+    const name = box.trim().toLowerCase()
+    if (!name) return null
+    if (name.startsWith('id:')) return items.find(i => i.id == name.slice(3))?.id ?? null
+    const named = items.filter(i => labelOf(i) == name)
+    return named.length == 1 ? named[0].id : null
+  }
+
+  let walk: RecentWalk | null = null
+  let box = ''
+  const down = () => {
+    const res = stepRecentWalk(items, box, walk, i => i.query, unique, selects)
+    walk = res.walk
+    if (res.item && res.walk) box = res.walk.query
+    return { id: res.item?.id ?? null, box }
+  }
+  const up = () => {
+    const res = stepRecentWalkBack(items, box, walk, i => i.query, unique, selects)
+    walk = res.walk
+    if (res.query !== null) box = res.query
+    return { id: res.item?.id ?? null, query: res.query, box }
+  }
+
+  expect(down()).toEqual({ id: 'u1', box: 'id:u1' })
+  expect(down()).toEqual({ id: 'mid', box: '#mid ' })
+  expect(down()).toEqual({ id: 'u2', box: 'id:u2' })
+
+  expect(up()).toEqual({ id: 'mid', query: '#mid ', box: '#mid ' })
+  expect(up()).toEqual({ id: 'u1', query: 'id:u1', box: 'id:u1' })
+  expect(up()).toEqual({ id: null, query: '', box: '' })
+
+  // at the global start: stops quietly, keeping the walk on
+  const walkAtStart = walk
+  expect(up()).toEqual({ id: null, query: null, box: '' })
+  expect(walk).toBe(walkAtStart)
+
+  // forward again from the global start repeats the same items
+  expect(down()).toEqual({ id: 'u1', box: 'id:u1' })
+  expect(down()).toEqual({ id: 'mid', box: '#mid ' })
+})
+
+test('Option+Up with no walk (or a drifted box) is taken by the key predicate and changes nothing', () => {
+  const items: Item[] = [
+    item('p', 50, [], { query: '#p ' }),
+    item('a', 300, ['#p'], { query: '#p/a ' }),
+    item('b', 200, ['#p'], { query: '#p/b ' }),
+  ]
+  const unique = (label: string) => ['#p', '#p/a', '#p/b'].includes(label)
+
+  // key is taken (Alt+ArrowUp alone), and with no walk active changes nothing across labelled box, empty box, or search
+  expect(isRecentUpKey('ArrowUp', { altKey: true })).toBe(true)
+  for (const box of ['#p/a ', '#p ', '', 'search', '#p extra', 'id:p', '#log']) {
+    expect(stepRecentWalkBack(items, box, null, i => i.query, unique), box).toEqual({
+      item: null,
+      query: null,
+      walk: null,
+    })
+  }
+
+  // walk active, then the box changed (typed text, missing trailing space, or another item): clears walk and changes nothing
+  const first = stepRecentWalk(items, '#p ', null, i => i.query, unique)
+  for (const drifted of ['#p/a', '#p/b ', '#p ', '']) {
+    expect(stepRecentWalkBack(items, drifted, first.walk, i => i.query, unique), drifted).toEqual({
+      item: null,
+      query: null,
+      walk: null,
+    })
+  }
+})
+
+test('Option+Up ends a walk when the current or start item is renamed or deleted, keeps case-only changes, and passes over a gone earlier step', () => {
+  const p = item('p', 100, [], { query: '#p ' })
+  const a = item('a', 300, ['#p'], { query: '#p/a ' })
+  const b = item('b', 200, ['#p'], { query: '#p/b ' })
+  const c = item('c', 150, ['#p'], { query: '#p/c ' })
+  const labelOf = (i: Item) => i.query.trim().toLowerCase()
+  const unique = (list: Item[]) => (label: string) => list.filter(i => labelOf(i) == label).length == 1
+  const selects = (list: Item[]) => (box: string) => {
+    const name = box.trim().toLowerCase()
+    if (!name) return null
+    if (name.startsWith('id:')) return list.find(i => i.id == name.slice(3))?.id ?? null
+    const named = list.filter(i => labelOf(i) == name)
+    return named.length == 1 ? named[0].id : null
+  }
+  const down = (list: Item[], box: string, walk: RecentWalk | null) =>
+    stepRecentWalk(list, box, walk, i => i.query, unique(list), selects(list))
+  const up = (list: Item[], box: string, walk: RecentWalk | null) =>
+    stepRecentWalkBack(list, box, walk, i => i.query, unique(list), selects(list))
+
+  const s1 = down([p, a, b, c], '#p ', null)
+  const s2 = down([p, a, b, c], '#p/a ', s1.walk)
+  const s3 = down([p, a, b, c], '#p/b ', s2.walk)
+  expect(s3.item?.id).toBe('c')
+
+  // current item deleted / renamed / label taken by another -> walk ends and changes nothing
+  const taker = item('x', 50, ['#p'], { query: '#p/c ' })
+  const endedCases: [string, Item[]][] = [
+    ['current item deleted', [p, a, b]],
+    ['current item renamed in place', [p, a, b, { ...c, query: '#p/z ' }]],
+    ['current item renamed out of tree', [p, a, b, { ...c, ancestors: [], query: '#z ' }]],
+    ['current item label taken by another', [p, a, b, { ...c, query: '#p/z ' }, taker]],
+    ['current item label duplicated', [p, a, b, c, taker]],
+    ['start item deleted', [a, b, c]],
+    ['start item renamed away', [{ ...p, query: '#q ' }, a, b, c]],
+    ['start item label duplicated', [p, item('p2', 40, [], { query: '#p ' }), a, b, c]],
+    ['start item label taken by another', [{ ...p, query: '#q ' }, item('p2', 40, [], { query: '#p ' }), a, b, c]],
+  ]
+  for (const [name, list] of endedCases) {
+    expect(up(list, '#p/c ', s3.walk), name).toEqual({ item: null, query: null, walk: null })
+  }
+
+  // case-only rename of current item or start item still continues the walk
+  expect(up([p, a, b, { ...c, query: '#p/C ' }], '#p/c ', s3.walk)).toMatchObject({ item: b, query: '#p/b ' })
+  expect(up([{ ...p, query: '#P ' }, a, b, c], '#p/c ', s3.walk)).toMatchObject({ item: b, query: '#p/b ' })
+
+  // earlier visited item deleted or moved out of the start is passed over symmetrically with forward
+  expect(up([p, a, c], '#p/c ', s3.walk)).toMatchObject({ item: a, query: '#p/a ' })
+  expect(up([p, a, { ...b, ancestors: [], query: '#elsewhere ' }, c], '#p/c ', s3.walk)).toMatchObject({
+    item: a,
+    query: '#p/a ',
+  })
+  // all earlier visited items deleted -> steps back to the start
+  expect(up([p, c], '#p/c ', s3.walk)).toMatchObject({ item: p, query: '#p ' })
+
+  // at the start itself, if the start item is renamed away or taken by another, Option+Up ends the walk
+  const atStart = up([p, a], '#p/a ', s1.walk)
+  expect(atStart).toMatchObject({ item: p, query: '#p ' })
+  expect(up([{ ...p, query: '#q ' }, a], '#p ', atStart.walk)).toEqual({ item: null, query: null, walk: null })
+  expect(up([{ ...p, query: '#q ' }, item('p2', 40, [], { query: '#p ' }), a], '#p ', atStart.walk)).toEqual({
+    item: null,
+    query: null,
+    walk: null,
+  })
+
+  // global walk: first label given to unnamed item selected by id keeps the walk; deletion ends it
+  const u = item('u', 300, [], { query: 'id:u' })
+  const n = item('n', 200, [], { query: '#n ' })
+  const g1 = down([u, n], '', null)
+  expect(up([{ ...u, query: '#named ' }, n], 'id:u', g1.walk)).toMatchObject({ item: null, query: '' })
+  expect(up([n], 'id:u', g1.walk)).toEqual({ item: null, query: null, walk: null })
+})
+
+test('forward after Option+Up prefers the previously visited item among equal-time ties even when items reorder, while genuinely newer wins and fresh walks keep array order', () => {
+  // reviewer's global-walk sequence: #apple is newest; #birch/c and its parent #birch tie in time,
+  // initially [#apple, #birch/c, #birch]. Selecting #birch/c ranks its parent #birch ahead of it.
+  // Down, Down, Up, Down must revisit #birch/c on the fourth press rather than flipping to #birch.
+  const apple = item('apple', 300, [], { query: '#apple ' })
+  const birchChild = item('birch_c', 200, ['#birch'], { query: '#birch/c ' })
+  const birch = item('birch', 200, [], { query: '#birch ' })
+  const order1 = [apple, birchChild, birch]
+  const order2 = [apple, birch, birchChild]
+
+  const labelOf = (i: Item) => i.query.trim().toLowerCase()
+  const unique = (list: Item[]) => (label: string) => list.filter(i => labelOf(i) == label).length == 1
+  const selects = (list: Item[]) => (box: string) => {
+    const name = box.trim().toLowerCase()
+    if (!name) return null
+    const named = list.filter(i => labelOf(i) == name)
+    return named.length == 1 ? named[0].id : null
+  }
+  const down = (list: Item[], box: string, walk: RecentWalk | null) =>
+    stepRecentWalk(list, box, walk, i => i.query, unique(list), selects(list))
+  const up = (list: Item[], box: string, walk: RecentWalk | null) =>
+    stepRecentWalkBack(list, box, walk, i => i.query, unique(list), selects(list))
+
+  const p1 = down(order1, '', null)
+  expect(p1.item?.id).toBe('apple')
+  const p2 = down(order1, p1.walk!.query, p1.walk)
+  expect(p2.item?.id).toBe('birch_c')
+  // selecting #birch/c reordered items so #birch now precedes #birch/c (order2)
+  const p3 = up(order2, p2.walk!.query, p2.walk)
+  expect(p3.item?.id).toBe('apple')
+  const p4 = down(order2, p3.walk!.query, p3.walk)
+  expect(p4.item?.id, '4th keypress revisits #birch/c despite order2 putting #birch first').toBe('birch_c')
+  const p5 = down(order2, p4.walk!.query, p4.walk)
+  expect(p5.item?.id).toBe('birch')
+
+  // stepping back multiple steps all the way to the start (plus a stop press) still replays the same tie order
+  const b1 = up(order2, p5.walk!.query, p5.walk)
+  expect(b1.item?.id).toBe('birch_c')
+  const b2 = up(order2, b1.walk!.query, b1.walk)
+  expect(b2.item?.id).toBe('apple')
+  const b3 = up(order2, b2.walk!.query, b2.walk)
+  expect(b3.query).toBe('')
+  const stop = up(order2, '', b3.walk)
+  expect(stop.query).toBeNull()
+  const r1 = down(order2, '', stop.walk)
+  expect(r1.item?.id).toBe('apple')
+  const r2 = down(order2, r1.walk!.query, r1.walk)
+  expect(r2.item?.id, 'replay from start preserves #birch/c preference across multi-step back').toBe('birch_c')
+  const r3 = down(order2, r2.walk!.query, r2.walk)
+  expect(r3.item?.id).toBe('birch')
+
+  // a genuinely newer candidate still wins over the stepped-back preference
+  const backToApple = up(order2, r2.walk!.query, r2.walk)
+  expect(backToApple.item?.id).toBe('apple')
+  const orderNewer = [apple, { ...birch, time: 250 }, birchChild]
+  const newerWins = down(orderNewer, backToApple.walk!.query, backToApple.walk)
+  expect(newerWins.item?.id, 'strictly newer #birch beats stepped-back #birch/c').toBe('birch')
+
+  // an ineligible stepped-back item (pinned in global walk) is skipped
+  const orderPinned = [apple, birch, { ...birchChild, pinned: true }]
+  const skippedPinned = down(orderPinned, backToApple.walk!.query, backToApple.walk)
+  expect(skippedPinned.item?.id, 'pinned #birch/c is ineligible so #birch wins').toBe('birch')
+
+  // a fresh walk (no active walk) keeps today's items-array tie order
+  const f1 = down(order2, '', null)
+  expect(f1.item?.id).toBe('apple')
+  const f2 = down(order2, f1.walk!.query, f1.walk)
+  expect(f2.item?.id, 'fresh walk on order2 picks #birch first').toBe('birch')
 })

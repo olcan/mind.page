@@ -3157,7 +3157,8 @@
   let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
   let ignoreEditorChanges = false
-  let recentWalk: RecentWalk | null = null // Option+Down's walk (see onKeyDown); ended by any other change of the box
+  let recentWalk: RecentWalk | null = null // Option+Down/Option+Up walk (see onKeyDown); ended by any other change of the box
+  let skipNarrationJump = false // true while applyWalkStep settles a pending debounce before pushing the walk step
 
   // the key inert_blocks tracks the active search under (trimmed lowercase query plus whether a
   // leading slash disables search): shared by onEditorChange (forgetSearch) and
@@ -3239,8 +3240,12 @@
     else editorChangesWithTimeKept.clear()
 
     if (narrating) {
-      // if non-empty editorText matches top history entry, then go back to top
+      // if non-empty editorText matches top history entry, then go back to top (not during an
+      // active Option+Down/Option+Up walk or its debounce settle, where the walk step promises a
+      // history entry and stays active; a real Back clears recentWalk in onPopState first)
       if (
+        !recentWalk &&
+        !skipNarrationJump &&
         editorText.trim() &&
         sessionStateHistoryIndex > 0 &&
         !positionUnknown && // no distance can be said from a position that holds no entry
@@ -9610,7 +9615,7 @@
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
-  import { isRecentDownKey, stepRecentWalk, type RecentWalk } from '../recent_descendant'
+  import { isRecentDownKey, isRecentUpKey, stepRecentWalk, stepRecentWalkBack, type RecentWalk } from '../recent_descendant'
   import { SessionEntries, decodedFragment, launchAnchor, launchIdentity, ownEntry, startupPlace, stopReturn, updatedEntry, INPUT_EVENTS, inputActive, launchQuery, writeMode } from '../history_entries'
   import {
     NOTIFICATION_CLICK_TYPE,
@@ -12530,29 +12535,29 @@
         return
       }
     }
-    // Option+Down (Alt+ArrowDown alone; the owner, 2026-11-24: "most recently updated descendant" /
-    // "having alt/option+down go to the most recently updated descendant, or root item in global context"):
-    // from a uniquely labeled item selects the newest descendant at any depth by item.time (or, on an empty
-    // box, the newest non-pinned item of all, unnamed included by its id reference); consecutive presses
-    // walk on to the next newest from the same start without going back up, ending quietly with no wrap
-    if (isRecentDownKey(key, e)) {
+    // Option+Down (Alt+ArrowDown alone) starts a time-ordered walk from the uniquely labeled item the
+    // box names (or globally from an empty box) and walks on without wrapping; Option+Up (Alt+ArrowUp
+    // alone) steps back through the active walk to its start and stops there; neither does anything
+    // else (the owner, 2026-11-24 and 2026-11-26)
+    if (isRecentDownKey(key, e) || isRecentUpKey(key, e)) {
       e.preventDefault()
-      const { item: next, walk } = stepRecentWalk(
-        items,
-        editorText,
-        recentWalk,
-        chosen => (chosen.labelUnique && chosen.label ? (labelTextOf(chosen.labelText, chosen.label) || chosen.label) + ' ' : selectName(chosen)),
-        label => idsFromLabel.get(label)?.length == 1,
-        query => _item(query.trim(), true /* silent */)?.id // what the box selects now (a walk goes on from its own last item alone)
-      )
-      if (next && walk) {
+      const queryOf = chosen =>
+        chosen.labelUnique && chosen.label ? (labelTextOf(chosen.labelText, chosen.label) || chosen.label) + ' ' : selectName(chosen)
+      const hasUniqueLabel = (label: string) => idsFromLabel.get(label)?.length == 1
+      const selectedId = (query: string) => _item(query.trim(), true /* silent */)?.id // what the box selects now (a walk goes on from its own last item alone)
+      const applyWalkStep = (walk: RecentWalk) => {
         // a query still debouncing (a label typed within 500 ms with the MindBox focused) is settled first, as
         // typing is, so the jump is an entry of its own after it and Back returns to the label typed: applied
         // alone, the jump's query cancelled the typed one's, and where the box had shown that very item before
         // it wrote no entry at all (review 0 of option_down). a press that selects nothing writes nothing
         if (editorChangePending) {
           lastEditorChangeTime = 0 // disable debounce even if editor focused
-          onEditorChange(editorText)
+          skipNarrationJump = true
+          try {
+            onEditorChange(editorText)
+          } finally {
+            skipNarrationJump = false
+          }
         }
         recentWalk = walk // (after the settling, which ends a walk whose query the box no longer holds)
         textArea(-1)?.blur()
@@ -12563,11 +12568,20 @@
         onEditorChange(walk.query, true) // keep_times for consistency w/ mousedown w/ altKey:true
         // note since we are using onEditorChange, we need to handle scrolling as needed
         update_dom().then(scrollToTarget)
-      } else recentWalk = walk
+      }
+      if (isRecentDownKey(key, e)) {
+        const { item: next, walk } = stepRecentWalk(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
+        if (next && walk) applyWalkStep(walk)
+        else recentWalk = walk
+      } else {
+        const { query, walk } = stepRecentWalkBack(items, editorText, recentWalk, queryOf, hasUniqueLabel, selectedId)
+        if (query !== null && walk) applyWalkStep(walk)
+        else recentWalk = walk
+      }
       return
     }
-    // let unmodified or alt-modified ArrowUp select label on last context item (i.e. move up to parent)
-    if (key == 'ArrowUp' && (!modified || e.altKey)) {
+    // let unmodified ArrowUp select label on last context item (i.e. move up to parent)
+    if (key == 'ArrowUp' && !modified) {
       // first attempt to click on top-most hide toggle, if any
       const hideToggle = document.querySelector(`.toggle.hide`)
       if (hideToggle) {
