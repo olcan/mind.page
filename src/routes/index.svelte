@@ -951,9 +951,11 @@
         'save_local_store',
         () => {
           let __item = item(this.id)
-          // retry every second until item is saved
+          // retry every second until item is saved (woken in onEditorDone once savedId arrives)
           if (!__item.savedId) {
             this.save_local_store({ delay: 1000, invalidate_elem_cache, force_render, render_delay })
+            const retry = __item.tasks?.save_local_store
+            if (retry) retry['_waiting_for_saved_id'] = ++storeSaveWaitSeq
             return
           }
           const key = 'mindpage_item_store_' + __item.savedId
@@ -1005,7 +1007,7 @@
       // until item is saved, we can only initialize and return in-memory store
       if (!_item.savedId) return (_item.global_store ??= {})
       if (anonymous) {
-        _item.global_store ??= _.cloneDeep(this.local_store['_anonymous_global_store']) || {}
+        _item.global_store ??= _.cloneDeep(this._local_store['_anonymous_global_store']) || {}
       } else {
         const name = 'global_store_' + _item.savedId
         _item.global_store ??= _.cloneDeep(hiddenItemsByName.get(name)?.item) || {}
@@ -1023,11 +1025,16 @@
         'save_global_store',
         () => {
           let __item = item(this.id)
-          // retry every second until item is saved
+          // retry every second until item is saved (woken in onEditorDone once savedId arrives)
           if (!__item.savedId) {
             this.save_global_store({ delay: 1000, invalidate_elem_cache, force_render, render_delay })
+            const retry = __item.tasks?.save_global_store
+            if (retry) retry['_waiting_for_saved_id'] = ++storeSaveWaitSeq
             return
           }
+          // signed-in writes go through saveHiddenItem, which requires initialization to finish
+          // first; returning 1000 reschedules this same wrapper in 1 s and preserves its callbacks
+          if (!anonymous && !initialized) return 1000
           let modified = false
           if (anonymous) {
             // emulate global store using local store
@@ -2106,6 +2113,32 @@
     remove: key => (itemStorePersists ? localStorage.removeItem(key) : void memoryItemStore.delete(key)),
   }
   const memoryItemStore = new Map()
+
+  let storeSaveWaitSeq = 0
+
+  // wake store-save retries that parked on a missing savedId, in the order their current retries
+  // parked, going through each task's own scheduler wrapper so identity, serialization, options
+  // and completion handling are preserved. a signed-in global save stays parked until initialized
+  function wakeStoreSaves(raw) {
+    if (!raw?.savedId) return
+    const eligible: Array<{ task: (() => void) & { _waiting_for_saved_id?: number }; seq: number }> = []
+    for (const name of ['save_local_store', 'save_global_store'] as const) {
+      if (name == 'save_global_store' && !anonymous && !initialized) continue
+      const task = raw.tasks?.[name]
+      const seq = task?.['_waiting_for_saved_id']
+      if (!seq) continue
+      eligible.push({ task, seq })
+    }
+    eligible.sort((a, b) => a.seq - b.seq)
+    // the first runs now; a second gets a turn of its own, as two separately fired retries had
+    // (in the same turn it replaced the first one's task while that completion was still queued,
+    // and the first was told it was cancelled after its write had succeeded)
+    for (const [index, { task }] of eligible.entries()) {
+      delete task['_waiting_for_saved_id']
+      if (index === 0) task()
+      else _item(raw.id).dispatch(task, 0)
+    }
+  }
 
   // the query scrollToTopWithHistory settled on its way to the top: the layouts of THAT query (the one run
   // synchronously in onEditorChange, and the ones that follow as its newly revealed items render) must
@@ -7821,6 +7854,8 @@
                 replaceStateOnEditorChange = false
               }
             }
+
+            wakeStoreSaves(item) // wake any store save that parked on missing savedId (instead of sleeping 1s)
 
             // if saving is disabled, we stop here after creating item and setting its permanent id (item.savedId)
             // if editing, item contents are considered unsaved, and a cancel/discard will empty-out & delete item

@@ -2135,6 +2135,406 @@ test('a second tab of the profile that deletes an item takes its store with it t
   }
 })
 
+test('signed-in global_store wake: startup child stays parked before initialized and saves on retry; post-init child persists on savedId while its 1 s timer stays held', async ({ page }) => {
+  await withSecret(page)
+  await loadUser(page, ALICE)
+  await waitForApp(page)
+  await isolateEmulatorWebChannelPosts(page)
+  const createdDocs = new Set<string>()
+  let reloaded = false
+  let hookTabId: string | null = null
+  let hookDocId: string | null = null
+  let childTabId: string | null = null
+  let childId: string | null = null
+  let childStoreDocId: string | null = null
+  let wakeChildTabId: string | null = null
+  let wakeChildId: string | null = null
+  let wakeStoreDocId: string | null = null
+  let releaseCreateWrite = () => {}
+  const createWriteRelease = new Promise<void>(r => {
+    releaseCreateWrite = r
+  })
+  let heldCreateWrite = false
+  let releaseWakeWrite = () => {}
+  const wakeWriteRelease = new Promise<void>(r => {
+    releaseWakeWrite = r
+  })
+  let heldWakeWrite = false
+  const holdWakeWriteRoute = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+    const req = route.request()
+    if (req.method() == 'POST') {
+      const rawBody = req.postData() ?? ''
+      let body = rawBody
+      try {
+        body = decodeURIComponent(rawBody)
+      } catch {}
+      if (body.includes('/documents/items/')) {
+        heldWakeWrite = true
+        await wakeWriteRelease
+      }
+    }
+    await route.fallback()
+  }
+  const holdWriteRoute = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+    const req = route.request()
+    if (req.method() == 'POST') {
+      const rawBody = req.postData() ?? ''
+      let body = rawBody
+      try {
+        body = decodeURIComponent(rawBody)
+      } catch {}
+      if (body.includes('/documents/items/')) {
+        heldCreateWrite = true
+        await createWriteRelease
+      }
+    }
+    await route.fallback()
+  }
+  const errors: string[] = []
+  let reloadInitializedLog = false
+  let watchingReload = false
+  page.on('console', m => {
+    const text = m.text()
+    if (/saveHiddenItem called before initialized|stopping task 'save_global_store'/.test(text)) errors.push(text)
+    if (watchingReload && /initialized \d+ items/.test(text)) reloadInitializedLog = true
+  })
+  try {
+    // seed an #_init item that creates #e2e_init_store_child and writes its global_store during
+    // initItems(), and traps resolve_height on items[0] (always in the first renderRange chunk)
+    // so initialized stays false across the create acknowledgement until we release it
+    const hookText = [
+      '#e2e_init_store_hook #_init',
+      '```js',
+      'function _init() {',
+      '  if (!window.__e2eAllowStartupHold) return',
+      "  if (_item('#e2e_init_store_child', true)) return",
+      "  const child = _create('#e2e_init_store_child startup store owner')",
+      '  window.__e2eStartupChildTabId = child.id',
+      '  child.global_store.fromInit = 1',
+      '  const target = window.__items[0]',
+      '  let realResolve = null',
+      '  let released = false',
+      '  window.__e2eHoldInit = {',
+      '    armed: false,',
+      '    release: () => {',
+      '      released = true',
+      '      if (realResolve) {',
+      '        const fn = realResolve',
+      '        realResolve = null',
+      '        fn(100)',
+      '      }',
+      '    },',
+      '  }',
+      "  Object.defineProperty(target, 'resolve_height', {",
+      '    configurable: true,',
+      '    get: () =>',
+      '      realResolve',
+      '        ? h => {',
+      '            window.__e2eHoldInit.armed = true',
+      '            if (released) {',
+      '              const fn = realResolve',
+      '              realResolve = null',
+      '              fn(h)',
+      '            }',
+      '          }',
+      '        : null,',
+      '    set: fn => {',
+      '      if (fn) realResolve = fn',
+      '      else if (released) realResolve = null',
+      '    },',
+      '  })',
+      '}',
+      '```',
+    ].join('\n')
+    hookTabId = await page.evaluate(text => {
+      const id = (window._create(text) as any).id as string
+      ;(window as any).__e2eHookTabId = id
+      return id
+    }, hookText)
+    await expect
+      .poll(
+        async () =>
+          (hookDocId = await page.evaluate(
+            id => ((window.__items as any[]).find(i => i.id === id)?.savedId as string | undefined) ?? null,
+            hookTabId!
+          )),
+        { timeout: 30_000 }
+      )
+      .toBeTruthy()
+    createdDocs.add(hookDocId!)
+
+    // on the next load, opt in to the #e2e_init_store_hook hold and hold the parked 1 s retry
+    // timer of the startup child's save_global_store at dispatch
+    await page.addInitScript(() => {
+      ;(window as any).__e2eAllowStartupHold = true
+      const realSetTimeout = window.setTimeout.bind(window)
+      const seen = new WeakSet<object>()
+      const heldRetries: Array<{ task: unknown; fn: TimerHandler; args: unknown[]; fired: boolean }> = []
+      window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+        const id = (window as any).__e2eStartupChildTabId as string | undefined
+        const raw = id ? ((window as any).__items as any[])?.find((i: any) => i.id === id) : null
+        const task = raw?.tasks?.save_global_store
+        if (raw && task && !seen.has(task)) {
+          seen.add(task)
+          if (delay === 1000 && !raw.savedId) {
+            heldRetries.push({ task, fn, args, fired: false })
+            return -heldRetries.length
+          }
+        }
+        return realSetTimeout(fn, delay, ...args)
+      }) as typeof window.setTimeout
+      ;(window as any).__e2eStartup = {
+        heldRetries,
+        restore: () => {
+          window.setTimeout = realSetTimeout
+        },
+        fireRetries: () => {
+          window.setTimeout = realSetTimeout
+          for (const h of heldRetries) {
+            if (!h.fired) {
+              h.fired = true
+              realSetTimeout(h.fn, 0, ...h.args)
+            }
+          }
+        },
+      }
+    })
+    await page.route('**/Write/channel**', holdWriteRoute)
+    watchingReload = true
+    reloaded = true
+    await page.reload()
+
+    // precondition: first renderRange chunk is held (initialized=false), the create write is held,
+    // and #e2e_init_store_child's save_global_store has parked with its 1 s timer held
+    await expect.poll(() => heldCreateWrite, { message: '#e2e_init_store_child create held by route', timeout: 30_000 }).toBe(true)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const st = (window as any).__e2eStartup
+            const hold = (window as any).__e2eHoldInit
+            const id = (window as any).__e2eStartupChildTabId as string | undefined
+            const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+            const task = raw?.tasks?.save_global_store ?? null
+            const latest = [...(st?.heldRetries ?? [])].reverse()[0] ?? null
+            return {
+              initHeld: Boolean(hold?.armed),
+              unsaved: Boolean(raw && !raw.savedId),
+              parkedAndHeld: Boolean(raw && !raw.savedId && task && latest && latest.task === task && !latest.fired),
+            }
+          }),
+        { message: 'save_global_store parked while first renderRange chunk is held before initialized', timeout: 30_000 }
+      )
+      .toEqual({ initHeld: true, unsaved: true, parkedAndHeld: true })
+    childTabId = await page.evaluate(() => ((window as any).__e2eStartupChildTabId as string | undefined) ?? null)
+    expect(childTabId, 'captured startup child tab id').toBeTruthy()
+    expect(reloadInitializedLog, 'app not yet initialized before create acknowledgement').toBe(false)
+
+    // release ONLY the create write: savedId arrives while initialized is STILL false
+    releaseCreateWrite()
+    await page.unroute('**/Write/channel**', holdWriteRoute)
+    await expect
+      .poll(
+        async () =>
+          (childId = await page.evaluate(
+            id => ((window.__items as any[]).find(i => i.id === id)?.savedId as string | undefined) ?? null,
+            childTabId!
+          )),
+        { timeout: 30_000 }
+      )
+      .toBeTruthy()
+    createdDocs.add(childId!)
+    // give any erroneous premature wake a turn to run while initialized is still false
+    await page.evaluate(() => new Promise(r => setTimeout(r, 50)))
+    expect(reloadInitializedLog, 'app still not initialized after create acknowledgement').toBe(false)
+    expect(
+      await page.evaluate(id => {
+        const st = (window as any).__e2eStartup
+        const raw = (window.__items as any[]).find(i => i.id === id) ?? null
+        const latest = [...(st?.heldRetries ?? [])].reverse()[0] ?? null
+        return {
+          stillParked: Boolean(raw?.tasks?.save_global_store && latest && raw.tasks.save_global_store === latest.task),
+        }
+      }, childTabId!),
+      'save_global_store stayed parked instead of hitting saveHiddenItem before initialized'
+    ).toEqual({ stillParked: true })
+    expect(errors, 'no saveHiddenItem-before-initialized error').toEqual([])
+
+    // release the first render chunk (initialized=true), then let the parked 1 s retry run -> hidden store lands
+    await page.evaluate(() => (window as any).__e2eHoldInit.release())
+    await waitForApp(page)
+    expect(reloadInitializedLog, 'app initialized after releasing first render chunk').toBe(true)
+    await page.evaluate(() => (window as any).__e2eStartup.fireRetries())
+    let storeDoc: { id: string; item: any } | null = null
+    await expect
+      .poll(async () => {
+        storeDoc = await findStore(`global_store_${childId}`)
+        return storeDoc?.item ?? null
+      }, { message: 'hidden global store persisted after initialized', timeout: 30_000 })
+      .toEqual({ fromInit: 1 })
+    if (storeDoc) {
+      childStoreDocId = (storeDoc as { id: string }).id
+      createdDocs.add(childStoreDocId)
+    }
+    expect(errors).toEqual([])
+
+    // phase 2 (once initialized): a parked global_store save on a second, post-init signed-in child
+    // wakes on savedId and reaches Firestore WHILE its 1 s fallback timer stays held
+    await page.evaluate(() => {
+      const real = window.setTimeout.bind(window)
+      const seen = new WeakSet<object>()
+      const held: Array<{ task: unknown; fired: boolean }> = []
+      window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+        const id = (window as any).__e2eWakeChildTabId as string | undefined
+        const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+        const task = raw?.tasks?.save_global_store
+        if (raw && task && !seen.has(task)) {
+          seen.add(task)
+          if (delay === 1000 && !raw.savedId) {
+            held.push({ task, fired: false })
+            return -held.length
+          }
+        }
+        return real(fn, delay, ...args)
+      }) as typeof window.setTimeout
+      ;(window as any).__e2eSignedInWake = {
+        held,
+        restore: () => {
+          window.setTimeout = real
+        },
+      }
+    })
+    await page.route('**/Write/channel**', holdWakeWriteRoute)
+    wakeChildTabId = await page.evaluate(() => {
+      const it = window._create('#e2e_signed_in_wake post-init wake owner') as any
+      ;(window as any).__e2eWakeChildTabId = it.id
+      it.global_store.woken = 1
+      return it.id as string
+    })
+    await expect.poll(() => heldWakeWrite, { message: '#e2e_signed_in_wake create held by route', timeout: 30_000 }).toBe(true)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(id => {
+            const held = ((window as any).__e2eSignedInWake?.held ?? []) as Array<{ task: unknown; fired: boolean }>
+            const raw = (window.__items as any[]).find(i => i.id === id) ?? null
+            const task = raw?.tasks?.save_global_store ?? null
+            const latest = [...held].reverse()[0] ?? null
+            return {
+              unsaved: Boolean(raw && !raw.savedId),
+              parkedAndHeld: Boolean(raw && !raw.savedId && task && latest && latest.task === task && !latest.fired),
+            }
+          }, wakeChildTabId!),
+        { message: 'post-init signed-in save_global_store parked with 1 s timer held', timeout: 15_000 }
+      )
+      .toEqual({ unsaved: true, parkedAndHeld: true })
+    releaseWakeWrite()
+    await page.unroute('**/Write/channel**', holdWakeWriteRoute)
+    await expect
+      .poll(
+        async () =>
+          (wakeChildId = await page.evaluate(
+            id => ((window.__items as any[]).find(i => i.id === id)?.savedId as string | undefined) ?? null,
+            wakeChildTabId!
+          )),
+        { timeout: 30_000 }
+      )
+      .toBeTruthy()
+    createdDocs.add(wakeChildId!)
+    let wakeStoreDoc: { id: string; item: any } | null = null
+    await expect
+      .poll(async () => {
+        wakeStoreDoc = await findStore(`global_store_${wakeChildId}`)
+        return wakeStoreDoc?.item ?? null
+      }, { message: 'signed-in save_global_store woke on savedId while 1 s timer stayed held', timeout: 15_000 })
+      .toEqual({ woken: 1 })
+    if (wakeStoreDoc) {
+      wakeStoreDocId = (wakeStoreDoc as { id: string }).id
+      createdDocs.add(wakeStoreDocId)
+    }
+    expect(
+      await page.evaluate(() => ((window as any).__e2eSignedInWake?.held ?? []).every((h: any) => !h.fired)),
+      'post-init held 1 s retry timer never fired'
+    ).toBe(true)
+    await page.evaluate(() => (window as any).__e2eSignedInWake?.restore?.())
+    expect(errors).toEqual([])
+  } finally {
+    releaseCreateWrite()
+    releaseWakeWrite()
+    await page.unroute('**/Write/channel**', holdWriteRoute).catch(() => {})
+    await page.unroute('**/Write/channel**', holdWakeWriteRoute).catch(() => {})
+    await page
+      .evaluate(() => {
+        ;(window as any).__e2eHoldInit?.release?.()
+        ;(window as any).__e2eStartup?.restore?.()
+        ;(window as any).__e2eSignedInWake?.restore?.()
+      })
+      .catch(() => {})
+    const settleTabId = async (tabId: string) =>
+      page
+        .evaluate(async id => {
+          const deadline = Date.now() + 15_000
+          while (Date.now() < deadline) {
+            const raw = (window.__items as any[]).find(i => i.id === id)
+            if (!raw || raw.savedId || raw.createFailed) return (raw?.savedId as string | undefined) ?? null
+            await new Promise(r => setTimeout(r, 50))
+          }
+          return (((window.__items as any[]).find(i => i.id === id)?.savedId as string | undefined) ?? null)
+        }, tabId)
+        .catch(() => null)
+    if (!page.isClosed()) {
+      if (!reloaded && !hookDocId) {
+        hookTabId ??= await page.evaluate(() => ((window as any).__e2eHookTabId as string | undefined) ?? null).catch(() => null)
+        if (hookTabId) {
+          hookDocId = await settleTabId(hookTabId)
+          if (hookDocId) createdDocs.add(hookDocId)
+        }
+      }
+      if (reloaded) {
+        if (!childId) {
+          childTabId ??= await page
+            .evaluate(() => ((window as any).__e2eStartupChildTabId as string | undefined) ?? null)
+            .catch(() => null)
+          if (childTabId) {
+            childId = await settleTabId(childTabId)
+            if (childId) createdDocs.add(childId)
+          }
+        }
+        if (!wakeChildId) {
+          wakeChildTabId ??= await page
+            .evaluate(() => ((window as any).__e2eWakeChildTabId as string | undefined) ?? null)
+            .catch(() => null)
+          if (wakeChildTabId) {
+            wakeChildId = await settleTabId(wakeChildTabId)
+            if (wakeChildId) createdDocs.add(wakeChildId)
+          }
+        }
+      }
+    }
+    let cleanupErr: unknown = null
+    for (const [ownerId, knownStoreId] of [
+      [childId, childStoreDocId],
+      [wakeChildId, wakeStoreDocId],
+    ] as const) {
+      if (!ownerId || knownStoreId) continue
+      try {
+        const storeId = await findStoreDoc(`global_store_${ownerId}`)
+        if (storeId) createdDocs.add(storeId)
+      } catch (e) {
+        cleanupErr ??= e
+      }
+    }
+    for (const id of createdDocs) {
+      try {
+        await firestore().collection('items').doc(id).delete()
+      } catch (e) {
+        cleanupErr ??= e
+      }
+    }
+    if (cleanupErr) throw cleanupErr
+  }
+})
+
 test('isolating emulator WebChannel POSTs forwards Listen and Write on distinct sockets while GET and REST fall through', async ({ browser }) => {
   // forwarding-contract check for emulator_webchannel.ts against an ordinary HTTP server:
   // Listen and Write POSTs are isolated onto distinct non-pooled upstream sockets with bodies and

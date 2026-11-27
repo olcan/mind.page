@@ -3904,108 +3904,319 @@ test('wiki links: the owner text and the inert frame link under the setting, on,
 // travel to another device (a backfill)
 test('wiki links: the settings item, its command, the store, and the first render after a reload', async ({ page }) => {
   await loadAdmin(page)
-  // the item renders without an error indication (it declares no dependency, so it evaluates
-  // no macro): the app's diagnostics (src/item_errors.ts: `macro error in item`, the item's
-  // `error indication` line) recorded from before the install, and its error elements
-  const errors: string[] = []
-  page.on('console', m => {
-    if (/macro error in item #?wiki_links|\[#wiki_links\] error indication/.test(m.text())) errors.push(m.text())
+  const existingWikiId = await page.evaluate(() => window._item('#wiki_links', true)?.id ?? null)
+  expect(existingWikiId, '#wiki_links absent before install').toBeNull()
+  const ownedTabIds = new Set<string>()
+  let wikiLinksTabId: string | null = null
+  const createdDocs = new Set<string>()
+  let reloaded = false
+  let releaseWrites = () => {}
+  const writesRelease = new Promise<void>(r => {
+    releaseWrites = r
   })
-  expect(await install(page, 'wiki_links')).toBeNull()
-  await page.evaluate(() => void (location.hash = '#wiki_links'))
-  await expect.poll(() => page.evaluate(() => window._item('#wiki_links')?.elem?.querySelector('.content')?.textContent ?? ''), { timeout: 15_000 }).toContain('/wiki_links')
-  expect(await page.evaluate(() => window._item('#wiki_links')!.elem!.querySelectorAll('.content .macro-error, .content .console-error, .content mark.missing, .content .error').length)).toBe(0)
-  expect(errors).toEqual([])
-  // the command's feedback is the item's alert (window.alert: a native dialog here, recorded
-  // and dismissed; Playwright dismisses an unhandled one silently); any other dialog is accepted,
-  // as Playwright does unhandled (the app's beforeunload prompt on the reload below: dismissing
-  // it would cancel the reload)
-  const alerts: string[] = []
-  page.on('dialog', dialog => {
-    if (dialog.type() != 'alert') {
-      void dialog.accept()
-      return
+  let heldInstallWrite = false
+  const writeRouteHandler = async (route: Parameters<Parameters<typeof page.route>[1]>[0]) => {
+    const req = route.request()
+    const body = req.method() == 'POST' ? (req.postData() ?? '') : ''
+    if (body.includes('wiki_links') || body.includes('e2e_local_wake')) {
+      if (body.includes('wiki_links')) heldInstallWrite = true
+      await writesRelease
     }
-    alerts.push(dialog.message())
-    void dialog.dismiss()
-  })
-  await page.evaluate(() => void window._create('#e2e_wiki_startup see [[docs/s]] here'))
-  const command = async (text: string) => {
-    const before = alerts.length
-    await page.evaluate(text => void window._create(text, { command: true }), text)
-    await expect.poll(() => alerts.length, { message: text, timeout: 15_000 }).toBeGreaterThan(before)
-    return alerts[alerts.length - 1]
+    await route.continue()
   }
-  expect(await command('/wiki_links')).toContain('wiki links: off')
-  expect(await command('/wiki_links h/f /r')).toContain('refused h/f /r') // nothing applied, nothing saved
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
-  expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
-  // the command TYPED into the mindbox, as the owner runs it: the editor augments the long url
-  // with zero-width spaces (src/zwsp.ts; the precondition is asserted, or the row proves nothing),
-  // and the command's arguments must not carry them (2026-09-26: the stored url held three, and
-  // the editor launched by it never saw a valid extension id)
-  await page.evaluate(() => void (window as any)._set_wiki_links(null))
-  const typed = async (line: string) => {
-    // the textarea sits behind a backdrop until focused (a refused command leaves it focused)
-    if (!(await mindbox(page).evaluate(el => document.activeElement === el))) await focusMindbox(page)
-    await mindbox(page).fill(line)
-    await expect.poll(() => mindbox(page).inputValue(), { message: 'the editor augments the url' }).toContain('\u200b')
-    const before = alerts.length
-    await page.keyboard.press('Shift+Enter') // the mindbox's run key (see Editor.svelte and editor.spec.ts)
-    await expect.poll(() => alerts.length, { message: `${line} answered`, timeout: 15_000 }).toBeGreaterThan(before)
-    return alerts[alerts.length - 1]
-  }
-  // a REFUSED url (a query) echoes the argument the handler received: clean only when the command
-  // boundary stripped the augmentation (the parser's own normalization never sees a refusal's echo)
-  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v')).toBe(
-    '/wiki_links: refused vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v (a url is <scheme>://<host>/<path> without a query)'
-  )
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
-  expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toBe('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
-  // the store carries the accepted config (saved through the item's store)
-  await expect.poll(() => page.evaluate(() => JSON.stringify((window._item('#wiki_links') as any)._global_store.wiki_links)), { timeout: 15_000 }).toBe(
-    JSON.stringify({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
-  )
-  await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
-  // every item saved before the reload (the app guards navigation with a beforeunload prompt
-  // while a save is pending; the dialog handler above accepts one anyway)
-  await expect.poll(() => page.evaluate(() => (window as any)._server_confirmed), { timeout: 30_000 }).toBe(true)
-  await expect.poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 60_000 }).toBe(0)
-  // the setter's calls of the next load, each with the app's rendered flag at the call (the
-  // property is trapped before the app defines it; the app assigns the setter once, at its init)
-  await page.addInitScript(() => {
-    const calls: Array<{ rendered: unknown; value: unknown }> = []
-    let real: any
-    Object.defineProperty(window, '_set_wiki_links', {
-      configurable: true,
-      get: () =>
-        real &&
-        ((value: unknown) => {
-          calls.push({ rendered: (window as any).__rendered, value })
-          return real(value)
-        }),
-      set: fn => void (real = fn),
+  try {
+    // the item renders without an error indication (it declares no dependency, so it evaluates
+    // no macro): the app's diagnostics (src/item_errors.ts: `macro error in item`, the item's
+    // `error indication` line) recorded from before the install, and its error elements
+    const errors: string[] = []
+    page.on('console', m => {
+      if (/macro error in item #?wiki_links|\[#wiki_links\] error indication/.test(m.text())) errors.push(m.text())
     })
-    ;(window as any).__wikiSetterCalls = calls
-  })
-  await page.reload()
-  await waitForApp(page)
-  // the first render sees the setting: the init hook applied it (epoch 1) before any render
-  const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' }
-  expect(await page.evaluate(() => [(window as any)._wiki_links_epoch, (window as any)._wiki_links])).toEqual([1, config])
-  expect(await page.evaluate(() => (window as any).__wikiSetterCalls[0]), 'the init hook applied the store before the first render').toEqual({ rendered: false, value: config })
-  await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
-  // the welcome's reapplication of the same value: a second call, no change
-  await expect.poll(() => page.evaluate(() => (window as any).__wikiSetterCalls.length), { timeout: 30_000 }).toBeGreaterThanOrEqual(2)
-  expect(await page.evaluate(() => (window as any).__wikiSetterCalls.slice(1).map((c: any) => c.value))).toEqual([config])
-  expect(await page.evaluate(() => (window as any)._wiki_links_epoch), 'an equal reapplication changes nothing').toBe(1)
-  expect(await command('/wiki_links off')).toContain('wiki links: off')
-  expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
-  await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+    // control BOTH sides of the store-save race:
+    // (1) hold #wiki_links and #e2e_local_wake's Firestore creates until their store saves park
+    // (2) hold the parked 1 s retry timers at dispatch so the old fallback cannot rescue a broken build
+    await page.evaluate(() => {
+      const real = window.setTimeout.bind(window)
+      const seen = new WeakSet<object>()
+      const held: Array<{ label: string; name: string; task: unknown; fired: boolean }> = []
+      const targets = [
+        ['#wiki_links', 'save_global_store'],
+        ['#e2e_local_wake', 'save_local_store'],
+      ] as const
+      window.setTimeout = ((fn: TimerHandler, delay?: number, ...args: unknown[]) => {
+        for (const [label, name] of targets) {
+          const id = window._item(label, true)?.id
+          const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+          const task = raw?.tasks?.[name]
+          if (!raw || !task || seen.has(task)) continue
+          seen.add(task)
+          if (delay === 1000 && !raw.savedId) {
+            held.push({ label, name, task, fired: false })
+            return -held.length
+          }
+        }
+        return real(fn, delay, ...args)
+      }) as typeof window.setTimeout
+      ;(window as any).__e2eRetryHook = {
+        held,
+        restore: () => {
+          window.setTimeout = real
+        },
+      }
+    })
+    await page.route('**/Write/channel**', writeRouteHandler)
+    expect(await install(page, 'wiki_links')).toBeNull()
+    wikiLinksTabId = await page.evaluate(existing => {
+      const id = window._item('#wiki_links', true)?.id ?? null
+      const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+      return id && id !== existing && raw && !raw.savedId ? id : null
+    }, existingWikiId)
+    expect(wikiLinksTabId, 'captured new unsaved #wiki_links owner id during held install').toBeTruthy()
+    ownedTabIds.add(wikiLinksTabId!)
+    // wait until the route handler reports holding #wiki_links's create before going on
+    await expect.poll(() => heldInstallWrite, { message: '#wiki_links create write held by route', timeout: 15_000 }).toBe(true)
+    await page.evaluate(() => void (location.hash = '#wiki_links'))
+    await expect.poll(() => page.evaluate(() => window._item('#wiki_links')?.elem?.querySelector('.content')?.textContent ?? ''), { timeout: 15_000 }).toContain('/wiki_links')
+    expect(await page.evaluate(() => window._item('#wiki_links')!.elem!.querySelectorAll('.content .macro-error, .content .console-error, .content mark.missing, .content .error').length)).toBe(0)
+    expect(errors).toEqual([])
+    // the command's feedback is the item's alert (window.alert: a native dialog here, recorded
+    // and dismissed; Playwright dismisses an unhandled one silently); any other dialog is accepted,
+    // as Playwright does unhandled (the app's beforeunload prompt on the reload below: dismissing
+    // it would cancel the reload)
+    const alerts: string[] = []
+    page.on('dialog', dialog => {
+      if (dialog.type() != 'alert') {
+        void dialog.accept()
+        return
+      }
+      alerts.push(dialog.message())
+      void dialog.dismiss()
+    })
+    ownedTabIds.add(
+      await page.evaluate(() => {
+        const id = (window._create('#e2e_wiki_startup see [[docs/s]] here') as any).id as string
+        ;(window as any).__e2eWikiStartupTabId = id
+        return id
+      })
+    )
+    // separate unsaved item exercising the direct save_local_store wake (wiki_links reaches
+    // localStorage via save_global_store and would still pass with the local wake removed)
+    ownedTabIds.add(
+      await page.evaluate(() => {
+        const it = window._create('#e2e_local_wake local store wake') as any
+        ;(window as any).__e2eLocalWakeTabId = it.id
+        it.local_store.direct = 'ok'
+        return it.id as string
+      })
+    )
+    const command = async (text: string) => {
+      const before = alerts.length
+      await page.evaluate(text => void window._create(text, { command: true }), text)
+      await expect.poll(() => alerts.length, { message: text, timeout: 15_000 }).toBeGreaterThan(before)
+      return alerts[alerts.length - 1]
+    }
+    expect(await command('/wiki_links')).toContain('wiki links: off')
+    expect(await command('/wiki_links h/f /r')).toContain('refused h/f /r') // nothing applied, nothing saved
+    expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+    expect(await command('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toContain('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
+    expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
+    // the command TYPED into the mindbox, as the owner runs it: the editor augments the long url
+    // with zero-width spaces (src/zwsp.ts; the precondition is asserted, or the row proves nothing),
+    // and the command's arguments must not carry them (2026-09-26: the stored url held three, and
+    // the editor launched by it never saw a valid extension id)
+    await page.evaluate(() => void (window as any)._set_wiki_links(null))
+    const typed = async (line: string) => {
+      // the textarea sits behind a backdrop until focused (a refused command leaves it focused)
+      if (!(await mindbox(page).evaluate(el => document.activeElement === el))) await focusMindbox(page)
+      await mindbox(page).fill(line)
+      await expect.poll(() => mindbox(page).inputValue(), { message: 'the editor augments the url' }).toContain('\u200b')
+      const before = alerts.length
+      await page.keyboard.press('Shift+Enter') // the mindbox's run key (see Editor.svelte and editor.spec.ts)
+      await expect.poll(() => alerts.length, { message: `${line} answered`, timeout: 15_000 }).toBeGreaterThan(before)
+      return alerts[alerts.length - 1]
+    }
+    // a REFUSED url (a query) echoes the argument the handler received: clean only when the command
+    // boundary stripped the augmentation (the parser's own normalization never sees a refusal's echo)
+    expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v')).toBe(
+      '/wiki_links: refused vscode-insiders://olcan.auto-open-obsidian/link/{link}?q=1 /Users/o c/v (a url is <scheme>://<host>/<path> without a query)'
+    )
+    expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+    expect(await typed('/wiki_links vscode-insiders://olcan.auto-open-obsidian/link/{link} /Users/o c/v')).toBe('wiki links: vscode-insiders://olcan.auto-open-obsidian/link/{link} under /Users/o c/v')
+    expect(await page.evaluate(() => (window as any)._wiki_links)).toEqual({ url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' })
+    // the store carries the accepted config (saved through the item's store)
+    const config = { url: 'vscode-insiders://olcan.auto-open-obsidian/link/{link}', root: '/Users/o c/v' }
+    await expect.poll(() => page.evaluate(() => JSON.stringify((window._item('#wiki_links') as any)._global_store.wiki_links)), { timeout: 15_000 }).toBe(JSON.stringify(config))
+    // precondition: BOTH items are still unsaved and BOTH store saves have parked with their 1 s retry timers held
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const held = ((window as any).__e2eRetryHook?.held ?? []) as Array<{ label: string; name: string; task: unknown; fired: boolean }>
+            const state = (label: string, name: string) => {
+              const id = window._item(label, true)?.id
+              const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+              const task = raw?.tasks?.[name] ?? null
+              const latest = [...held].reverse().find(h => h.label === label && h.name === name) ?? null
+              return {
+                unsaved: Boolean(raw && !raw.savedId),
+                parkedAndHeld: Boolean(raw && !raw.savedId && task && latest && latest.task === task && !latest.fired),
+              }
+            }
+            return {
+              global: state('#wiki_links', 'save_global_store'),
+              local: state('#e2e_local_wake', 'save_local_store'),
+            }
+          }),
+        { message: 'both store saves parked with their 1 s retry timers held before release', timeout: 15_000 }
+      )
+      .toEqual({
+        global: { unsaved: true, parkedAndHeld: true },
+        local: { unsaved: true, parkedAndHeld: true },
+      })
+    releaseWrites()
+    await page.unroute('**/Write/channel**', writeRouteHandler)
+    // wait for all creates started by this run to receive savedId
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ids =>
+              ids.every(id => {
+                const raw = (window.__items as any[]).find(i => i.id === id)
+                return Boolean(raw?.savedId)
+              }),
+            [...ownedTabIds]
+          ),
+        { message: 'created items received savedId after release', timeout: 60_000 }
+      )
+      .toBe(true)
+    for (const id of await page.evaluate(
+      ids =>
+        ids
+          .map(id => (window.__items as any[]).find(i => i.id === id)?.savedId)
+          .filter((sid): sid is string => typeof sid == 'string' && !!sid),
+      [...ownedTabIds]
+    ))
+      createdDocs.add(id)
+    // check BOTH writes landed in localStorage WHILE their 1 s fallback timers are still held
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const it = window._item('#wiki_links') as any
+            return JSON.parse(localStorage.getItem('mindpage_item_store_' + it.saved_id) || 'null')?._anonymous_global_store?.wiki_links ?? null
+          }),
+        { message: 'save_global_store woke on savedId while 1 s fallback timer stayed held', timeout: 5_000 }
+      )
+      .toEqual(config)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const it = window._item('#e2e_local_wake') as any
+            return JSON.parse(localStorage.getItem('mindpage_item_store_' + it.saved_id) || 'null')?.direct ?? null
+          }),
+        { message: 'save_local_store woke on savedId while 1 s fallback timer stayed held', timeout: 5_000 }
+      )
+      .toBe('ok')
+    expect(
+      await page.evaluate(() => ((window as any).__e2eRetryHook?.held ?? []).every((h: any) => !h.fired)),
+      'held 1 s retry timers never fired'
+    ).toBe(true)
+    await page.evaluate(() => (window as any).__e2eRetryHook?.restore?.())
+    await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
+    await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+    // every item saved before the reload (the app guards navigation with a beforeunload prompt
+    // while a save is pending; the dialog handler above accepts one anyway)
+    await expect.poll(() => page.evaluate(() => (window as any)._server_confirmed), { timeout: 30_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => window.__items.filter(item => !item.savedId).length), { timeout: 60_000 }).toBe(0)
+    // the setter's calls of the next load, each with the app's rendered flag at the call (the
+    // property is trapped before the app defines it; the app assigns the setter once, at its init)
+    await page.addInitScript(() => {
+      const calls: Array<{ rendered: unknown; value: unknown }> = []
+      let real: any
+      Object.defineProperty(window, '_set_wiki_links', {
+        configurable: true,
+        get: () =>
+          real &&
+          ((value: unknown) => {
+            calls.push({ rendered: (window as any).__rendered, value })
+            return real(value)
+          }),
+        set: fn => void (real = fn),
+      })
+      ;(window as any).__wikiSetterCalls = calls
+    })
+    reloaded = true
+    await page.reload()
+    await waitForApp(page)
+    // the first render sees the setting: the init hook applied it (epoch 1) before any render
+    expect(await page.evaluate(() => [(window as any)._wiki_links_epoch, (window as any)._wiki_links])).toEqual([1, config])
+    expect(await page.evaluate(() => (window as any).__wikiSetterCalls[0]), 'the init hook applied the store before the first render').toEqual({ rendered: false, value: config })
+    await page.evaluate(() => void (location.hash = '#e2e_wiki_startup'))
+    await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(1)
+    // the welcome's reapplication of the same value: a second call, no change
+    await expect.poll(() => page.evaluate(() => (window as any).__wikiSetterCalls.length), { timeout: 30_000 }).toBeGreaterThanOrEqual(2)
+    expect(await page.evaluate(() => (window as any).__wikiSetterCalls.slice(1).map((c: any) => c.value))).toEqual([config])
+    expect(await page.evaluate(() => (window as any)._wiki_links_epoch), 'an equal reapplication changes nothing').toBe(1)
+    expect(await command('/wiki_links off')).toContain('wiki links: off')
+    expect(await page.evaluate(() => (window as any)._wiki_links)).toBeNull()
+    await expect.poll(() => page.evaluate(() => window._item('#e2e_wiki_startup', true)?.elem?.querySelectorAll('a[data-wiki-link]').length), { timeout: 15_000 }).toBe(0)
+  } finally {
+    await page.evaluate(() => (window as any).__e2eRetryHook?.restore?.()).catch(() => {})
+    if (!reloaded && !page.isClosed()) {
+      // capture any of the three owned tab ids created before a failure (while the install write
+      // is still held, an unsaved #wiki_links owner is the one this install created)
+      const captured = await page
+        .evaluate(
+          ({ haveWiki, existing }) => {
+            const ids: string[] = []
+            if (!haveWiki) {
+              const id = window._item('#wiki_links', true)?.id ?? null
+              const raw = id ? (window.__items as any[]).find(i => i.id === id) : null
+              if (id && id !== existing && raw && !raw.savedId) ids.push(id)
+            }
+            for (const key of ['__e2eWikiStartupTabId', '__e2eLocalWakeTabId']) {
+              const id = (window as any)[key]
+              if (typeof id == 'string' && id) ids.push(id)
+            }
+            return ids
+          },
+          { haveWiki: Boolean(wikiLinksTabId), existing: existingWikiId }
+        )
+        .catch(() => [] as string[])
+      for (const id of captured) ownedTabIds.add(id)
+    }
+    releaseWrites()
+    await page.unroute('**/Write/channel**', writeRouteHandler).catch(() => {})
+    if (!reloaded && !page.isClosed() && ownedTabIds.size) {
+      const settled = await page
+        .evaluate(async owned => {
+          const deadline = Date.now() + 15_000
+          while (Date.now() < deadline) {
+            const pending = owned
+              .map(id => (window.__items as any[]).find(i => i.id === id))
+              .filter(it => it && !it.savedId && !it.createFailed)
+            if (!pending.length) break
+            await new Promise(r => setTimeout(r, 50))
+          }
+          return owned
+            .map(id => (window.__items as any[]).find(i => i.id === id)?.savedId)
+            .filter((id): id is string => typeof id == 'string' && !!id)
+        }, [...ownedTabIds])
+        .catch(() => [] as string[])
+      for (const id of settled) createdDocs.add(id)
+    }
+    let deleteErr: unknown = null
+    for (const id of createdDocs) {
+      try {
+        await firestore().collection('items').doc(id).delete()
+      } catch (e) {
+        deleteErr ??= e
+      }
+    }
+    if (deleteErr) throw deleteErr
+  }
 })
 
 // THE INERT SECTIONS THAT CLOSE (src/inert_blocks.ts; the owner, 2026-11-19): the frames of an
