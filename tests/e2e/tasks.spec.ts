@@ -3258,6 +3258,34 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
           gapToStrip: last && firstNav ? Math.round(firstNav.left - last.right) : null,
         }
       })
+    const guestBoxes = () =>
+      page.evaluate(() => {
+        const g = document.querySelector('.key-buttons-guests') as HTMLElement | null
+        const bg = document.querySelector('.key-buttons-bg') as HTMLElement | null
+        const pane = bg?.querySelector('.key-buttons-bg-pane') as HTMLElement | null
+        const floor = bg?.querySelector('.key-buttons-bg-floor') as HTMLElement | null
+        const strip = document.querySelector('.key-buttons-nav') as HTMLElement | null
+        const rect = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height })
+        const items = [...(g?.children ?? [])]
+          .map(el => ({ name: (el as HTMLElement).dataset.guest ?? '', box: rect(el.getBoundingClientRect()) }))
+          .sort((a, b) => a.box.left - b.box.left)
+        const byName = Object.fromEntries(items.map(i => [i.name, i.box]))
+        const gaps = items.slice(1).map((item, i) => Math.round(item.box.left - items[i]!.box.right))
+        const firstNav = strip?.children[0]?.getBoundingClientRect()
+        const last = items[items.length - 1]?.box ?? null
+        return {
+          visual: items.map(i => i.name),
+          gaps,
+          up: byName.up ?? null,
+          down: byName.down ?? null,
+          groupLeft: items[0]?.box.left ?? null,
+          groupRight: last?.right ?? null,
+          paneLeft: pane ? Math.round(pane.getBoundingClientRect().left) : null,
+          paneWidth: pane ? Math.round(pane.getBoundingClientRect().width) : null,
+          floorWidth: floor ? Math.round(floor.getBoundingClientRect().width) : null,
+          gapToStrip: last && firstNav ? Math.round(firstNav.left - last.right) : null,
+        }
+      })
     const mainRowNames = () =>
       page.evaluate(() => {
         const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !w._snoozed && !w._delegated)
@@ -3584,12 +3612,66 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     // 3. Bell rule (Points 1 & 4): a reply row's bell removes its row and selects the next row;
     //    a todo row's bell clears its bell while keeping its row and leaving selection unchanged
     await userSet(page, '#bl_reply/0')
-    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row gets up, down, bell only', timeout: 5_000 }).toEqual([
-      ['up', 'down', 'bell'],
-      ['Previous row (k)', 'Next row (j)', 'Clear the notification (b)'],
+    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row gets bell then fixed-end up, down', timeout: 5_000 }).toEqual([
+      ['bell', 'up', 'down'],
+      ['Clear the notification (b)', 'Previous row (k)', 'Next row (j)'],
     ])
     expect((await guestState()).colors.bell, 'bell button is yellow #ff6').toBe('rgb(255, 255, 102)')
     await expect.poll(() => mainWidget.locator('.list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
+
+    // Wide window fixed-end stability: stepping Down from few buttons (reply: 3) to more (todo: 6) and back
+    // with Up leaves up/down boxes frozen to the pixel while the group's left edge moves; 18 px group gap before up
+    const wideFew = await guestBoxes()
+    expect([wideFew.visual, wideFew.gaps, wideFew.paneWidth, wideFew.gapToStrip], 'wide reply row has 18 px group gap before up/down').toEqual([
+      ['bell', 'up', 'down'],
+      [18, 6],
+      454,
+      18,
+    ])
+    await guest('down').click()
+    await expect.poll(() => guestState().then(s => s.names), { message: 'down button steps from reply row to todo row with more buttons', timeout: 5_000 }).toEqual([
+      'agent', 'done', 'snooze', 'cancel', 'up', 'down',
+    ])
+    const wideMore = await guestBoxes()
+    expect(
+      [wideMore.visual, wideMore.gaps, wideMore.up, wideMore.down, wideMore.groupLeft, wideMore.paneLeft, wideMore.paneWidth, wideMore.gapToStrip],
+      'wide todo row keeps up/down fixed to the pixel while group left edge shifts left and gap before up stays 18 px',
+    ).toEqual([
+      ['agent', 'done', 'snooze', 'cancel', 'up', 'down'],
+      [6, 6, 6, 18, 6],
+      wideFew.up,
+      wideFew.down,
+      wideFew.groupLeft! - 90,
+      wideFew.paneLeft! - 90,
+      544,
+      18,
+    ])
+    // clicking bare glass in the wider 18 px gap before up never reaches the page
+    const wideGapX = wideMore.up!.left - 9
+    const wideGapY = wideMore.up!.top + wideMore.up!.height / 2
+    await page.evaluate(() => {
+      ;(window as any).__st1_gap_clicks = 0
+      ;(window as any).__st1_gap_fn = () => (window as any).__st1_gap_clicks++
+      document.addEventListener('click', (window as any).__st1_gap_fn)
+    })
+    await page.mouse.click(wideGapX, wideGapY)
+    expect(await page.evaluate(() => (window as any).__st1_gap_clicks), 'click on wider 18 px gap before up is blocked as bare glass').toBe(0)
+    await page.evaluate(() => {
+      document.removeEventListener('click', (window as any).__st1_gap_fn)
+      delete (window as any).__st1_gap_clicks
+      delete (window as any).__st1_gap_fn
+    })
+    await guest('up').click()
+    await expect.poll(boxNow, { message: 'up button steps back to reply row', timeout: 5_000 }).toBe('#bl_reply/0')
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['bell', 'up', 'down'])
+    const wideBack = await guestBoxes()
+    expect([wideBack.up, wideBack.down, wideBack.groupLeft, wideBack.gaps], 'stepping back with up keeps up/down fixed and restores group left edge').toEqual([
+      wideFew.up,
+      wideFew.down,
+      wideFew.groupLeft,
+      [18, 6],
+    ])
+
     const rowsBeforeReplyBell = await mainRowNames()
     const replyIdx = rowsBeforeReplyBell.indexOf('#bl_reply/0')
     const expectedAfterReplyBell = rowsBeforeReplyBell[replyIdx + 1] ?? rowsBeforeReplyBell[replyIdx - 1]
@@ -3610,22 +3692,30 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     const taskRow = mainWidget.locator('.list-item-container', { hasText: 'fix the cache' })
     await expect(taskRow.locator('mark.waits'), 'todo row shows question bell').toHaveText('question', { timeout: 30_000 })
     await userSet(page, '#bl_task')
-    await expect.poll(() => guestState().then(s => s.names), { message: 'todo with bell shows bell button before bins', timeout: 5_000 }).toEqual([
-      'up', 'down', 'bell', 'agent', 'done', 'snooze', 'cancel',
+    await expect.poll(() => guestState().then(s => s.names), { message: 'todo with bell shows bell button before bins and up/down last', timeout: 5_000 }).toEqual([
+      'bell', 'agent', 'done', 'snooze', 'cancel', 'up', 'down',
+    ])
+    const wideBell = await guestBoxes()
+    expect([wideBell.up, wideBell.down, wideBell.groupLeft, wideBell.paneWidth, wideBell.gaps], '7-button belled todo keeps up/down fixed and widens glass to 574').toEqual([
+      wideFew.up,
+      wideFew.down,
+      wideFew.groupLeft! - 120,
+      574,
+      [6, 6, 6, 6, 18, 6],
     ])
     await guest('bell').click()
     await expect(taskRow.locator('mark.waits'), 'bell button clears todo bell').toHaveCount(0, { timeout: 15_000 })
     await expect(taskRow, 'todo row stays in main list after bell clear').toHaveCount(1)
     await expect.poll(() => guestState().then(s => s.names), { message: 'bell button disappears once cleared', timeout: 5_000 }).toEqual([
-      'up', 'down', 'agent', 'done', 'snooze', 'cancel',
+      'agent', 'done', 'snooze', 'cancel', 'up', 'down',
     ])
     expect(await boxNow(), 'clearing a todo row bell leaves that todo selected').toBe('#bl_task')
 
     // 4. Wide desktop todo bin buttons, snooze picker cancel, open-editor draft guard, and done button + select-next
     await userSet(page, '#bl_task')
     await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'todo row tooltips name their keys', timeout: 5_000 }).toEqual([
-      ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
-      ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Done (d)', 'Snooze (s)', 'Delete (x)'],
+      ['agent', 'done', 'snooze', 'cancel', 'up', 'down'],
+      ['Delegate to the agent (a)', 'Done (d)', 'Snooze (s)', 'Delete (x)', 'Previous row (k)', 'Next row (j)'],
     ])
     const wideTodo = await guestState()
     expect(
@@ -3677,7 +3767,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(boxNow, { timeout: 5_000 }).toBe('#bl_note')
     await userSet(page, '#bl_other')
     await expect.poll(boxNow, { timeout: 5_000 }).toBe('#bl_other')
-    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['agent', 'done', 'snooze', 'cancel', 'up', 'down'])
     const histIdxBeforeDelegate = await page.evaluate(() => (history.state?.index as number | undefined) ?? -1)
     // yield one macrotask before enqueue resolves so the click event dispatch has finished
     // (eventPhase === 0) when _select_next settles, just as WebCrypto v1 / real async waits do
@@ -3709,8 +3799,8 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     ).toBeGreaterThan(histIdxBeforeDelegate)
     await page.goBack()
     await expect.poll(boxNow, { message: 'Back returns to the delegated item (#bl_other)', timeout: 10_000 }).toBe('#bl_other')
-    await expect.poll(() => guestState().then(s => [s.names, s.titles[3]]), { message: 'delegated row has take-back button', timeout: 5_000 }).toEqual([
-      ['up', 'down', 'agent', 'owner'],
+    await expect.poll(() => guestState().then(s => [s.names, s.titles[1]]), { message: 'delegated row has take-back button', timeout: 5_000 }).toEqual([
+      ['agent', 'owner', 'up', 'down'],
       'Take back from the agent (u)',
     ])
     // translucent white backgrounds on a row's tag (0.07) and age mark (0.04) so they adapt to the tint
@@ -3724,19 +3814,78 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       'rgba(255, 255, 255, 0.07)',
       'rgba(255, 255, 255, 0.04)',
     ])
-    // narrow window (430 px): second row above bottom bar at left edge, clickable at elementFromPoint
-    await page.setViewportSize({ width: 430, height: 800 })
-    await expect.poll(() => guestState().then(s => [s.cls, s.bgCls, s.floorShown]), { message: 'narrow window puts bin buttons on second row', timeout: 5_000 }).toEqual([
+    // intermediate desktop window (538 px): below w_piece(8, split)=604 px, so even the 4-button
+    // delegated row stands on the second row (same row as the 6-button main row, with full-width
+    // lower strip glass, clip and frame) and Down stays under the same point across steps
+    await page.setViewportSize({ width: 538, height: 800 })
+    await expect.poll(() => guestState().then(s => [s.cls, s.bgCls, s.floorShown]), { message: 'intermediate 538 px window puts 4-button delegated row on second row', timeout: 5_000 }).toEqual([
       'key-buttons-guests floor',
       'key-buttons-bg desktop floor',
       true,
     ])
+    const narrowFew = await guestBoxes()
+    const stripSpan538 = await page.evaluate(() => {
+      const pane = document.querySelector('.key-buttons-bg-pane') as HTMLElement | null
+      const border = document.querySelector('.key-buttons-bg-svg.strip > path:last-of-type') as SVGPathElement | null
+      return {
+        paneWidth: pane ? Math.round(pane.getBoundingClientRect().width) : null,
+        clipPath: pane ? getComputedStyle(pane).clipPath : null,
+        borderWidth: border ? Math.round(border.getBBox().width) : null,
+      }
+    })
+    expect(
+      [narrowFew.visual, narrowFew.gaps, narrowFew.groupLeft, narrowFew.floorWidth, stripSpan538],
+      '538 px second row puts up/down first at left 14 with 18 px group gap, 154 px floor, and lower strip spanning >= 538 px',
+    ).toEqual([
+      ['up', 'down', 'agent', 'owner'],
+      [6, 18, 6],
+      14,
+      154,
+      { paneWidth: 538, clipPath: 'path("M 0 0 H 604 V 44 H 0 Z")', borderWidth: 604 },
+    ])
+    const hitAt = (box: { left: number; top: number; width: number; height: number }) =>
+      page.evaluate(({ x, y }) => {
+        const hit = document.elementFromPoint(x, y) as HTMLElement | null
+        return hit?.closest('button')?.getAttribute('data-guest') ?? null
+      }, { x: box.left + box.width / 2, y: box.top + box.height / 2 })
+    const downBefore = narrowFew.down!
+    const upBefore = narrowFew.up!
+    await guest('down').click()
+    await expect.poll(() => guestState().then(s => s.names), { message: '538 px down steps to main row with 6 buttons', timeout: 5_000 }).toEqual([
+      'agent', 'done', 'snooze', 'cancel', 'up', 'down',
+    ])
+    const narrowMore = await guestBoxes()
+    expect(
+      [narrowMore.visual, narrowMore.gaps, narrowMore.up, narrowMore.down, narrowMore.floorWidth, await hitAt(downBefore)],
+      '538 px second row keeps up/down fixed at left, widens floor to 214 px, and keeps original Down point on Down',
+    ).toEqual([['up', 'down', 'agent', 'done', 'snooze', 'cancel'], [6, 18, 6, 6, 6], upBefore, downBefore, 214, 'down'])
+    await guest('up').click()
+    await expect.poll(boxNow, { message: '538 px up steps back to delegated row', timeout: 5_000 }).toBe('#bl_other')
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['agent', 'owner', 'up', 'down'])
+    const narrowBack = await guestBoxes()
+    expect(
+      [narrowBack.up, narrowBack.down, narrowBack.floorWidth, await hitAt(downBefore), await hitAt(upBefore)],
+      '538 px up back keeps up/down fixed under their original points and restores 154 px floor',
+    ).toEqual([upBefore, downBefore, 154, 'down', 'up'])
     const floorHit = await page.evaluate(() => {
       const b = document.querySelector('.key-buttons-guests > button[data-guest="owner"]')!.getBoundingClientRect()
       const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2) as HTMLElement | null
       return hit?.closest('button')?.getAttribute('data-guest') ?? null
     })
     expect(floorHit, 'second-row owner button is reachable at its centre').toBe('owner')
+    // truly narrow window (430 px, below the 480 px merge width): stays on second row with full-width strip
+    await page.setViewportSize({ width: 430, height: 800 })
+    await expect.poll(() => guestState().then(s => [s.cls, s.bgCls, s.floorShown]), { message: 'truly narrow 430 px window keeps bin buttons on second row', timeout: 5_000 }).toEqual([
+      'key-buttons-guests floor',
+      'key-buttons-bg desktop floor',
+      true,
+    ])
+    const narrow430 = await guestBoxes()
+    expect([narrow430.visual, narrow430.floorWidth, narrow430.paneWidth], '430 px second row keeps pair first with 154 px floor and 430 px lower strip').toEqual([
+      ['up', 'down', 'agent', 'owner'],
+      154,
+      430,
+    ])
     await page.setViewportSize({ width: 1280, height: 800 })
     await expect.poll(() => guestState().then(s => [s.cls, s.floorShown]), { message: 'widening returns bin buttons inline', timeout: 5_000 }).toEqual(['key-buttons-guests', false])
 
@@ -3757,7 +3906,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     })
     expect(delRowNames.length, 'two rows in delegated list').toBe(2)
     await userSet(page, delRowNames[0]!)
-    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'owner'])
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['agent', 'owner', 'up', 'down'])
     await page.evaluate(() => {
       const w = window as any
       const orig = w._enqueue_hidden_document
@@ -3926,7 +4075,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     ])
 
     await selectRow('#rk_one')
-    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'done', 'snooze', 'cancel'])
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['agent', 'done', 'snooze', 'cancel', 'up', 'down'])
     await keys()
     await priorKeys()
     await page.keyboard.press('Shift+D')
@@ -4199,9 +4348,9 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
 
     // 7f. Reply row: only up/down/bell shown; d and x leave the row (no confirm dialog) and forward to prior hook; b clears the row
     await selectRow('#rk_reply/0')
-    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row shows up, down, and bell only', timeout: 5_000 }).toEqual([
-      ['up', 'down', 'bell'],
-      ['Previous row (k)', 'Next row (j)', 'Clear the notification (b)'],
+    await expect.poll(() => guestState().then(s => [s.names, s.titles]), { message: 'reply row shows bell, up, and down only', timeout: 5_000 }).toEqual([
+      ['bell', 'up', 'down'],
+      ['Clear the notification (b)', 'Previous row (k)', 'Next row (j)'],
     ])
     const dlgReply = dialogs.length
     await keys()
@@ -4230,7 +4379,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(boxNow, { message: 'a selects the next row', timeout: 10_000 }).toBe(afterA)
     expect(await priorKeys(), 'a did not forward to prior hook').toEqual([])
     await selectRow(delTarget)
-    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['up', 'down', 'agent', 'owner'])
+    await expect.poll(() => guestState().then(s => s.names), { timeout: 5_000 }).toEqual(['agent', 'owner', 'up', 'down'])
     await keys()
     await priorKeys()
     await page.keyboard.press('d')
@@ -4993,7 +5142,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         timeout: 5_000,
       })
       .toEqual({
-        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'],
         snooze: 'Unsnooze (s)',
         nav: [LIT_COLOR, LIT_COLOR],
       })
@@ -5018,7 +5167,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       })
       .toEqual({
         hidden: false,
-        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'],
         snooze: 'Unsnooze (s)',
         nav: [LIT_COLOR, LIT_COLOR],
       })
@@ -5056,7 +5205,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       })
       .toEqual({
         hidden: false,
-        names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'],
+        names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'],
         snooze: 'Snooze (s)',
         nav: [DIM_COLOR, DIM_COLOR],
       })
@@ -5105,7 +5254,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         message: 'visible #_pin/dot list lights up/down for selected #sb_snz',
         timeout: 5_000,
       })
-      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [LIT_COLOR, LIT_COLOR] })
+      .toEqual({ names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'], nav: [LIT_COLOR, LIT_COLOR] })
     await page.keyboard.press('j')
     await expect.poll(() => boxNow().then(b => b !== '#sb_snz' && b !== ''), { message: 'j advances when #_pin/dot list is visible', timeout: 5_000 }).toBe(true)
     await page.keyboard.press('k')
@@ -5119,7 +5268,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         message: 'folding #_pin/dot list refreshes same selected item arrows to dim while keeping bins',
         timeout: 5_000,
       })
-      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [DIM_COLOR, DIM_COLOR] })
+      .toEqual({ names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'], nav: [DIM_COLOR, DIM_COLOR] })
     await unfocus()
     await page.keyboard.press('j')
     await page.evaluate(() => (window as any)._update_dom?.())
@@ -5132,7 +5281,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         message: 'unfolding #_pin/dot list refreshes same selected item arrows back to lit',
         timeout: 5_000,
       })
-      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], nav: [LIT_COLOR, LIT_COLOR] })
+      .toEqual({ names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'], nav: [LIT_COLOR, LIT_COLOR] })
     await unfocus()
     await page.keyboard.press('j')
     await expect.poll(() => boxNow().then(b => b !== '#sb_snz' && b !== ''), { message: 'j advances again after unfolding', timeout: 5_000 }).toBe(true)
@@ -5178,7 +5327,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         message: 'snoozed #sb_bell has no bell button and shows Unsnooze',
         timeout: 5_000,
       })
-      .toEqual({ names: ['up', 'down', 'agent', 'done', 'snooze', 'cancel'], snooze: 'Unsnooze (s)' })
+      .toEqual({ names: ['agent', 'done', 'snooze', 'cancel', 'up', 'down'], snooze: 'Unsnooze (s)' })
     await userSet(page, '#sb_snz_list')
     await expect.poll(() => snoozedRowNames().then(r => r.includes('#sb_bell')), { message: '#sb_bell sits in snoozed list', timeout: 10_000 }).toBe(true)
     const sbSnzWidget = page.locator('.column:not(.hidden) .todoer-widget').filter({ has: page.locator('.list-item-container', { hasText: 'snoozed todo two' }) })
@@ -5353,8 +5502,8 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         timeout: 5_000,
       })
       .toEqual({
-        names: ['up', 'down', 'agent', 'owner'],
-        titles: ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Take back from the agent (u)'],
+        names: ['agent', 'owner', 'up', 'down'],
+        titles: ['Delegate to the agent (a)', 'Take back from the agent (u)', 'Previous row (k)', 'Next row (j)'],
         nav: [LIT_COLOR, LIT_COLOR],
       })
     await keys()
@@ -5392,8 +5541,8 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         timeout: 5_000,
       })
       .toEqual({
-        names: ['up', 'down', 'agent', 'owner'],
-        titles: ['Previous row (k)', 'Next row (j)', 'Delegate to the agent (a)', 'Take back from the agent (u)'],
+        names: ['agent', 'owner', 'up', 'down'],
+        titles: ['Delegate to the agent (a)', 'Take back from the agent (u)', 'Previous row (k)', 'Next row (j)'],
         nav: [LIT_COLOR, LIT_COLOR],
       })
     await pressAndRead('j', delRows11[3] ?? mainRows11[0]!, 'j from unbelled delegated row steps to next row in page order')
@@ -5711,6 +5860,56 @@ test('bin buttons on a phone touch page: 32 px corner buttons, second row lined 
       floorBottom: 44,
       floorHeight: 44,
     })
+
+    // Phone second-row fixed-end stability: up/down stand FIRST at left 10 with an 18 px group gap before
+    // the other buttons, and do not move by a pixel when stepping Down from main (6 buttons) to delegated (fewer) and back
+    const phoneBoxes = () =>
+      page.evaluate(() => {
+        const g = document.querySelector('.key-buttons-guests') as HTMLElement
+        const floor = document.querySelector('.key-buttons-bg > .key-buttons-bg-floor') as HTMLElement
+        const rect = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height })
+        const items = [...g.children]
+          .map(el => ({ name: (el as HTMLElement).dataset.guest ?? '', box: rect(el.getBoundingClientRect()) }))
+          .sort((a, b) => a.box.left - b.box.left)
+        const byName = Object.fromEntries(items.map(i => [i.name, i.box]))
+        return {
+          visual: items.map(i => i.name),
+          gaps: items.slice(1).map((item, i) => Math.round(item.box.left - items[i]!.box.right)),
+          up: byName.up,
+          down: byName.down,
+          floorWidth: Math.round(floor.getBoundingClientRect().width),
+        }
+      })
+    const phoneP1 = await phoneBoxes()
+    expect(
+      [phoneP1.visual, phoneP1.gaps, phoneP1.up.left, phoneP1.floorWidth],
+      'phone second row places up/down first at left 10 with 18 px group gap and 254 px floor',
+    ).toEqual([['up', 'down', 'agent', 'done', 'snooze', 'cancel'], [6, 18, 6, 6, 6], 10, 254])
+    const lastMain = (await rowsNow()).filter((n): n is string => !!n).slice(-1)[0]!
+    await userSet(page, lastMain)
+    await expect.poll(() => phoneBoxes().then(b => b.visual.length), { timeout: 5_000 }).toBeGreaterThanOrEqual(6)
+    const phoneMain = await phoneBoxes()
+    expect([phoneMain.up, phoneMain.down], 'main row keeps up/down at the same phone boxes').toEqual([phoneP1.up, phoneP1.down])
+    await page.locator('.key-buttons-guests > button[data-guest="down"]').tap({ timeout: 5_000 })
+    await expect.poll(() => phoneBoxes().then(b => b.visual.includes('owner')), { message: 'tap on down steps from last main row to first delegated row', timeout: 5_000 }).toBe(true)
+    const phoneDel = await phoneBoxes()
+    const expectedDelFloor = 20 + phoneDel.visual.length * 32 + (phoneDel.visual.length - 1) * 6 + 12
+    expect(phoneDel.visual.length, 'delegated row has fewer buttons than main row').toBeLessThan(phoneMain.visual.length)
+    expect(
+      [phoneDel.visual.slice(0, 2), phoneDel.gaps.slice(0, 2), phoneDel.up, phoneDel.down, phoneDel.floorWidth],
+      'phone second row keeps up/down fixed at left across button-count shrink while floor narrows',
+    ).toEqual([['up', 'down'], [6, 18], phoneMain.up, phoneMain.down, expectedDelFloor])
+    await page.locator('.key-buttons-guests > button[data-guest="up"]').tap({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => (window as any).MindBox.get().trim()), { message: 'tap on up steps back to last main row', timeout: 5_000 }).toBe(lastMain)
+    await expect.poll(() => phoneBoxes().then(b => b.visual.length), { timeout: 5_000 }).toBe(phoneMain.visual.length)
+    const phoneBack = await phoneBoxes()
+    expect([phoneBack.up, phoneBack.down, phoneBack.floorWidth], 'phone tap back keeps up/down fixed and restores floor width').toEqual([
+      phoneMain.up,
+      phoneMain.down,
+      phoneMain.floorWidth,
+    ])
+    await userSet(page, '#bl_phone_1')
+    await expect.poll(() => page.locator('.todoer-widget .list-item-container.selected').count(), { timeout: 5_000 }).toBe(1)
 
     // simulated on-screen keyboard hides the bin buttons along with the main bar; closing brings them back
     await page.locator('.header .backdrop').first().click()
