@@ -3202,6 +3202,7 @@
     if (ignoreEditorChanges || editorChangePending || lastRankedQuery !== oldLower) return false
     const newLower = to.toLowerCase().trim()
     editorText = to
+    window['_mindboxApplied'] = editorText // the applied query follows the in-place upgrade (exact case), as where a query is applied in onEditorChange
     if (recentWalk && to !== recentWalk.query) recentWalk = null
     recordSessionHistory(to, from)
     lastRankedQuery = newLower
@@ -3329,6 +3330,7 @@
     }
     lastEditorChangeTime = Infinity // force minimum wait for next change
     window['_mindboxDebounced'] = false
+    window['_mindboxApplied'] = editorText // applied query as written (exact case), for item code while a newer draft is debounced
     if (explicitScrollQuery !== null && explicitScrollQuery !== editorText) explicitScrollQuery = null // a new query: its layouts scroll as usual
     const start = Date.now()
     forgetSearch(inertSearchKey(editorText, text)) // the search, where it is applied (its text, and whether a first slash turns it off, below): a change of it forgets the inert sections' manual toggles (src/inert_blocks.ts)
@@ -3412,8 +3414,17 @@
     // expand term context (tag prefixes) to include item context computed above
     termsContext = _.uniq(termsContext.concat(context))
 
-    // parse regex terms
-    const regexTerms = terms.filter(t => t.match(/^regex:\S+/)).map(t => new RegExp(t.substring(6)))
+    // parse regex terms; omit incomplete/invalid patterns so the rest of the query still ranks and
+    // applies (keeping the page's target in agreement with window._mindboxApplied)
+    const regexTerms: RegExp[] = []
+    for (const t of terms) {
+      if (!t.match(/^regex:\S+/)) continue
+      try {
+        regexTerms.push(new RegExp(t.substring(6)))
+      } catch {
+        // incomplete or invalid regex contributes no regex matches
+      }
+    }
     // active query/context tag sets for highlighting drawn child marks on the path from root
     // without touching item.matching, item.matchingTerms or ranking
     const tagTermSet = new Set(terms.filter(t => t[0] == '#'))

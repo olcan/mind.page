@@ -1945,6 +1945,7 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
         if (clearListeners) {
           w.__se3_changes = []
           w.__se3_searches = []
+          w.__se3_applied = []
         }
         return w.__layoutCount as number
       }, !!opts.checkListeners)
@@ -2061,6 +2062,12 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
               timeout: 5_000,
             })
             .toEqual([`id:${tabId}`, `id:${savedDocId}`])
+          // the applied query that item code reads while a later draft is debounced (window._mindboxApplied),
+          // as it stands AT each search hook: the in-place upgrade sets it too, in the id's exact case
+          expect(
+            await page.evaluate(() => (window as any).__se3_applied ?? []),
+            'save ack sets the applied query (window._mindboxApplied) to the exact saved id by its search hook'
+          ).toEqual([`id:${tabId}`, `id:${savedDocId}`])
         }
         await expect.poll(() => page.evaluate(() => !(window as any).__layoutPending), { timeout: 10_000 }).toBe(true)
         await settled(page)
@@ -2146,7 +2153,7 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
       '#e2e_se3_listener #_listen',
       '```js',
       'function _on_change(text) { (window.__se3_changes ??= []).push(text) }',
-      'function _on_search(text) { (window.__se3_searches ??= []).push(text) }',
+      'function _on_search(text) { (window.__se3_searches ??= []).push(text); (window.__se3_applied ??= []).push(window._mindboxApplied) }',
       '```',
     ].join('\n')
     const listenTabId = await page.evaluate(text => (window._create(text) as any).id as string, listenText)
@@ -2459,6 +2466,7 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
       ;(window as any).__se1_restore_timer?.()
       delete (window as any).__se3_changes
       delete (window as any).__se3_searches
+      delete (window as any).__se3_applied
       localStorage.removeItem('mindpage_green_screen')
     }).catch(() => {})
     await page.context().setOffline(false)

@@ -251,7 +251,9 @@ export const FAKE_GITHUB_TOKEN = 'e2e-local'
 // loadAdmin seeds the fake one, which works because that repository route is always intercepted;
 // parameterless and private -- a real token must never be copied into a traced browser context
 async function useGithubToken(page: Page) {
-  await page.addInitScript(tok => localStorage.setItem('mindpage_github_token', tok), FAKE_GITHUB_TOKEN)
+  await page.addInitScript(tok => {
+    if (window === window.top && location.protocol.startsWith('http')) localStorage.setItem('mindpage_github_token', tok)
+  }, FAKE_GITHUB_TOKEN)
 }
 
 async function inspectDoc(raw: Record<string, any>, secret?: string) {

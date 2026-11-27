@@ -3168,3 +3168,133 @@ test('a stale Back scroll restore is cancelled by a later select or a second Bac
       .toBe(true)
   }
 })
+
+test('window._mindboxApplied records the applied query in its typed case across debounced typing, undo, MindBox.set, and incomplete regex', async ({ page }) => {
+  await loadAdmin(page)
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(err.message))
+  const applied = 'id:AbC_123 MixedCase'
+  await focusMindbox(page)
+  await mindbox(page).pressSequentially(applied)
+  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+  expect(await page.evaluate(() => (window as any)._mindboxApplied)).toBe(applied)
+  // typing one more character debounces the draft while _mindboxApplied stays at the applied query
+  await mindbox(page).press('KeyX')
+  const duringDraft = await page.evaluate(() => ({
+    debounced: (window as any)._mindboxDebounced,
+    applied: (window as any)._mindboxApplied,
+    box: (window as any).MindBox.get(),
+  }))
+  expect(duringDraft).toEqual({ debounced: true, applied, box: `${applied}x` })
+  // taking the character back and letting the debounce end leaves _mindboxApplied unchanged
+  await mindbox(page).press('Backspace')
+  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+  expect(await page.evaluate(() => ({ applied: (window as any)._mindboxApplied, box: (window as any).MindBox.get() }))).toEqual({
+    applied,
+    box: applied,
+  })
+  // item code setting the box via MindBox.set updates _mindboxApplied by the time the debounce flag clears
+  const fromCode = 'id:XyZ_789 NextQuery'
+  await page.evaluate(q => void (window as any).MindBox.set(q), fromCode)
+  await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+  expect(await page.evaluate(() => (window as any)._mindboxApplied)).toBe(fromCode)
+
+  // incomplete regex term: typing `#new regex:[x`, pausing for debounce, then typing `]` must not throw
+  // and must keep _mindboxApplied and the page's actual target container in agreement
+  const oldLabel = '#e2e_applied_old'
+  const newLabel = '#e2e_applied_new'
+  const labels = [oldLabel, newLabel]
+  try {
+    await page.evaluate(
+      ([oldL, newL]) => {
+        window._create(`${oldL} prior target`)
+        window._create(`${newL} target with x`)
+      },
+      [oldLabel, newLabel] as const
+    )
+    for (const label of labels) {
+      await expect.poll(() => savedId(page, label), { message: `${label} saved`, timeout: 15_000 }).toBeTruthy()
+    }
+    const [oldId, newId] = await page.evaluate(ls => ls.map(l => window._item(l, true)!.id), labels)
+    const readAgreement = async (itemId: string) => ({
+      ...(await page.evaluate(id => {
+        const item = ((window as any).__items as any[]).find(i => i.id === id)
+        return {
+          applied: (window as any)._mindboxApplied,
+          targetId: document.querySelector('.container.target')?.getAttribute('data-item-id') ?? null,
+          regexMatched: (item?.matchingTerms ?? []).some((t: unknown) => t instanceof RegExp && t.source === '[x]'),
+        }
+      }, itemId)),
+      errors: [...pageErrors],
+    })
+
+    // start with the page showing #e2e_applied_old
+    await blur(page)
+    await page.evaluate(q => void (window as any).MindBox.set(q), oldLabel)
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+    await expect
+      .poll(() => readAgreement(oldId), { message: 'premise: page starts on old target', timeout: 5_000 })
+      .toEqual({ applied: oldLabel, targetId: oldId, regexMatched: false, errors: [] })
+
+    // replace box with incomplete regex query and let debounce settle
+    const incomplete = `${newLabel} regex:[x`
+    await focusMindboxInPlace(page)
+    await expect(mindbox(page)).toBeFocused()
+    await mindbox(page).fill(incomplete)
+    expect(
+      await page.evaluate(() => ({
+        debounced: (window as any)._mindboxDebounced,
+        applied: (window as any)._mindboxApplied,
+      }))
+    ).toEqual({ debounced: true, applied: oldLabel })
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+    await expect
+      .poll(() => readAgreement(newId), {
+        message: 'incomplete regex: no pageerror and _mindboxApplied agrees with .container.target',
+        timeout: 5_000,
+      })
+      .toEqual({ applied: incomplete, targetId: newId, regexMatched: false, errors: [] })
+
+    // type closing bracket: debounced draft keeps incomplete query, then settles with regex matching and agreement
+    const complete = `${incomplete}]`
+    await mindbox(page).pressSequentially(']')
+    expect(
+      await page.evaluate(() => ({
+        debounced: (window as any)._mindboxDebounced,
+        applied: (window as any)._mindboxApplied,
+        box: (window as any).MindBox.get(),
+      }))
+    ).toEqual({ debounced: true, applied: incomplete, box: complete })
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+    await expect
+      .poll(() => readAgreement(newId), {
+        message: 'closed regex: no pageerror, regex compiles and matches, and _mindboxApplied agrees with .container.target',
+        timeout: 5_000,
+      })
+      .toEqual({ applied: complete, targetId: newId, regexMatched: true, errors: [] })
+
+    // recovery: another query applies as usual
+    await mindbox(page).fill(oldLabel)
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+    await expect
+      .poll(() => readAgreement(oldId), {
+        message: 'recovery: subsequent query applies as usual',
+        timeout: 5_000,
+      })
+      .toEqual({ applied: oldLabel, targetId: oldId, regexMatched: false, errors: [] })
+  } finally {
+    await blur(page)
+    await page.evaluate(() => void (window as any).MindBox.set(''))
+    await expect.poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 }).toBe(true)
+    await page.evaluate(ls => {
+      for (const l of ls) window._item(l, true)?.delete(false)
+    }, labels)
+    await expect
+      .poll(() => page.evaluate(ls => ls.every(l => !window._item(l, true)), labels), {
+        message: 'applied-query fixtures removed',
+        timeout: 15_000,
+      })
+      .toBe(true)
+  }
+  expect(pageErrors).toEqual([])
+})

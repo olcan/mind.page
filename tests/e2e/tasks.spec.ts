@@ -3208,6 +3208,19 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await page.evaluate(text => void window._create(text), REPLY_CHAT)
     await expect.poll(() => savedId(page, '#bl_reply/0'), { timeout: 30_000 }).toBeTruthy()
     await expect.poll(() => page.locator('.todoer-widget').first().locator('.list-item-container').count(), { timeout: 30_000 }).toBe(4)
+    // wait for the widget's initial four-row order to persist so a later render cannot re-rank rows0 after j/k
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const sc = document.querySelector('.todoer-widget')?.closest('.super-container')
+            const id = sc?.id?.replace(/^super-container-/, '')
+            const pin = id ? (window._item(id, true) as any) : null
+            return (pin?._global_store?._todoer?.['#todo']?.split(',').filter(Boolean).length ?? 0) >= 4
+          }),
+        { message: 'initial four-row order persisted before j/k checks', timeout: 10_000 },
+      )
+      .toBe(true)
 
     // #todoer's own page js_table shows no private bin-button definitions and introduces no missing tags
     const todoerPage = await page.evaluate(() => {
@@ -5390,8 +5403,15 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
       await page.keyboard.press('w')
       await expect.poll(() => page.evaluate(() => !!sessionStorage.getItem('mindpage_todoer_send')), { timeout: 5_000 }).toBe(true)
+      const selectedName = () =>
+        page.evaluate(() => {
+          const r = document.querySelector('.column:not(.hidden) .super-container:not(.hidden) .todoer-widget .list-item-container.selected')
+          return r ? window._item(r.getAttribute('data-id')!, true)?.name ?? null : null
+        })
       await page.keyboard.press('j')
-      await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe(longRows[0])
+      await expect.poll(selectedName, { timeout: 5_000 }).toBe(longRows[0])
+      await expect.poll(() => peer.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe(longRows[0])
+      expect(await page.evaluate(() => (window as any).MindBox.get()), '430 px linked list keeps empty box on j').toBe('')
       await expect
         .poll(() => guestState().then(s => [s.cls, s.bgCls, s.floorShown, s.names.length > 1]), {
           message: '430 px linked list shows second-floor bin buttons',
@@ -5405,27 +5425,27 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         return Math.round(document.body.scrollTop)
       })
       for (let i = 0; i < 20; i++) await page.keyboard.press('j')
-      await expect.poll(() => page.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe(longRows[20])
+      await expect.poll(selectedName, { timeout: 5_000 }).toBe(longRows[20])
+      await expect.poll(() => peer.evaluate(() => (window as any).MindBox.get()), { timeout: 5_000 }).toBe(longRows[20])
       await expect
         .poll(
           () =>
             page.evaluate(baseTop => {
               const row = document.querySelector('.column:not(.hidden) .super-container:not(.hidden) .todoer-widget .list-item-container.selected') as HTMLElement | null
               const floor = document.querySelector('.key-buttons-bg > .key-buttons-bg-floor') as HTMLElement | null
-              const target = document.querySelector('.column:not(.hidden) .super-container.target') as HTMLElement | null
-              if (!row || !floor || !target) return null
+              if (!row || !floor) return null
               const rb = row.getBoundingClientRect()
               const fb = floor.getBoundingClientRect()
               return {
                 overlaps: fb.width > 0 && fb.height > 0 && fb.right > rb.left && fb.left < rb.right,
                 clearsFloor: Math.round(rb.bottom) <= Math.round(fb.top) - 8 + 3 && Math.round(rb.bottom) >= Math.round(fb.top) - 8 - 4,
                 scrolled: Math.round(document.body.scrollTop) > baseTop + 40,
-                aboveTarget: Math.round(document.body.scrollTop) < Math.round(target.offsetTop) - 100,
+                noTarget: !document.querySelector('.column:not(.hidden) .super-container.target') && (window as any).MindBox.get() == '',
               }
             }, startTop),
           { message: 'selected row of long list at 430 px clears the installed second-floor button strip', timeout: 8_000 },
         )
-        .toEqual({ overlaps: true, clearsFloor: true, scrolled: true, aboveTarget: true })
+        .toEqual({ overlaps: true, clearsFloor: true, scrolled: true, noTarget: true })
       await page.keyboard.press('w')
       await expect.poll(() => page.evaluate(() => sessionStorage.getItem('mindpage_todoer_send')), { timeout: 5_000 }).toBeNull()
     } finally {
@@ -6437,21 +6457,26 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     })
   const rowNames = (page: Page) =>
     page.evaluate(() => {
-      const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w._snoozed && !w._delegated)
+      const main = [...document.querySelectorAll('.todoer-widget')].find(
+        (w: any) => !w.closest('#cache-div, .column.hidden, .super-container.hidden') && !w._snoozed && !w._delegated,
+      )
       return [...(main?.querySelectorAll('.list .list-item-container[data-id]') ?? [])].map(r => window._item(r.getAttribute('data-id')!, true)?.name ?? null)
     })
   const selectedRowName = (page: Page) =>
     page.evaluate(() => {
-      const r = document.querySelector('.todoer-widget .list-item-container.selected')
+      const r = [...document.querySelectorAll('.todoer-widget .list-item-container.selected')].find(
+        el => !el.closest('#cache-div, .column.hidden, .super-container.hidden'),
+      )
       return r ? window._item(r.getAttribute('data-id')!, true)?.name ?? null : null
     })
   const rowBox = (page: Page, name: string | null = null) =>
     page.evaluate(name => {
       const id = name ? window._item(name, true)?.id : null
+      const vis = (el: Element) => !el.closest('#cache-div, .column.hidden, .super-container.hidden')
       const r = (
         id
-          ? [...document.querySelectorAll('.todoer-widget .list-item-container')].find(el => el.getAttribute('data-id') == id)
-          : document.querySelector('.todoer-widget .list-item-container.selected')
+          ? [...document.querySelectorAll('.todoer-widget .list-item-container')].find(el => vis(el) && el.getAttribute('data-id') == id)
+          : [...document.querySelectorAll('.todoer-widget .list-item-container.selected')].find(vis)
       ) as HTMLElement | null
       const b = r?.getBoundingClientRect()
       if (!b) return null
@@ -6466,7 +6491,9 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
   const clickRow = (page: Page, name: string) =>
     page.evaluate(name => {
       const id = window._item(name, true)?.id
-      const row = [...document.querySelectorAll('.todoer-widget .list-item-container')].find(r => r.getAttribute('data-id') == id)
+      const row = [...document.querySelectorAll('.todoer-widget .list-item-container')].find(
+        r => !r.closest('#cache-div, .column.hidden, .super-container.hidden') && r.getAttribute('data-id') == id,
+      )
       ;(row?.querySelector('.list-item') as HTMLElement | null)?.click()
       return !!row
     }, name)
@@ -6476,6 +6503,7 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await page.keyboard.press('Shift')
     await page.evaluate(pos => void (document.body.scrollTop = pos), y)
     await expect.poll(() => top(page), { timeout: 3_000 }).toBe(y)
+    await page.evaluate(() => new Promise<void>(r => requestAnimationFrame(() => requestAnimationFrame(() => r()))))
   }
   const startScrollWatch = (page: Page = a) =>
     page.evaluate(() => {
@@ -6523,15 +6551,19 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await expect.poll(() => a.locator('.todoer-widget').count(), { timeout: 30_000 }).toBe(2)
     await a.evaluate(count => {
       window._create('#done completed items')
+      window._create('#ow_snz_list\n<<todoer_widget({snoozed: true})>>\n#_todo/pin\n#_todoer')
       window._create('#ow_unlisted\nplain note outside the todoer lists')
+      const snz = window._create('#ow_snz\n#todo snoozed todo for list window') as any
+      snz.global_store._todoer = { snoozed: Date.now() + 7 * 86_400_000, notify: false }
+      snz.save_global_store()
       for (let i = 1; i <= count; i++) window._create(`#ow_${i}\n#todo todo number ${i}\nsome words of todo ${i}`)
     }, N)
     await expect.poll(() => savedId(a, `#ow_${N}`), { timeout: 60_000 }).toBeTruthy()
     await allSaved(a)
-    await expect.poll(() => a.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(N)
+    await expect.poll(async () => (await rowNames(a)).length, { timeout: 30_000 }).toBe(N)
     await a.reload()
     await loaded(a)
-    await expect.poll(() => a.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(N)
+    await expect.poll(async () => (await rowNames(a)).length, { timeout: 30_000 }).toBe(N)
     errors.length = 0
 
     const headerTop = await a.evaluate(() => Math.round((document.querySelector('.header') as HTMLElement).offsetTop))
@@ -6554,7 +6586,7 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     expect(await interceptMindItems(b), 'mind.items local checkout on B').toBe(true)
     await b.goto(a.url().replace(/[?#].*$/, ''))
     await loaded(b)
-    await expect.poll(() => b.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(N)
+    await expect.poll(async () => (await rowNames(b)).length, { timeout: 30_000 }).toBe(N)
     await expect.poll(async () => [await peers(a), await peers(b)], { message: 'both windows discover each other', timeout: 15_000 }).toEqual([1, 1])
     await userSet(a, '')
     await userSet(b, '')
@@ -6605,20 +6637,123 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await expect.poll(() => top(a), { message: 'switch off scrolls A to target item', timeout: 5_000 }).toBeGreaterThan(headerTop + 200)
     expect(await boxNow(b), 'switch off does not take selection in B').toBe('')
 
-    // Turn link on in A with a row selected -> B immediately shows that currently selected listed item
+    const snoozedListState = (page: Page) =>
+      page.evaluate(() => {
+        const listItem = window._item('#ow_snz_list', true)
+        const sup = listItem ? document.getElementById('super-container-' + listItem.id) : null
+        const visible = !!sup && !sup.classList.contains('hidden') && !sup.closest('#cache-div, .column.hidden')
+        const snz = window._item('#ow_snz', true)
+        const row = visible && snz ? sup!.querySelector(`.todoer-widget .list-item-container[data-id="${snz.id}"]`) : null
+        return { visible, hasRow: !!row, marked: !!row?.classList.contains('selected') }
+      })
+    const stripButtons = (page: Page) =>
+      page.evaluate(() => [...document.querySelectorAll('.todoer-bin-buttons button')].map(b => [b.className.split(' ')[0], (b as HTMLElement).title]))
+
+    // Under a target (names[2]), the #_todo/pin snoozed list is hidden on the page
+    await expect.poll(() => snoozedListState(a), { message: 'snoozed list is hidden under a target query', timeout: 5_000 }).toEqual({
+      visible: false,
+      hasRow: false,
+      marked: false,
+    })
+
+    // 3. List window on #todo (no target): keeps #todo in box, keeps snoozed list visible, shows mark and
+    //    strip buttons for the clicked row, stays put with zero scroll events / no frame elsewhere, while B shows item
+    await userSet(a, '#todo')
+    await expect.poll(() => boxNow(a), { timeout: 5_000 }).toBe('#todo')
+    await expect.poll(() => snoozedListState(a), { message: 'snoozed list stands on the page under #todo', timeout: 5_000 }).toEqual({
+      visible: true,
+      hasRow: true,
+      marked: false,
+    })
     await unfocus(a)
     await a.keyboard.press('w')
-    await expect.poll(() => isOn(a), { message: 'w with row selected turns link on in A', timeout: 5_000 }).toBe(true)
+    await expect.poll(() => isOn(a), { message: 'w links A (#todo) and B', timeout: 5_000 }).toBe(true)
     await expect.poll(() => windowButton(b), { timeout: 5_000 }).toEqual(LIT_BTN)
-    await expect.poll(() => boxNow(b), { message: 'linking with a listed row selected tells it to B at once', timeout: 5_000 }).toBe(names[2])
 
-    // 3. Row click, second click (no editor), j, and wheel-set position in list window
     await resetScroll(a, headerTop)
-    expect(await clickRow(a, names[4]!), 'click row in linked list window').toBe(true)
-    await expect.poll(() => boxNow(b), { message: 'B follows row click in A', timeout: 5_000 }).toBe(names[4])
+    await startScrollWatch(a)
+    expect(await clickRow(a, names[4]!), 'click row in linked #todo list window').toBe(true)
+    await expect.poll(() => boxNow(b), { message: 'B shows item clicked in A', timeout: 5_000 }).toBe(names[4])
     await expect.poll(() => top(b), { message: 'B scrolls to item selected from A', timeout: 5_000 }).toBeGreaterThan(headerTop + 200)
-    await a.waitForTimeout(250)
-    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'list window holds header position on row click').toEqual([names[4], true])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks clicked row while staying on #todo', timeout: 5_000 }).toBe(names[4])
+    await a.evaluate(() => (window as any)._update_dom())
+    await waitFramesAt(headerTop, 6, 'list window row click: sampled frames at headerTop', a)
+    const listClickWatch = await stopScrollWatch(a)
+    expect(listClickWatch.events, 'list window row click: zero scroll events').toEqual([])
+    expect(
+      listClickWatch.frames.filter(y => Math.abs(y - headerTop) > 2),
+      'list window row click: no frame elsewhere',
+    ).toEqual([])
+    expect(await boxNow(a), 'list window keeps #todo in its box after row click').toBe('#todo')
+    expect(await stripButtons(a), 'list window shows strip buttons for marked row').toEqual([
+      ['up', 'Previous row (k)'],
+      ['down', 'Next row (j)'],
+      ['agent', 'Delegate to the agent (a)'],
+      ['done', 'Done (d)'],
+      ['snooze', 'Snooze (s)'],
+      ['cancel', 'Delete (x)'],
+      ['window', 'Linked with the other window. Unlink (w)'],
+    ])
+    expect(await snoozedListState(a), 'snoozed list stays visible on A after clicking a main row').toEqual({
+      visible: true,
+      hasRow: true,
+      marked: false,
+    })
+    // Clicking the snoozed row keeps #todo and the snoozed list on the page, marks the snoozed row, and shows Unsnooze
+    expect(await clickRow(a, '#ow_snz'), 'click row in #todo-only snoozed list').toBe(true)
+    await expect.poll(() => boxNow(b), { message: 'B shows snoozed item clicked in A', timeout: 5_000 }).toBe('#ow_snz')
+    await expect.poll(() => snoozedListState(a), { message: 'snoozed list stays visible and marks #ow_snz', timeout: 5_000 }).toEqual({
+      visible: true,
+      hasRow: true,
+      marked: true,
+    })
+    expect(await boxNow(a), 'list window keeps #todo after clicking snoozed row').toBe('#todo')
+    expect(
+      (await stripButtons(a)).find(([cls]) => cls == 'snooze'),
+      'strip shows Unsnooze for marked snoozed row',
+    ).toEqual(['snooze', 'Unsnooze (s)'])
+    // Reloading A (list window) while B stays open on the snoozed item restores the visible mark and Unsnooze
+    // without touching B; toggling the snoozed widget off and back on ('' -> #todo) keeps them too
+    await a.reload()
+    await loaded(a)
+    await expect.poll(() => peers(a), { message: 'reloaded list window rediscovers B', timeout: 15_000 }).toBe(1)
+    await expect.poll(() => isOn(a), { message: 'reloaded list window keeps link on', timeout: 5_000 }).toBe(true)
+    if ((await boxNow(a)) !== '#todo') await userSet(a, '#todo')
+    await expect.poll(() => snoozedListState(a), { message: 'reloaded list window marks #ow_snz without touching B', timeout: 10_000 }).toEqual({
+      visible: true,
+      hasRow: true,
+      marked: true,
+    })
+    await expect
+      .poll(async () => (await stripButtons(a)).find(([cls]) => cls == 'snooze'), {
+        message: 'reloaded list window shows Unsnooze button for #ow_snz',
+        timeout: 5_000,
+      })
+      .toEqual(['snooze', 'Unsnooze (s)'])
+    await userSet(a, '')
+    await expect.poll(() => snoozedListState(a), { message: 'clearing box hides #todo-only snoozed list', timeout: 5_000 }).toEqual({
+      visible: false,
+      hasRow: false,
+      marked: false,
+    })
+    await userSet(a, '#todo')
+    await expect.poll(() => snoozedListState(a), { message: 'returning to #todo restores #ow_snz mark without touching B', timeout: 5_000 }).toEqual({
+      visible: true,
+      hasRow: true,
+      marked: true,
+    })
+    await expect
+      .poll(async () => (await stripButtons(a)).find(([cls]) => cls == 'snooze'), {
+        message: 'returning to #todo restores Unsnooze button for #ow_snz',
+        timeout: 5_000,
+      })
+      .toEqual(['snooze', 'Unsnooze (s)'])
+    expect(await boxNow(b), 'other window stays on #ow_snz across A reload and widget return').toBe('#ow_snz')
+    await resetScroll(a, headerTop)
+    // Return mark to names[4] for the following stretches
+    expect(await clickRow(a, names[4]!), 'click names[4] again').toBe(true)
+    await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe(names[4])
+    await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[4])
 
     // Second click on selected row while linked opens no editor and keeps position
     expect(await clickRow(a, names[4]!), 'second click on selected row').toBe(true)
@@ -6628,18 +6763,25 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       'second click on selected row opens no editor and holds scroll',
     ).toEqual([false, headerTop])
 
-    // j moves to next row in B while A stays at headerTop
+    // j moves to next row in B while A stays on #todo at headerTop with no scrollTo shadow
     await unfocus(a)
     await a.keyboard.press('j')
     await expect.poll(() => boxNow(b), { message: 'B follows j in A', timeout: 5_000 }).toBe(names[5])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks next row on j', timeout: 5_000 }).toBe(names[5])
     await a.waitForTimeout(200)
-    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'list window holds header position on j').toEqual([names[5], true])
+    expect(
+      [
+        await boxNow(a),
+        Math.abs((await top(a)) - headerTop) <= 2,
+        await a.evaluate(() => Object.prototype.hasOwnProperty.call(document.body, 'scrollTo')),
+      ],
+      'list window keeps #todo, headerTop, and zero scrollTo shadow on j',
+    ).toEqual(['#todo', true, false])
 
-    // Wheel during active hold ends the hold and moves A; clicking a row still in view keeps A right
-    // where it was, with zero scroll events and every sampled animation frame at that position
+    // Wheel moves A freely; clicking a row still in view keeps A right where it was, with zero scroll events
     await a.mouse.move(400, 300)
     await a.mouse.wheel(0, 160)
-    await expect.poll(() => top(a), { message: 'wheel ends scroll hold and moves list window', timeout: 5_000 }).toBeGreaterThan(headerTop + 80)
+    await expect.poll(() => top(a), { message: 'wheel moves list window', timeout: 5_000 }).toBeGreaterThan(headerTop + 80)
     await expect
       .poll(
         () =>
@@ -6677,93 +6819,12 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       stayWatch.frames.filter(y => Math.abs(y - scrolledTop) > 2),
       'scrolled in-view click: every animation frame stays at scrolledTop',
     ).toEqual([])
-    expect(Math.abs((await top(a)) - scrolledTop) <= 2, 'clicking a row still in view after wheel keeps list window where it was').toBe(true)
-
-    // 3b. Wheel right after a row click, BEFORE the page's update_dom().then(scrollToTarget):
-    //     hold ends on the wheel, targeted swallow stays armed for the selection's automatic scroll,
-    //     catches it when layout runs, drains itself, and leaves the list where the wheel put it.
-    //     Gate rAF briefly across the click -> real mouse.wheel CDP round-trip so the trusted wheel
-    //     reliably lands before selectItem's two-frame update_dom().then(scrollToTarget) resolves.
-    await resetScroll(a, headerTop)
-    await a.mouse.move(400, 300)
-    await a.evaluate(() => {
-      const w = window as any
-      w.__ow_dom_done = false
-      w.__ow_wheel_before_dom = null
-      w.__ow_wheel_saw_swallow = null
-      const origRaf = window.requestAnimationFrame.bind(window)
-      const held: FrameRequestCallback[] = []
-      let released = false
-      const release = () => {
-        if (released) return
-        released = true
-        clearTimeout(safety)
-        window.requestAnimationFrame = origRaf
-        origRaf(() => {
-          for (const cb of held.splice(0)) origRaf(cb)
-        })
-      }
-      const safety = setTimeout(release, 500)
-      window.requestAnimationFrame = (cb: FrameRequestCallback) => {
-        if (released) return origRaf(cb)
-        held.push(cb)
-        return held.length
-      }
-      window.addEventListener(
-        'wheel',
-        () => {
-          w.__ow_wheel_before_dom = !w.__ow_dom_done
-          w.__ow_wheel_saw_swallow = Object.prototype.hasOwnProperty.call(document.body, 'scrollTo')
-          release()
-        },
-        { capture: true, once: true },
-      )
-    })
-    const wheelRow = names[10]!
-    expect(
-      await a.evaluate(name => {
-        const w = window as any
-        const id = window._item(name, true)?.id
-        const row = [...document.querySelectorAll('.todoer-widget .list-item-container')].find(r => r.getAttribute('data-id') == id)
-        ;(row?.querySelector('.list-item') as HTMLElement | null)?.click()
-        w._update_dom().then(() => {
-          w.__ow_dom_done = true
-        })
-        return !!row
-      }, wheelRow),
-      'click row for wheel-before-layout witness',
-    ).toBe(true)
-    await a.mouse.wheel(0, 220)
-    await expect.poll(() => a.evaluate(() => (window as any).__ow_dom_done), { message: 'layout callback finished after wheel', timeout: 5_000 }).toBe(true)
-    await expect.poll(() => boxNow(b), { message: 'B follows click interrupted by wheel', timeout: 5_000 }).toBe(wheelRow)
-    await expect
-      .poll(() => a.evaluate(() => !Object.prototype.hasOwnProperty.call(document.body, 'scrollTo')), {
-        message: 'targeted swallow drains itself after catching interrupted selection scroll',
-        timeout: 5_000,
-      })
-      .toBe(true)
-    await a.evaluate(() => (window as any)._update_dom())
-    const wheelProof = await a.evaluate(name => {
-      const w = window as any
-      const el = document.getElementById('super-container-' + window._item(name, true)!.id) as HTMLElement
-      return {
-        beforeDom: w.__ow_wheel_before_dom as boolean | null,
-        sawSwallow: w.__ow_wheel_saw_swallow as boolean | null,
-        top: Math.round(document.body.scrollTop),
-        targetY: Math.round(el.offsetTop - visualViewport!.height / 4),
-        holdActive: !!w._todoer_windows?.hold,
-      }
-    }, wheelRow)
-    expect([wheelProof.beforeDom, wheelProof.sawSwallow, wheelProof.holdActive], 'wheel landed before layout with swallow armed and ended hold').toEqual([
+    expect([await boxNow(a), Math.abs((await top(a)) - scrolledTop) <= 2], 'clicking in-view row after wheel keeps #todo and position').toEqual([
+      '#todo',
       true,
-      true,
-      false,
     ])
-    expect(wheelProof.targetY, 'interrupted item sits below viewport so scrollToTarget had to be swallowed').toBeGreaterThan(headerTop + 400)
-    expect(wheelProof.top, 'list window stays where the wheel scrolled it (not pulled back to headerTop)').toBeGreaterThan(headerTop + 100)
-    expect(wheelProof.top, 'list window stays where the wheel scrolled it (not jumped to target item)').toBeLessThan(wheelProof.targetY - 100)
 
-    // 4a. Busy other window (900 ms > old 300 ms ack): two quick selections reach B, A stays in place, B is not forgotten
+    // 4a. Busy other window (900 ms > old 300 ms ack): two quick selections reach B, A keeps #todo and place, B is not forgotten
     await resetScroll(a, headerTop)
     const busyB = b.evaluate(() => {
       const start = Date.now()
@@ -6778,25 +6839,15 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await unfocus(a)
     await a.keyboard.press('j')
     await a.waitForTimeout(380) // ~610 ms into B's busy period (past old 300 ms timeout for both selections)
-    expect([await boxNow(a), await peers(a), Math.abs((await top(a)) - headerTop) <= 2], 'while B is busy, A keeps B as peer and holds position').toEqual([names[6], 1, true])
+    expect(
+      [await boxNow(a), await selectedRowName(a), await peers(a), Math.abs((await top(a)) - headerTop) <= 2],
+      'while B is busy, A keeps #todo, marks row 6, keeps B as peer, and holds position',
+    ).toEqual(['#todo', names[6], 1, true])
     const [busyStart, busyEnd] = await busyB
     expect(clickAt >= busyStart && clickAt < busyEnd, 'first click happened while B was actually busy').toBe(true)
     await expect.poll(() => boxNow(b), { message: 'busy B ends on the second quick selection', timeout: 8_000 }).toBe(names[6])
     await a.waitForTimeout(300)
     expect([await peers(a), Math.abs((await top(a)) - headerTop) <= 2], 'after busy B catches up, peer stays and A holds position').toEqual([1, true])
-
-    // 4b. Busy list page for 1.8 s (> SEND_HOLD_MS = 1500) right after a row click: stepped hold still keeps A in place
-    await resetScroll(a, headerTop)
-    await a.evaluate(name => {
-      const id = window._item(name, true)?.id
-      const row = [...document.querySelectorAll('.todoer-widget .list-item-container')].find(r => r.getAttribute('data-id') == id)
-      ;(row?.querySelector('.list-item') as HTMLElement | null)?.click()
-      const t = performance.now()
-      while (performance.now() - t < 1800);
-    }, names[8]!)
-    await expect.poll(() => boxNow(b), { message: 'B follows click before 1.8 s stall in A', timeout: 8_000 }).toBe(names[8])
-    await a.waitForTimeout(400)
-    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'stepped hold keeps A in place after 1.8 s main-thread stall').toEqual([names[8], true])
 
     // 4c. Twelve quick presses of j with NO pause: A stays in place with selected row in view, B ends on last, zero errors
     await resetScroll(a, headerTop)
@@ -6817,16 +6868,12 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       )
       .toBe(true)
     const afterQuickTop = await top(a)
-    const targetItemY = await a.evaluate(() => Math.round((document.querySelector('.super-container.target') as HTMLElement).offsetTop))
-    expect(afterQuickTop, 'twelve quick j presses stay far above target item position').toBeLessThan(targetItemY - 100)
+    expect(await boxNow(a), 'twelve quick j presses keep #todo in list window box').toBe('#todo')
+    expect(await a.evaluate(() => !!document.querySelector('.super-container.target')), 'list window has no target item').toBe(false)
     expect(afterQuickTop, 'twelve quick j presses moved past headerTop to put row at 80% depth').toBeGreaterThan(headerTop)
 
     // Step a few more rows down then k back up to a row that shows from the top and is out of view wherever the
-    // walk down ended: list window returns to headerTop. (The walk down ends at one of three places, by which
-    // press's page update comes before the next press; from the highest of them names[2] stands exactly at the
-    // window's upper edge, where it counts as in view and the window rightly stays. names[1] is above all three.
-    // The walk back starts once row 18 is clear of the button strip: a row is marked before its scroll is
-    // decided, and a walk back begun at the old place would supersede that scroll and find names[1] in view there)
+    // walk down ended: list window returns to headerTop
     for (let i = 0; i < 5; i++) await a.keyboard.press('j')
     await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[18])
     await expect
@@ -6847,16 +6894,20 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
         timeout: 5_000,
       })
       .toBe(true)
+    expect(await boxNow(a), 'k walk keeps #todo in list window box').toBe('#todo')
 
-    // 4d. Listed name typed in A scrolls A and syncs to B; unlisted item opened in A stays in A alone
-    await resetScroll(a, headerTop)
-    await userSet(a, names[20]!)
-    await expect.poll(() => boxNow(b), { message: 'B shows listed name typed in A', timeout: 6_000 }).toBe(names[20])
-    await expect.poll(() => top(a), { message: 'name typed in A scrolls A to the item', timeout: 5_000 }).toBeGreaterThan(headerTop + 200)
-    await userSet(a, '#ow_unlisted')
-    await expect.poll(() => boxNow(a), { timeout: 5_000 }).toBe('#ow_unlisted')
-    await a.waitForTimeout(400)
-    expect(await boxNow(b), 'unlisted item opened in A leaves B on its selection (B has no row of it)').toBe(names[20])
+    // 4d. Target window B while A has no target (#todo): j and row click in B open there in B
+    //     and move A's mark while A keeps #todo and stays at headerTop
+    await b.bringToFront()
+    await unfocus(b)
+    await b.keyboard.press('j')
+    await expect.poll(() => boxNow(b), { message: 'j in target window B opens next item in B', timeout: 5_000 }).toBe(names[2])
+    await expect.poll(() => selectedRowName(a), { message: 'list window A moves mark to item opened by j in B', timeout: 5_000 }).toBe(names[2])
+    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'A keeps #todo and headerTop on j in B').toEqual(['#todo', true])
+    expect(await clickRow(b, names[3]!), 'click row in target window B while A has no target').toBe(true)
+    await expect.poll(() => boxNow(b), { message: 'row click in target window B opens there in B', timeout: 5_000 }).toBe(names[3])
+    await expect.poll(() => selectedRowName(a), { message: 'list window A moves mark on row click in B', timeout: 5_000 }).toBe(names[3])
+    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'A keeps #todo and headerTop on row click in B').toEqual(['#todo', true])
 
     // 5. Listed-only sync from B + flicker witness (scroll events & animation frames on A while A is in front):
     //    near row from top fires zero scroll events with one position throughout; far row fires one event straight
@@ -6867,11 +6918,11 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await a.waitForTimeout(150)
     const topBeforeB = await top(a)
 
-    // 5a. Near row in view from top opened directly in B: zero scroll events and one scrollTop across all frames in A
+    // 5a. Near row in view from top opened directly in B: zero scroll events, #todo kept, mark moved
     await startScrollWatch()
     await userSet(b, names[4]!, { scroll: true })
-    await expect.poll(() => boxNow(a), { message: 'A follows listed selection made in B', timeout: 5_000 }).toBe(names[4])
     await expect.poll(() => selectedRowName(a), { message: 'A marks row for listed selection from B', timeout: 5_000 }).toBe(names[4])
+    expect(await boxNow(a), 'A keeps #todo when B opens a listed item').toBe('#todo')
     await a.evaluate(() => (window as any)._update_dom())
     await waitFramesAt(topBeforeB, 6, 'flicker witness (near row): sampled frames at headerTop')
     const nearWatch = await stopScrollWatch()
@@ -6886,16 +6937,15 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     // 5b. Far row down the long list opened directly in B: one scroll event straight to 80% depth and no third-position frame
     await startScrollWatch()
     await userSet(b, names[22]!, { scroll: true })
-    await expect.poll(() => boxNow(a), { message: 'A follows far row opened in B', timeout: 5_000 }).toBe(names[22])
     await expect.poll(() => selectedRowName(a), { message: 'A marks far row opened in B', timeout: 5_000 }).toBe(names[22])
+    expect(await boxNow(a), 'A keeps #todo for far row opened in B').toBe('#todo')
     await expect.poll(() => top(a), { message: 'A moves down for far row from B', timeout: 5_000 }).toBeGreaterThan(headerTop + 100)
     const farTop = await top(a)
     await a.evaluate(() => (window as any)._update_dom())
     await waitFramesAt(farTop, 3, 'flicker witness (far row): sampled frames at destination')
     const farWatch = await stopScrollWatch()
     const farBox = await selectedRowBox(a)
-    const farTargetY = await a.evaluate(() => Math.round((document.querySelector('.super-container.target') as HTMLElement).offsetTop))
-    expect(farTop, 'far row from B stays far above target item body').toBeLessThan(farTargetY - 100)
+    expect(await a.evaluate(() => !!document.querySelector('.super-container.target')), 'far row from B keeps list window without target').toBe(false)
     expect(
       !!farBox && farBox.bottom <= farBox.targetBottom + 3 && farBox.bottom >= farBox.targetBottom - 4,
       'far row from B places lower edge at 80% depth (or above visible button strip)',
@@ -6916,8 +6966,8 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     // 5c. Near row again opened directly in B while A is down at farTop: one scroll event back to headerTop, no third-position frame
     await startScrollWatch()
     await userSet(b, names[4]!, { scroll: true })
-    await expect.poll(() => boxNow(a), { message: 'A follows return to near row in B', timeout: 5_000 }).toBe(names[4])
     await expect.poll(() => selectedRowName(a), { message: 'A marks return to near row in B', timeout: 5_000 }).toBe(names[4])
+    expect(await boxNow(a), 'A keeps #todo on return to near row in B').toBe('#todo')
     await expect.poll(async () => Math.abs((await top(a)) - headerTop) <= 2, { message: 'A returns to headerTop for near row from B', timeout: 5_000 }).toBe(true)
     await a.evaluate(() => (window as any)._update_dom())
     await waitFramesAt(headerTop, 3, 'flicker witness (near row again): sampled frames at headerTop')
@@ -6935,95 +6985,164 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       'flicker witness (near row again from B): no animation frame at any third position',
     ).toEqual([])
 
-    // 5d. Once the hold expires, document.body has no own scrollTo shadow left behind
-    await expect.poll(() => a.evaluate(() => !(window as any)._todoer_windows?.hold), { message: 'hold expires after SEND_HOLD_MS', timeout: 5_000 }).toBe(true)
+    // 5d. No hold and no body.scrollTo shadow on list window
     expect(
-      await a.evaluate(() => Object.prototype.hasOwnProperty.call(document.body, 'scrollTo')),
-      'body has no own scrollTo shadow after hold ends',
-    ).toBe(false)
+      await a.evaluate(() => [!(window as any)._todoer_windows?.hold, Object.prototype.hasOwnProperty.call(document.body, 'scrollTo')]),
+      'list window has neither hold nor body.scrollTo shadow',
+    ).toEqual([true, false])
 
-    // Unlisted item opened in B leaves A's box, marked row, and scroll untouched, and j in A continues from its row
+    // Unlisted item opened in B clears A's mark while keeping A's #todo box and scroll untouched
     await b.bringToFront()
     await userSet(b, '#ow_unlisted', { scroll: true })
     await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe('#ow_unlisted')
-    await a.waitForTimeout(500)
-    expect(
-      [await boxNow(a), await selectedRowName(a), Math.abs((await top(a)) - topBeforeB) <= 2],
-      'unlisted item opened in B leaves list window A box, row, and place untouched',
-    ).toEqual([names[4], names[4], true])
-    await a.bringToFront()
-    await unfocus(a)
-    await a.keyboard.press('j')
-    await expect.poll(() => selectedRowName(a), { message: 'j in A continues from its kept row after B opened an unlisted item', timeout: 5_000 }).toBe(names[5])
-    await expect.poll(() => boxNow(b), { message: 'B follows j from A kept row', timeout: 5_000 }).toBe(names[5])
+    await expect.poll(() => selectedRowName(a), { message: 'unlisted item in B clears A mark', timeout: 5_000 }).toBeNull()
+    expect([await boxNow(a), Math.abs((await top(a)) - topBeforeB) <= 2], 'unlisted item in B keeps A box #todo and place').toEqual(['#todo', true])
 
-    await b.bringToFront()
-    await userSet(b, 'plain search words')
-    await a.waitForTimeout(300)
-    expect([await boxNow(b), await boxNow(a)], 'plain search text stays in B').toEqual(['plain search words', names[5]])
-
-    // Child created under a todo in B (Shift+Enter) has no todoer row -> A never takes it even after save and arrival
+    // Plain search (no target) in B tells "none" -> clears A's mark and row buttons while keeping A's #todo box
     await userSet(b, names[5]!, { scroll: true })
-    await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe(names[5])
+    await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[5])
+    await userSet(b, 'plain search words')
+    await expect.poll(() => selectedRowName(a), { message: 'plain search in B tells none and clears A mark', timeout: 5_000 }).toBeNull()
+    expect([await boxNow(b), await boxNow(a)], 'plain search text stays in B and #todo stays in A').toEqual(['plain search words', '#todo'])
+    expect(await stripButtons(a), 'clearing partner target drops row buttons in A leaving window button alone').toEqual([
+      ['window', 'Linked with the other window. Unlink (w)'],
+    ])
+
+    // Child created under a todo in B (Shift+Enter) has no todoer row -> clears A's mark while keeping #todo and headerTop
+    await userSet(b, names[5]!, { scroll: true })
+    await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[5])
     await focusMindbox(b)
     await b.keyboard.press('Shift+Enter')
     const childB = `${names[5]}/0`
     await expect.poll(() => boxNow(b), { message: 'Shift+Enter creates child in B', timeout: 5_000 }).toBe(childB)
     await expect.poll(() => savedId(b, childB), { message: 'child created in B is saved', timeout: 15_000 }).toBeTruthy()
     await expect.poll(() => a.evaluate(n => !!window._item(n, true), childB), { message: 'child created in B arrives in A store', timeout: 15_000 }).toBe(true)
-    await a.waitForTimeout(500)
-    expect(
-      [await boxNow(a), await selectedRowName(a), Math.abs((await top(a)) - headerTop) <= 2],
-      'new child created in B has no row and is not taken by A',
-    ).toEqual([names[5], names[5], true])
+    await expect.poll(() => selectedRowName(a), { message: 'new child in B has no row so A clears mark', timeout: 5_000 }).toBeNull()
+    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'new child in B keeps A box #todo and headerTop').toEqual(['#todo', true])
     await b.keyboard.press('Escape')
     await expect.poll(() => b.evaluate(n => !(window._item(n, true) as any)?.editing, childB), { timeout: 5_000 }).toBe(true)
 
-    // New todo created in B (unsaved -> saved -> row renders in A): told once saved and taken by A once its row is there
+    // New todo created in B (unsaved -> saved -> row renders in A): told once saved and marked in A while A keeps #todo
     await b.evaluate(() => {
       window._create('#ow_new_b\n#todo todo created in other window')
       ;(window._item('#ow_new_b', true) as any)?.select()
     })
     await expect.poll(() => boxNow(b), { message: 'new todo selected in B', timeout: 5_000 }).toBe('#ow_new_b')
     await expect.poll(() => savedId(b, '#ow_new_b'), { message: 'new todo created in B is saved', timeout: 15_000 }).toBeTruthy()
-    await expect.poll(() => boxNow(a), { message: 'A follows new todo created in B once saved and rendered', timeout: 15_000 }).toBe('#ow_new_b')
-    await expect.poll(() => selectedRowName(a), { message: 'A marks row of new todo created in B', timeout: 5_000 }).toBe('#ow_new_b')
+    await expect.poll(() => selectedRowName(a), { message: 'A marks row of new todo created in B once saved and rendered', timeout: 15_000 }).toBe('#ow_new_b')
     await a.waitForTimeout(200)
-    expect(Math.abs((await top(a)) - headerTop) <= 2, 'list window keeps scroll position for new todo from B').toBe(true)
+    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'list window keeps #todo and scroll position for new todo from B').toEqual([
+      '#todo',
+      true,
+    ])
 
-    // 6. New child (Shift+Enter) in the list window A has no row -> NOT told to B even once saved
+    // 6. Both windows have targets: target window ignores partner navigation; a real pointer click on a row in A
+    //    gives A's target up to #todo (marking the row, keeping snoozed list visible and holding against no-target
+    //    scroll-up) and shows the item in B. For a nonempty release query (#todo), giving up a finalized target
+    //    adds a history step and Back returns to it, while a typed, unfinalized target is replaced with no step.
+    const pointerClickRow = async (page: Page, name: string) => {
+      const rect = await page.evaluate(name => {
+        const id = window._item(name, true)?.id
+        const row = [...document.querySelectorAll('.todoer-widget .list-item-container')].find(
+          r => !r.closest('#cache-div, .column.hidden, .super-container.hidden') && r.getAttribute('data-id') == id,
+        )
+        const box = (row?.querySelector('.list-item') as HTMLElement | null)?.getBoundingClientRect()
+        return box ? { left: box.left, top: box.top, width: box.width, height: box.height, bottom: box.bottom, inner: innerHeight } : null
+      }, name)
+      expect(!!rect && rect.width > 0 && rect.height > 0 && rect.top >= 0 && rect.bottom <= rect.inner, `row ${name} is in view for pointer click`).toBe(true)
+      await page.mouse.click(rect!.left + rect!.width / 2, rect!.top + rect!.height / 2)
+    }
+    const historyHead = (page: Page) =>
+      page.evaluate(() => {
+        const w = window as any
+        const idx = w._history_index as number
+        const e = w._history?.[idx]
+        return { index: idx, editorText: (e?.editorText ?? null) as string | null, final: !!e?.final }
+      })
+    const priorFinal = names[16]! // distinct prior target of this window's own history
+    const priorTyped = names[17]! // distinct prior target of this window's own history
     await a.bringToFront()
-    await resetScroll(a, headerTop)
-    await focusMindbox(a)
-    await a.keyboard.press('Shift+Enter')
-    const childA = '#ow_new_b/0'
-    await expect.poll(() => boxNow(a), { message: 'Shift+Enter creates child in A', timeout: 5_000 }).toBe(childA)
-    await expect.poll(() => savedId(a, childA), { message: 'child created in A is saved', timeout: 15_000 }).toBeTruthy()
-    await a.waitForTimeout(500)
-    expect(await boxNow(b), 'new child created in A has no row in B: B keeps its selection').toBe('#ow_new_b')
-    await a.keyboard.press('Escape')
-    await expect.poll(() => a.evaluate(n => !(window._item(n, true) as any)?.editing, childA), { timeout: 5_000 }).toBe(true)
+    await asUser(a, n => void (window._item(n, true) as any)?.select(), priorFinal)
+    await asUser(b, n => void (window._item(n, true) as any)?.select(), names[5]!)
+    await expect.poll(() => boxNow(a), { timeout: 5_000 }).toBe(priorFinal)
+    await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe(names[5])
+    await expect.poll(() => historyHead(a), { message: 'finalized prior target stands in A history', timeout: 5_000 }).toMatchObject({
+      editorText: priorFinal,
+      final: true,
+    })
+    await expect.poll(() => snoozedListState(a), { timeout: 5_000 }).toEqual({ visible: false, hasRow: false, marked: false })
+    // Direct navigation in B leaves target window A untouched
+    await userSet(b, names[6]!, { scroll: true })
+    await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe(names[6])
     await a.waitForTimeout(300)
-
-    // 7. Done by its key (d) in A: next row goes to B and A stays at headerTop
+    expect(await boxNow(a), 'target window A ignores unasked navigation in B').toBe(priorFinal)
+    // Real pointer click on row names[8] in A while both windows have targets -> A drops finalized target to #todo as a new history step, B shows names[8]
     await resetScroll(a, headerTop)
-    expect(await clickRow(a, names[3]!), 'select row before done key').toBe(true)
+    const idxBeforeFinalDrop = (await historyHead(a)).index
+    await pointerClickRow(a, names[8]!)
+    await expect.poll(() => boxNow(a), { message: 'both-targets click sets A box to #todo', timeout: 5_000 }).toBe('#todo')
+    await expect.poll(() => boxNow(b), { message: 'both-targets click shows item in B', timeout: 5_000 }).toBe(names[8])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks clicked row after dropping target to #todo', timeout: 5_000 }).toBe(names[8])
+    await expect.poll(() => snoozedListState(a), { message: 'snoozed list reappears on A after dropping target to #todo', timeout: 5_000 }).toEqual({
+      visible: true,
+      hasRow: true,
+      marked: false,
+    })
+    await a.waitForTimeout(200)
+    expect(Math.abs((await top(a)) - headerTop) <= 2, 'both-targets click holds A at headerTop against no-target scroll-up').toBe(true)
+    await expect
+      .poll(() => historyHead(a), { message: 'giving up a finalized target increments _history_index by one step', timeout: 5_000 })
+      .toMatchObject({ index: idxBeforeFinalDrop + 1, editorText: '#todo' })
+    // Back in A returns A to the distinct finalized prior target
+    await a.goBack()
+    await expect.poll(() => boxNow(a), { message: 'Back in A returns to prior finalized target item', timeout: 5_000 }).toBe(priorFinal)
+    expect((await historyHead(a)).index, 'Back returns _history_index to prior finalized target').toBe(idxBeforeFinalDrop)
+    // Typed, unfinalized target in A: giving it up via row click replaces that history entry (no new step, per app writeMode)
+    await focusMindbox(a)
+    await mindbox(a).fill(priorTyped)
+    await expect.poll(() => historyHead(a), { message: 'typed unfinalized target settles in A history', timeout: 5_000 }).toMatchObject({
+      editorText: priorTyped,
+      final: false,
+    })
+    await expect.poll(() => a.evaluate(() => !!document.querySelector('.super-container.target')), { timeout: 5_000 }).toBe(true)
+    await resetScroll(a, headerTop)
+    const beforeTypedDrop = await historyHead(a)
+    expect(beforeTypedDrop, 'typed target stays unfinalized after returning to headerTop').toMatchObject({ editorText: priorTyped, final: false })
+    const idxBeforeTypedDrop = beforeTypedDrop.index
+    await pointerClickRow(a, names[4]!)
+    await expect.poll(() => boxNow(a), { message: 'giving up typed unfinalized target sets A box to #todo', timeout: 5_000 }).toBe('#todo')
+    await expect.poll(() => boxNow(b), { message: 'giving up typed unfinalized target shows clicked row in B', timeout: 5_000 }).toBe(names[4])
+    await expect.poll(() => selectedRowName(a), { message: 'A marks clicked row after giving up typed unfinalized target', timeout: 5_000 }).toBe(names[4])
+    await expect
+      .poll(() => historyHead(a), {
+        message: 'giving up a typed unfinalized target adds no history step (replaces the unfinalized entry)',
+        timeout: 5_000,
+      })
+      .toMatchObject({ index: idxBeforeTypedDrop, editorText: '#todo' })
+
+    // 7. Clicking the Done button on A's strip acts on the marked row while A keeps #todo and headerTop,
+    //    marks the next row in A, and shows the next row in B
+    await resetScroll(a, headerTop)
+    expect(await clickRow(a, names[3]!), 'select row before clicking Done strip button').toBe(true)
     await expect.poll(() => selectedRowName(a), { timeout: 5_000 }).toBe(names[3])
-    await expect.poll(() => a.evaluate(() => !!document.querySelector('.container.target')?.getAttribute('data-selection')), { timeout: 5_000 }).toBe(true)
     await expect.poll(() => boxNow(b), { timeout: 5_000 }).toBe(names[3])
     const rowsBeforeDone = (await rowNames(a)) as string[]
     const nextAfterDone = rowsBeforeDone[rowsBeforeDone.indexOf(names[3]!) + 1]!
-    await unfocus(a)
-    await a.keyboard.press('d')
-    await expect.poll(async () => (await rowNames(a)).length, { message: 'd removes completed row', timeout: 10_000 }).toBe(rowsBeforeDone.length - 1)
-    await expect.poll(() => boxNow(a), { message: 'd selects next row in A', timeout: 5_000 }).toBe(nextAfterDone)
-    await expect.poll(() => boxNow(b), { message: 'd sends next row to B', timeout: 5_000 }).toBe(nextAfterDone)
+    await a.locator('.todoer-bin-buttons button.done').click()
+    await expect.poll(async () => (await rowNames(a)).length, { message: 'Done strip button removes completed row', timeout: 10_000 }).toBe(rowsBeforeDone.length - 1)
+    await expect.poll(() => selectedRowName(a), { message: 'Done strip button marks next row in A', timeout: 5_000 }).toBe(nextAfterDone)
+    await expect.poll(() => boxNow(b), { message: 'Done strip button sends next row to B', timeout: 5_000 }).toBe(nextAfterDone)
     await a.waitForTimeout(250)
-    expect(Math.abs((await top(a)) - headerTop) <= 2, 'list window keeps header position after done key').toBe(true)
+    expect([await boxNow(a), Math.abs((await top(a)) - headerTop) <= 2], 'list window keeps #todo and headerTop after clicking Done strip button').toEqual([
+      '#todo',
+      true,
+    ])
 
-    // 7b. Fluid roles: with the link still on, a real click on an in-view row in the second window B
-    //     shows the item inside A's viewport (even with A's own row) while B's list stays right where
-    //     it was (zero scroll events and every sampled frame at headerTopB)
+    // 7b. Fluid roles: with both windows on targets, a real click on an in-view row in B makes B the list
+    //     (#todo at headerTopB) and shows the item inside A's viewport (even with A's own row); a second click
+    //     in B (now on #todo) fires zero scroll events and every sampled frame stays at headerTopB
+    await a.evaluate(n => (window._item(n, true) as any)?.select(), names[9]!)
+    await expect.poll(() => boxNow(a), { timeout: 5_000 }).toBe(names[9])
     await b.bringToFront()
     const headerTopB = await b.evaluate(() => Math.round((document.querySelector('.header') as HTMLElement).offsetTop))
     await resetScroll(b, headerTopB)
@@ -7036,8 +7155,8 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     const bRowId = await b.evaluate(name => window._item(name, true)!.id, bRow)
     const bClickBox = await b.locator(`.todoer-widget .list-item-container[data-id="${bRowId}"] .list-item`).boundingBox()
     expect(bClickBox, 'row clicked in second window B has a bounding box').toBeTruthy()
-    await startScrollWatch(b)
     await b.mouse.click(bClickBox!.x + bClickBox!.width / 2, bClickBox!.y + bClickBox!.height / 2)
+    await expect.poll(() => boxNow(b), { message: 'both-targets click in B sets B to #todo', timeout: 5_000 }).toBe('#todo')
     await expect.poll(() => boxNow(a), { message: 'first window A shows item clicked in second window B', timeout: 5_000 }).toBe(bRow)
     await expect
       .poll(
@@ -7052,6 +7171,17 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       )
       .toBe(true)
     await expect.poll(() => selectedRowName(b), { message: 'second window B marks its clicked row', timeout: 5_000 }).toBe(bRow)
+    await b.waitForTimeout(200)
+    expect(Math.abs((await top(b)) - headerTopB) <= 2, 'second window B stays at headerTopB after dropping target to #todo').toBe(true)
+    // Next click in B (now on #todo): zero scroll events and every sampled frame at headerTopB
+    const bRow2 = names[7]!
+    const bRow2Id = await b.evaluate(name => window._item(name, true)!.id, bRow2)
+    const bClickBox2 = await b.locator(`.todoer-widget .list-item-container[data-id="${bRow2Id}"] .list-item`).boundingBox()
+    expect(bClickBox2, 'second row clicked in B has a bounding box').toBeTruthy()
+    await startScrollWatch(b)
+    await b.mouse.click(bClickBox2!.x + bClickBox2!.width / 2, bClickBox2!.y + bClickBox2!.height / 2)
+    await expect.poll(() => boxNow(a), { message: 'A shows second item clicked in B', timeout: 5_000 }).toBe(bRow2)
+    await expect.poll(() => selectedRowName(b), { message: 'B marks second clicked row', timeout: 5_000 }).toBe(bRow2)
     await b.evaluate(() => (window as any)._update_dom())
     await waitFrames(6, 'second window row click: animation frames sampled', b)
     const bStayWatch = await stopScrollWatch(b)
@@ -7060,7 +7190,7 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
       bStayWatch.frames.filter(y => Math.abs(y - headerTopB) > 2),
       'second window row click: every animation frame in B stays at headerTopB',
     ).toEqual([])
-    expect(Math.abs((await top(b)) - headerTopB) <= 2, 'second window B stays where its list was').toBe(true)
+    expect([await boxNow(b), Math.abs((await top(b)) - headerTopB) <= 2], 'second window B keeps #todo and headerTopB').toEqual(['#todo', true])
 
     // 8. Close B: selection shown in A after all; button stays whole-lit while on; timestamp survives reload; w turns off & hides button
     await allSaved(a)
@@ -7082,7 +7212,7 @@ test('two windows keep one selection with w: fluid roles hold scroll on row clic
     await allSaved(a)
     await a.reload()
     await loaded(a)
-    await expect.poll(() => a.locator('.todoer-widget .list-item-container').count(), { timeout: 30_000 }).toBe(N)
+    await expect.poll(async () => (await rowNames(a)).length, { timeout: 30_000 }).toBe(N)
     expect(await on(a), 'owned link record survives reload').toBe(keptSwitch)
     await expect
       .poll(() => windowButton(a), { message: 'whole-lit button stays visible after reload while link is on', timeout: 5_000 })
