@@ -71,12 +71,14 @@ const WINDOW_USER: TestUser = { uid: 'tasks_window_e2e', displayName: 'Tasks Win
 const VAULT_LINK_USER: TestUser = { uid: 'tasks_vault_link_e2e', displayName: 'Tasks Vault Link', email: 'tasks_vault_link@e2e.test' }
 // the shared _chat_command row's account: #chat installed alone with a made-up #chat/stub command
 const CHAT_CMD_USER: TestUser = { uid: 'tasks_chat_cmd_e2e', displayName: 'Tasks Chat Cmd', email: 'tasks_chat_cmd@e2e.test' }
+// the snooze-last-choice row's own account: #todoer installed alone for immediate s+Enter & reload
+const SNOOZE_LAST_USER: TestUser = { uid: 'tasks_snooze_last_e2e', displayName: 'Tasks Snooze Last', email: 'tasks_snooze_last@e2e.test' }
 
 type Command = { doc: string; wrapper: { name: string; item: Record<string, any> }; raw: Record<string, any> }
 
 async function cleanup() {
   const db = firestore()
-  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER, VAULT_LINK_USER, CHAT_CMD_USER]) {
+  for (const { uid } of [USER, LAUNCH_USER, RELOAD_USER, SWITCH_USER, WAITS_USER, NOTIFY_SW_USER, BIN_USER, SHORTCUTS_USER, WINDOW_USER, VAULT_LINK_USER, CHAT_CMD_USER, SNOOZE_LAST_USER]) {
     const docs = await db.collection('items').where('user', '==', uid).get()
     for (const doc of docs.docs) await doc.ref.delete()
     await db.collection('users').doc(uid).delete()
@@ -4054,11 +4056,12 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
     await selectRow('#rk_one')
 
-    // 7c-3. Snooze modal pointer + keys share one highlight: opening under a resting mouse cursor
-    //       lights and paints nothing; a single move within 6h lights that button at once; an arrow
-    //       key moves the highlight leaving only one stop lit and painted; editing the date field
-    //       moves the highlight to the field; moving onto 3d while the date field holds focus with
-    //       a distinct future date keeps focus and Enter still takes 3d
+    // 7c-3. Snooze modal pointer + keys share one highlight: 7c-2 remembered 6h, so opening under
+    //       a resting mouse cursor over 3h keeps 6h lit and paints nothing on 3h; a single move
+    //       within 3h lights that button at once; an arrow key moves the highlight leaving only
+    //       one stop lit and painted; editing the date field moves the highlight to the field;
+    //       moving onto 3d while the date field holds focus with a distinct future date keeps
+    //       focus and Enter still takes 3d
     const snoozePaintState = () =>
       page.evaluate(() => {
         const lit = [...document.querySelectorAll('.snooze-modal .lit')].map(el => el.textContent?.trim() || el.tagName.toLowerCase())
@@ -4074,29 +4077,29 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
         const r = el.getBoundingClientRect()
         return { x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, right: r.right, top: r.top, bottom: r.bottom }
       }, label)
-    const pt6h = await stopCenter('6h')
-    expect(pt6h, 'measured 6h button location before opening dialog').not.toBeNull()
-    await page.mouse.move(pt6h!.x, pt6h!.y)
+    const pt3h = await stopCenter('3h')
+    expect(pt3h, 'measured 3h button location before opening dialog').not.toBeNull()
+    await page.mouse.move(pt3h!.x, pt3h!.y)
     await page.keyboard.press('s')
     await expect(snoozeDlg, 's opens snooze picker under resting mouse pointer').toBeVisible({ timeout: 5_000 })
     await page.evaluate(() => (window as any)._update_dom())
     await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))
-    const live6h = await stopCenter('6h')
-    expect(live6h, 'live 6h button box exists after open').not.toBeNull()
-    expect(pt6h!.x >= live6h!.left && pt6h!.x <= live6h!.right && pt6h!.y >= live6h!.top && pt6h!.y <= live6h!.bottom, 'resting pointer sits inside 6h button').toBe(true)
-    expect(await snoozePaintState(), 'opening under resting pointer lights nothing and hover paints nothing').toEqual({
-      lit: [],
-      painted: [],
-    })
-    await page.mouse.move(pt6h!.x + 4, pt6h!.y + 2)
-    expect(await snoozePaintState(), 'single mouse move within 6h lights and paints 6h alone').toEqual({
+    const live3h = await stopCenter('3h')
+    expect(live3h, 'live 3h button box exists after open').not.toBeNull()
+    expect(pt3h!.x >= live3h!.left && pt3h!.x <= live3h!.right && pt3h!.y >= live3h!.top && pt3h!.y <= live3h!.bottom, 'resting pointer sits inside 3h button').toBe(true)
+    expect(await snoozePaintState(), 'opening under resting pointer over 3h keeps remembered 6h lit and does not paint 3h').toEqual({
       lit: ['6h'],
       painted: ['6h'],
     })
-    await page.keyboard.press('ArrowRight') // moves highlight from 6h -> 1d while pointer stays on 6h
-    expect(await snoozePaintState(), 'ArrowRight moves highlight to 1d with only one stop lit and painted').toEqual({
-      lit: ['1d'],
-      painted: ['1d'],
+    await page.mouse.move(pt3h!.x + 4, pt3h!.y + 2)
+    expect(await snoozePaintState(), 'single mouse move within 3h lights and paints 3h alone').toEqual({
+      lit: ['3h'],
+      painted: ['3h'],
+    })
+    await page.keyboard.press('ArrowRight') // moves highlight from 3h -> 6h while pointer stays on 3h
+    expect(await snoozePaintState(), 'ArrowRight moves highlight to 6h with only one stop lit and painted').toEqual({
+      lit: ['6h'],
+      painted: ['6h'],
     })
     await page.evaluate(() => {
       const inp = document.querySelector('.snooze-modal .custom input') as HTMLInputElement
@@ -4107,7 +4110,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
       // `input` alone: an editable date field can hold `change` back until it loses the focus (WebKit)
       inp.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    expect(await snoozePaintState(), 'editing the date field moves the highlight to the field and unpaints 1d').toEqual({
+    expect(await snoozePaintState(), 'editing the date field moves the highlight to the field and unpaints 6h').toEqual({
       lit: ['input'],
       painted: [],
     })
@@ -7833,6 +7836,193 @@ test('shared _chat_command sets mindbox_text on first frame, targets and scrolls
     await expect.poll(() => savedId(page, '#chat/stub/2'), { timeout: 30_000 }).toBeTruthy()
 
     expect(errors, 'no console errors or pageerrors in _chat_command row').toEqual([])
+  } finally {
+    await context.close()
+  }
+})
+
+// SNOOZE DIALOG LAST CHOICE: choosing a time button via real keys (s, arrows, Enter) remembers it
+// on this device so pressing s and immediately Enter on the auto-selected next todo repeats the
+// same snooze and advances again, and after a page reload s opens with the same button already lit
+test('snooze dialog remembers the last choice across immediate s+Enter and page reload', async ({ browser }) => {
+  const db = firestore()
+  const stale = await db.collection('items').where('user', '==', SNOOZE_LAST_USER.uid).get()
+  for (const doc of stale.docs) await doc.ref.delete()
+  await db.collection('users').doc(SNOOZE_LAST_USER.uid).delete()
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: false })
+  const page = await context.newPage()
+  const errors: string[] = []
+  const watchPage = (p: Page, tag: string) => {
+    p.on('dialog', dialog => void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss()))
+    p.on('console', msg => void (msg.type() == 'error' && !/ERR_NAME_NOT_RESOLVED|#template\/example/.test(msg.text()) && errors.push(`${tag}: ${msg.text()}`)))
+    p.on('pageerror', err => void errors.push(`${tag} pageerror: ${err.message}`))
+  }
+  watchPage(page, 'main')
+  try {
+    expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+    await page.addInitScript(() => localStorage.setItem('mindpage_github_token', 'e2e-local'))
+    await signIn(page, SNOOZE_LAST_USER)
+    await enterPhrase(page, /Choose a .*secret phrase/, PHRASE, 'Continue')
+    await enterPhrase(page, /Confirm your new secret phrase/, PHRASE, 'Confirm')
+    await waitForApp(page)
+    expect(await install(page, 'todoer'), '/_install todoer').toBeNull()
+    const saved = () =>
+      expect
+        .poll(() => page.evaluate(() => window.__items.every(item => item.savedId && !item.saving)), { message: 'all items saved', timeout: 60_000 })
+        .toBe(true)
+    await saved()
+    await page.reload()
+    await loaded(page)
+    errors.length = 0
+
+    await page.evaluate(() => (window._item('#todoer') as any).eval('create_pinned_item()'))
+    await expect.poll(() => page.locator('.todoer-widget').count(), { message: 'both todoer widgets mounted', timeout: 30_000 }).toBe(2)
+
+    for (const text of ['#sl_one\n#todo first snooze item', '#sl_two\n#todo second snooze item', '#sl_three\n#todo third snooze item']) {
+      await page.evaluate(t => void window._create(t), text)
+    }
+    await saved()
+
+    const mainRowNames = (p: Page = page) =>
+      p.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find(
+          (w: any) => !w.closest('#cache-div, .column.hidden, .super-container.hidden') && !w._snoozed && !w._delegated,
+        )
+        return [...(main?.querySelectorAll('.list > .list-item-container[data-id]') ?? [])].map(
+          r => window._item(r.getAttribute('data-id')!, true)?.name ?? null,
+        )
+      })
+    const boxNow = (p: Page = page) => p.evaluate(() => ((window as any).MindBox.get() as string).trim())
+    const selectRow = async (name: string, p: Page = page) => {
+      await userSet(p, name)
+      await expect.poll(() => boxNow(p), { message: `selected ${name}`, timeout: 5_000 }).toBe(name)
+      await p.evaluate(() => (document.activeElement as HTMLElement | null)?.blur?.())
+    }
+    const snoozePaintState = (p: Page = page) =>
+      p.evaluate(() => {
+        const lit = [...document.querySelectorAll('.snooze-modal .lit')].map(el => el.textContent?.trim() || el.tagName.toLowerCase())
+        const painted = [...document.querySelectorAll('.snooze-modal .button')]
+          .filter(el => getComputedStyle(el).backgroundColor === 'rgb(85, 153, 255)')
+          .map(el => el.textContent?.trim() ?? '')
+        const notifyChecked = !!(document.querySelector('.snooze-modal .notify input') as HTMLInputElement | null)?.checked
+        return { lit, painted, notifyChecked }
+      })
+
+    await expect
+      .poll(() => mainRowNames().then(r => ['#sl_one', '#sl_two', '#sl_three'].every(n => r.includes(n))), {
+        message: 'all three todos listed in main widget',
+        timeout: 15_000,
+      })
+      .toBe(true)
+    const initialRows = (await mainRowNames()).filter((n): n is string => !!n)
+    expect(initialRows.length, 'at least three todos in main list').toBeGreaterThanOrEqual(3)
+    const [first, second, third] = initialRows as [string, string, string]
+
+    // Open a second window on the same account BEFORE the first choice so it stands open beside
+    // the first window and is never reloaded after the choice (also opens once while empty so a
+    // per-page cached reader would hold nothing)
+    const peer = await context.newPage()
+    watchPage(peer, 'peer')
+    expect(await interceptMindItems(peer), 'mind.items local checkout on peer window').toBe(true)
+    await peer.goto(page.url().replace(/[?#].*$/, ''))
+    await loaded(peer)
+    await expect.poll(() => mainRowNames(peer).then(r => r.includes(third)), { message: `${third} listed in second window`, timeout: 15_000 }).toBe(true)
+    const peerSnoozeDlg = peer.locator('.snooze-modal')
+    await selectRow(third, peer)
+    await peer.keyboard.press('s')
+    await expect(peerSnoozeDlg, 's opens snooze dialog in second window before any choice').toBeVisible({ timeout: 5_000 })
+    await peer.evaluate(() => (window as any)._update_dom())
+    expect(await peerSnoozeDlg.locator('.lit').count(), 'second window opens with nothing lit before any choice').toBe(0)
+    await peer.keyboard.press('Escape')
+    await expect(peerSnoozeDlg, 'Escape closes initial snooze dialog in second window').toBeHidden({ timeout: 5_000 })
+    await page.bringToFront()
+
+    // 1. On the first todo: s, arrows to 1d, Enter -> snoozed for ~1d and the next row is selected
+    const snoozeDlg = page.locator('.snooze-modal')
+    await selectRow(first)
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze dialog on first todo').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._update_dom())
+    expect(await snoozeDlg.locator('.lit').count(), 'fresh device opens with nothing lit').toBe(0)
+    await page.keyboard.press('ArrowRight') // 3h
+    await page.keyboard.press('ArrowRight') // 6h
+    await page.keyboard.press('ArrowRight') // 1d
+    expect(await snoozePaintState(), 'three right arrows light and paint 1d').toEqual({
+      lit: ['1d'],
+      painted: ['1d'],
+      notifyChecked: false,
+    })
+    const beforeFirst = Date.now()
+    await page.keyboard.press('Enter')
+    await expect(snoozeDlg, 'Enter closes snooze dialog for first todo').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainRowNames().then(r => !r.includes(first)), { message: `${first} left main list`, timeout: 15_000 }).toBe(true)
+    const firstSnoozed = await page.evaluate(name => ((window._item(name, true) as any)?._global_store?._todoer?.snoozed ?? 0) as number, first)
+    expect(Math.abs(firstSnoozed - (beforeFirst + 24 * 3_600_000)), `${first} snooze time (${firstSnoozed}) is within 1 minute of 1d`).toBeLessThan(60_000)
+    await expect.poll(boxNow, { message: `auto-advanced selection to ${second}`, timeout: 10_000 }).toBe(second)
+
+    // 2. On the auto-selected second todo: s followed AT ONCE by Enter (no wait or assertion between)
+    const beforeSecond = Date.now()
+    await page.keyboard.press('s')
+    await page.keyboard.press('Enter')
+    await expect(snoozeDlg, 'immediate s+Enter closes snooze dialog for second todo').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainRowNames().then(r => !r.includes(second)), { message: `${second} left main list`, timeout: 15_000 }).toBe(true)
+    const secondState = await page.evaluate(name => {
+      const it = window._item(name, true) as any
+      const todoer = window._item('#todoer', true) as any
+      const raw = localStorage.getItem('mindpage_todoer_snooze_last')
+      const itemStoreRaw = todoer?.saved_id ? localStorage.getItem('mindpage_item_store_' + todoer.saved_id) : null
+      return {
+        snoozed: (it?._global_store?._todoer?.snoozed ?? 0) as number,
+        editing: !!it?.editing,
+        storedChoice: raw ? JSON.parse(raw) : null,
+        itemStoreRaw,
+        globalHasChoice: 'snooze_last' in (todoer?._global_store ?? {}),
+      }
+    }, second)
+    expect(
+      Math.abs(secondState.snoozed - (beforeSecond + 24 * 3_600_000)),
+      `${second} snooze time (${secondState.snoozed}) is within 1 minute of 1d`,
+    ).toBeLessThan(60_000)
+    expect(secondState.editing, 'immediate s+Enter did not open item editor').toBe(false)
+    expect(secondState.storedChoice, 'todoer localStorage key holds 1d').toEqual({ label: '1d' })
+    expect(secondState.itemStoreRaw, 'todoer item local store is unused').toBeNull()
+    expect(secondState.globalHasChoice, 'todoer global store does not hold snooze_last').toBe(false)
+    await expect.poll(() => boxNow(), { message: `auto-advanced selection to ${third}`, timeout: 10_000 }).toBe(third)
+
+    // 2b. In the second window (open since before the first choice, never reloaded): s on a todo
+    //     shows 1d already lit and painted; Escape closes it and leaves the todo unsnoozed
+    await peer.bringToFront()
+    await selectRow(third, peer)
+    await peer.keyboard.press('s')
+    await expect(peerSnoozeDlg, 's opens snooze dialog in second window without reload').toBeVisible({ timeout: 5_000 })
+    await expect
+      .poll(() => snoozePaintState(peer), { message: 'second window lights and paints 1d with no reload after choice', timeout: 5_000 })
+      .toEqual({ lit: ['1d'], painted: ['1d'], notifyChecked: false })
+    await peer.keyboard.press('Escape')
+    await expect(peerSnoozeDlg, 'Escape closes second window snooze dialog').toBeHidden({ timeout: 5_000 })
+    expect(await mainRowNames(peer), `${third} remains unsnoozed in second window after Escape`).toContain(third)
+    await peer.close()
+    await page.bringToFront()
+
+    // 3. Reload the page: s on the third todo opens with 1d already lit before any other key
+    await saved()
+    await page.reload()
+    await loaded(page)
+    await expect.poll(() => mainRowNames().then(r => r.includes(third)), { message: `${third} listed after reload`, timeout: 15_000 }).toBe(true)
+    await selectRow(third)
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze dialog after reload').toBeVisible({ timeout: 5_000 })
+    await expect
+      .poll(snoozePaintState, { message: 'reloaded snooze dialog lights and paints 1d before any other key', timeout: 5_000 })
+      .toEqual({ lit: ['1d'], painted: ['1d'], notifyChecked: false })
+    await page.keyboard.press('Escape')
+    await expect(snoozeDlg, 'Escape closes reloaded snooze dialog').toBeHidden({ timeout: 5_000 })
+    expect(await mainRowNames(), `${third} remains unsnoozed after Escape`).toContain(third)
+
+    expect(errors, 'no console errors or pageerrors in snooze-last-choice row').toEqual([])
   } finally {
     await context.close()
   }
