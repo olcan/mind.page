@@ -844,6 +844,47 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
   await expect.poll(async () => (await query(page)).trim(), { message: 'clicking dim Up on root clears the box', timeout: 3_000 }).toBe('')
   await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'clearing box via dim Up dims all four')
 
+  // 1c-dim. While any item is open for editing, the five guarded desktop strip buttons (the four
+  // arrows and create) dim to LOOK.dim while top and back stay at full opacity; closing the editor
+  // restores the arrows to the named target and create back to full opacity
+  const childAId = await page.evaluate(label => window._item(label, true)!.id, `${navRoot}/a`)
+  await name(page, `${navRoot}/a`)
+  await expectDesktop({ left: 'green', up: 'green', down: 'green', right: 'green' }, 'child lights all four desktop arrows green before editing')
+  await expect
+    .poll(() => nonArrowLooks(page, NAV_STRIP), { message: 'top, back and create are bright before editing', timeout: 3_000 })
+    .toEqual([
+      ['top', true, 1],
+      ['back', true, 1],
+      ['create', true, 1],
+    ])
+  if (SHOTS) {
+    await page.mouse.move(10, 10)
+    await shot(page, 'strip_idle', (await page.locator(NAV_STRIP).boundingBox())!)
+  }
+  await page.keyboard.press('Enter')
+  await expect(page.locator(`#textarea-${childAId}`), 'child item editor opens and takes focus for dim check').toBeFocused()
+  await expectDesktop({ left: 'dim', up: 'dim', down: 'dim', right: 'dim' }, 'while an item editor is open, all four desktop arrows dim')
+  await expect
+    .poll(() => nonArrowLooks(page, NAV_STRIP), { message: 'while an item editor is open, desktop create dims while top and back stay bright', timeout: 3_000 })
+    .toEqual([
+      ['top', true, 1],
+      ['back', true, 1],
+      ['create', true, expect.closeTo(LOOK.dim, 2)],
+    ])
+  if (SHOTS) await shot(page, 'strip_editing', (await page.locator(NAV_STRIP).boundingBox())!)
+  await page.keyboard.press('Escape')
+  await expect
+    .poll(() => page.evaluate(id => (window._item(id, true) as any).editing, childAId), { message: 'child item editor closes on Escape', timeout: 3_000 })
+    .toBe(false)
+  await expectDesktop({ left: 'green', up: 'green', down: 'green', right: 'green' }, 'closing the item editor restores desktop arrows to the named target')
+  await expect
+    .poll(() => nonArrowLooks(page, NAV_STRIP), { message: 'closing the item editor restores desktop create to full opacity while top and back stay bright', timeout: 3_000 })
+    .toEqual([
+      ['top', true, 1],
+      ['back', true, 1],
+      ['create', true, 1],
+    ])
+
   // 1c-edit. While ANY item is open for editing (including while a save of it is in flight, where
   // the route's ArrowUp cancellation asks no question and would discard newer typing), a real click
   // on a desktop arrow sends nothing and keeps the editor open with focus and the newer text; once
@@ -904,9 +945,10 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
       ;(window as any).__edit_onkey = (e: KeyboardEvent) => (window as any).__edit_keys.push(e.code)
       window.addEventListener('keydown', (window as any).__edit_onkey)
     })
+    const EDIT_GUARDED = ['left', 'up', 'down', 'right', 'create']
     let editKeys: string[] = []
     try {
-      for (const btn of STRIP_NAMES) await clickDesktop(btn)
+      for (const btn of EDIT_GUARDED) await clickDesktop(btn)
     } finally {
       editKeys = await page.evaluate(() => {
         window.removeEventListener('keydown', (window as any).__edit_onkey)
@@ -918,8 +960,11 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     }
     expect(
       editKeys,
-      'clicking none of the seven desktop strip buttons dispatches any key while an item is open for editing'
+      'clicking none of the five guarded desktop strip buttons (arrows and create) dispatches any key while an item is open for editing'
     ).toEqual([])
+    // clicking top and back while a save is in flight also leaves the editor open with focus and newer text C
+    await clickDesktop('top')
+    await clickDesktop('back')
     expect(
       await page.evaluate(id => (window._item(id, true) as any).editing, editId),
       'clicking all seven strip buttons while an item editor is open with a save in flight keeps the editor open'
@@ -945,8 +990,9 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
   await expect.poll(async () => (await query(page)).trim(), { message: 'with no item open for editing, clicking dim Up on root still clears the box', timeout: 3_000 }).toBe('')
 
   // 1c-strip. Clicking top, back and create on the desktop strip each act as their key does:
-  // top and back scroll to the top and back down with the history entry, and create opens a new
-  // child item under the named item with its editor focused
+  // top and back scroll to the top and back down with the history entry (unfocused, with an item's
+  // editor focused, and with the MindBox focused — leaving focus, caret and text as the keys do),
+  // and create opens a new child item under the named item with its editor focused
   await expect
     .poll(
       () => page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight),
@@ -954,6 +1000,134 @@ test('navigation arrows light green or dim live, stay in place on desktop with f
     )
     .toBeGreaterThan(400)
   await scrolls(page, clickDesktop)
+
+  const scrollsFocused = async (
+    press: Press,
+    taId: string,
+    expectedText: string,
+    caret: number,
+    label: string,
+    itemId?: string
+  ) => {
+    const readField = () =>
+      page.evaluate(
+        ([id, eid]) => {
+          const ta = document.getElementById(id) as HTMLTextAreaElement | null
+          const active = document.activeElement?.id ?? ''
+          const editing = eid ? !!(window._item(eid, true) as any)?.editing : null
+          return {
+            active,
+            caret: ta ? ([ta.selectionStart, ta.selectionEnd] as const) : null,
+            text: ta?.value ?? null,
+            editing,
+          }
+        },
+        [taId, itemId ?? ''] as const
+      )
+    await page.evaluate(
+      ([id, pos]) => {
+        const ta = document.getElementById(id) as HTMLTextAreaElement
+        ta.focus({ preventScroll: true })
+        ta.setSelectionRange(pos, pos)
+      },
+      [taId, caret] as const
+    )
+    const expectedField = { active: taId, caret: [caret, caret] as const, text: expectedText, editing: itemId ? true : null }
+    expect(await readField(), `${label}: focused with caret and text before scrolling`).toEqual(expectedField)
+    const top = await headerTop(page)
+    await expect
+      .poll(
+        async () => {
+          await page.evaluate(y => document.body.scrollTo(0, y), top + 600)
+          await page.waitForTimeout(150)
+          return scrollTop(page)
+        },
+        { message: `${label}: body scrolled below header` }
+      )
+      .toBeGreaterThan(top + 300)
+    await page.waitForTimeout(300) // let scroll listener settle on current entry
+    const position = await scrollTop(page)
+    const [, index] = await entries(page)
+    await press('top')
+    await expect
+      .poll(async () => Math.abs((await scrollTop(page)) - top) <= 2, { message: `${label}: top scrolls to header`, timeout: 10_000 })
+      .toBe(true)
+    expect(await entries(page), `${label}: top pushes one history entry`).toEqual([index + 2, index + 1])
+    expect(await readField(), `${label}: top keeps focus, caret, text and open editor`).toEqual(expectedField)
+    await press('back')
+    await expect
+      .poll(async () => Math.abs((await scrollTop(page)) - position) <= 2, { message: `${label}: back returns to saved scroll position`, timeout: 10_000 })
+      .toBe(true)
+    await page.waitForTimeout(300) // whatever the restore scheduled
+    expect([Math.abs((await scrollTop(page)) - position) <= 2, await entries(page)], `${label}: back stays at position, one entry back`).toEqual([
+      true,
+      [index + 2, index],
+    ])
+    expect(await readField(), `${label}: back keeps focus, caret, text and open editor`).toEqual(expectedField)
+  }
+
+  // item editor focused on the tall full list (unsaved draft, caret in the middle): real keys and
+  // real mouse clicks on top/back both scroll with history and leave focus, caret, draft and editor untouched
+  await page.evaluate(id => {
+    const c = document.querySelector(`#super-container-${id} .container`) as HTMLElement
+    c.dispatchEvent(new Event('mousedown'))
+    c.dispatchEvent(new Event('click'))
+  }, editId)
+  await expect(editTextarea, 'item editor opens on the full list').toBeFocused()
+  await page.evaluate(id => {
+    const ta = document.getElementById('textarea-' + id) as HTMLTextAreaElement
+    ta.setSelectionRange(ta.value.length, ta.value.length)
+  }, editId)
+  await page.keyboard.type(' draft')
+  const editDraft = `${editTextC} draft`
+  await expect(editTextarea, 'item editor holds unsaved draft').toHaveValue(editDraft)
+  await expect
+    .poll(() => nonArrowLooks(page, NAV_STRIP), { message: 'with empty box and an item editor open, desktop create dims while top and back stay bright', timeout: 3_000 })
+    .toEqual([
+      ['top', true, 1],
+      ['back', true, 1],
+      ['create', true, expect.closeTo(LOOK.dim, 2)],
+    ])
+  await scrollsFocused(key(page), `textarea-${editId}`, editDraft, 5, 'item editor (real keys)', editId)
+  await scrollsFocused(clickDesktop, `textarea-${editId}`, editDraft, 5, 'item editor (mouse click)', editId)
+  await page.locator(`[data-item-id="${editId}"] .edit-menu .button.cancel`).click()
+  await expect(page.locator('.modal'), 'cancelling unsaved draft asks to discard').toBeVisible()
+  await page.locator('.modal .button.confirm').click()
+  await expect(page.locator('.modal'), 'discard modal closes').toBeHidden()
+  await expect
+    .poll(() => page.evaluate(id => (window._item(id, true) as any).editing, editId), { message: 'draft editor closes cleanly' })
+    .toBe(false)
+  await expect
+    .poll(() => nonArrowLooks(page, NAV_STRIP), { message: 'discarding the draft via modal on empty box restores desktop create to full opacity', timeout: 3_000 })
+    .toEqual([
+      ['top', true, 1],
+      ['back', true, 1],
+      ['create', true, 1],
+    ])
+
+  // MindBox focused on a tall matching list (caret inside query text): real keys and real mouse
+  // clicks on top/back both scroll with history and leave focus, caret and query untouched
+  await page.evaluate(() => (window as any).MindBox.set('the'))
+  await expect
+    .poll(
+      async () => [
+        await query(page),
+        await page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight),
+      ],
+      { message: 'MindBox query "the" applied with tall scrollable list', timeout: 5_000 }
+    )
+    .toEqual(['the', expect.any(Number)])
+  await expect
+    .poll(
+      () => page.evaluate(() => document.body.scrollHeight - (document.querySelector('.header') as HTMLElement).offsetTop - window.innerHeight),
+      { message: 'MindBox query "the" list is tall enough to scroll', timeout: 5_000 }
+    )
+    .toBeGreaterThan(400)
+  await page.locator('.header .backdrop').first().click()
+  await expect(page.locator('#textarea-mindbox'), 'MindBox takes focus via its backdrop').toBeFocused()
+  await scrollsFocused(key(page), 'textarea-mindbox', 'the', 1, 'MindBox (real keys)')
+  await scrollsFocused(clickDesktop, 'textarea-mindbox', 'the', 1, 'MindBox (mouse click)')
+  await blur(page)
 
   await name(page, editRoot)
   await clickDesktop('create')
