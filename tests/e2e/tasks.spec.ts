@@ -3960,7 +3960,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     expect([await boxNow(), (await keys())[0], await priorKeys()], 's was taken by rows and closed picker keeps selection').toEqual(['#rk_one', ['KeyS', true, false], []])
 
     // 7c-2. Snooze modal arrows: Down to the date field lets the browser's arrow change its value,
-    //       Escape leaves the field still lit and a second Escape closes; then s, two arrows,
+    //       Escape leaves the field still lit and a second Escape closes; then s, three arrows,
     //       Enter snoozes for the lit button's time (~6h), closes the dialog, and the next row key
     //       acts on the rows again (then unsnooze #rk_one so 7d..7g keep their starting state)
     await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
@@ -3969,7 +3969,7 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect(snoozeDlg, 's opens snooze picker for field arrow check').toBeVisible({ timeout: 5_000 })
     await page.evaluate(() => (window as any)._update_dom())
     expect(await snoozeDlg.locator('.lit').count(), 'nothing is lit at snooze dialog opening').toBe(0)
-    await page.keyboard.press('ArrowDown') // 3h
+    await page.keyboard.press('ArrowDown') // 1h
     await page.keyboard.press('ArrowDown') // tomorrow
     await page.keyboard.press('ArrowDown') // date field
     const fieldState = await page.evaluate(() => {
@@ -4031,13 +4031,14 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await page.keyboard.press('s')
     await expect(snoozeDlg, 's opens snooze picker for arrow + Enter').toBeVisible({ timeout: 5_000 })
     expect(await snoozeDlg.locator('.lit').count(), 'reopened snooze picker starts with nothing lit').toBe(0)
+    await page.keyboard.press('ArrowRight') // 1h
     await page.keyboard.press('ArrowRight') // 3h
     await page.keyboard.press('ArrowRight') // 6h
     const litBtn = await page.evaluate(() => {
       const el = document.querySelector('.snooze-modal .lit') as HTMLElement | null
       return { text: el?.innerText?.trim() ?? null, bg: el ? getComputedStyle(el).backgroundColor : null }
     })
-    expect(litBtn, 'two right arrows light 6h in hover blue').toEqual({ text: '6h', bg: 'rgb(85, 153, 255)' })
+    expect(litBtn, 'three right arrows light 6h in hover blue').toEqual({ text: '6h', bg: 'rgb(85, 153, 255)' })
     const beforeSnooze = Date.now()
     await page.keyboard.press('Enter')
     await expect(snoozeDlg, 'Enter on lit 6h closes snooze picker').toBeHidden({ timeout: 5_000 })
@@ -7945,10 +7946,11 @@ test('snooze dialog remembers the last choice across immediate s+Enter and page 
     await expect(snoozeDlg, 's opens snooze dialog on first todo').toBeVisible({ timeout: 5_000 })
     await page.evaluate(() => (window as any)._update_dom())
     expect(await snoozeDlg.locator('.lit').count(), 'fresh device opens with nothing lit').toBe(0)
+    await page.keyboard.press('ArrowRight') // 1h
     await page.keyboard.press('ArrowRight') // 3h
     await page.keyboard.press('ArrowRight') // 6h
     await page.keyboard.press('ArrowRight') // 1d
-    expect(await snoozePaintState(), 'three right arrows light and paint 1d').toEqual({
+    expect(await snoozePaintState(), 'four right arrows light and paint 1d').toEqual({
       lit: ['1d'],
       painted: ['1d'],
       notifyChecked: false,
@@ -8021,6 +8023,79 @@ test('snooze dialog remembers the last choice across immediate s+Enter and page 
     await page.keyboard.press('Escape')
     await expect(snoozeDlg, 'Escape closes reloaded snooze dialog').toBeHidden({ timeout: 5_000 })
     expect(await mainRowNames(), `${third} remains unsnoozed after Escape`).toContain(third)
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+
+    // 4. At a 360 px viewport the first row's seven buttons stand on one line and inside the window
+    await page.evaluate(() => localStorage.removeItem('mindpage_todoer_snooze_last'))
+    await page.setViewportSize({ width: 360, height: 800 })
+    try {
+      await selectRow(third)
+      await page.keyboard.press('s')
+      await expect(snoozeDlg, 's opens snooze dialog at 360 px viewport').toBeVisible({ timeout: 5_000 })
+      await page.evaluate(() => (window as any)._update_dom())
+      const narrowRow = await page.evaluate(() => {
+        const vw = window.innerWidth
+        const btns = [...document.querySelectorAll('.snooze-modal .row:first-child .button')]
+        const rects = btns.map(el => {
+          const r = el.getBoundingClientRect()
+          return {
+            label: el.textContent?.trim() ?? '',
+            left: r.left,
+            right: r.right,
+            top: r.top,
+            bottom: r.bottom,
+            width: r.width,
+            height: r.height,
+          }
+        })
+        return { vw, rects }
+      })
+      expect(narrowRow.vw, 'viewport width is 360 px').toBe(360)
+      expect(narrowRow.rects.map(r => r.label), 'first row has all seven buttons in order').toEqual(['1h', '3h', '6h', '1d', '3d', '7d', '28d'])
+      const top0 = narrowRow.rects[0].top
+      const bot0 = narrowRow.rects[0].bottom
+      expect(
+        narrowRow.rects.every(r => r.width > 0 && r.height > 0 && Math.abs(r.top - top0) <= 1 && Math.abs(r.bottom - bot0) <= 1),
+        `all seven first-row buttons stand on one line at 360 px: ${JSON.stringify(narrowRow.rects)}`,
+      ).toBe(true)
+      expect(
+        narrowRow.rects.every((r, i) => r.left >= 0 && r.right <= narrowRow.vw && (i == 0 || r.left >= narrowRow.rects[i - 1].right)),
+        `all seven first-row buttons fit in order inside the ${narrowRow.vw} px window: ${JSON.stringify(narrowRow.rects)}`,
+      ).toBe(true)
+      await page.keyboard.press('Escape')
+      await expect(snoozeDlg, 'Escape closes narrow snooze dialog').toBeHidden({ timeout: 5_000 })
+      await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    } finally {
+      await page.setViewportSize({ width: 1280, height: 800 })
+    }
+
+    // 5. From nothing lit: ONE Right lights 1h and Enter snoozes for about 60 minutes
+    await selectRow(third)
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze dialog with nothing lit').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._update_dom())
+    expect(await snoozeDlg.locator('.lit').count(), 'nothing is lit after clearing remembered choice').toBe(0)
+    await page.keyboard.press('ArrowRight') // 1h
+    expect(await snoozePaintState(), 'one right arrow from nothing lit lights and paints 1h').toEqual({
+      lit: ['1h'],
+      painted: ['1h'],
+      notifyChecked: false,
+    })
+    const before1h = Date.now()
+    await page.keyboard.press('Enter')
+    await expect(snoozeDlg, 'Enter on lit 1h closes snooze dialog').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainRowNames().then(r => !r.includes(third)), { message: `${third} left main list after 1h snooze`, timeout: 15_000 }).toBe(true)
+    const thirdSnoozed = await page.evaluate(name => {
+      const it = window._item(name, true) as any
+      const raw = localStorage.getItem('mindpage_todoer_snooze_last')
+      return {
+        snoozed: (it?._global_store?._todoer?.snoozed ?? 0) as number,
+        storedChoice: raw ? JSON.parse(raw) : null,
+      }
+    }, third)
+    expect(Math.abs(thirdSnoozed.snoozed - (before1h + 3_600_000)), `${third} snooze time (${thirdSnoozed.snoozed}) is within 1 minute of 1h`).toBeLessThan(60_000)
+    expect(thirdSnoozed.storedChoice, 'localStorage remembers 1h').toEqual({ label: '1h' })
 
     expect(errors, 'no console errors or pageerrors in snooze-last-choice row').toEqual([])
   } finally {
