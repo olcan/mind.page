@@ -3944,6 +3944,103 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect(page.locator('.snooze-modal')).toBeHidden({ timeout: 5_000 })
     expect([await boxNow(), (await keys())[0], await priorKeys()], 's was taken by rows and closed picker keeps selection').toEqual(['#rk_one', ['KeyS', true, false], []])
 
+    // 7c-2. Snooze modal arrows: Down to the date field lets the browser's arrow change its value,
+    //       Escape leaves the field still lit and a second Escape closes; then s, two arrows,
+    //       Enter snoozes for the lit button's time (~6h), closes the dialog, and the next row key
+    //       acts on the rows again (then unsnooze #rk_one so 7d..7g keep their starting state)
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    const snoozeDlg = page.locator('.snooze-modal')
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze picker for field arrow check').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._update_dom())
+    expect(await snoozeDlg.locator('.lit').count(), 'nothing is lit at snooze dialog opening').toBe(0)
+    await page.keyboard.press('ArrowDown') // 3h
+    await page.keyboard.press('ArrowDown') // tomorrow
+    await page.keyboard.press('ArrowDown') // date field
+    const fieldState = await page.evaluate(() => {
+      const inp = document.querySelector('.snooze-modal .custom input') as HTMLInputElement | null
+      return {
+        lit: !!inp?.classList.contains('lit'),
+        focused: document.activeElement === inp,
+        outline: inp ? getComputedStyle(inp).outlineColor : null,
+        val: inp?.value ?? '',
+      }
+    })
+    expect(fieldState.val, 'date field initialized before browser arrow').not.toBe('')
+    expect([fieldState.lit, fieldState.focused, fieldState.outline], 'Down lights and focuses date field with blue ring').toEqual([
+      true,
+      true,
+      'rgb(85, 153, 255)',
+    ])
+    await page.keyboard.press('ArrowUp')
+    expect(await snoozeDlg.locator('.custom input').inputValue(), 'browser arrow changes focused date field value').not.toBe(fieldState.val)
+    // Clearing one date segment must not erase the rest of the date/time (partial datetime-local serializes as '')
+    await page.evaluate(() => {
+      const inp = document.querySelector('.snooze-modal .custom input') as HTMLInputElement
+      inp.value = '2027-06-17T12:38'
+      inp.blur()
+      inp.focus()
+    })
+    await page.keyboard.press('Backspace')
+    await page.keyboard.press('ArrowUp')
+    const afterPartialEdit = await snoozeDlg.locator('.custom input').inputValue()
+    expect(afterPartialEdit, 'Backspace on first date segment then ArrowUp keeps non-empty date').toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/)
+    const [partialDate, partialTime] = afterPartialEdit.split('T')
+    expect(partialTime, 'Backspace + ArrowUp on first date segment preserves time part').toBe('12:38')
+    expect(
+      ['2027', '06', '17'].filter((part, idx) => partialDate.split('-')[idx] === part).length,
+      `Backspace + ArrowUp on first date segment preserves the other date parts (${afterPartialEdit})`,
+    ).toBeGreaterThanOrEqual(2)
+    await page.keyboard.press('Escape')
+    await expect(snoozeDlg, 'Escape from focused date field leaves dialog open').toBeVisible({ timeout: 5_000 })
+    expect(
+      await page.evaluate(() => {
+        const inp = document.querySelector('.snooze-modal .custom input')
+        return { lit: !!inp?.classList.contains('lit'), focused: document.activeElement === inp }
+      }),
+      'Escape leaves date field blurred and still lit',
+    ).toEqual({ lit: true, focused: false })
+    await page.keyboard.press('Escape')
+    await expect(snoozeDlg, 'second Escape closes snooze picker').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+
+    const rowsBeforeSnooze = await mainRowNames()
+    const snoozeIdx = rowsBeforeSnooze.indexOf('#rk_one')
+    expect(snoozeIdx, '#rk_one is in main list before snooze').toBeGreaterThanOrEqual(0)
+    const expectedAfterSnooze = rowsBeforeSnooze[snoozeIdx + 1] ?? rowsBeforeSnooze[snoozeIdx - 1]
+    expect(expectedAfterSnooze, 'main list has a successor row for #rk_one').toBeTruthy()
+    const remainingAfterSnooze = rowsBeforeSnooze.filter(n => n != '#rk_one')
+    const expectedAfterJ = remainingAfterSnooze[(remainingAfterSnooze.indexOf(expectedAfterSnooze) + 1) % remainingAfterSnooze.length]
+
+    await priorKeys()
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze picker for arrow + Enter').toBeVisible({ timeout: 5_000 })
+    expect(await snoozeDlg.locator('.lit').count(), 'reopened snooze picker starts with nothing lit').toBe(0)
+    await page.keyboard.press('ArrowRight') // 3h
+    await page.keyboard.press('ArrowRight') // 6h
+    const litBtn = await page.evaluate(() => {
+      const el = document.querySelector('.snooze-modal .lit') as HTMLElement | null
+      return { text: el?.innerText?.trim() ?? null, bg: el ? getComputedStyle(el).backgroundColor : null }
+    })
+    expect(litBtn, 'two right arrows light 6h in hover blue').toEqual({ text: '6h', bg: 'rgb(85, 153, 255)' })
+    const beforeSnooze = Date.now()
+    await page.keyboard.press('Enter')
+    await expect(snoozeDlg, 'Enter on lit 6h closes snooze picker').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainRowNames().then(r => !r.includes('#rk_one')), { message: '#rk_one snoozed out of main list', timeout: 15_000 }).toBe(true)
+    const snoozedAt = await page.evaluate(() => ((window._item('#rk_one', true) as any)?._global_store?._todoer?.snoozed ?? 0) as number)
+    expect(Math.abs(snoozedAt - (beforeSnooze + 6 * 3_600_000)), `snooze time (${snoozedAt}) is within 1 minute of 6h`).toBeLessThan(60_000)
+    expect((await itemText('#rk_one'))?.editing, 'Enter on lit button did not open item editor').toBe(false)
+    expect(await priorKeys(), 'snooze picker keys did not leak to prior hook').toEqual([])
+    await expect.poll(boxNow, { message: 'snoozing #rk_one selects its recorded successor row', timeout: 10_000 }).toBe(expectedAfterSnooze)
+    await page.keyboard.press('j')
+    await expect.poll(boxNow, { message: 'next row key j advances from the recorded successor row', timeout: 5_000 }).toBe(expectedAfterJ)
+    await selectRow('#rk_one')
+    await page.keyboard.press('s')
+    await expect.poll(() => mainRowNames().then(r => r.includes('#rk_one')), { message: '#rk_one restored to main list via s', timeout: 15_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await selectRow('#rk_one')
+
     // 7d. x asks first; declined question keeps the row and selection
     const dlgX = dialogs.length
     answer.accept = false
