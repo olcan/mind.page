@@ -7896,8 +7896,10 @@
 
   let lastEditTime = 0 // updated in onItemEdited
   let lastReaderScrollTime = 0 // reader's own scroll input (wheel, touchmove, scroll keys, app key scrolls)
+  let readerScrollSeq = 0 // monotonic count of noteReaderScroll calls (unaffected by onScroll's 250 ms clamp/inertia extension)
   function noteReaderScroll() {
     lastReaderScrollTime = Date.now()
+    readerScrollSeq++
   }
   const READER_SCROLL_KEYS = new Set(['PageUp', 'PageDown', 'Home', 'End', 'Space', 'ArrowUp', 'ArrowDown'])
   let layoutPending = false
@@ -8340,6 +8342,31 @@
     }
     lastEditorChangeTime = 0 // disable debounce even if editor focused
     onEditorChange(editorText)
+    if (
+      selectedBefore &&
+      contextLabel &&
+      editorText == contextLabel &&
+      !narrating &&
+      !disableScrollingOnLayout &&
+      !popStateScrollPending &&
+      focusedItem < 0 &&
+      items.some(item => item.target)
+    ) {
+      // scroll to the backed-up parent target as the arrow keys do (no history entry added;
+      // yield if the query moves on, another item editor gains focus, a popstate restore is
+      // pending, or the reader scrolls during the DOM wait)
+      const scrollSeq = readerScrollSeq
+      update_dom().then(() => {
+        if (
+          editorText == contextLabel &&
+          !narrating &&
+          focusedItem < 0 &&
+          !popStateScrollPending &&
+          readerScrollSeq == scrollSeq
+        )
+          scrollToTarget()
+      })
+    }
     deletedItems.unshift({
       time: item.savedTime,
       attr: _.cloneDeep(item.savedAttr),
@@ -8407,9 +8434,18 @@
       const msg = descendants.length ? `Delete ${item.name} and ${count} under it?\n\n${listed}` : `Delete ${item.name}?`
       if (!confirm(msg)) return false
     }
-    for (const other of descendants) {
-      const i = indexFromId.get(other.id)
-      if (i !== undefined) deleteItem(i, false /* confirmed as the batch */)
+    // suppress per-item layout/delete scrolls across intermediate descendants only when the root
+    // itself is selected at entry, so a root/keyboard batch scrolls at most once (on the root)
+    // while an API batch with a tag-child or unrelated selection keeps its scroll
+    const prevDisableScroll = disableScrollingOnLayout
+    if (selectsAlready(editorText, item)) disableScrollingOnLayout = true
+    try {
+      for (const other of descendants) {
+        const i = indexFromId.get(other.id)
+        if (i !== undefined) deleteItem(i, false /* confirmed as the batch */)
+      }
+    } finally {
+      disableScrollingOnLayout = prevDisableScroll
     }
     const i = indexFromId.get(item.id)
     return i === undefined || deleteItem(i, false /* confirmed as the batch */)

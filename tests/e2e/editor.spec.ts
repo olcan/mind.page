@@ -3298,3 +3298,733 @@ test('window._mindboxApplied records the applied query in its typed case across 
   }
   expect(pageErrors).toEqual([])
 })
+
+test('deleting a targeted child scrolls its parent into view as ArrowUp does, from the window, from its editor, and across a subtree', async ({
+  page,
+}) => {
+  await loadAdmin(page)
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(err.message))
+  const PREFIX = '#e2e_del_scroll'
+  const PARENT = `${PREFIX}_p`
+  const CHILD = `${PARENT}/0`
+  const GRANDCHILD = `${CHILD}/0`
+  const SHORT_PARENT = `${PREFIX}_sp`
+  const SHORT_CHILD = `${SHORT_PARENT}/0`
+  const OTHER = `${PREFIX}_other`
+  const UNSELECTED = `${OTHER}/unsel`
+  const fillers = Array.from({ length: 12 }, (_, i) => {
+    const label = `${PREFIX}_f${String(i + 1).padStart(2, '0')}`
+    const body = Array.from({ length: 5 }, (_, j) => `- filler ${i + 1} line ${j + 1}`).join('\n')
+    return [label, `${label} #_pin\n${body}`] as const
+  })
+  const parentText = `${PARENT}\n` + Array.from({ length: 15 }, (_, i) => `- parent line ${i + 1}`).join('\n')
+  const fixtures: ReadonlyArray<readonly [string, string]> = [
+    ...fillers,
+    [PARENT, parentText],
+    [SHORT_PARENT, `${SHORT_PARENT} short parent`],
+    [OTHER, `${OTHER} unrelated target`],
+    [UNSELECTED, `${UNSELECTED} item not selected`],
+  ]
+  const createdIds = new Set<string>()
+
+  const targetLabel = () =>
+    page.evaluate(
+      () => (document.querySelector('.container.target mark.label') as HTMLElement | null)?.title?.toLowerCase() ?? null
+    )
+  const itemRectTop = (label: string) =>
+    page.evaluate(l => {
+      const id = window._item(l, true)?.id
+      const sc = id && document.getElementById('super-container-' + id)
+      return sc ? Math.round(sc.getBoundingClientRect().top) : null
+    }, label)
+  const viewportHeight = () => page.evaluate(() => visualViewport!.height)
+
+  const waitSaved = async (label: string) => {
+    await expect.poll(() => savedId(page, label), { message: `${label} savedId`, timeout: 30_000 }).toBeTruthy()
+    const id = (await savedId(page, label))!
+    createdIds.add(id)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(l => {
+            const item = window.__items.find(i => i.id == window._item(l, true)?.id)
+            return !!item && !item.saving && !!item.savedText
+          }, label),
+        { message: `${label} save settled`, timeout: 30_000 }
+      )
+      .toBe(true)
+    return id
+  }
+
+  const waitGone = async (label: string, id: string) => {
+    await expect
+      .poll(() => page.evaluate(l => window._item(l, true)?.id ?? null, label), {
+        message: `${label} removed locally`,
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect
+      .poll(async () => (await firestore().collection('items').doc(id).get()).exists, {
+        message: `${label} removed on server`,
+        timeout: 30_000,
+      })
+      .toBe(false)
+  }
+
+  const makeChild = async (parent: string, child: string, word?: string) => {
+    await userSet(page, parent, { scroll: true })
+    await expect.poll(targetLabel, { message: `target ${parent}`, timeout: 10_000 }).toBe(parent)
+    await blur(page)
+    await settled(page)
+    await page.keyboard.press('Control+Enter')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(c => {
+            const ae = document.activeElement as HTMLTextAreaElement | null
+            return !!window._item(c, true) && ae?.tagName == 'TEXTAREA' && ae.value.startsWith(c)
+          }, child),
+        { message: `${child} editor open and focused`, timeout: 10_000 }
+      )
+      .toBe(true)
+    const id = await waitSaved(child)
+    if (word !== undefined) {
+      await page.keyboard.type(word)
+      await page.keyboard.press('Shift+Enter')
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              ([c, w]) => {
+                const handle = window._item(c, true) as { id: string; editing?: boolean } | null
+                const item = handle && window.__items.find(i => i.id == handle.id)
+                return !!item && !handle.editing && !item.saving && !!item.savedText?.includes(w)
+              },
+              [child, word] as const
+            ),
+          { message: `${child} saved with word`, timeout: 30_000 }
+        )
+        .toBe(true)
+      await expect.poll(targetLabel, { message: `${child} targeted`, timeout: 10_000 }).toBe(child)
+      await blur(page)
+    }
+    await settled(page)
+    return id
+  }
+
+  try {
+    await page.evaluate(items => {
+      for (const [, text] of items) void window._create(text)
+    }, fixtures)
+    for (const [label] of fixtures) await waitSaved(label)
+    await settled(page)
+    const vh = await viewportHeight()
+
+    // 1. saved targeted child deleted by window's key: parent becomes target and stands where ArrowUp puts it
+    const id1 = await makeChild(PARENT, CHILD, 'step1')
+    expect((await itemRectTop(PARENT))!, 'premise step 1: parent above viewport while child targeted').toBeLessThan(0)
+    const histBefore1 = await entries(page)
+    await page.keyboard.press('Control+Backspace')
+    await expect
+      .poll(() => page.evaluate(c => window._item(c, true)?.id ?? null, CHILD), {
+        message: 'step 1: child removed locally',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect.poll(targetLabel, { message: 'step 1: parent targeted after delete', timeout: 10_000 }).toBe(PARENT)
+    await settled(page)
+    const afterDeleteTop1 = (await itemRectTop(PARENT))!
+    const afterDeleteScroll1 = await scrollTop(page)
+    expect(await entries(page), 'step 1: delete replaces current history entry without pushing').toEqual(histBefore1)
+    await waitGone(CHILD, id1)
+
+    // measure ArrowUp's place from the same state (never hard-code a number)
+    const idUp = await makeChild(PARENT, CHILD, 'step1')
+    expect((await itemRectTop(PARENT))!, 'premise up: parent above viewport before ArrowUp').toBeLessThan(0)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(targetLabel, { message: 'ArrowUp targeted parent', timeout: 10_000 }).toBe(PARENT)
+    await settled(page)
+    const upTop = (await itemRectTop(PARENT))!
+    const upScroll = await scrollTop(page)
+    expect(upTop, 'premise up: ArrowUp placed parent inside scroll band').toBeGreaterThanOrEqual(0)
+    expect(upTop, 'premise up: ArrowUp placed parent inside scroll band').toBeLessThanOrEqual(vh - 200)
+    await page.evaluate(c => void window._item(c, true)?.delete(false), CHILD)
+    await waitGone(CHILD, idUp)
+
+    expect
+      .soft(
+        Math.abs(afterDeleteTop1 - upTop),
+        `step 1: window delete parent top (${afterDeleteTop1}) matches ArrowUp (${upTop})`
+      )
+      .toBeLessThanOrEqual(2)
+    expect
+      .soft(
+        Math.abs(afterDeleteScroll1 - upScroll),
+        `step 1: window delete scrollTop (${afterDeleteScroll1}) matches ArrowUp (${upScroll})`
+      )
+      .toBeLessThanOrEqual(2)
+
+    // 2. the same with the view scrolled away by the wheel before the delete
+    const id2 = await makeChild(PARENT, CHILD, 'step2')
+    await page.mouse.move(640, 360)
+    await page.mouse.wheel(0, -1200)
+    await expect
+      .poll(() => itemRectTop(PARENT), { message: 'premise step 2: parent scrolled below band by wheel', timeout: 10_000 })
+      .toBeGreaterThan(vh - 200)
+    await settled(page)
+    await page.keyboard.press('Control+Backspace')
+    await expect
+      .poll(() => page.evaluate(c => window._item(c, true)?.id ?? null, CHILD), {
+        message: 'step 2: child removed locally',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect.poll(targetLabel, { message: 'step 2: parent targeted after delete', timeout: 10_000 }).toBe(PARENT)
+    await settled(page)
+    const afterDeleteTop2 = (await itemRectTop(PARENT))!
+    await waitGone(CHILD, id2)
+    expect
+      .soft(
+        Math.abs(afterDeleteTop2 - upTop),
+        `step 2: wheeled-away delete parent top (${afterDeleteTop2}) matches ArrowUp (${upTop})`
+      )
+      .toBeLessThanOrEqual(2)
+
+    // 3. delete from the child's own editor, right after its creation
+    const id3 = await makeChild(PARENT, CHILD)
+    expect(
+      await page.evaluate(c => {
+        const id = window._item(c, true)?.id
+        return !!id && document.activeElement === document.getElementById('textarea-' + id)
+      }, CHILD),
+      'premise step 3: child editor is focused'
+    ).toBe(true)
+    expect((await itemRectTop(PARENT))!, 'premise step 3: parent above viewport while child editor open').toBeLessThan(0)
+    await page.keyboard.press('Control+Backspace')
+    await expect
+      .poll(() => page.evaluate(c => window._item(c, true)?.id ?? null, CHILD), {
+        message: 'step 3: child removed from its editor',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect.poll(targetLabel, { message: 'step 3: parent targeted after editor delete', timeout: 10_000 }).toBe(PARENT)
+    await settled(page)
+    const afterDeleteTop3 = (await itemRectTop(PARENT))!
+    await waitGone(CHILD, id3)
+    expect
+      .soft(
+        Math.abs(afterDeleteTop3 - upTop),
+        `step 3: editor delete parent top (${afterDeleteTop3}) matches ArrowUp (${upTop})`
+      )
+      .toBeLessThanOrEqual(2)
+
+    // 4. parent already in the scroll band (short child under short parent): scroll position does not change
+    const id4 = await makeChild(SHORT_PARENT, SHORT_CHILD, 'short')
+    const beforeTop4 = (await itemRectTop(SHORT_PARENT))!
+    expect(beforeTop4, 'premise step 4: short parent inside scroll band').toBeGreaterThanOrEqual(0)
+    expect(beforeTop4, 'premise step 4: short parent inside scroll band').toBeLessThanOrEqual(vh - 200)
+    const beforeScroll4 = await scrollTop(page)
+    await page.keyboard.press('Control+Backspace')
+    await expect
+      .poll(() => page.evaluate(c => window._item(c, true)?.id ?? null, SHORT_CHILD), {
+        message: 'step 4: short child removed locally',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect.poll(targetLabel, { message: 'step 4: short parent targeted', timeout: 10_000 }).toBe(SHORT_PARENT)
+    await settled(page)
+    expect(Math.abs((await scrollTop(page)) - beforeScroll4), 'step 4: scrollTop unchanged when parent in band').toBeLessThanOrEqual(1)
+    expect(Math.abs((await itemRectTop(SHORT_PARENT))! - beforeTop4), 'step 4: parent top unchanged').toBeLessThanOrEqual(2)
+    await waitGone(SHORT_CHILD, id4)
+
+    // 5. deleting an item the query does not select (another item targeted and scrolled out of band): scroll position does not change
+    await userSet(page, OTHER, { scroll: true })
+    await expect.poll(targetLabel, { message: 'step 5: unrelated item targeted', timeout: 10_000 }).toBe(OTHER)
+    await blur(page)
+    await settled(page)
+    await page.mouse.move(640, 360)
+    await page.mouse.wheel(0, -1200)
+    await expect
+      .poll(() => itemRectTop(OTHER), { message: 'premise step 5: targeted item scrolled below band', timeout: 10_000 })
+      .toBeGreaterThan(vh - 200)
+    await settled(page)
+    const beforeScroll5 = await scrollTop(page)
+    const unselId = (await savedId(page, UNSELECTED))!
+    expect(await page.evaluate(l => window._item(l)!.delete(false), UNSELECTED), 'step 5: unselected item deleted').toBe(true)
+    await expect
+      .poll(() => page.evaluate(l => window._item(l, true)?.id ?? null, UNSELECTED), {
+        message: 'step 5: unselected item removed locally',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await settled(page)
+    expect(await targetLabel(), 'step 5: target unchanged').toBe(OTHER)
+    expect(Math.abs((await scrollTop(page)) - beforeScroll5), 'step 5: scrollTop unchanged for unselected delete').toBeLessThanOrEqual(1)
+    await waitGone(UNSELECTED, unselId)
+
+    // 6. subtree delete from a child with a child of its own (Shift+Ctrl+Backspace, confirmed): parent ends where Up puts it, one scroll
+    const id6Child = await makeChild(PARENT, CHILD, 'subtree-root')
+    await page.keyboard.press('Control+Enter')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(gc => {
+            const ae = document.activeElement as HTMLTextAreaElement | null
+            return !!window._item(gc, true) && ae?.tagName == 'TEXTAREA' && ae.value.startsWith(gc)
+          }, GRANDCHILD),
+        { message: 'step 6: grandchild editor open and focused', timeout: 10_000 }
+      )
+      .toBe(true)
+    const id6Grand = await waitSaved(GRANDCHILD)
+    await page.keyboard.type('gc')
+    await page.keyboard.press('Shift+Enter')
+    await expect
+      .poll(
+        () =>
+          page.evaluate(gc => {
+            const handle = window._item(gc, true) as { id: string; editing?: boolean } | null
+            const item = handle && window.__items.find(i => i.id == handle.id)
+            return !!item && !handle.editing && !item.saving && !!item.savedText?.includes('gc')
+          }, GRANDCHILD),
+        { message: 'step 6: grandchild saved', timeout: 30_000 }
+      )
+      .toBe(true)
+    await userSet(page, CHILD, { scroll: true })
+    await expect.poll(targetLabel, { message: 'step 6: child targeted before subtree delete', timeout: 10_000 }).toBe(CHILD)
+    await blur(page)
+    await settled(page)
+    expect((await itemRectTop(PARENT))!, 'premise step 6: parent above viewport before subtree delete').toBeLessThan(0)
+    await page.evaluate(() => {
+      const w = window as any
+      w.__delScrollCalls = 0
+      w.__origBodyScrollTo = document.body.scrollTo
+      document.body.scrollTo = function (...args: any[]) {
+        w.__delScrollCalls++
+        return w.__origBodyScrollTo.apply(this, args)
+      }
+    })
+    const seenDialogs: string[] = []
+    page.once('dialog', d => {
+      seenDialogs.push(d.message())
+      void d.accept()
+    })
+    await page.keyboard.press('Control+Shift+Backspace')
+    await expect
+      .poll(
+        () => page.evaluate(([c, gc]) => !window._exists(c) && !window._exists(gc), [CHILD, GRANDCHILD] as const),
+        { message: 'step 6: child and grandchild removed locally', timeout: 10_000 }
+      )
+      .toBe(true)
+    await expect.poll(targetLabel, { message: 'step 6: parent targeted after subtree delete', timeout: 10_000 }).toBe(PARENT)
+    await settled(page)
+    const afterDeleteTop6 = (await itemRectTop(PARENT))!
+    const scrollCalls6 = await page.evaluate(() => (window as any).__delScrollCalls as number)
+    expect(seenDialogs, 'step 6: one subtree confirmation dialog').toEqual([
+      `Delete ${CHILD} and 1 item under it?\n\n${GRANDCHILD}`,
+    ])
+    await waitGone(CHILD, id6Child)
+    await waitGone(GRANDCHILD, id6Grand)
+    expect
+      .soft(
+        Math.abs(afterDeleteTop6 - upTop),
+        `step 6: subtree delete parent top (${afterDeleteTop6}) matches ArrowUp (${upTop})`
+      )
+      .toBeLessThanOrEqual(2)
+    expect.soft(scrollCalls6, 'step 6: subtree delete performs exactly one scroll').toBe(1)
+  } finally {
+    await page
+      .evaluate(() => {
+        const w = window as any
+        if (w.__origBodyScrollTo) {
+          document.body.scrollTo = w.__origBodyScrollTo
+          delete w.__origBodyScrollTo
+        }
+        delete w.__delScrollCalls
+      })
+      .catch(() => {})
+    await blur(page).catch(() => {})
+    await page.evaluate(() => void (window as any).MindBox.set('')).catch(() => {})
+    await expect
+      .poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 })
+      .toBe(true)
+      .catch(() => {})
+    await page
+      .evaluate(prefix => {
+        const remaining = window.__items.filter(i => i.labelText?.toLowerCase().startsWith(prefix)).map(i => i.id)
+        for (const id of remaining) window._item(id, true)?.delete(false)
+      }, PREFIX)
+      .catch(() => {})
+    for (const id of createdIds) {
+      const ref = firestore().collection('items').doc(id)
+      if ((await ref.get()).exists) await ref.delete().catch(() => {})
+    }
+  }
+  expect(pageErrors, 'no page errors').toEqual([])
+})
+
+test('a child delete yields to a pending Back restore and mid-wait wheel input, and a subtree delete with a tag-child selected scrolls its surviving ancestor into view', async ({
+  page,
+}) => {
+  await loadAdmin(page)
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(err.message))
+  const PREFIX = '#e2e_del_edge'
+  const PARENT = `${PREFIX}_p`
+  const CHILD = `${PARENT}/0`
+  const T = '#e2e_tree'
+  const fillers = Array.from({ length: 12 }, (_, i) => {
+    const label = `${PREFIX}_f${String(i + 1).padStart(2, '0')}`
+    const body = Array.from({ length: 5 }, (_, j) => `- filler ${i + 1} line ${j + 1}`).join('\n')
+    return [label, `${label} #_pin\n${body}`] as const
+  })
+  const tallBody = (label: string) =>
+    `${label}\n` + Array.from({ length: 15 }, (_, i) => `- ${label.slice(1)} line ${i + 1}`).join('\n')
+  const baseFixtures: ReadonlyArray<readonly [string, string]> = [
+    ...fillers,
+    [PARENT, tallBody(PARENT)],
+    [CHILD, `${CHILD} step1 child`],
+    ['#chat', '#chat #_autodep'],
+    ['#chat/vault', '#chat/vault'],
+    [T, tallBody(T)],
+    [`${T}/a`, `${T}/a #_chat/vault #_autodep\nbranch a`],
+    [`${T}/a/x`, `${T}/a/x\nnested under a`],
+    [`${T}/in`, `${T}/in #_${T.slice(1)}/a\nmoved in`],
+    [`${T}/in/leaf`, `${T}/in/leaf\nunder moved in`],
+  ]
+  const createdIds = new Set<string>()
+
+  const targetLabel = () =>
+    page.evaluate(
+      () => (document.querySelector('.container.target mark.label') as HTMLElement | null)?.title?.toLowerCase() ?? null
+    )
+  const itemRectTop = (label: string) =>
+    page.evaluate(l => {
+      const id = window._item(l, true)?.id
+      const sc = id && document.getElementById('super-container-' + id)
+      return sc ? Math.round(sc.getBoundingClientRect().top) : null
+    }, label)
+  const viewportHeight = () => page.evaluate(() => visualViewport!.height)
+  const settledRecorded = () =>
+    expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              !(window as any)._history_update_pending &&
+              !(window as any)._popstate_scroll_pending &&
+              (window as any)._history[(window as any)._history_index].scrollPosition === document.body.scrollTop
+          ),
+        { message: 'entry settled and scroll recorded' }
+      )
+      .toBe(true)
+
+  const waitSaved = async (label: string) => {
+    await expect.poll(() => savedId(page, label), { message: `${label} savedId`, timeout: 30_000 }).toBeTruthy()
+    const id = (await savedId(page, label))!
+    createdIds.add(id)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(l => {
+            const item = window.__items.find(i => i.id == window._item(l, true)?.id)
+            return !!item && !item.saving && !!item.savedText
+          }, label),
+        { message: `${label} save settled`, timeout: 30_000 }
+      )
+      .toBe(true)
+    return id
+  }
+
+  const waitGone = async (label: string, id: string) => {
+    await expect
+      .poll(() => page.evaluate(l => window._item(l, true)?.id ?? null, label), {
+        message: `${label} removed locally`,
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect
+      .poll(async () => (await firestore().collection('items').doc(id).get()).exists, {
+        message: `${label} removed on server`,
+        timeout: 30_000,
+      })
+      .toBe(false)
+  }
+
+  try {
+    await page.evaluate(items => {
+      for (const [, text] of items) void window._create(text)
+    }, baseFixtures)
+    const ids = new Map<string, string>()
+    for (const [label] of baseFixtures) ids.set(label, await waitSaved(label))
+    await settled(page)
+    const vh = await viewportHeight()
+    const top = await headerTop(page)
+
+    // 1. Pending Back restore onto a child deleted via item API while Back's frames are held:
+    //    query backs up to the parent, and the Back entry's saved scroll position is preserved.
+    const childId = await page.evaluate(c => window._item(c, true)!.id, CHILD)
+    await asUser(page, id => void (window._item(id) as any).select(), childId)
+    await expect(mindbox(page)).toHaveValue(CHILD)
+    await settled(page)
+    const savedChildScroll = top + 100
+    await page.evaluate(y => document.body.scrollTo(0, y), savedChildScroll)
+    await settledRecorded()
+    expect(
+      (await itemRectTop(PARENT))!,
+      'premise step 1: saved Back position leaves parent below the scroll band'
+    ).toBeGreaterThan(vh - 200)
+    const childIdx = (await entries(page))[1]
+
+    await userSet(page, '')
+    await expect(mindbox(page)).toHaveValue('')
+    expect((await entries(page))[1], 'premise step 1: leaving child pushed a new entry').toBe(childIdx + 1)
+    const awayScroll = top + 500
+    await page.evaluate(y => document.body.scrollTo(0, y), awayScroll)
+    await settledRecorded()
+
+    // hold Back's 2-rAF update_dom() restore (same pattern as the existing Back row)
+    await page.evaluate(() => {
+      window.addEventListener(
+        'popstate',
+        () => {
+          const w = window as any
+          const orig = window.requestAnimationFrame.bind(window)
+          const held: FrameRequestCallback[] = []
+          w.__origRaf = orig
+          w.__releaseHeldRaf = () => {
+            window.requestAnimationFrame = orig
+            delete w.__origRaf
+            delete w.__releaseHeldRaf
+            for (const cb of held.splice(0)) orig(cb)
+          }
+          window.requestAnimationFrame = (cb => {
+            held.push(cb)
+            return held.length
+          }) as typeof requestAnimationFrame
+        },
+        { capture: true, once: true }
+      )
+    })
+    await page.goBack()
+    await expect(mindbox(page)).toHaveValue(CHILD)
+    expect(
+      await page.evaluate(() => !!(window as any)._popstate_scroll_pending),
+      'step 1: Back armed _popstate_scroll_pending while its frames are held'
+    ).toBe(true)
+
+    expect(
+      await page.evaluate(c => window._item(c)!.delete(false), CHILD),
+      'step 1: item API deletes child while Back restore is pending'
+    ).toBe(true)
+    await expect(mindbox(page)).toHaveValue(PARENT)
+
+    await page.evaluate(() => {
+      ;(window as any).__releaseHeldRaf?.()
+      return new Promise<void>(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      )
+    })
+    await settled(page)
+    await expect
+      .poll(() => page.evaluate(() => !!(window as any)._popstate_scroll_pending), {
+        message: 'step 1: Back restore finished',
+        timeout: 10_000,
+      })
+      .toBe(false)
+    const afterBackDeleteScroll = await scrollTop(page)
+    expect(await mindbox(page).inputValue(), 'step 1: query backed up to parent').toBe(PARENT)
+    expect(await targetLabel(), 'step 1: parent is target after pending-Back delete').toBe(PARENT)
+    expect
+      .soft(
+        Math.abs(afterBackDeleteScroll - savedChildScroll),
+        `step 1: pending Back restore kept its saved position ${savedChildScroll} (got ${afterBackDeleteScroll}, away was ${awayScroll})`
+      )
+      .toBeLessThanOrEqual(2)
+    await waitGone(CHILD, ids.get(CHILD)!)
+
+    // 2. API delete_subtree(false) on #e2e_tree/a while tag-child #e2e_tree/in is selected:
+    //    deleting #e2e_tree/in backs up to surviving textual ancestor #e2e_tree, which must scroll
+    //    into view with exactly one scroll (subtree suppression applies only when root is selected).
+    expect(
+      await page.evaluate(l => {
+        const i = window._item(l, true) as any
+        return { tag_parent: i.tag_parent, ancestors: i.ancestors }
+      }, `${T}/in`),
+      'premise step 2: #e2e_tree/in is a tag-child of #e2e_tree/a under #e2e_tree'
+    ).toEqual({ tag_parent: `${T}/a`, ancestors: [`${T}/a`, T] })
+
+    await asUser(page, l => void (window._item(l) as any).select(), `${T}/in`)
+    await expect.poll(targetLabel, { message: 'step 2: tag-child targeted', timeout: 10_000 }).toBe(`${T}/in`)
+    await blur(page)
+    await expect
+      .poll(() => itemRectTop(T), { message: 'premise step 2: surviving ancestor above viewport before subtree delete', timeout: 10_000 })
+      .toBeLessThan(0)
+    await settled(page)
+
+    await page.evaluate(() => {
+      const w = window as any
+      w.__delScrollCalls = 0
+      w.__origBodyScrollTo = document.body.scrollTo
+      document.body.scrollTo = function (...args: any[]) {
+        w.__delScrollCalls++
+        return w.__origBodyScrollTo.apply(this, args)
+      }
+    })
+    expect(
+      await page.evaluate(l => window._item(l)!.delete_subtree(false), `${T}/a`),
+      'step 2: delete_subtree(false) on #e2e_tree/a succeeds'
+    ).toBe(true)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            ls => ls.every(l => !window._exists(l)),
+            [`${T}/a`, `${T}/a/x`, `${T}/in`, `${T}/in/leaf`]
+          ),
+        { message: 'step 2: subtree items removed locally', timeout: 10_000 }
+      )
+      .toBe(true)
+    await expect.poll(targetLabel, { message: 'step 2: surviving ancestor targeted', timeout: 10_000 }).toBe(T)
+    await settled(page)
+    const afterSubtreeTop = (await itemRectTop(T))!
+    const subtreeScrollCalls = await page.evaluate(() => {
+      const w = window as any
+      const calls = w.__delScrollCalls as number
+      if (w.__origBodyScrollTo) {
+        document.body.scrollTo = w.__origBodyScrollTo
+        delete w.__origBodyScrollTo
+      }
+      delete w.__delScrollCalls
+      return calls
+    })
+    expect(await mindbox(page).inputValue(), 'step 2: query backed up to surviving ancestor').toBe(T)
+    expect(await page.evaluate(l => window._exists(l), T), 'step 2: surviving ancestor kept').toBe(true)
+    expect
+      .soft(afterSubtreeTop, `step 2: surviving ancestor top (${afterSubtreeTop}) brought into view (>= 0)`)
+      .toBeGreaterThanOrEqual(0)
+    expect
+      .soft(afterSubtreeTop, `step 2: surviving ancestor top (${afterSubtreeTop}) inside scroll band (<= ${vh - 200})`)
+      .toBeLessThanOrEqual(vh - 200)
+    expect
+      .soft(subtreeScrollCalls, `step 2: API subtree delete with tag-child selected performs 1 scroll (got ${subtreeScrollCalls})`)
+      .toBe(1)
+    for (const label of [`${T}/a`, `${T}/a/x`, `${T}/in`, `${T}/in/leaf`]) await waitGone(label, ids.get(label)!)
+
+    // 3. Mid-wait wheel input after a stationary-parent delete cancels deleteItem's deferred scroll
+    //    and leaves the reader at their wheeled position.
+    await page.evaluate(c => void window._create(`${c} step3 child`), CHILD)
+    const idChild3 = await waitSaved(CHILD)
+    await asUser(page, c => void (window._item(c) as any).select(), CHILD)
+    await expect.poll(targetLabel, { message: 'step 3: child targeted', timeout: 10_000 }).toBe(CHILD)
+    await blur(page)
+    await expect
+      .poll(() => itemRectTop(PARENT), { message: 'premise step 3: parent above viewport before delete', timeout: 10_000 })
+      .toBeLessThan(0)
+    await settled(page)
+
+    await page.evaluate(() => {
+      const w = window as any
+      const orig = window.requestAnimationFrame.bind(window)
+      const held: FrameRequestCallback[] = []
+      w.__origRaf = orig
+      w.__heldRaf = held
+      w.__releaseHeldRaf = () => {
+        window.requestAnimationFrame = orig
+        delete w.__origRaf
+        delete w.__heldRaf
+        delete w.__releaseHeldRaf
+        for (const cb of held.splice(0)) orig(cb)
+      }
+      window.requestAnimationFrame = (cb => {
+        held.push(cb)
+        return held.length
+      }) as typeof requestAnimationFrame
+    })
+    await page.keyboard.press('Control+Backspace')
+    await expect
+      .poll(() => page.evaluate(c => window._item(c, true)?.id ?? null, CHILD), {
+        message: 'step 3: child removed locally',
+        timeout: 10_000,
+      })
+      .toBeNull()
+    await expect(mindbox(page)).toHaveValue(PARENT)
+    await expect
+      .poll(() => page.evaluate(() => ((window as any).__heldRaf?.length ?? 0) > 0), {
+        message: 'step 3: delete scroll callback queued onto held rAF',
+        timeout: 10_000,
+      })
+      .toBe(true)
+
+    const beforeWheelScroll = await scrollTop(page)
+    await page.mouse.move(640, 360)
+    await page.mouse.wheel(0, -200)
+    await expect
+      .poll(() => scrollTop(page), { message: 'step 3: wheel scrolled while frames were held', timeout: 10_000 })
+      .toBeLessThan(beforeWheelScroll - 50)
+    const afterWheelScroll = await scrollTop(page)
+    expect(
+      (await itemRectTop(PARENT))!,
+      'premise step 3: parent still above viewport after wheel (so an uncancelled scrollToTarget would move it)'
+    ).toBeLessThan(0)
+
+    await page.evaluate(() => {
+      ;(window as any).__releaseHeldRaf?.()
+      return new Promise<void>(resolve =>
+        requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+      )
+    })
+    await settled(page)
+    const finalWheelScroll = await scrollTop(page)
+    expect(await targetLabel(), 'step 3: parent is target after wheel-cancelled delete').toBe(PARENT)
+    expect
+      .soft(
+        Math.abs(finalWheelScroll - afterWheelScroll),
+        `step 3: mid-wait wheel kept reader position ${afterWheelScroll} (got ${finalWheelScroll})`
+      )
+      .toBeLessThanOrEqual(2)
+    await waitGone(CHILD, idChild3)
+  } finally {
+    await page
+      .evaluate(() => {
+        const w = window as any
+        if (w.__origRaf) {
+          window.requestAnimationFrame = w.__origRaf
+          delete w.__origRaf
+          delete w.__heldRaf
+          delete w.__releaseHeldRaf
+        }
+        if (w.__origBodyScrollTo) {
+          document.body.scrollTo = w.__origBodyScrollTo
+          delete w.__origBodyScrollTo
+        }
+        delete w.__delScrollCalls
+      })
+      .catch(() => {})
+    await blur(page).catch(() => {})
+    await page.evaluate(() => void (window as any).MindBox.set('')).catch(() => {})
+    await expect
+      .poll(() => page.evaluate(() => (window as any)._mindboxDebounced === false), { timeout: 10_000 })
+      .toBe(true)
+      .catch(() => {})
+    await page
+      .evaluate(
+        ([prefix, tree]) => {
+          const remaining = window.__items
+            .filter(i => {
+              const l = i.labelText?.toLowerCase() ?? ''
+              return l.startsWith(prefix) || l == tree || l.startsWith(tree + '/') || l == '#chat' || l == '#chat/vault'
+            })
+            .map(i => i.id)
+          for (const id of remaining) window._item(id, true)?.delete(false)
+        },
+        [PREFIX, T] as const
+      )
+      .catch(() => {})
+    for (const id of createdIds) {
+      const ref = firestore().collection('items').doc(id)
+      if ((await ref.get()).exists) await ref.delete().catch(() => {})
+    }
+  }
+  expect(pageErrors, 'no page errors').toEqual([])
+})
