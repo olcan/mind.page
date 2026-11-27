@@ -4054,6 +4054,106 @@ test('bin buttons on wide and narrow windows, j/k row keys, select-next after ac
     await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
     await selectRow('#rk_one')
 
+    // 7c-3. Snooze modal pointer + keys share one highlight: opening under a resting mouse cursor
+    //       lights and paints nothing; a single move within 6h lights that button at once; an arrow
+    //       key moves the highlight leaving only one stop lit and painted; editing the date field
+    //       moves the highlight to the field; moving onto 3d while the date field holds focus with
+    //       a distinct future date keeps focus and Enter still takes 3d
+    const snoozePaintState = () =>
+      page.evaluate(() => {
+        const lit = [...document.querySelectorAll('.snooze-modal .lit')].map(el => el.textContent?.trim() || el.tagName.toLowerCase())
+        const painted = [...document.querySelectorAll('.snooze-modal .button')]
+          .filter(el => getComputedStyle(el).backgroundColor === 'rgb(85, 153, 255)')
+          .map(el => el.textContent?.trim() ?? '')
+        return { lit, painted }
+      })
+    const stopCenter = (label: string) =>
+      page.evaluate((want: string) => {
+        const el = [...document.querySelectorAll('.snooze-modal .button')].find(b => b.textContent?.trim() === want)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2, left: r.left, right: r.right, top: r.top, bottom: r.bottom }
+      }, label)
+    const pt6h = await stopCenter('6h')
+    expect(pt6h, 'measured 6h button location before opening dialog').not.toBeNull()
+    await page.mouse.move(pt6h!.x, pt6h!.y)
+    await page.keyboard.press('s')
+    await expect(snoozeDlg, 's opens snooze picker under resting mouse pointer').toBeVisible({ timeout: 5_000 })
+    await page.evaluate(() => (window as any)._update_dom())
+    await page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))))
+    const live6h = await stopCenter('6h')
+    expect(live6h, 'live 6h button box exists after open').not.toBeNull()
+    expect(pt6h!.x >= live6h!.left && pt6h!.x <= live6h!.right && pt6h!.y >= live6h!.top && pt6h!.y <= live6h!.bottom, 'resting pointer sits inside 6h button').toBe(true)
+    expect(await snoozePaintState(), 'opening under resting pointer lights nothing and hover paints nothing').toEqual({
+      lit: [],
+      painted: [],
+    })
+    await page.mouse.move(pt6h!.x + 4, pt6h!.y + 2)
+    expect(await snoozePaintState(), 'single mouse move within 6h lights and paints 6h alone').toEqual({
+      lit: ['6h'],
+      painted: ['6h'],
+    })
+    await page.keyboard.press('ArrowRight') // moves highlight from 6h -> 1d while pointer stays on 6h
+    expect(await snoozePaintState(), 'ArrowRight moves highlight to 1d with only one stop lit and painted').toEqual({
+      lit: ['1d'],
+      painted: ['1d'],
+    })
+    await page.evaluate(() => {
+      const inp = document.querySelector('.snooze-modal .custom input') as HTMLInputElement
+      const d = new Date(Date.now() + 5 * 3_600_000)
+      const local = new Date(d.getTime() - d.getTimezoneOffset() * 60_000)
+      inp.focus()
+      inp.value = local.toISOString().slice(0, 16)
+      // `input` alone: an editable date field can hold `change` back until it loses the focus (WebKit)
+      inp.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(await snoozePaintState(), 'editing the date field moves the highlight to the field and unpaints 1d').toEqual({
+      lit: ['input'],
+      painted: [],
+    })
+    expect(
+      await page.evaluate(() => {
+        const inp = document.querySelector('.snooze-modal .custom input')
+        const btn = document.querySelector('.snooze-modal .button.snooze')
+        return {
+          focused: document.activeElement === inp,
+          dateLit: !!inp?.classList.contains('lit'),
+          snoozeEnabled: !btn?.classList.contains('disabled'),
+        }
+      }),
+      'date field holds focus and .lit with a distinct valid future date enabled before hovering 3d',
+    ).toEqual({ focused: true, dateLit: true, snoozeEnabled: true })
+    const pt3d = await stopCenter('3d')
+    expect(pt3d, 'measured 3d button location').not.toBeNull()
+    await page.mouse.move(pt3d!.x, pt3d!.y)
+    expect(await snoozePaintState(), 'moving mouse onto 3d takes the one highlight').toEqual({
+      lit: ['3d'],
+      painted: ['3d'],
+    })
+    // the field's held-back `change` arrives now: it must not take the highlight back from 3d
+    await page.evaluate(() => document.querySelector('.snooze-modal .custom input')!.dispatchEvent(new Event('change', { bubbles: true })))
+    expect(await snoozePaintState(), 'a held-back change of the date field leaves 3d lit').toEqual({
+      lit: ['3d'],
+      painted: ['3d'],
+    })
+    expect(
+      await page.evaluate(() => document.activeElement === document.querySelector('.snooze-modal .custom input')),
+      'hovering 3d leaves the focused date field focused',
+    ).toBe(true)
+    const beforePointerSnooze = Date.now()
+    await page.keyboard.press('Enter')
+    await expect(snoozeDlg, 'Enter on pointer-lit 3d closes snooze picker').toBeHidden({ timeout: 5_000 })
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await expect.poll(() => mainRowNames().then(r => !r.includes('#rk_one')), { message: '#rk_one snoozed out of main list via pointer + Enter', timeout: 15_000 }).toBe(true)
+    const pointerSnoozedAt = await page.evaluate(() => ((window._item('#rk_one', true) as any)?._global_store?._todoer?.snoozed ?? 0) as number)
+    expect(Math.abs(pointerSnoozedAt - (beforePointerSnooze + 3 * 86_400_000)), `pointer+Enter snooze time (${pointerSnoozedAt}) is within 1 minute of 3d`).toBeLessThan(60_000)
+    await page.mouse.move(0, 0)
+    await selectRow('#rk_one')
+    await page.keyboard.press('s')
+    await expect.poll(() => mainRowNames().then(r => r.includes('#rk_one')), { message: '#rk_one restored to main list after pointer snooze', timeout: 15_000 }).toBe(true)
+    await expect.poll(() => page.evaluate(() => !(window as any)._todoer_bin_busy), { timeout: 5_000 }).toBe(true)
+    await selectRow('#rk_one')
+
     // 7d. x asks first; declined question keeps the row and selection
     const dlgX = dialogs.length
     answer.accept = false
