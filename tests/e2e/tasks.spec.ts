@@ -5773,6 +5773,88 @@ test('shortcuts menu: now and reference views, box and editor contexts, caret re
     await page.keyboard.press('j')
     await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j on last row wraps round to first row #sm_two', timeout: 5_000 }).toBe('#sm_two')
 
+    // 4c. Held order save (resume hold): walking unstored rows with j (including a pinned-item
+    //     force_render between j presses) keeps their drawn order instead of jumping on soft-touch
+    await page.evaluate(() => {
+      const store = (window._item('#todoer') as any).store
+      store.last_tick = Date.now()
+      store.hold_until = Date.now() + 5 * 60_000
+    })
+    try {
+      await page.evaluate(() => void window._create('#sm_hold_a\n#todo held order todo a'))
+      await expect.poll(() => savedId(page, '#sm_hold_a'), { timeout: 30_000 }).toBeTruthy()
+      await page.evaluate(() => void window._create('#sm_hold_b\n#todo held order todo b'))
+      await expect.poll(() => savedId(page, '#sm_hold_b'), { timeout: 30_000 }).toBeTruthy()
+      await expect.poll(() => mainRows(), { message: 'held unstored todos appear at top of main list', timeout: 15_000 }).toEqual([
+        '#sm_hold_b',
+        '#sm_hold_a',
+        '#sm_two',
+        '#sm_reply/0',
+        '#sm_one',
+      ])
+      await userSet(page, '')
+      await unfocus()
+      await page.keyboard.press('j')
+      await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j selects first unstored row #sm_hold_b', timeout: 5_000 }).toBe('#sm_hold_b')
+      await page.keyboard.press('j')
+      await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j moves to second unstored row #sm_hold_a', timeout: 5_000 }).toBe('#sm_hold_a')
+      await expect
+        .poll(() => page.locator('.todoer-widget .list-item-container.selected').first().getAttribute('data-id'), { timeout: 5_000 })
+        .toBe(await page.evaluate(() => window._item('#sm_hold_a', true)?.id ?? null))
+      const beforePinVer = await page.evaluate(() => {
+        const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !w._snoozed && !w._delegated) as any
+        const list = main.querySelector('.list') as any
+        list.__sr1_old = true
+        const pinId = main.closest('.container[data-item-id]')!.getAttribute('data-item-id')!
+        const pinItem = window._item(pinId) as any
+        const savedOrder: string[] = (pinItem._global_store?._todoer?.['#todo'] ?? '').split(',').filter(Boolean)
+        const holdIds: (string | null)[] = ['#sm_hold_a', '#sm_hold_b'].map(name => (window._item(name, true) as any)?.saved_id ?? null)
+        const storedHeld = holdIds.filter((id): id is string => !!id && savedOrder.includes(id))
+        const ver = document.getElementById('item-' + pinId)?.firstElementChild?.getAttribute('_version') ?? ''
+        pinItem.invalidate_elem_cache({ force_render: true, render_delay: 0 })
+        return { pinId, ver, bothSaved: holdIds.every(Boolean), storedHeld }
+      })
+      expect([beforePinVer.bothSaved, beforePinVer.storedHeld], 'both held rows have saved ids and are absent from pinned item saved order at invalidation').toEqual([
+        true,
+        [],
+      ])
+      await expect
+        .poll(
+          () =>
+            page.evaluate(
+              ([pinId, ver]) => {
+                const main = [...document.querySelectorAll('.todoer-widget')].find((w: any) => !w.closest('#cache-div') && !w._snoozed && !w._delegated) as any
+                const list = main?.querySelector('.list') as any
+                const curVer = document.getElementById('item-' + pinId)?.firstElementChild?.getAttribute('_version') ?? ''
+                return !!list && !list.__sr1_old && curVer !== ver && list.querySelectorAll('.list-item-container[data-id]').length === 5
+              },
+              [beforePinVer.pinId, beforePinVer.ver] as const,
+            ),
+          { message: 'pinned item force_render rebuilds list DOM', timeout: 15_000 },
+        )
+        .toBe(true)
+      expect(await mainRows(), 'unstored rows keep drawn order after select soft-touch and force_render').toEqual([
+        '#sm_hold_b',
+        '#sm_hold_a',
+        '#sm_two',
+        '#sm_reply/0',
+        '#sm_one',
+      ])
+      await page.keyboard.press('j')
+      await expect.poll(() => boxNow().then(b => b.trim()), { message: 'j moves past second unstored row #sm_hold_a to #sm_two', timeout: 5_000 }).toBe('#sm_two')
+    } finally {
+      await page.evaluate(() => {
+        const store = (window._item('#todoer', true) as any)?.store
+        if (store) delete store.hold_until
+        for (const name of ['#sm_hold_b', '#sm_hold_a']) (window._item(name, true) as any)?.delete(false)
+      })
+      await expect.poll(() => mainRows(), { message: 'main list returns to three shortcuts rows', timeout: 15_000 }).toEqual([
+        '#sm_two',
+        '#sm_reply/0',
+        '#sm_one',
+      ])
+    }
+
     // 5. In the box: plain ? types its character; Ctrl+? opens on box's now; both ? and Escape restore focus and caret
     await userSet(page, '')
     await focusMindbox(page)
