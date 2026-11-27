@@ -1,5 +1,7 @@
+import http from 'http'
 import { expect, test, type Page } from '@playwright/test'
 import { FieldValue } from 'firebase-admin/firestore'
+import { isolateEmulatorWebChannelPosts } from './emulator_webchannel.js'
 import { ALICE, customToken, firestore, loadUser, secretFor, waitForApp, lanePort, laneProjectId } from './helpers.js'
 // @ts-expect-error host.js is plain js shared with the node server, without a declaration file
 import { SHARED_LOCAL_HOST } from '../../src/host.js'
@@ -1638,6 +1640,7 @@ test('/_gc deletes exactly the previewed orphans, and an owner restored mid-conf
     })
     await page.reload()
     await waitForApp(page)
+    await isolateEmulatorWebChannelPosts(page)
     await expect.poll(authority, { timeout: 30_000 }).toBe(true)
     expect(cachedRevocations.length, 'cached first snapshot revoked at startup').toBeGreaterThan(0)
     expect(cachedRevocations.every(type => type == 'debug'), 'startup revocations are exactly debug').toBe(true)
@@ -1762,6 +1765,7 @@ test('an item deleted in this tab takes its store with it, with no warning of th
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
+  await isolateEmulatorWebChannelPosts(page)
   const authority = () => page.evaluate(() => (window as any).__hiddenAuthoritative)
   const exists = async (id: string) => (await firestore().collection('items').doc(id).get()).exists
   const SINGLE = '#e2e_cascade_single'
@@ -2030,6 +2034,7 @@ test('a subtree of 26 items deleted at once takes every store with it, quietly',
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
+  await isolateEmulatorWebChannelPosts(page)
   const ROOT = '#e2e_cascade_batch'
   const labels = [ROOT, ...Array.from({ length: 25 }, (_, i) => `${ROOT}/k${i}`)]
   const exist = async (ids: (string | null)[]) =>
@@ -2086,11 +2091,13 @@ test('a second tab of the profile that deletes an item takes its store with it t
   await withSecret(page)
   await loadUser(page, ALICE)
   await waitForApp(page)
+  await isolateEmulatorWebChannelPosts(page)
   const LABEL = '#e2e_cascade_twin'
   let owner: string | null = null
   let store: string | null = null
   let marker: string | null = null
   const twin = await page.context().newPage()
+  await isolateEmulatorWebChannelPosts(twin)
   const twinLines: { type: string; text: string }[] = []
   twin.on('console', m => void twinLines.push({ type: m.type(), text: m.text() }))
   try {
@@ -2125,5 +2132,192 @@ test('a second tab of the profile that deletes an item takes its store with it t
   } finally {
     await twin.close()
     for (const id of [marker, owner, store]) if (id) await firestore().collection('items').doc(id).delete().catch(() => {})
+  }
+})
+
+test('isolating emulator WebChannel POSTs forwards Listen and Write on distinct sockets while GET and REST fall through', async ({ browser }) => {
+  // forwarding-contract check for emulator_webchannel.ts against an ordinary HTTP server:
+  // Listen and Write POSTs are isolated onto distinct non-pooled upstream sockets with bodies and
+  // replies preserved at both ends, while streaming GET and REST :commit fall through to the
+  // browser's own transport (witnessed by a lower-priority route)
+  const sockets = new Set<http.IncomingMessage['socket']>()
+  const socketIds = new WeakMap<http.IncomingMessage['socket'], number>()
+  let nextSockId = 1
+  const webChannelPosts: { path: string; body: string; channel: string | undefined; contentType: string | undefined; socketId: number }[] = []
+  const restCommits: string[] = []
+  let streamRes: http.ServerResponse | null = null
+
+  const readBody = (req: http.IncomingMessage) =>
+    new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = []
+      req.on('data', c => chunks.push(typeof c === 'string' ? Buffer.from(c) : c))
+      req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      req.on('error', reject)
+    })
+
+  const server = http.createServer(async (req, res) => {
+    const reqPath = req.url ?? '/'
+    const socketId = socketIds.get(req.socket) ?? -1
+    const channelMatch = req.method === 'POST' ? reqPath.match(/^\/google\.firestore\.v1\.Firestore\/(Listen|Write)\/channel(?:\?|$)/) : null
+    if (req.method === 'GET' && reqPath === '/') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' })
+      res.end('ok')
+    } else if (req.method === 'GET' && reqPath === '/favicon.ico') {
+      res.writeHead(204)
+      res.end()
+    } else if (req.method === 'GET' && reqPath.startsWith('/google.firestore.v1.Firestore/Listen/channel')) {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store' })
+      streamRes = res
+      res.write('first-chunk\n')
+    } else if (channelMatch) {
+      const kind = channelMatch[1].toLowerCase()
+      webChannelPosts.push({
+        path: reqPath,
+        body: await readBody(req),
+        channel: typeof req.headers['x-e2e-channel'] === 'string' ? req.headers['x-e2e-channel'] : undefined,
+        contentType: req.headers['content-type'],
+        socketId,
+      })
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'X-E2E-Reply': `${kind}-ok` })
+      res.end(kind === 'listen' ? '12\n["listen"]\n' : '11\n["write"]\n')
+    } else if (req.method === 'POST' && reqPath === '/v1/projects/p/databases/(default)/documents:commit') {
+      restCommits.push(await readBody(req))
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end('{"commitTime":"2026-11-26T00:00:00Z"}')
+    } else {
+      res.writeHead(404)
+      res.end()
+    }
+  })
+  server.on('connection', sock => {
+    socketIds.set(sock, nextSockId++)
+    sockets.add(sock)
+    sock.on('close', () => sockets.delete(sock))
+  })
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+  const addr = server.address()
+  const port = typeof addr === 'object' && addr ? addr.port : 0
+  const base = `http://127.0.0.1:${port}`
+  const ctx = await browser.newContext()
+  try {
+    const tab = await ctx.newPage()
+    // lower-priority witness route (registered first so isolateEmulatorWebChannelPosts runs ahead of it)
+    const fellThrough: string[] = []
+    await tab.route(new RegExp(`^http://127\\.0\\.0\\.1:${port}/(google\\.firestore\\.v1\\.Firestore/|v1/)`), async route => {
+      const req = route.request()
+      fellThrough.push(`${req.method()} ${new URL(req.url()).pathname}`)
+      await route.continue()
+    })
+    await isolateEmulatorWebChannelPosts(tab, `127.0.0.1:${port}`)
+    await tab.goto(`${base}/`)
+
+    // (1) streaming GET falls through unbuffered: first chunk arrives while response is still open
+    const stream = await tab.evaluate(
+      url =>
+        new Promise<{ chunk: string; readyState: number }>(resolve => {
+          const x = new XMLHttpRequest()
+          const timer = setTimeout(() => {
+            x.abort()
+            resolve({ chunk: 'timeout', readyState: x.readyState })
+          }, 2_000)
+          x.open('GET', url, true)
+          x.onprogress = () => {
+            if (x.responseText) {
+              clearTimeout(timer)
+              const result = { chunk: x.responseText, readyState: x.readyState }
+              x.abort()
+              resolve(result)
+            }
+          }
+          x.onerror = () => {
+            clearTimeout(timer)
+            resolve({ chunk: 'error', readyState: x.readyState })
+          }
+          x.send()
+        }),
+      `${base}/google.firestore.v1.Firestore/Listen/channel?VER=8&RID=rpc`
+    )
+    expect(stream, 'streaming GET first chunk arrives before EOF').toEqual({ chunk: 'first-chunk\n', readyState: 3 })
+    const openStream = streamRes as http.ServerResponse | null
+    expect(openStream?.writableEnded, 'server had not ended streaming GET when first chunk arrived').toBe(false)
+    openStream?.end()
+
+    // (2) distinct Listen POST, Write POST, and browser REST commit
+    const commitBody = JSON.stringify({ writes: [{ delete: 'projects/p/databases/(default)/documents/items/doc1' }] })
+    const replies = await tab.evaluate(
+      async ({ base, commitBody }) => {
+        const post = (url: string, body: string, ct: string, channel?: string) =>
+          new Promise<{ status: number; reply: string | null; body: string }>(resolve => {
+            const x = new XMLHttpRequest()
+            x.open('POST', url, true)
+            x.setRequestHeader('Content-Type', ct)
+            if (channel) x.setRequestHeader('X-E2E-Channel', channel)
+            x.onload = () => resolve({ status: x.status, reply: x.getResponseHeader('x-e2e-reply'), body: x.responseText })
+            x.onerror = () => resolve({ status: 0, reply: null, body: 'ERR' })
+            x.send(body)
+          })
+        const listen = await post(
+          `${base}/google.firestore.v1.Firestore/Listen/channel?VER=8`,
+          'count=1&req=listen',
+          'application/x-www-form-urlencoded',
+          'listen'
+        )
+        const write = await post(
+          `${base}/google.firestore.v1.Firestore/Write/channel?VER=8`,
+          'count=2&req=write',
+          'application/x-www-form-urlencoded',
+          'write'
+        )
+        const commit = await post(`${base}/v1/projects/p/databases/(default)/documents:commit`, commitBody, 'text/plain')
+        return { listen, write, commit }
+      },
+      { base, commitBody }
+    )
+
+    expect(replies.listen, 'page received Listen POST reply').toEqual({
+      status: 200,
+      reply: 'listen-ok',
+      body: '12\n["listen"]\n',
+    })
+    expect(replies.write, 'page received Write POST reply').toEqual({
+      status: 200,
+      reply: 'write-ok',
+      body: '11\n["write"]\n',
+    })
+    expect(replies.commit, 'page received REST commit reply').toEqual({
+      status: 200,
+      reply: null,
+      body: '{"commitTime":"2026-11-26T00:00:00Z"}',
+    })
+    expect(fellThrough, 'only streaming GET and REST commit fall through to the browser transport').toEqual([
+      'GET /google.firestore.v1.Firestore/Listen/channel',
+      'POST /v1/projects/p/databases/(default)/documents:commit',
+    ])
+    expect(
+      webChannelPosts.map(({ socketId: _socketId, ...rest }) => rest),
+      'server received distinct Listen and Write POSTs'
+    ).toEqual([
+      {
+        path: '/google.firestore.v1.Firestore/Listen/channel?VER=8',
+        body: 'count=1&req=listen',
+        channel: 'listen',
+        contentType: 'application/x-www-form-urlencoded',
+      },
+      {
+        path: '/google.firestore.v1.Firestore/Write/channel?VER=8',
+        body: 'count=2&req=write',
+        channel: 'write',
+        contentType: 'application/x-www-form-urlencoded',
+      },
+    ])
+    expect(
+      new Set(webChannelPosts.map(p => p.socketId)).size,
+      'Listen and Write POSTs use distinct upstream sockets (agent: false)'
+    ).toBe(2)
+    expect(restCommits, 'server received the browser REST commit').toEqual([commitBody])
+  } finally {
+    await ctx.close()
+    for (const s of sockets) s.destroy()
+    await new Promise<void>(resolve => server.close(() => resolve()))
   }
 })
