@@ -34,7 +34,9 @@ import { customToken, firestore, install, interceptMindItems, loadUser, secretFo
 // the bridge fresh, and comes back when the item is #vault again.
 // A second row, on the same account as a returning device, is the watched mark (the vault's
 // design note, D25): what the item watcher follows is published as rules in the same value, and
-// the item marks the items the rules name (its phases are at the row). The LAST row, on the
+// the item marks the items the rules name (its phases are at the row). A row after it is an
+// agent's marks: the items an agent says it is about to act on are published in the same value
+// too, and each shows the app's running mark (its phases are at the row). The LAST row, on the
 // same account as a returning device too, is the sparkle's end: (h) the item's deletion removes
 // it at the task's next look; (i) installed again and watched, a successful sign-out leaves none
 test.describe.configure({ mode: 'serial' })
@@ -1547,6 +1549,151 @@ test('on a phone the menu says what the tooltips say, and a held finger selects 
 // account and takes the reading from the page: the key of the label index the item is under,
 // and the `label` and `tags_raw` that item code sees. (As the row above, it signs the account
 // of the first row in again)
+// an agent's marks (vault lib/mindpage_marks.py, vault docs/mind_marks.md): the items an agent
+// says it is about to act on, which the bridge, played as above, publishes in the same value
+// (`_bridge.watcher.marks`, each `{id, name, what}`). phases: (a) a published mark puts the app's
+// running mark on its item, the ring by the number, with the agent and its word as the ring's
+// tooltip, and on no other item; the sparkle pulses and says who is at work on how many items;
+// (a2) an item that has a run of its own shows no mark, and its Run button runs it while marked;
+// (b) a mark is no lock: the marked item opens in its editor, where the ring stands in the edit
+// menu, and an edit saved there leaves the mark where it was; (c) an item marked BEFORE it
+// exists takes its ring when it arrives, listed whatever the page shows, and other words are the
+// same ring with another tooltip; (d) a stale bridge shows none, the words gone with the rings,
+// and its return brings them back; (e) a listing without the marks takes the rings and their
+// words away, and the sparkle is the watcher's again
+test("an agent's marks put the running mark on the items it is about to act on", async ({ page }) => {
+  const dialogs: string[] = []
+  page.on('dialog', dialog => {
+    dialogs.push(`${dialog.type()}: ${dialog.message()}`)
+    void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss())
+  })
+  expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
+  await page.addInitScript(secret => {
+    localStorage.setItem('mindpage_github_token', 'e2e-local')
+    localStorage.setItem('mindpage_secret', secret)
+    localStorage.setItem('mindpage_kdf', 'off')
+  }, SECRET)
+  await loadUser(page, USER)
+  await waitForApp(page)
+  await expect.poll(() => page.evaluate(() => (window as any).__hiddenAuthoritative), { timeout: POLL_MS }).toBe(true)
+  await expect.poll(async () => (await sparkle(page)).nodes, { timeout: POLL_MS }).toBe(1)
+
+  // the bound of THIS row's own polls: the spec's (POLL_MS), unless a pin of this row lowers it
+  // alone (`E2E_MARKS_POLL_MS=5000 ...`), so that the row before it, which installs the account
+  // this one starts from, keeps its bound (a pin at the spec's short bound once failed there, at
+  // the installs' writes, before this row ran)
+  const WAIT = (ms => (Number.isInteger(ms) && ms > 0 && ms < POLL_MS ? ms : POLL_MS))(Number(process.env.E2E_MARKS_POLL_MS))
+  const [NOTED, PLAIN, NEW] = ['#e2e_act_note', '#e2e_act_plain', '#e2e_act_new']
+  for (const text of [`${NOTED} a note the agent answers`, `${PLAIN} an item nobody marks`]) {
+    await page.evaluate(text => void window._create(text), text)
+    await expect.poll(() => savedId(page, text.split(' ')[0]), { timeout: POLL_MS }).toBeTruthy()
+  }
+  const noted = (await savedId(page, NOTED))!
+  // an item's running flag as the app holds it, and its ring by the number with its tooltip
+  const ring = (label: string) =>
+    page.evaluate(label => {
+      const item = window._item(label, true) as any
+      if (!item) return null
+      const rings = [...document.querySelectorAll(`.container[data-item-id="${item.id}"] .item-menu > .index > .running-mark`)] as HTMLElement[]
+      return { running: item.running as boolean, rings: rings.length, says: rings[0]?.title ?? null }
+    }, label)
+  const RUNS = (what: string) => ({ running: true, rings: 1, says: `${AGENT}: ${what}` })
+  const STILL = { running: false, rings: 0, says: null }
+  const shows = async (label: string) => {
+    await page.evaluate(label => (window as any).MindBox.set(label), label)
+    await expect.poll(() => page.evaluate(label => (window as any)._mindboxDebounced === false && !!window._item(label, true)?.elem, label), { timeout: POLL_MS }).toBe(true)
+  }
+  const act = (id: string, what: string) => ({ id, name: AGENT, what })
+  const acting = (marks: Record<string, string>[] | null) => watched(page, { name: AGENT, took: TOOK, state: 'watching', ...(marks ? { marks } : {}) })
+  // whether an item has its element on the page, and the status the app's record holds for it,
+  // there or not (the item's own getter gives null for an item without an element, whatever was set)
+  const on_screen = (label: string) => page.evaluate(label => !!window._item(label, true)?.elem?.querySelector(':scope > .container'), label)
+  const words = (labels: string[]) => page.evaluate(labels => labels.map(label => ((window as any).__item(window._item(label, true)!.id).status as string | undefined) ?? ''), labels)
+
+  // (a) the mark: the ring and its words on the marked item alone, and the sparkle's pulse. The
+  // item is NOT ON THE SCREEN when its mark arrives (the page shows another): its words are
+  // stored all the same, and other words asked for the mark are written over them
+  await fresh(page)
+  await acting(null)
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is watching`))
+  await shows(PLAIN)
+  expect([await ring(NOTED), await ring(PLAIN)].map(held => held?.running), 'nothing runs before a mark').toEqual([false, false])
+  expect(await on_screen(NOTED), 'the item to be marked has no element: the page shows another').toBe(false)
+  await acting([act(noted, 'reading')])
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is working on 1 item`, { answering: true }))
+  await expect.poll(() => ring(NOTED), { timeout: WAIT, message: 'a marked item is listed, with its ring, whatever the page shows' }).toEqual(RUNS('reading'))
+  await acting([act(noted, 'answering')])
+  await expect.poll(() => ring(NOTED), { timeout: WAIT, message: 'other words for a mark that was set off the screen' }).toEqual(RUNS('answering'))
+  expect(await words([NOTED]), 'as the app holds them').toEqual([`${AGENT}: answering`])
+  expect(await ring(PLAIN)).toEqual(STILL)
+  // this tab's record of its reference for the mark: the #vault item's in-tab state, by the
+  // marked item's own id (the #todoer item, which holds an agent's alert for an item while its
+  // mark stands, goes by the list the #vault item's controller applied, not by this record)
+  const held = () => page.evaluate(() => Object.keys((window._item('#vault', true) as any).store._vault_acting ?? {}))
+  const noted_own = await page.evaluate(label => window._item(label, true)!.id, NOTED)
+  expect(await held()).toEqual([noted_own])
+
+  // (a2) an item that has a run of its own to offer shows no mark: it is not running, it has no
+  // ring, and a click on its Run button runs it, once, while its mark is listed (the ring is the
+  // app's running state, and a Run click does nothing on a running item)
+  const CODE = '#e2e_act_code'
+  await page.evaluate(text => void window._create(text), `${CODE} an item that can run\n` + '```js_input\nwindow.__e2e_act_ran = (window.__e2e_act_ran ?? 0) + 1\n```')
+  await expect.poll(() => savedId(page, CODE), { timeout: POLL_MS }).toBeTruthy()
+  const ran = () => page.evaluate(() => ((window as any).__e2e_act_ran as number | undefined) ?? 0)
+  const already = await ran()
+  await acting([act(noted, 'answering'), act((await savedId(page, CODE))!, 'editing')])
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is working on 2 items`, { answering: true }))
+  await shows(CODE)
+  expect([await ring(CODE), await held()], 'the item that can run takes no reference of a mark').toEqual([STILL, [noted_own]])
+  const code_id = await page.evaluate(label => window._item(label, true)!.id, CODE)
+  await page.locator(`.column:not(.hidden) .container[data-item-id="${code_id}"] .item-menu > .button.run`).click()
+  await expect.poll(async () => (await ran()) - already, { timeout: WAIT, message: 'one click on Run runs the marked item once' }).toBe(1)
+  await acting([act(noted, 'answering')])
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is working on 1 item`, { answering: true }))
+
+  // (b) no lock: the marked item is edited and saved, and the mark stays
+  await shows(NOTED)
+  const id = await page.evaluate(label => window._item(label, true)!.id, NOTED)
+  const paragraph = page.locator(`#item-${id} p`).first()
+  const box = (await paragraph.boundingBox())!
+  await paragraph.click({ position: { x: box.width / 2, y: box.height / 2 } })
+  await expect(page.locator(`#textarea-${id}`)).toBeVisible()
+  expect(await page.evaluate(id => document.querySelectorAll(`.container[data-item-id="${id}"] .edit-menu > .running-mark`).length, id), 'the ring stands in the edit menu').toBe(1)
+  await page.locator(`#textarea-${id}`).fill(`${NOTED} a note the agent answers, edited meanwhile`)
+  await page.keyboard.press('Shift+Enter') // save
+  await expect(page.locator(`#textarea-${id}`)).toBeHidden()
+  await expect.poll(() => ring(NOTED), { timeout: WAIT }).toEqual(RUNS('answering'))
+  expect(await savedId(page, NOTED), 'the saved id a mark names is the item\'s still').toBe(noted)
+
+  // (c) an item marked before it exists, written behind the app as an agent's tool writes it:
+  // its ring is there when it arrives; and other words on a marked item
+  const CREATED = 'e2e-act-new'
+  await acting([act(noted, 'editing'), act(CREATED, 'writing')])
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is working on 2 items`, { answering: true }))
+  await expect.poll(() => ring(NOTED), { timeout: WAIT }).toEqual(RUNS('editing'))
+  const { encryptWithSecret } = await import('../../src/crypto.js')
+  const cipher = await encryptWithSecret(JSON.stringify({ text: NEW, attr: null }), SECRET)
+  await firestore().collection('items').doc(CREATED).set({ user: USER.uid, time: Date.now(), hidden: false, text: null, attr: null, cipher })
+  await expect.poll(() => ring(NEW), { timeout: WAIT, message: 'the created item takes its ring as it arrives' }).toEqual(RUNS('writing'))
+  expect(await savedId(page, NEW)).toBe(CREATED)
+
+  // (d) a stale bridge shows none; its return brings them back
+  await fresh(page, 4 * 60_000)
+  await expect.poll(async () => [await ring(NOTED), await ring(NEW), (await sparkle(page)).shown], { timeout: WAIT }).toEqual([STILL, STILL, false])
+  expect(await words([NOTED, NEW]), 'the words go with the rings: the app holds none for an item that runs no more, on the screen or not').toEqual(['', ''])
+  await fresh(page)
+  await expect.poll(async () => [await ring(NOTED), await ring(NEW)], { timeout: WAIT }).toEqual([RUNS('editing'), RUNS('writing')])
+
+  // (e) the marks end: the rings and their words go, and the sparkle is the watcher's again
+  await acting(null)
+  await expect.poll(async () => [await ring(NOTED), await ring(NEW)], { timeout: WAIT }).toEqual([STILL, STILL])
+  await expect.poll(() => sparkle(page), { timeout: WAIT }).toEqual(shown(`${AGENT} is watching`))
+  expect(await words([NOTED, NEW]), 'and none is left when the marks ended').toEqual(['', ''])
+  expect(await held(), 'nor a reference of this tab').toEqual([])
+  await page.waitForFunction(() => (window as any).__items.every((item: any) => !item.saveTask && !item.saving && !item.unackedWrites?.length), null, { timeout: WAIT })
+  expect(dialogs, 'no alert of the sparkle or the marks').toEqual([])
+})
+
 test('the app reads every text of the reading corpus as the corpus says', async ({ page }) => {
   page.on('dialog', dialog => void (dialog.type() == 'beforeunload' ? dialog.accept() : dialog.dismiss()))
   expect(await interceptMindItems(page), 'mind.items local checkout required').toBe(true)
