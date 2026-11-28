@@ -6177,3 +6177,246 @@ test('deleting a parent with items under it asks in the app modal, lists them, o
   expect(nativeDialogs, 'no browser confirm dialog').toEqual([])
   expect(pageErrors, 'no page errors').toEqual([])
 })
+
+test('kept times survive passive re-rankings while the box holds the query, for Option+PageDown and Option-click, while plain clicks and leaving the query touch as before', async ({ page }) => {
+  // the owner (2026-11-27): Option+PageDown (and Option-click / arrow navigation / Back) keeps
+  // times, so later passive re-rankings (remote change, running state, unrelated touch, etc.) must
+  // not soft-touch the named item while the box holds that query; a plain click or leaving the
+  // query ends the kept visit and touches as before
+  const pageErrors: string[] = []
+  page.on('pageerror', err => pageErrors.push(String(err)))
+  await loadAdmin(page)
+
+  const PARENT = '#e2e_kt'
+  const CHILD_A = `${PARENT}/a`
+  const CHILD_B = `${PARENT}/b`
+  const CHILD_C = `${PARENT}/c`
+  const CHILD_D = `${PARENT}/d`
+  const OTHER = '#e2e_kt_other'
+  const labels = [PARENT, CHILD_A, CHILD_B, CHILD_C, CHILD_D, OTHER]
+  const fixtures = [
+    `${PARENT} parent`,
+    `${CHILD_A} child a (oldest)`,
+    `${CHILD_B} child b`,
+    `${CHILD_C} child c`,
+    `${CHILD_D} child d (newest)`,
+    `${OTHER} unrelated item for passive re-ranking`,
+  ]
+  const query = () => page.evaluate(() => (document.getElementById('textarea-mindbox') as HTMLTextAreaElement).value)
+  const itemTime = (label: string) =>
+    page.evaluate(l => ((window as any).__items as any[]).find(i => i.label == l)?.time as number, label)
+  const passiveTouchAndSettle = async () => {
+    const beforeOther = await itemTime(OTHER)
+    await page.waitForTimeout(25)
+    const touched = await page.evaluate(label => {
+      const it = window._item(label, true) as any
+      if (!it) return false
+      it.touch()
+      return true
+    }, OTHER)
+    expect(touched, 'premise: unrelated item found for passive touch').toBe(true)
+    expect(await itemTime(OTHER), 'premise: unrelated item touch advanced its time').toBeGreaterThan(beforeOther)
+    await settled(page)
+  }
+  const clickLabel = async (label: string, altKey: boolean) => {
+    if (!(await page.evaluate(l => !!window._item(l, true)?.elem, label)))
+      await page.evaluate(() => document.querySelector('.toggle.show')?.dispatchEvent(new Event('click')))
+    await expect
+      .poll(() => page.evaluate(l => !!window._item(l, true)?.elem?.querySelector('mark.label'), label), {
+        message: `premise: rendered mark.label present for ${label}`,
+      })
+      .toBe(true)
+    await page.evaluate(
+      ([l, alt]) => {
+        window._item(l, true)!.elem!.querySelector('mark.label')!.dispatchEvent(new MouseEvent('mousedown', { altKey: alt }))
+      },
+      [label, altKey] as const
+    )
+  }
+
+  try {
+    await page.evaluate(texts => texts.forEach(text => void window._create(text)), fixtures)
+    await expect
+      .poll(
+        () =>
+          page.evaluate(ls => {
+            const list = (window as any).__items as any[]
+            const found = ls.map(l => list.find(i => i.label == l))
+            return found.every(i => i && i.savedId && !i.saving && !i.saveTask && !(i.unackedWrites?.length))
+          }, labels),
+        { message: 'kept-times fixtures saved and idle', timeout: 30_000 }
+      )
+      .toBe(true)
+
+    // navigate to PARENT first, then place all four children at distinct past times (a oldest < b < c < d)
+    await userSet(page, PARENT, { scroll: true })
+    await expect.poll(query).toMatch(/^#e2e_kt ?$/)
+    await settled(page)
+    const times = await page.evaluate(ls => {
+      const list = (window as any).__items as any[]
+      const byLabel = (l: string) => list.find(i => i.label == l)
+      const base = Date.now() - 3600_000
+      const plan: [any, number][] = [
+        [byLabel(ls[5]), base + 100], // OTHER
+        [byLabel(ls[0]), base + 500], // PARENT
+        [byLabel(ls[1]), base + 1000], // CHILD_A (oldest)
+        [byLabel(ls[2]), base + 2000], // CHILD_B
+        [byLabel(ls[3]), base + 3000], // CHILD_C
+        [byLabel(ls[4]), base + 4000], // CHILD_D (newest)
+      ]
+      for (const [it, t] of plan) it.time = it.savedTime = t
+      return {
+        a: byLabel(ls[1]).time as number,
+        b: byLabel(ls[2]).time as number,
+        c: byLabel(ls[3]).time as number,
+        d: byLabel(ls[4]).time as number,
+      }
+    }, labels)
+
+    // 1. Option+PageDown from PARENT lands on oldest CHILD_A; a passive re-ranking keeps CHILD_A's
+    //    time unchanged, and returning to PARENT and pressing Option+PageDown lands on CHILD_A again
+    await blur(page)
+    await page.keyboard.press('Alt+PageDown')
+    await expect.poll(query, { message: '1st Option+PageDown lands on oldest child a' }).toBe(`${CHILD_A} `)
+    await settled(page)
+    expect(await itemTime(CHILD_A), 'Option+PageDown keeps child a time on landing').toBe(times.a)
+    await passiveTouchAndSettle()
+    const aTimeAfterRerank = await itemTime(CHILD_A)
+    await blur(page)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(query, { message: 'ArrowUp returns to parent' }).toBe(`${PARENT} `)
+    await settled(page)
+    await blur(page)
+    await page.keyboard.press('Alt+PageDown')
+    await expect.poll(query, { message: 'repeat Option+PageDown leaves parent' }).not.toBe(`${PARENT} `)
+    expect(await query(), 'repeat Option+PageDown from parent lands on the same oldest child').toBe(`${CHILD_A} `)
+    expect(aTimeAfterRerank, 'passive re-ranking keeps Option+PageDown child time unchanged').toBe(times.a)
+    expect(await itemTime(CHILD_A), 'child a time stays unchanged after repeat Option+PageDown').toBe(times.a)
+
+    // 2. Option-click on a rendered tag label keeps its time across a passive re-ranking
+    await blur(page)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(query, { message: 'ArrowUp returns to parent before Option-click' }).toBe(`${PARENT} `)
+    await settled(page)
+    await clickLabel(CHILD_B, true)
+    await expect.poll(query, { message: 'Option-click navigates to child b' }).toBe(`${CHILD_B} `)
+    await settled(page)
+    expect(await itemTime(CHILD_B), 'Option-click keeps child b time on landing').toBe(times.b)
+    await passiveTouchAndSettle()
+    expect(await itemTime(CHILD_B), 'passive re-ranking keeps Option-clicked child b time unchanged').toBe(times.b)
+
+    // 3. Control: after a plain click on a tag, the same passive re-ranking moves the named item's time
+    await blur(page)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(query, { message: 'ArrowUp returns to parent before plain-click control' }).toBe(`${PARENT} `)
+    await settled(page)
+    await clickLabel(CHILD_C, false)
+    await expect.poll(query, { message: 'plain click navigates to child c' }).toBe(`${CHILD_C} `)
+    await settled(page)
+    const cAfterPlainClick = await itemTime(CHILD_C)
+    expect(cAfterPlainClick, 'plain click touches child c on landing').toBeGreaterThan(times.c)
+    await passiveTouchAndSettle()
+    expect(await itemTime(CHILD_C), 'after a plain click on the tag, passive re-ranking moves child c time').toBeGreaterThan(cAfterPlainClick)
+
+    // 4. A kept visit ends with the query: after another query and a plain click back, the item is touched
+    await blur(page)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(query, { message: 'ArrowUp returns to parent before kept-visit end check' }).toBe(`${PARENT} `)
+    await settled(page)
+    await clickLabel(CHILD_D, true)
+    await expect.poll(query, { message: 'Option-click starts kept visit on child d' }).toBe(`${CHILD_D} `)
+    await settled(page)
+    expect(await itemTime(CHILD_D), 'Option-click keeps child d time on landing').toBe(times.d)
+    await userSet(page, PARENT, { scroll: true })
+    await expect.poll(query, { message: 'another query ends kept visit on child d' }).toMatch(/^#e2e_kt ?$/)
+    await settled(page)
+    expect(await itemTime(CHILD_D), 'leaving to parent did not touch child d').toBe(times.d)
+    await clickLabel(CHILD_D, false)
+    await expect.poll(query, { message: 'plain click returns to child d' }).toBe(`${CHILD_D} `)
+    await settled(page)
+    const dAfterReturn = await itemTime(CHILD_D)
+    expect(dAfterReturn, 'plain click back after leaving a kept visit touches child d').toBeGreaterThan(times.d)
+    await passiveTouchAndSettle()
+    expect(await itemTime(CHILD_D), 'passive re-ranking after plain click back moves child d time').toBeGreaterThan(dAfterReturn)
+
+    // 4b. Debounced typing away and back ends a kept visit (even if typed back to the same query)
+    await blur(page)
+    await page.keyboard.press('ArrowUp')
+    await expect.poll(query, { message: 'ArrowUp returns to parent before typing check' }).toBe(`${PARENT} `)
+    await settled(page)
+    await clickLabel(CHILD_A, true)
+    await expect.poll(query, { message: 'Option-click starts kept visit on child a' }).toBe(`${CHILD_A} `)
+    await settled(page)
+    expect(await itemTime(CHILD_A), 'premise: child a still at its original time').toBe(times.a)
+    await focusMindboxInPlace(page, (await query()).length)
+    await page.evaluate(
+      ([original, label]) => {
+        const w = window as any
+        const box = document.getElementById('textarea-mindbox') as HTMLTextAreaElement
+        box.addEventListener(
+          'input',
+          () => {
+            const afterAway = !!w._editor_change_pending
+            const valueAway = box.value
+            const timeBetween = ((w.__items as any[]).find(i => i.label == label)?.time as number) ?? 0
+            box.value = original
+            box.dispatchEvent(new Event('input', { bubbles: true }))
+            w.__e2e_kt_pending = {
+              afterAway,
+              valueAway,
+              timeBetween,
+              afterBack: !!w._editor_change_pending,
+              valueBack: box.value,
+            }
+          },
+          { once: true }
+        )
+      },
+      [`${CHILD_A} `, CHILD_A] as const
+    )
+    await page.keyboard.insertText('x')
+    const between = await page.evaluate(() => {
+      const w = window as any
+      const r = w.__e2e_kt_pending
+      delete w.__e2e_kt_pending
+      return r
+    })
+    expect(between, 'premise: both typed edits stayed pending in one browser task before debounce settled').toEqual({
+      afterAway: true,
+      valueAway: `${CHILD_A} x`,
+      timeBetween: times.a,
+      afterBack: true,
+      valueBack: `${CHILD_A} `,
+    })
+    await expect
+      .poll(
+        () => page.evaluate(() => !(window as any)._editor_change_pending && (window as any)._mindboxDebounced === false),
+        { message: 'typed draft settled' }
+      )
+      .toBe(true)
+    await expect.poll(query).toBe(`${CHILD_A} `)
+    expect(await itemTime(CHILD_A), 'typing away and back during a kept visit touches child a').toBeGreaterThan(times.a)
+
+    expect(pageErrors, 'no pageerror during kept-times row').toEqual([])
+  } finally {
+    await blur(page).catch(() => {})
+    const deletedSavedIds = await page.evaluate(ls => {
+      const matches = ((window as any).__items as any[]).filter(i => ls.includes(i.label))
+      const sids = matches.map(i => i.savedId).filter((s): s is string => !!s)
+      for (const item of matches) window._item(item.id, true)?.delete(false)
+      return sids
+    }, labels)
+    await userSet(page, '').catch(() => {})
+    await expect
+      .poll(
+        async () => {
+          const localGone = await page.evaluate(ls => !((window as any).__items as any[]).some(i => ls.includes(i.label)), labels)
+          if (!localGone) return false
+          const snaps = await Promise.all(deletedSavedIds.map(id => firestore().collection('items').doc(id).get()))
+          return snaps.every(s => !s.exists)
+        },
+        { message: 'kept-times fixtures removed locally and on server', timeout: 15_000 }
+      )
+      .toBe(true)
+  }
+})

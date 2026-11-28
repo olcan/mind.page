@@ -102,6 +102,58 @@ test('an edit in one tab reaches another tab sharing the persistent cache', asyn
       await expect
         .poll(() => tab.evaluate(() => window._items('#e2e_twin').length), { timeout: 30_000 })
         .toBe(2)
+    // cross-window kept visit: a real touch(true) of an unrelated item in the other tab delivers
+    // its new savedTime and triggers a passive re-ranking here without touching the kept item
+    await page.evaluate(() => void window._create('#e2e_xtab_kept kept visit target'))
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const list = (window as any).__items as any[]
+            const k = list.find(i => i.label == '#e2e_xtab_kept')
+            const x = list.find(i => i.label == '#e2e_xtab')
+            return !!(k?.savedId && !k.saving && !k.saveTask && !k.unackedWrites?.length && x?.savedId && !x.saving && !x.saveTask && !x.unackedWrites?.length)
+          }),
+        { message: 'premise: #e2e_xtab_kept and #e2e_xtab saved and idle', timeout: 30_000 }
+      )
+      .toBe(true)
+    const { keptBefore, xtabSavedBefore } = await page.evaluate(() => {
+      const list = (window as any).__items as any[]
+      const k = list.find(i => i.label == '#e2e_xtab_kept')
+      const x = list.find(i => i.label == '#e2e_xtab')
+      k.time = k.savedTime = Date.now() - 3600_000
+      return { keptBefore: k.time as number, xtabSavedBefore: x.savedTime as number }
+    })
+    if (!(await page.evaluate(() => !!window._item('#e2e_xtab_kept', true)?.elem)))
+      await page.evaluate(() => document.querySelector('.toggle.show')?.dispatchEvent(new Event('click')))
+    await expect
+      .poll(() => page.evaluate(() => !!window._item('#e2e_xtab_kept', true)?.elem?.querySelector('mark.label')))
+      .toBe(true)
+    await page.evaluate(() => {
+      window
+        ._item('#e2e_xtab_kept', true)!
+        .elem!.querySelector('mark.label')!
+        .dispatchEvent(new MouseEvent('mousedown', { altKey: true }))
+    })
+    await expect.poll(() => mindbox(page).inputValue(), { message: 'Option-click starts kept visit in first tab' }).toBe('#e2e_xtab_kept ')
+    await settled(page)
+    expect(
+      await page.evaluate(() => ((window as any).__items as any[]).find(i => i.label == '#e2e_xtab_kept')?.time as number),
+      'premise: Option-click kept #e2e_xtab_kept time on landing'
+    ).toBe(keptBefore)
+    await other.waitForTimeout(25)
+    await other.evaluate(() => (window._item('#e2e_xtab', true) as any).touch(true))
+    await expect
+      .poll(() => page.evaluate(() => ((window as any).__items as any[]).find(i => i.label == '#e2e_xtab')?.savedTime as number), {
+        message: 'unrelated item new savedTime arrived from the other tab',
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(xtabSavedBefore)
+    await settled(page)
+    expect(
+      await page.evaluate(() => ((window as any).__items as any[]).find(i => i.label == '#e2e_xtab_kept')?.time as number),
+      'cross-window touch(true) of unrelated item keeps #e2e_xtab_kept live time unchanged'
+    ).toBe(keptBefore)
   } finally {
     await other.close()
   }
@@ -1627,6 +1679,9 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
   const NOEDIT = 'e2e_bc noedit note'
   const RESELECT = 'e2e_bc reselect note'
   const FAIL_VIEW = 'e2e_bc fail view note'
+  // (7c)'s item: a text of its own, outside the bulk cleanup's `e2e_bc` prefix and not in
+  // createdEmptyIds: the teardown deletes it through the app (review 1 of kept_times)
+  const KEPT_PEND = 'e2e_kept pending ack'
   const createdEmptyIds: string[] = []
   try {
     await page.evaluate(text => void window._create(text), `${PRIOR} prior target`)
@@ -2532,6 +2587,103 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
     await page.evaluate(() => (window as any).__se1_restore_timer?.())
     await removeSavedItem(pendSavedId)
 
+    // (7c) save ack with a whitespace-only pending debounce on a KEPT visit to an IDLE unnamed
+    // item (reached via Back): the fallback path must still carry keptTimesQuery onto id:<savedId>
+    // so neither the ack nor a later passive re-ranking (unrelated touch) soft-touches the item
+    await page.context().setOffline(true)
+    await focusMindboxInPlace(page)
+    await mindbox(page).fill(KEPT_PEND)
+    await waitQueryReady()
+    await page.keyboard.press('Control+Alt+s')
+    const keptTabId = await waitPendingBc(
+      page,
+      KEPT_PEND,
+      { editing: false, target: true },
+      'idle unnamed item created locally for kept pending ack check'
+    )
+    await expect(mindbox(page)).toHaveValue(`id:${keptTabId}`)
+    await waitQueryReady()
+    const [, idxKeptCreated] = await entries(page)
+    await asUser(page, label => (window._item(label) as any).select(), PRIOR)
+    await expect(mindbox(page)).toHaveValue(PRIOR)
+    await waitQueryReady()
+    expect((await entries(page))[1], 'premise: selecting PRIOR pushed an entry after unnamed creation').toBe(idxKeptCreated + 1)
+    await page.goBack()
+    await expect(mindbox(page), 'Back returns to exact id:<tabId> kept entry').toHaveValue(`id:${keptTabId}`)
+    await waitQueryReady()
+    const keptBefore = await page.evaluate(id => {
+      const it = ((window as any).__items as any[]).find(i => i.id === id)
+      return {
+        time: (it?.time ?? 0) as number,
+        editing: !!it?.editing,
+        running: !!it?.running,
+        savedId: (it?.savedId ?? null) as string | null,
+      }
+    }, keptTabId)
+    expect(keptBefore, 'premise: kept unnamed item is idle and unsaved').toMatchObject({
+      editing: false,
+      running: false,
+      savedId: null,
+    })
+    expect(keptBefore.time, 'premise: kept unnamed item has live time').toBeGreaterThan(0)
+    await page.waitForTimeout(25)
+    await focusMindboxInPlace(page)
+    await fillHoldingDebounce([`id:${keptTabId} `, `id:${keptTabId}`])
+    expect(
+      await page.evaluate(id => {
+        const w = window as any
+        const it = (w.__items as any[]).find(i => i.id === id)
+        return {
+          pending: !!w._editor_change_pending,
+          debounced: !!w._mindboxDebounced,
+          target: !!it?.target,
+          time: it?.time as number,
+        }
+      }, keptTabId),
+      'kept pending premise: whitespace edit debounced back to exact id:<tabId> without touching'
+    ).toEqual({ pending: true, debounced: true, target: true, time: keptBefore.time })
+    const layoutBeforeKeptAck = await page.evaluate(() => (window as any).__layoutCount as number)
+    await page.context().setOffline(false)
+    const [keptSavedId] = await saved(page, [keptTabId])
+    await expect(mindbox(page), 'kept pending save ack upgrades box to id:<savedId>').toHaveValue(`id:${keptSavedId}`)
+    expect(
+      await page.evaluate(before => {
+        const w = window as any
+        return {
+          pending: !!w._editor_change_pending,
+          debounced: !!w._mindboxDebounced,
+          reranked: (w.__layoutCount as number) > before,
+        }
+      }, layoutBeforeKeptAck),
+      'kept pending save ack took the fallback path and settled'
+    ).toEqual({ pending: false, debounced: false, reranked: true })
+    expect(
+      await page.evaluate(id => ((window as any).__items as any[]).find(i => i.id === id)?.time as number, keptTabId),
+      'kept pending save ack preserves unnamed item live time'
+    ).toBe(keptBefore.time)
+    const priorTimeBefore = await page.evaluate(
+      label => ((window as any).__items as any[]).find(i => i.label == label)?.time as number,
+      PRIOR
+    )
+    await page.waitForTimeout(25)
+    const priorTouched = await page.evaluate(label => {
+      const it = window._item(label, true) as any
+      if (!it) return false
+      it.touch()
+      return true
+    }, PRIOR)
+    expect(priorTouched, 'premise: unrelated item found for passive touch after kept ack').toBe(true)
+    expect(
+      await page.evaluate(label => ((window as any).__items as any[]).find(i => i.label == label)?.time as number, PRIOR),
+      'premise: unrelated item touch advanced its time'
+    ).toBeGreaterThan(priorTimeBefore)
+    await waitQueryReady()
+    expect(
+      await page.evaluate(id => ((window as any).__items as any[]).find(i => i.id === id)?.time as number, keptTabId),
+      'unrelated touch re-ranking after kept pending save ack preserves unnamed item live time'
+    ).toBe(keptBefore.time)
+    await page.evaluate(() => (window as any).__se1_restore_timer?.())
+
     await waitNoBcSaves(page)
     expect(errors, 'no page errors').toEqual([])
   } finally {
@@ -2545,6 +2697,26 @@ test('unnamed creation selects the new item by its tab id, upgrades the box to i
       localStorage.removeItem('mindpage_green_screen')
     }).catch(() => {})
     await page.context().setOffline(false)
+    // (7c)'s item goes through the app's own delete, online again; the server's record is only read
+    const keptPendSavedIds = await page
+      .evaluate(text => {
+        const matches = ((window as any).__items as any[]).filter(i => i.text === text)
+        const sids = matches.map(i => i.savedId).filter((s): s is string => !!s)
+        for (const item of matches) window._item(item.id, true)?.delete(false)
+        return sids
+      }, KEPT_PEND)
+      .catch(() => [] as string[])
+    await expect
+      .poll(
+        async () => {
+          const localGone = await page.evaluate(text => !((window as any).__items as any[]).some(i => i.text === text), KEPT_PEND)
+          if (!localGone) return false
+          const snaps = await Promise.all(keptPendSavedIds.map(id => firestore().collection('items').doc(id).get()))
+          return snaps.every(s => !s.exists)
+        },
+        { message: 'kept pending fixture removed through the app, locally and on the server', timeout: 15_000 }
+      )
+      .toBe(true)
     for (const id of createdEmptyIds) await firestore().collection('items').doc(id).delete().catch(() => {})
     await deleteBoxAfterCreation()
   }

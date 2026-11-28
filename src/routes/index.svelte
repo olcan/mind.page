@@ -3189,6 +3189,7 @@
   let renderingVisibleItems = false
   let itemIdsOnLastEditorChange = []
   let editorChangesWithTimeKept = new Set()
+  let keptTimesQuery: string | null = null // trimmed query last applied with keep_times=true; passive re-rankings keep times while the box holds it
   let ignoreEditorChanges = false
   let recentWalk: RecentWalk | null = null // Option+Down/Up/PageDown/PageUp walk (see onKeyDown); ended by Option release, window focus loss, or any other change of the box
   let skipNarrationJump = false // true while applyWalkStep settles a pending debounce before pushing the walk step
@@ -3251,7 +3252,7 @@
     return true
   }
 
-  function onEditorChange(text: string, keep_times = false) {
+  function onEditorChange(text: string, keep_times?: boolean) {
     // console.debug('onEditorChange', text, keep_times)
     if (ignoreEditorChanges) return
     // a click or an edit of the user's supersedes the launch's query that is yet to be applied (see
@@ -3271,6 +3272,9 @@
     editorText = text // in case invoked without setting editorText
     if (keep_times && text.trim()) editorChangesWithTimeKept.add(text.trim())
     else editorChangesWithTimeKept.clear()
+    const keptStep = stepKeptTimes(keptTimesQuery, text, keep_times)
+    keptTimesQuery = keptStep.kept
+    keep_times = !keptStep.touch
 
     if (narrating) {
       // if non-empty editorText matches top history entry, then go back to top (not during an
@@ -7842,6 +7846,9 @@
                   box && document.activeElement === box
                     ? { start: box.selectionStart, end: box.selectionEnd, dir: box.selectionDirection }
                     : null
+                // carry any kept-times visit onto the persisted id before the settled/fallback
+                // paths diverge, so a pending same-id debounce fallback still sees it
+                if (keptTimesQuery === createdBoxId.trim()) keptTimesQuery = savedQuery.trim() || null
                 // when the page has already settled on this tab-id query with no change pending,
                 // upgrade box text, query/inert bookkeeping, history entry, and listeners in place;
                 // otherwise fall back to full onEditorChange
@@ -9756,6 +9763,7 @@
   import { gcCandidates, gcIntersect, type GcTarget } from '../hidden_gc'
   import { renamableTag, renameConflicts, renamedTag, renameTag } from '../tag_rename'
   import { numberClick, selectName, selectsAlready } from '../number_click'
+  import { stepKeptTimes } from '../kept_times'
   import { freeName, labeledText, nameLabel, nameRefusal } from '../item_name'
   import {
     isRecentDownKey,
