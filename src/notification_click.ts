@@ -10,8 +10,15 @@
 //   event on `window`.
 //     { type: 'mindpage:notificationclick:ready' }
 //   sent by a window once its listener stands and its items are loaded (and again whenever a new
-//   worker is confirmed); posts every stored click eligible for that sender, oldest first (without
-//   deleting them until `received`).
+//   worker is confirmed); for every stored click eligible for that sender (oldest first, without
+//   deleting until `received`), preserves stored posting order within that replay (the next row
+//   waits until the preceding row's offer to this sender has been posted or skipped, not for its
+//   acknowledgement interval), taking an offer turn if a `notificationclick` handler currently
+//   owns that click or posting at once if no handler owns it.
+//     { type: 'mindpage:notificationclick:status', id: string, showing: boolean, canHandle: boolean }
+//   side-effect-free answer to a discovery query (`mindpage:notificationclick:query`) telling the
+//   worker whether this window already shows the click's subject and whether it can handle it at
+//   that moment; ignored when late, duplicate, or from a client that was not queried.
 //     { type: 'mindpage:notificationclick:received', id: string }
 //   sent by the handler only when it can act on a click of its own; deletes that stored click.
 //     { type: 'mindpage:notificationclick:clear' }
@@ -27,9 +34,35 @@
 //   reload, so a canceled reload starts no new notifications, sends no `ready`, and answers no
 //   clicks; same-account external transitions leave the document unmarked.
 // - worker -> page (`navigator.serviceWorker` `message` event):
+//     { type: 'mindpage:notificationclick:query', id: string, tag: string, data: unknown, action?: string }
+//   sent in parallel to all eligible windows before any actionable click when two or more eligible
+//   windows exist. Discovery changes nothing on the page and holds no offer turn (so `ready` is
+//   served at once): an updated page answers with `status` (`showing`, `canHandle`); an older page
+//   ignores the unknown type. Delivery goes on as soon as every window has answered, the earliest
+//   window in worker order whose showing+capable answer still stands (a post to a window uses its
+//   answer up) cannot be beaten by any unanswered predecessor, a
+//   `received` or `clear` arrives, or `min(ackTimeoutMs, totalAckBudgetMs)` ms elapse. Each listed
+//   window's first valid answer is still taken after that decision, until all have answered, that
+//   deadline passes, or the click is acknowledged, cleared or released.
 //     { type: 'mindpage:notificationclick', id: string, tag: string, data: unknown, action?: string }
 //   `id` is fresh per click, `tag` is notification.tag ('' when absent), `data` is passed verbatim
 //   (structured-cloned, never inspected), and `action` is included only when non-empty.
+//   While a `notificationclick` handler is running for a click, every ordinary offer (loop or
+//   `ready`; cold-open direct posts excepted) takes a turn: one offer is in flight at a time for
+//   its acknowledgement interval, and a posted offer keeps its interval. Of the offers that wait,
+//   the one to a window that has answered that it shows the subject goes first (the loop's offer or
+//   that window's own `ready`, queued before or after its answer; several: the earliest in worker
+//   order), ahead of the offers to other windows; the others first come. An answer is good for the
+//   next ordinary post to its window alone. Another `ready` from the same window
+//   (where the loop's preferred offer and a `ready`'s offer would go to the same window, the
+//   `ready`'s is served first) whose turn is in flight posts at once and restarts that turn's interval, unless a DIFFERENT
+//   window that has answered that it shows the subject waits for the turn. Discovery only reorders: ONE
+//   preferred offer goes to the earliest window in worker order whose answer still stands when that
+//   offer's turn starts, with its own `ackTimeoutMs` interval; if it does not answer (or no answer
+//   stands), the remaining
+//   originally eligible windows are tried in released order (a `canHandle: false` answer removes
+//   nobody) with the full `ACK_TOTAL_BUDGET_MS` budget (time spent waiting for a `ready` turn is
+//   not charged to that budget). Single-window and cold-open paths skip discovery.
 // - storage: single IndexedDB object store (`mindpage-notification-clicks`, v1, store `pending`
 //   with autoIncrement `seq`, 5-minute TTL checked at next store use; disabled on isolated
 //   shared-page hosts). Clicks nobody answered stay unassigned (`clientId: null`) so any app
@@ -38,11 +71,24 @@
 //   stored clicks. Overlapping cold opens share one in-memory opening (`openInFlight`).
 //
 // KNOWN LIMITS:
-// - With two windows of the app open, both can take one click: a window whose answer outlasts
-//   the worker's wait (e.g. a busy main thread or message delivery delay), or two that say `ready`
-//   close together. Both then select the item.
+// - With two windows of the app open, both can still act on one ordinary click when a window's
+//   `received` reply outlasts the worker's wait (on timeout the worker offers the click to the next
+//   window), or when two windows say `ready` close together for a stored click that no running
+//   handler owns. Discovery itself is side-effect-free, and while a handler runs, ordinary offers
+//   (loop and `ready`) take turns one at a time.
+// - Page-owned `new Notification(...)` cards (used when no confirmed worker stands) still invoke
+//   their creator window's click handler, and startup `ready` still replays only to its sender.
 // - A click made while an earlier one is still on its way to a window that was just opened can
 //   arrive first; the page then ends on the earlier one.
+// - Rapid clicks can overtake each other in an already-open window when another window ignores
+//   discovery: if window A holds X and Y and already shows Y while window B ignores the query,
+//   clicking X at 0 ms and Y at 100 ms lets Y win discovery from A at once while X waits out B's
+//   250 ms discovery timeout, so A handles Y first and then selects X at 258 ms.
+// - A window that is loading at the moment of a click is posted it on its `ready` from the cache
+//   and again at once on its second `ready`, also while discovery is still waiting for answers:
+//   where a window that already shows the subject answers the query later than that second
+//   `ready` (e.g. `ready` at 10 ms, the answer at 17 ms), or has answered but has no offer
+//   waiting yet because a window ahead of it has not, the loading window takes the click.
 // - A sign-out does not stop a notification or a click that is already in flight at that moment:
 //   a notification that was just being shown can still appear after sign-out with that outgoing
 //   notebook's text in it, and an old click payload can still reach a page after the clear. The
@@ -73,6 +119,8 @@
 //   again, the next start sees the same account and clears nothing.
 
 export const NOTIFICATION_CLICK_TYPE = 'mindpage:notificationclick'
+export const NOTIFICATION_CLICK_QUERY = 'mindpage:notificationclick:query'
+export const NOTIFICATION_CLICK_STATUS = 'mindpage:notificationclick:status'
 export const NOTIFICATION_CLICK_HELLO = 'mindpage:notificationclick:hello'
 export const NOTIFICATION_CLICK_RELAY = 'mindpage:notificationclick:relay'
 export const NOTIFICATION_CLICK_RELAY_VERSION = 2
@@ -102,6 +150,21 @@ export type NotificationClickMessage = {
   tag: string
   data: unknown
   action?: string
+}
+
+export type NotificationClickQueryMessage = {
+  type: typeof NOTIFICATION_CLICK_QUERY
+  id: string
+  tag: string
+  data: unknown
+  action?: string
+}
+
+export type NotificationClickStatusMessage = {
+  type: typeof NOTIFICATION_CLICK_STATUS
+  id: string
+  showing: boolean
+  canHandle: boolean
 }
 
 export type NotificationRelayHelloAnswer = {
@@ -165,6 +228,8 @@ export type RelayOptions = {
   makeId?: () => string
   ackTimeoutMs?: number
   totalAckBudgetMs?: number
+  setTimeout?: (fn: () => void, ms: number) => unknown
+  clearTimeout?: (id: unknown) => void
 }
 
 export type RelayWorkerLike = {
@@ -551,19 +616,49 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
         : `${now()}-${++idSeq}-${Math.random().toString(36).slice(2)}`)
   const ackTimeoutMs = opts.ackTimeoutMs ?? ACK_WAIT_MS
   const totalAckBudgetMs = opts.totalAckBudgetMs ?? ACK_TOTAL_BUDGET_MS
+  const setTimer = opts.setTimeout ?? ((fn: () => void, ms: number) => setTimeout(fn, ms))
+  const clearTimer = opts.clearTimeout ?? ((id: unknown) => clearTimeout(id as ReturnType<typeof setTimeout>))
 
   type AckInfo = { senderId: string | null; client: WindowClientLike | null }
+  type ReadySource = { id: string; postMessage: (message: unknown) => void }
+  type DiscoveryAnswer = { showing: boolean; canHandle: boolean }
+  type DiscoveryWaiter = {
+    expectedIds: ReadonlySet<string>
+    onStatus: (clientId: string, answer: DiscoveryAnswer) => void
+    cancel: () => void
+  }
+  type ActiveTurn = {
+    clientId: string
+    reset: (waitMs: number) => void
+    finish: (info: AckInfo | undefined) => void
+    done: Promise<AckInfo | undefined>
+  }
+  // `target`: the window an offer that waits would go to now (fixed, or for the loop's preferred offer the window
+  // picked when its turn starts; null: nothing would be posted)
+  // `pick`: the loop's preferred offer (its window is picked when its turn starts); else the window is fixed
+  type TurnWaiter = { target: () => ReadySource | null; pick: boolean; start: () => void }
   type ClickState = {
     acked: boolean
+    cleared: boolean
     senderId: string | null
     senderClient: WindowClientLike | null
     removal: Promise<void> | null
+    busy: boolean // an offer has the turn, or the turn is being handed to the next one
+    waiting: TurnWaiter[] // the offers that wait for the turn, in the order they came
+    // windows whose answer for this click was showing+capable -> their place in worker order; an entry is good
+    // for the next ordinary post to that window and removed just before it
+    showing: Map<string, number>
+    idleWaiters: (() => void)[]
+    activeTurn: ActiveTurn | null
+    releaseWhenIdle: boolean
   }
   type OpenOutcome = { client: WindowClientLike | null; opened: boolean; rejected: boolean; ready: boolean }
   type OpenAttempt = { promise: Promise<OpenOutcome> }
 
-  const pendingAcks = new Map<string, (ack: AckInfo) => void>()
+  const pendingQueries = new Map<string, DiscoveryWaiter>()
   const inFlightClicks = new Map<string, ClickState>()
+  const activeReplayAckSets = new Set<Set<string>>()
+  let clearEpoch = 0
   let openInFlight: OpenAttempt | null = null
 
   async function focusBestEffort(client: WindowClientLike): Promise<void> {
@@ -597,43 +692,268 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
     }
   }
 
+  // The next of the offers that wait: one to a window whose answer for this click was showing+capable, whether
+  // the answer came before or after that offer queued (several such windows: the earliest in worker order,
+  // discovery's own tie order), ahead of the offers to other windows; else first come. Where the loop's preferred
+  // offer and a fixed offer (a `ready`'s) would go to the same window, the fixed one is served first: the post
+  // goes to that window either way, and the preferred offer can then still take another window whose answer stands.
+  function takeNextWaiter(clickState: ClickState): TurnWaiter | undefined {
+    let at = -1
+    let best = Infinity
+    clickState.waiting.forEach((w, i) => {
+      const to = w.target()
+      const rank = to ? clickState.showing.get(to.id) : undefined
+      if (rank !== undefined && (rank < best || (rank === best && at >= 0 && clickState.waiting[at].pick && !w.pick))) {
+        best = rank
+        at = i
+      }
+    })
+    return at < 0 ? clickState.waiting.shift() : clickState.waiting.splice(at, 1)[0]
+  }
+
+  async function offerClick(
+    clickState: ClickState,
+    to: ReadySource | (() => ReadySource | null), // a window; or a pick made when the offer's turn starts
+    message: NotificationClickMessage,
+    waitMs: number,
+    allowSameWindow = false,
+    onStart?: (client: ReadySource) => void,
+    onPosted?: () => void
+  ): Promise<AckInfo | undefined> {
+    const target = typeof to === 'function' ? to : () => to
+    const same = typeof to === 'function' ? null : to
+    let postedNotified = false
+    const notifyPosted = () => {
+      if (postedNotified) return
+      postedNotified = true
+      onPosted?.()
+    }
+    if (clickState.acked || clickState.cleared) {
+      notifyPosted()
+      return undefined
+    }
+    // Same window again while its own offer is in flight: post at once and restart its wait, unless a
+    // DIFFERENT window that has answered that it shows the subject waits for the turn, whichever way its
+    // offer came (the loop's, or its own `ready`, queued before or after its answer): that one is not
+    // overtaken (the same window's own queued offer, or a window that has not said it shows the subject, is).
+    if (
+      allowSameWindow &&
+      same &&
+      clickState.activeTurn?.clientId === same.id &&
+      !clickState.waiting.some(w => {
+        const other = w.target()
+        return !!other && other.id !== same.id && clickState.showing.has(other.id)
+      })
+    ) {
+      const active = clickState.activeTurn
+      clickState.showing.delete(same.id) // its answer is used up by this post (see below)
+      try {
+        same.postMessage(message)
+      } catch {
+        notifyPosted()
+        return undefined
+      }
+      if (clickState.activeTurn === active && !clickState.acked && !clickState.cleared) active.reset(waitMs)
+      notifyPosted()
+      return active.done
+    }
+
+    // Take the turn, or wait for it: a posted offer keeps its interval, and the next is chosen when it ends.
+    if (clickState.busy) await new Promise<void>(resolve => clickState.waiting.push({ target, pick: !same, start: resolve }))
+    else clickState.busy = true
+    try {
+      if (clickState.acked || clickState.cleared) {
+        notifyPosted()
+        return undefined
+      }
+      // the window of this offer, now that its turn has come (a pick can find no window left: nothing is posted)
+      const client = target()
+      if (!client) {
+        notifyPosted()
+        return undefined
+      }
+      onStart?.(client)
+      let settled = false
+      let result: AckInfo | undefined
+      let timer: unknown
+      let resolveDone!: (info: AckInfo | undefined) => void
+      const done = new Promise<AckInfo | undefined>(r => { resolveDone = r })
+      const finish = (info: AckInfo | undefined) => {
+        if (settled) return
+        settled = true
+        result = info
+        if (timer !== undefined) clearTimer(timer)
+        if (clickState.activeTurn === turn) clickState.activeTurn = null
+        resolveDone(info)
+      }
+      const reset = (ms: number) => {
+        if (settled) return
+        if (timer !== undefined) clearTimer(timer)
+        timer = setTimer(() => finish(undefined), ms)
+      }
+      const turn: ActiveTurn = { clientId: client.id, reset, finish, done }
+      clickState.activeTurn = turn
+      // A positive answer gives its window the place ahead for the NEXT ordinary post to it alone: used up here,
+      // before the post, so that an unanswered offer does not earn the window a second turn ahead of the others
+      // (an answer that arrives after a post still ranks that window's next offer).
+      clickState.showing.delete(client.id)
+      try {
+        client.postMessage(message)
+      } catch {
+        finish(undefined)
+        notifyPosted()
+        return undefined
+      }
+      if (!settled) {
+        reset(waitMs)
+        notifyPosted()
+        return await done
+      }
+      notifyPosted()
+      return result
+    } finally {
+      notifyPosted()
+      // pass the turn on, or end it
+      const next = takeNextWaiter(clickState)
+      if (next) next.start()
+      else {
+        clickState.busy = false
+        if (clickState.releaseWhenIdle && inFlightClicks.get(message.id) === clickState) {
+          inFlightClicks.delete(message.id)
+          pendingQueries.get(message.id)?.cancel() // a released click takes no more answers
+        }
+        for (const wake of clickState.idleWaiters.splice(0)) wake()
+      }
+    }
+  }
+
+  async function waitForTurns(clickState: ClickState): Promise<void> {
+    while (clickState.busy) await new Promise<void>(resolve => clickState.idleWaiters.push(resolve))
+  }
+
+  async function probeClients(
+    clients: (WindowClientLike | (() => WindowClientLike | null))[],
+    allClients: WindowClientLike[],
+    message: NotificationClickMessage,
+    totalBudgetMs: number,
+    clickState: ClickState,
+    onTried?: (client: WindowClientLike) => void
+  ): Promise<WindowClientLike | null> {
+    let budget = totalBudgetMs
+    const winnerOf = (id: string | null, client: WindowClientLike | null) => allClients.find(c => c.id === id) ?? client
+    for (const client of clients) {
+      if (clickState.acked) return winnerOf(clickState.senderId, clickState.senderClient)
+      if (clickState.cleared || budget <= 0) break
+      const waitMs = Math.min(ackTimeoutMs, budget)
+      let startedAt: number | null = null
+      let tried = (typeof client === 'function' ? null : client) as WindowClientLike | null
+      const ack = await offerClick(clickState, client, message, waitMs, false, posted => {
+        startedAt = now()
+        tried = posted as WindowClientLike
+        onTried?.(tried)
+      })
+      if (ack) return winnerOf(ack.senderId, ack.client) ?? tried
+      if (clickState.acked) return winnerOf(clickState.senderId, clickState.senderClient)
+      if (clickState.cleared) return null
+      if (startedAt !== null) budget -= Math.min(waitMs, Math.max(0, now() - startedAt))
+    }
+    return null
+  }
+
+  async function discoverWindows(
+    ordered: WindowClientLike[],
+    message: NotificationClickMessage,
+    waitMs: number,
+    clickState: ClickState
+  ): Promise<void> {
+    clickState.showing = new Map()
+    if (ordered.length < 2 || waitMs <= 0) return
+    const query: NotificationClickQueryMessage = { ...message, type: NOTIFICATION_CLICK_QUERY }
+    const expectedIds = new Set(ordered.map(c => c.id))
+    const answered = new Set<string>()
+    const isDecided = () => {
+      if (clickState.acked || clickState.cleared) return true
+      for (const client of ordered) {
+        if (!answered.has(client.id)) return false
+        // an answer that still stands: one that a post has used up no longer ends discovery
+        if (clickState.showing.has(client.id)) return true
+      }
+      return true
+    }
+    // The first decision lets delivery go on at once. Each listed window's first valid answer is still taken
+    // until all have answered, the deadline passes, or the click is acknowledged, cleared or released: an answer
+    // that comes after the decision can still rank an offer that waits, and be the preferred offer's window.
+    await new Promise<void>(resolve => {
+      let decided = false
+      let closed = false
+      let timer: unknown
+      const decide = () => {
+        if (decided) return
+        decided = true
+        resolve()
+      }
+      const close = () => {
+        if (closed) return
+        closed = true
+        if (timer !== undefined) clearTimer(timer)
+        if (pendingQueries.get(message.id) === waiter) pendingQueries.delete(message.id)
+        decide()
+      }
+      const waiter: DiscoveryWaiter = {
+        expectedIds,
+        onStatus: (clientId, answer) => {
+          if (answered.has(clientId)) return
+          answered.add(clientId)
+          // known to the turn line at once, also while discovery still waits for a window ahead of this one
+          if (answer.showing && answer.canHandle) clickState.showing.set(clientId, ordered.findIndex(c => c.id === clientId))
+          if (answered.size >= expectedIds.size) close()
+          else if (isDecided()) decide()
+        },
+        cancel: close,
+      }
+      pendingQueries.get(message.id)?.cancel() // an earlier discovery of this click takes no more answers
+      pendingQueries.set(message.id, waiter)
+      for (const client of ordered) {
+        try {
+          client.postMessage(query)
+        } catch {
+          answered.add(client.id)
+        }
+      }
+      if (answered.size >= expectedIds.size) close()
+      else {
+        timer = setTimer(close, waitMs)
+        if (isDecided()) decide()
+      }
+    })
+  }
+
   async function probeWindows(
     ordered: WindowClientLike[],
     message: NotificationClickMessage,
-    startedAt: number
+    clickState: ClickState
   ): Promise<WindowClientLike | null> {
-    const deadline = startedAt + totalAckBudgetMs
-    for (const client of ordered) {
-      const remaining = deadline - now()
-      if (remaining <= 0) break
-      const waitMs = Math.min(ackTimeoutMs, remaining)
-      const ack = await new Promise<AckInfo | undefined>(resolve => {
-        let settled = false
-        let timer: ReturnType<typeof setTimeout> | undefined
-        const finish = (info: AckInfo | undefined) => {
-          if (settled) return
-          settled = true
-          if (timer !== undefined) clearTimeout(timer)
-          if (pendingAcks.get(message.id) === onAck) pendingAcks.delete(message.id)
-          resolve(info)
-        }
-        const onAck = (info: AckInfo) => finish(info)
-        pendingAcks.set(message.id, onAck)
-        try {
-          client.postMessage(message)
-        } catch {
-          finish(undefined)
-          return
-        }
-        if (!settled) {
-          timer = setTimeout(() => finish(undefined), waitMs)
-        }
-      })
-      if (ack !== undefined) {
-        return ordered.find(c => c.id === ack.senderId) ?? ack.client ?? client
-      }
+    if (ordered.length < 2) {
+      return probeClients(ordered, ordered, message, totalAckBudgetMs, clickState)
     }
-    return null
+
+    // Discovery only reorders (a `canHandle: false` answer removes nobody) and holds no turn;
+    // the preferred window's offer has its own `ackTimeoutMs` wait ahead of the fallback budget.
+    await discoverWindows(ordered, message, Math.min(ackTimeoutMs, totalAckBudgetMs), clickState)
+    if (clickState.acked || clickState.cleared) return null
+    // ONE preferred offer, to the earliest window in worker order whose answer still stands. A post uses an answer
+    // up, so the window is picked when the offer's turn STARTS: a `ready` of the window that leads now may have
+    // spent its answer by then (the next one is taken; with none left nothing is posted and the fallback goes on).
+    const stillShowing = () => ordered.find(c => clickState.showing.has(c.id)) ?? null
+    let winner: WindowClientLike | null = null
+    let tried = null as WindowClientLike | null
+    if (stillShowing()) winner = await probeClients([stillShowing], ordered, message, ackTimeoutMs, clickState, client => { tried = client })
+    if (!winner && !clickState.acked && !clickState.cleared) {
+      // the fallback leaves out the window that the preferred offer was actually posted to
+      const rest = tried ? ordered.filter(c => c !== tried) : ordered
+      winner = await probeClients(rest, ordered, message, totalAckBudgetMs, clickState)
+    }
+    return winner
   }
 
   async function settleAfterOpen(outcome: OpenOutcome, message: NotificationClickMessage, clickState: ClickState): Promise<boolean> {
@@ -643,7 +963,7 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
     }
     if (outcome.client) {
       if (outcome.ready) {
-        const winner = await probeWindows([outcome.client], message, now())
+        const winner = await probeClients([outcome.client], [outcome.client], message, totalAckBudgetMs, clickState)
         if (winner) {
           await focusBestEffort(winner)
           await awaitRemoval(message.id, clickState)
@@ -721,18 +1041,23 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
       if (openRejected) {
         const after = orderWindowClients(await sw.clients.matchAll({ type: 'window', includeUncontrolled: true }))
         if (after.length > 0) {
-          const winner = await probeWindows(after, message, now())
+          const winner = await probeWindows(after, message, clickState)
           if (winner) {
             await focusBestEffort(winner)
             await awaitRemoval(message.id, clickState)
             resolveOpen({ client: winner, opened: false, rejected: false, ready: true })
             return
           }
+          await waitForTurns(clickState)
           if (clickState.acked) {
             const lateWinner = after.find(c => c.id === clickState.senderId) ?? clickState.senderClient ?? after[0]
             await focusBestEffort(lateWinner)
             await awaitRemoval(message.id, clickState)
             resolveOpen({ client: lateWinner, opened: false, rejected: false, ready: true })
+            return
+          }
+          if (clickState.cleared) {
+            resolveOpen({ client: null, opened: false, rejected: false, ready: false })
             return
           }
           // Nobody answered among concurrent windows: leave unassigned so any ready app window takes it.
@@ -759,7 +1084,10 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
     notification.close()
     const message = buildClickMessage(notification, event.action, makeId())
     const clickAt = now()
-    const clickState: ClickState = { acked: false, senderId: null, senderClient: null, removal: null }
+    const clickState: ClickState = {
+      acked: false, cleared: false, senderId: null, senderClient: null, removal: null,
+      busy: false, waiting: [], showing: new Map(), idleWaiters: [], activeTurn: null, releaseWhenIdle: false,
+    }
     inFlightClicks.set(message.id, clickState)
 
     let stored = false
@@ -784,6 +1112,7 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
         await awaitRemoval(message.id, clickState)
         return
       }
+      if (clickState.cleared) return
 
       // 2. Gather eligible app window clients, focused first, then matchAll order.
       const ordered = orderWindowClients(await sw.clients.matchAll({ type: 'window', includeUncontrolled: true }))
@@ -793,21 +1122,24 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
         await awaitRemoval(message.id, clickState)
         return
       }
+      if (clickState.cleared) return
 
-      // 3. Post to eligible windows one at a time, waiting a short bounded time for `received`.
+      // 3. Deliver to eligible windows (discovering a showing window first when 2+ windows exist).
       if (ordered.length > 0) {
-        const winner = await probeWindows(ordered, message, now())
+        const winner = await probeWindows(ordered, message, clickState)
         if (winner) {
           await focusBestEffort(winner)
           await awaitRemoval(message.id, clickState)
           return
         }
+        await waitForTurns(clickState)
         if (clickState.acked) {
           const lateWinner = ordered.find(c => c.id === clickState.senderId) ?? clickState.senderClient ?? ordered[0]
           await focusBestEffort(lateWinner)
           await awaitRemoval(message.id, clickState)
           return
         }
+        if (clickState.cleared) return
         // 4. Nobody answered and at least one window exists (e.g. reloading, fixed shared view, or
         //    a same-origin static page): focus the first window and leave the click stored UNASSIGNED
         //    so any app window that says `ready` takes it. No new window.
@@ -818,7 +1150,10 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
       // 5. No eligible window at all: open the app.
       await handleColdOpen(message, stored, sw, clickState)
     } finally {
-      inFlightClicks.delete(message.id)
+      if (!clickState.busy) {
+        inFlightClicks.delete(message.id)
+        pendingQueries.get(message.id)?.cancel() // a released click takes no more answers
+      } else clickState.releaseWhenIdle = true
     }
   }
 
@@ -846,6 +1181,7 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
     if (type === NOTIFICATION_CLICK_RECEIVED) {
       const id = (data as { id?: unknown }).id
       if (typeof id !== 'string' || !id) return
+      for (const s of activeReplayAckSets) s.add(id)
       const source = event.source
       const senderId = typeof source?.id === 'string' ? source.id : null
       const senderClient =
@@ -853,18 +1189,40 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
       const inFlight = inFlightClicks.get(id)
       const removal = inFlight?.removal ?? safeRemove(id)
       if (inFlight) {
-        inFlight.acked = true
-        inFlight.senderId = senderId
-        inFlight.senderClient = senderClient
+        if (!inFlight.acked) {
+          inFlight.acked = true
+          inFlight.senderId = senderId
+          inFlight.senderClient = senderClient
+        }
         inFlight.removal = removal
+        inFlight.activeTurn?.finish({ senderId, client: senderClient })
       }
-      const waiter = pendingAcks.get(id)
-      if (waiter) waiter({ senderId, client: senderClient })
+      pendingQueries.get(id)?.cancel()
       await removal
       return
     }
 
+    if (type === NOTIFICATION_CLICK_STATUS) {
+      const id = (data as { id?: unknown }).id
+      if (typeof id !== 'string' || !id) return
+      const source = event.source
+      const senderId = typeof source?.id === 'string' ? source.id : null
+      if (!senderId) return
+      const waiter = pendingQueries.get(id)
+      if (!waiter || !waiter.expectedIds.has(senderId)) return
+      const showing = (data as { showing?: unknown }).showing === true
+      const canHandle = (data as { canHandle?: unknown }).canHandle === true
+      waiter.onStatus(senderId, { showing, canHandle })
+      return
+    }
+
     if (type === NOTIFICATION_CLICK_CLEAR) {
+      clearEpoch++
+      for (const [id, state] of [...inFlightClicks]) {
+        state.cleared = true
+        state.activeTurn?.finish(undefined)
+        pendingQueries.get(id)?.cancel()
+      }
       if (sw.registration && typeof sw.registration.getNotifications === 'function') {
         try {
           const list = await sw.registration.getNotifications()
@@ -895,7 +1253,7 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
       if (!source || typeof source.id !== 'string' || typeof source.postMessage !== 'function') return
       if (source.frameType === 'nested' || source.frameType === 'none') return
 
-      if (openInFlight) await openInFlight.promise
+      while (openInFlight) await openInFlight.promise
 
       let liveClientIds: Set<string> | null
       try {
@@ -908,19 +1266,43 @@ export function createNotificationClickRelay(store: PendingClickStore | null, op
         liveClientIds = null
       }
 
-      let eligible: NotificationClickMessage[]
+      const replayClearEpoch = clearEpoch
+      const ackedDuringReplay = new Set<string>()
+      activeReplayAckSets.add(ackedDuringReplay)
+      const pending: Promise<unknown>[] = []
       try {
-        eligible = await store.listEligible(source.id, liveClientIds, now())
-      } catch {
-        return
-      }
-      for (const message of eligible) {
+        let eligible: NotificationClickMessage[]
         try {
-          source.postMessage(message)
+          eligible = await store.listEligible(source.id, liveClientIds, now())
         } catch {
-          // leave stored until acknowledged or expired
+          return
         }
+        const rows = eligible.map(message => ({ message, initial: inFlightClicks.get(message.id) }))
+        for (const { message, initial } of rows) {
+          if (clearEpoch !== replayClearEpoch) break
+          if (ackedDuringReplay.has(message.id) || initial?.acked || initial?.cleared) continue
+          const inFlight = inFlightClicks.get(message.id)
+          if (inFlight) {
+            let postedNow = false
+            let resolvePosted: (() => void) | null = null
+            const onPosted = () => {
+              postedNow = true
+              resolvePosted?.()
+            }
+            pending.push(offerClick(inFlight, source as ReadySource, message, ackTimeoutMs, true, undefined, onPosted))
+            if (!postedNow) await new Promise<void>(r => { resolvePosted = r })
+            continue
+          }
+          try {
+            source.postMessage(message)
+          } catch {
+            // leave stored until acknowledged or expired
+          }
+        }
+      } finally {
+        activeReplayAckSets.delete(ackedDuringReplay)
       }
+      if (pending.length > 0) await Promise.all(pending)
     }
   }
 

@@ -18,18 +18,37 @@ import { createIdbPendingStore, createNotificationClickRelay } from './notificat
 //   account clear sends `{ type: 'mindpage:notificationclick:clear' }`. On isolated shared-page
 //   origins nothing is stored (best-effort in-memory delivery only, and `hello` is not answered).
 // - On `notificationclick`, the worker closes the notification, creates a message with a fresh
-//   `id` (`{ type: 'mindpage:notificationclick', id, tag, data, action? }`), stores it first,
-//   probes eligible app windows (top-level and auxiliary, uncontrolled included; focused first,
-//   then matchAll order) one at a time waiting briefly for `received`, focuses the answering
-//   window and deletes the stored click. If none answers and a window exists (e.g. reloading, a
-//   fixed shared view, or a static page), it focuses the first and leaves the click stored
-//   unassigned so any ready app window takes it. If none exists, it opens the app
-//   (`clients.openWindow(registration.scope)`) sharing one in-memory opening across overlapping
-//   clicks, writes the opened window's id onto unassigned clicks, and leaves clicks stored
-//   unassigned on a refused or null open.
-// - On `{ type: 'mindpage:notificationclick:ready' }`, the worker posts (oldest first) every
-//   stored click addressed to the sender, unassigned, or addressed to a client no longer among
-//   live window clients, without deleting until `received`.
+//   `id` (`{ type: 'mindpage:notificationclick', id, tag, data, action? }`), stores it first, and
+//   probes eligible app windows (top-level and auxiliary, uncontrolled included; focused first, then
+//   matchAll order). While a `notificationclick` handler is running for a click, every ordinary
+//   offer (from the probe loop or from `ready`; cold-open direct posts excepted) takes a turn so
+//   one offer at a time gets its acknowledgement interval: a posted offer keeps its interval, and
+//   of the offers that wait, the one to a window that answered that it shows the subject goes
+//   first (an answer is good for the next ordinary post to its window alone), the others first
+//   come. Another `ready` from the same window whose turn is in flight
+//   posts at once and restarts that turn's interval, unless a DIFFERENT window that answered that
+//   it shows the subject waits for the turn. When two
+//   or more eligible windows exist, it first queries them in parallel with
+//   `{ type: 'mindpage:notificationclick:query', id, tag, data, action? }` (side-effect-free,
+//   holding no turn; updated pages reply `{ type: 'mindpage:notificationclick:status', id, showing,
+//   canHandle }`; delivery goes on at the first decision, and answers are still taken until the
+//   deadline; a `received` or `clear` ends discovery at once). Discovery only reorders:
+//   one preferred offer goes to the earliest window whose showing+capable answer still stands when
+//   that offer's turn starts, with its own `ackTimeoutMs` wait; if it does not answer (or no answer
+//   stands), the remaining originally eligible
+//   windows are tried in released order (a `canHandle: false` answer removes nobody) with the full
+//   fallback budget (time spent waiting for a `ready` turn is not charged to that budget). Before
+//   going on to "nobody answered" among listed windows, the handler waits for any in-flight or
+//   queued turns to end and rechecks acknowledgement; it focuses the answering window and deletes
+//   the stored click, or else focuses the first window and leaves the click stored unassigned. If
+//   no window is listed, it opens the app at once, as released, without waiting for a turn
+//   (`clients.openWindow(registration.scope)`), sharing one
+//   in-memory opening across overlapping clicks, writes the opened window's id onto unassigned
+//   clicks, and leaves clicks stored unassigned on a refused or null open.
+// - On `{ type: 'mindpage:notificationclick:ready' }`, for every stored click (oldest first,
+//   without deleting until `received`) addressed to the sender, unassigned, or addressed to a client
+//   no longer among live window clients, the worker takes a turn if a handler currently owns that
+//   click, or posts at once otherwise.
 // - On `{ type: 'mindpage:notificationclick:clear' }`, the worker closes every notification of
 //   this registration and clears all stored clicks.
 

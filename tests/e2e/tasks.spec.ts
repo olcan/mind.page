@@ -3057,6 +3057,246 @@ test('a worker notification survives reload, holds clicks across startup and col
       await expect.poll(() => box(page2!), { message: 'relayed worker click on /notify test <name> selects the item', timeout: 10_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
       await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed clicked /notify test <name> card', timeout: 10_000 }).toEqual([])
 
+      // 4c. TWO OPEN WINDOWS OF ONE ACCOUNT (side-effect-free worker discovery + single-destination click):
+      //     Order 1: non-showing window (`page3`, on `#todoer`) is focused; showing window (`page2`)
+      //     holds a compound query (`${SW_TODO} reload`) and is scrolled out of view. Worker queries
+      //     both in parallel, sends the ordinary click ONLY to `page2`, focuses `page2`, and `page2`
+      //     marks and scrolls without rewriting its compound box or pushing a history step.
+      //     Order 2: showing window (`page2`, canonical `${SW_TODO}`) is focused; worker queries both,
+      //     sends the ordinary click ONLY to `page2`, and focuses `page2`.
+      //     Order 3: two targets in `page2`'s box (`id:${todoerId} id:${todoId}`) with `page3` focused
+      //     on `#todoer`; click on the SECOND target (`todoId`) still picks `page2` via `item.elem`,
+      //     preserves the two-target box, marks only `todoId`, and focuses `page2`.
+      let page3: Page | null = null
+      try {
+        page3 = await context.newPage()
+        page3.on('dialog', dialog => void dialog.accept())
+        await page3.goto(`${testInfo.project.use.baseURL}/`)
+        await loaded(page3)
+        await expect
+          .poll(() => page3!.evaluate(() => (window as unknown as { _notification_click_relay?: string })._notification_click_relay ?? null), {
+            message: 'second window confirmed notification click relay',
+            timeout: 15_000,
+          })
+          .toBe('mindpage:notificationclick')
+        await expect
+          .poll(() => page3!.evaluate(id => !!(window._item('#todoer') as any)?.store?.notify_seen?.[window._item('id:' + id, true)?.id ?? ''], todoId), {
+            message: 'second window ran _start_notifier and attached its click listener',
+            timeout: 30_000,
+          })
+          .toBe(true)
+        await expect.poll(() => windowClientIds(), { message: 'both window clients registered with worker', timeout: 15_000 }).toHaveLength(2)
+        const page3ClientId = (await windowClientIds()).find((id: string) => id !== page2ClientId)!
+        expect(page3ClientId, 'second window has a distinct client id').toBeTruthy()
+        const todoerId = await page2.evaluate(() => (window._item('#todoer') as any)?.saved_id ?? null)
+        expect(todoerId, 'todoer item has a saved_id for multi-target query').toBeTruthy()
+
+        const compoundQuery = `${SW_TODO} reload`
+        await userSet(page2, compoundQuery)
+        await userSet(page3, '#todoer')
+        await expect.poll(() => box(page2!), { message: 'showing window holds compound query', timeout: 10_000 }).toBe(compoundQuery)
+        await expect.poll(() => box(page3!), { message: 'non-showing window holds #todoer', timeout: 10_000 }).toBe('#todoer')
+
+        const itemTargetState = (p: Page, savedId: string) =>
+          p.evaluate(id => {
+            const it = window._item('id:' + id, true) as any
+            const sup = it?.elem as HTMLElement | null
+            if (!sup || !sup.classList.contains('target')) return null
+            const top = document.body.scrollTop
+            const vh = visualViewport?.height ?? innerHeight
+            return {
+              scrollTop: top,
+              offsetTop: sup.offsetTop,
+              inBand: sup.offsetTop >= top && sup.offsetTop <= top + vh - 200,
+              selection: sup.querySelector('.container.target')?.getAttribute('data-selection') ?? null,
+              historyLength: history.length,
+            }
+          }, savedId)
+        const scrollOutOfView = async (p: Page, savedId: string) => {
+          await p.evaluate(() => {
+            for (const el of document.querySelectorAll('.container.target')) el.removeAttribute('data-selection')
+            window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+            document.body.scrollTo(0, 0)
+          })
+          await expect.poll(async () => (await itemTargetState(p, savedId))?.inBand, { message: 'target scrolled out of view before click', timeout: 5_000 }).toBe(false)
+        }
+
+        // Spy on worker discovery queries, ordinary clicks (no extra fields), and client.focus() calls
+        await sw.evaluate(() => {
+          const g = globalThis as any
+          g.__origClientFocus = g.WindowClient.prototype.focus
+          g.__origClientPost = g.WindowClient.prototype.postMessage
+          g.__queries = []
+          g.__clicks = []
+          g.__focusedIds = []
+          g.WindowClient.prototype.postMessage = function (msg: any, ...rest: any[]) {
+            if (msg?.type === 'mindpage:notificationclick:query') {
+              g.__queries.push(this.id)
+            } else if (msg?.type === 'mindpage:notificationclick') {
+              g.__clicks.push({ id: this.id, hasExtra: 'ifShowingUntil' in msg })
+            }
+            return g.__origClientPost.call(this, msg, ...rest)
+          }
+          g.WindowClient.prototype.focus = function (...rest: any[]) {
+            g.__focusedIds.push(this.id)
+            return g.__origClientFocus.apply(this, rest)
+          }
+        })
+        const swTrace = () =>
+          sw.evaluate(() => ({
+            queries: [...((globalThis as any).__queries as string[])],
+            clicks: [...((globalThis as any).__clicks as { id: string; hasExtra: boolean }[])],
+            focused: [...((globalThis as any).__focusedIds as string[])],
+          }))
+        const resetSwTrace = () =>
+          sw.evaluate(() => {
+            const g = globalThis as any
+            g.__queries = []
+            g.__clicks = []
+            g.__focusedIds = []
+          })
+        const orderedClientIds = () =>
+          sw.evaluate(async () => {
+            const g = globalThis as any
+            const wins = await g.clients.matchAll({ type: 'window', includeUncontrolled: true })
+            const focused = wins.filter((w: any) => w.focused).map((w: any) => w.id)
+            const rest = wins.filter((w: any) => !w.focused).map((w: any) => w.id)
+            return [...focused, ...rest]
+          })
+
+        await expect.poll(async () => (await itemTargetState(page2!, todoId))?.inBand, { message: 'page2 initial compound target scroll settled', timeout: 10_000 }).toBe(true)
+        await expect.poll(async () => (await itemTargetState(page3!, todoerId))?.inBand, { message: 'page3 initial target scroll settled', timeout: 10_000 }).toBe(true)
+
+        // Order 1: non-showing window (page3) is focused; showing window (page2, compound box) is second
+        await scrollOutOfView(page2, todoId)
+        await page3.bringToFront()
+        await page3.evaluate(() => {
+          window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+          document.body.scrollTo(0, 0)
+        })
+        await expect.poll(() => orderedClientIds(), { message: 'non-showing page3 is focused and ordered first by worker', timeout: 10_000 }).toEqual([page3ClientId, page2ClientId])
+        const p2Before1 = (await itemTargetState(page2, todoId))!
+        const p2BoxBefore1 = await box(page2)
+        const p3BoxBefore1 = await box(page3)
+        const p3ScrollBefore1 = await page3.evaluate(() => document.body.scrollTop)
+
+        await writeStore(storeDoc, `global_store_${todoId}`, state('question', 4, 4, 4), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'two-window order-1 notification shown', timeout: 30_000 }).toHaveLength(1)
+        await resetSwTrace()
+        expect(await dispatchClick(`todoer:${todoId}`), 'dispatched order-1 click with non-showing page3 focused').toEqual({ count: 1 })
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed order-1 notification', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => pendingRows(), { message: 'worker deleted order-1 click after showing page2 answered received', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => swTrace(), { message: 'worker queried both, sent ordinary click only to page2, and focused page2', timeout: 10_000 }).toEqual({
+          queries: [page3ClientId, page2ClientId],
+          clicks: [{ id: page2ClientId, hasExtra: false }],
+          focused: [page2ClientId],
+        })
+        await expect.poll(async () => (await itemTargetState(page2!, todoId))?.inBand, { message: 'showing page2 scrolled target back into view', timeout: 10_000 }).toBe(true)
+        const p2After1 = (await itemTargetState(page2, todoId))!
+        expect(await box(page2), 'showing page2 kept compound box unchanged').toBe(p2BoxBefore1)
+        expect(p2BoxBefore1, 'order-1 box genuinely held a second term after the label').toBe(compoundQuery)
+        expect(p2After1.historyLength, 'showing page2 pushed no new history step').toBe(p2Before1.historyLength)
+        expect(p2After1.scrollTop, 'showing page2 moved scrollTop to bring target into view').not.toBe(p2Before1.scrollTop)
+        expect(p2After1.selection, 'showing page2 marked todo line').toBeTruthy()
+        expect(await box(page3), 'non-showing page3 box unchanged').toBe(p3BoxBefore1)
+        expect(await page3.evaluate(() => document.body.scrollTop), 'non-showing page3 scroll unchanged').toBe(p3ScrollBefore1)
+
+        // Order 2: showing window (page2, canonical query) is focused; non-showing window (page3) is second
+        await page2.bringToFront()
+        await userSet(page2, SW_TODO)
+        await expect.poll(() => box(page2!), { message: 'showing page2 switched to canonical query for order 2', timeout: 10_000 }).toMatch(new RegExp(`^${SW_TODO} ?$`))
+        await expect.poll(async () => (await itemTargetState(page2!, todoId))?.inBand, { message: 'page2 canonical target scroll settled', timeout: 10_000 }).toBe(true)
+        await scrollOutOfView(page2, todoId)
+        await expect.poll(() => orderedClientIds(), { message: 'showing page2 is focused and ordered first by worker', timeout: 10_000 }).toEqual([page2ClientId, page3ClientId])
+        const p2Before2 = (await itemTargetState(page2, todoId))!
+        expect(p2Before2.inBand, 'order-2 target is out of view before click').toBe(false)
+        const p2BoxBefore2 = await box(page2)
+        const p3BoxBefore2 = await box(page3)
+        const p3ScrollBefore2 = await page3.evaluate(() => document.body.scrollTop)
+
+        await writeStore(storeDoc, `global_store_${todoId}`, state('blocked', 5, 5, 5), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'two-window order-2 notification shown', timeout: 30_000 }).toHaveLength(1)
+        await resetSwTrace()
+        expect(await dispatchClick(`todoer:${todoId}`), 'dispatched order-2 click with showing page2 focused').toEqual({ count: 1 })
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed order-2 notification', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => pendingRows(), { message: 'worker deleted order-2 click after page2 answered received', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => swTrace(), { message: 'worker queried both, sent ordinary click only to page2, and focused page2 (order 2)', timeout: 10_000 }).toEqual({
+          queries: [page2ClientId, page3ClientId],
+          clicks: [{ id: page2ClientId, hasExtra: false }],
+          focused: [page2ClientId],
+        })
+        await expect.poll(async () => (await itemTargetState(page2!, todoId))?.inBand, { message: 'showing page2 scrolled target back into view (order 2)', timeout: 10_000 }).toBe(true)
+        const p2After2 = (await itemTargetState(page2, todoId))!
+        expect(await box(page2), 'showing page2 kept box unchanged (order 2)').toBe(p2BoxBefore2)
+        expect(p2After2.historyLength, 'showing page2 pushed no new history step (order 2)').toBe(p2Before2.historyLength)
+        expect(p2After2.scrollTop, 'showing page2 moved scrollTop (order 2)').not.toBe(p2Before2.scrollTop)
+        expect(p2After2.selection, 'showing page2 marked todo line (order 2)').toBeTruthy()
+        expect(await box(page3), 'non-showing page3 box unchanged (order 2)').toBe(p3BoxBefore2)
+        expect(await page3.evaluate(() => document.body.scrollTop), 'non-showing page3 scroll unchanged (order 2)').toBe(p3ScrollBefore2)
+
+        // Order 3: two targets in showing tab's box (`id:${todoerId} id:${todoId}`), non-showing page3
+        // focused on `#todoer`, click on the SECOND target (`todoId`) -> `item.elem` identifies it as a
+        // rendered target so page2 wins, keeps the two-target box, marks only `todoId`, and is focused
+        const multiTargetQuery = `id:${todoerId} id:${todoId}`
+        await userSet(page2, multiTargetQuery)
+        await expect.poll(() => box(page2!), { message: 'showing page2 holds two-target query', timeout: 10_000 }).toBe(multiTargetQuery)
+        await expect.poll(async () => !!(await itemTargetState(page2!, todoerId)) && !!(await itemTargetState(page2!, todoId)), {
+          message: 'both targets are rendered with .target in page2',
+          timeout: 10_000,
+        }).toBe(true)
+        await page2.evaluate(() => (window as any)._update_dom?.())
+        await scrollOutOfView(page2, todoId)
+        await page3.bringToFront()
+        await page3.evaluate(() => {
+          window.dispatchEvent(new WheelEvent('wheel', { deltaY: -100 }))
+          document.body.scrollTo(0, 0)
+        })
+        await expect.poll(() => orderedClientIds(), { message: 'non-showing page3 is focused and ordered first for order 3', timeout: 10_000 }).toEqual([page3ClientId, page2ClientId])
+        const p2Before3 = (await itemTargetState(page2, todoId))!
+        expect(p2Before3.inBand, 'order-3 target is out of view before click').toBe(false)
+        const p2BoxBefore3 = await box(page2)
+        const p3BoxBefore3 = await box(page3)
+        const p3ScrollBefore3 = await page3.evaluate(() => document.body.scrollTop)
+
+        await writeStore(storeDoc, `global_store_${todoId}`, state('question', 6, 6, 6), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'two-window order-3 notification shown', timeout: 30_000 }).toHaveLength(1)
+        await resetSwTrace()
+        expect(await dispatchClick(`todoer:${todoId}`), 'dispatched order-3 click on second target').toEqual({ count: 1 })
+        await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'worker closed order-3 notification', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => pendingRows(), { message: 'worker deleted order-3 click after page2 answered received', timeout: 10_000 }).toEqual([])
+        await expect.poll(() => swTrace(), { message: 'worker queried both, sent ordinary click only to page2, and focused page2 (order 3)', timeout: 10_000 }).toEqual({
+          queries: [page3ClientId, page2ClientId],
+          clicks: [{ id: page2ClientId, hasExtra: false }],
+          focused: [page2ClientId],
+        })
+        await expect.poll(async () => (await itemTargetState(page2!, todoId))?.inBand, { message: 'showing page2 scrolled second target into view (order 3)', timeout: 10_000 }).toBe(true)
+        const p2After3 = (await itemTargetState(page2, todoId))!
+        const p2FirstAfter3 = (await itemTargetState(page2, todoerId))!
+        expect(await box(page2), 'showing page2 kept two-target box unchanged (order 3)').toBe(p2BoxBefore3)
+        expect(p2BoxBefore3, 'order-3 box held two id: targets with clicked item second').toBe(multiTargetQuery)
+        expect(p2After3.historyLength, 'showing page2 pushed no new history step (order 3)').toBe(p2Before3.historyLength)
+        expect(p2After3.scrollTop, 'showing page2 moved scrollTop for second target (order 3)').not.toBe(p2Before3.scrollTop)
+        expect(p2After3.selection, 'showing page2 marked second target todo line (order 3)').toBeTruthy()
+        expect(p2FirstAfter3.selection, 'showing page2 left first target unmarked (order 3)').toBeNull()
+        expect(await box(page3), 'non-showing page3 box unchanged (order 3)').toBe(p3BoxBefore3)
+        expect(await page3.evaluate(() => document.body.scrollTop), 'non-showing page3 scroll unchanged (order 3)').toBe(p3ScrollBefore3)
+      } finally {
+        await sw
+          .evaluate(() => {
+            const g = globalThis as any
+            if (g.__origClientFocus) g.WindowClient.prototype.focus = g.__origClientFocus
+            if (g.__origClientPost) g.WindowClient.prototype.postMessage = g.__origClientPost
+            delete g.__origClientFocus
+            delete g.__origClientPost
+            delete g.__queries
+            delete g.__clicks
+            delete g.__focusedIds
+          })
+          .catch(() => {})
+        if (page3) await page3.close().catch(() => {})
+        await expect.poll(() => windowClientIds(), { message: 'only page2 remains before sign-out step', timeout: 15_000 }).toEqual([page2ClientId])
+      }
+
       // 5. SIGN-OUT CLEARS OUTGOING WORKER NOTIFICATIONS AND STORED CLICKS:
       //    seed one active worker notification (`/notify test`) and one real worker-stored click
       //    (clicked during a held-welcome reload), then run `/_signout`; both must be gone after sign-out.
@@ -3065,7 +3305,7 @@ test('a worker notification survives reload, holds clicks across startup and col
         page2Dialogs.push(dialog.message())
         void dialog.accept()
       })
-      await writeStore(storeDoc, `global_store_${todoId}`, state('budget', 4, 4, 4), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
+      await writeStore(storeDoc, `global_store_${todoId}`, state('budget', 7, 7, 7), NOTIFY_SW_USER, NOTIFY_SW_SECRET)
       await expect.poll(() => swNotifications(`todoer:${todoId}`), { message: 'fourth worker notification shown before sign-out check', timeout: 30_000 }).toHaveLength(1)
       expect(await command(page2, '/notify test'), '/notify test shows second worker card').toBeNull()
       await expect.poll(() => swNotifications('todoer:test'), { message: 'test notification active on worker', timeout: 15_000 }).toHaveLength(1)
