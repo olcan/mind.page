@@ -1009,7 +1009,7 @@ test('a running item is marked by a circle left of its number and by nothing els
 // `pause` is 0 here; the probe of the released build waited after each write, whose status
 // setter was a task
 async function accessorStates([docs, pause]: readonly [string, number]) {
-  type Handle = { status: unknown; progress: unknown; running: boolean; show_status: (status: unknown, progress: unknown) => void; clear_status: () => void; invalidate_elem_cache: (options: object) => void }
+  type Handle = { acting: unknown; status: unknown; progress: unknown; running: boolean; show_status: (status: unknown, progress: unknown) => void; clear_status: () => void; invalidate_elem_cache: (options: object) => void }
   const [handle, render] = [window._item as unknown as (id: string) => Handle, window._render_item as unknown as (item: Handle) => Promise<unknown>]
   const settle = (times = 1) => new Promise(resolve => setTimeout(resolve, pause * times))
   const safe = (value: unknown) => (value === undefined ? 'undefined' : typeof value == 'number' && isNaN(value) ? 'NaN' : value)
@@ -1025,7 +1025,7 @@ async function accessorStates([docs, pause]: readonly [string, number]) {
   const shown = [...document.querySelectorAll('.column:not(.hidden) .super-container:not(.hidden) > .container[data-item-id]')].map(box => (box as HTMLElement).dataset.itemId!)
   const away = (window._items() as unknown as { id: string }[]).map(item => item.id).filter(id => id != docs && !document.getElementById('super-container-' + id))
   const [a, b] = shown // on the page
-  const [x, y, z] = away // no element
+  const [x, y, z, w, v] = away // no element
   const item = handle(a)
   const out: Record<string, unknown> = {}
   out['never set, no element on the page'] = read(x)
@@ -1112,6 +1112,31 @@ async function accessorStates([docs, pause]: readonly [string, number]) {
   for (let waited = 0; waited < 100 && document.getElementById('item-' + docs)?.firstElementChild === first; waited++) await new Promise(resolve => setTimeout(resolve, 50))
   out['the docs item: rendered again'] = document.getElementById('item-' + docs)?.firstElementChild !== first
   out['the docs item: its cells rendered again where it stands'] = cells()
+  // `_Item.acting`: stored through `statusHtml` like `status`, cleared by an empty or missing
+  // value, and ALWAYS read from the record, whether the item has an element on the page or not
+  out['acting: never set, no element on the page'] = [!!document.getElementById('super-container-' + w), safe(handle(w).acting)]
+  out['acting: never set, on the page'] = safe(item.acting)
+  item.acting = 'claude: reading'
+  out['acting: set, read in the same turn'] = [safe(item.acting), item.running]
+  for (const [name, words] of [['acting: set, with entities', 'it&#39;s a &lt;b&gt; &amp; c'], ['acting: set, a bare ampersand', 'a & b'], ['acting: set, an open tag', '<div>open'], ['acting: set, a number', 5]] as const) {
+    item.acting = words
+    out[name] = safe(item.acting)
+  }
+  for (const [name, empty] of [["acting: cleared with ''", ''], ['acting: cleared with null', null], ['acting: cleared with undefined', undefined]] as const) {
+    item.acting = 'claude: editing'
+    item.acting = empty
+    out[name] = safe(item.acting)
+  }
+  const offAct = handle(w)
+  offAct.acting = 'claude: writing'
+  out['acting: set off the page, read while still off'] = [!!document.getElementById('super-container-' + w), safe(offAct.acting), offAct.running]
+  await render(offAct)
+  out['acting: set off the page, then given an element'] = [!!document.getElementById('super-container-' + w), safe(offAct.acting)]
+  offAct.acting = ''
+  const offClear = handle(v)
+  offClear.acting = 'claude: deleting'
+  offClear.acting = ''
+  out['acting: set and cleared off the page, read off'] = [!!document.getElementById('super-container-' + v), safe(offClear.acting)]
   return out
 }
 // the two accessors after the item's ELEMENT is made anew. The items render per column, a keyed
@@ -1143,14 +1168,15 @@ async function statusAfterRemount(page: Page, pause: number) {
   const read = (wait: number, set: boolean) =>
     page.evaluate(
       async ([id, wait, set]) => {
-        const item = window._item(id) as unknown as { status: unknown; progress: unknown }
+        const item = window._item(id) as unknown as { status: unknown; progress: unknown; acting: unknown }
         if (set) {
           item.status = 'kept'
           item.progress = 0.25
+          item.acting = 'claude: keeping'
           ;(document.getElementById('super-container-' + id) as HTMLElement & { __stamped?: boolean }).__stamped = true
         }
         await new Promise(resolve => setTimeout(resolve, wait))
-        return [item.status, item.progress]
+        return [item.status, item.progress, item.acting]
       },
       [id, wait, set] as const,
     )
@@ -1158,7 +1184,13 @@ async function statusAfterRemount(page: Page, pause: number) {
   await placed(2, 1, true)
   await page.setViewportSize({ width: 900, height: 900 }) // one column
   await placed(1, 0, false)
-  return { 'set, in column 1 of two': before, 'in a new element, in the one column': await read(pause * 2.25, false) }
+  const after = await read(pause * 2.25, false)
+  return {
+    'set, in column 1 of two': before.slice(0, 2),
+    'in a new element, in the one column': after.slice(0, 2),
+    'acting: set, in column 1 of two': before[2],
+    'acting: in a new element, in the one column': after[2],
+  }
 }
 test("an item's status and progress read as they did while they were its status line's", async ({ page }) => {
   await page.setViewportSize({ width: 700, height: 900 })
@@ -1215,9 +1247,27 @@ test("an item's status and progress read as they did while they were its status 
     'in a new element, in the one column': ['kept', 0.25], // ['', null]: the line was the element's, and what it held went with it
     'set, an open tag inside a noscript': ['<noscript><b>open</b></noscript>', null], // ['<noscript><b>open</noscript>', null]: the page's own document reads a noscript's content as text, the inert one that the status is now read in as markup
   }
+  const ACTING: Record<string, unknown> = {
+    'acting: never set, no element on the page': [false, ''],
+    'acting: never set, on the page': '',
+    'acting: set, read in the same turn': ['claude: reading', false],
+    'acting: set, with entities': "it's a &lt;b&gt; &amp; c",
+    'acting: set, a bare ampersand': 'a &amp; b',
+    'acting: set, an open tag': '<div>open</div>',
+    'acting: set, a number': '5',
+    "acting: cleared with ''": '',
+    'acting: cleared with null': '',
+    'acting: cleared with undefined': '',
+    'acting: set off the page, read while still off': [false, 'claude: writing', false],
+    'acting: set off the page, then given an element': [true, 'claude: writing'],
+    'acting: set and cleared off the page, read off': [false, ''],
+    'acting: set, in column 1 of two': 'claude: keeping',
+    'acting: in a new element, in the one column': 'claude: keeping',
+  }
   // (soft: each state is its own finding, and one wrong value must not hide the others)
-  for (const [state, value] of Object.entries({ ...AS_RELEASED, ...KEPT })) expect.soft(read[state], state).toEqual(value)
-  expect(Object.keys(read).sort(), 'every state read is one of the table').toEqual(Object.keys({ ...AS_RELEASED, ...KEPT }).sort())
+  const ALL = { ...AS_RELEASED, ...KEPT, ...ACTING }
+  for (const [state, value] of Object.entries(ALL)) expect.soft(read[state], state).toEqual(value)
+  expect(Object.keys(read).sort(), 'every state read is one of the table').toEqual(Object.keys(ALL).sort())
 })
 
 // THE RING'S HEIGHT IN THE APP'S OWN FONT (the owner, 2026-11-19: the circle "seems off, a bit too
@@ -1264,6 +1314,53 @@ test("the running mark stands on the number's baseline in the app's own font, as
   // and why: the ring's element is a line as tall as the digits' and at their height (in this
   // font, whose ascent takes the ring's 15 px), so the two share a baseline
   expect((await lines())!.ring, 'the ring\'s line is as tall as the digits\' and at their height').toEqual([20, 0])
+
+  // AN ACTING ITEM'S RING IS PIXEL-IDENTICAL TO A RUNNING ITEM'S AT THE SAME PLACE, and a
+  // progress written while it does not run shows no fill (the ring keeps turning)
+  const snapRing = async (target: string) => {
+    const still = await page.addStyleTag({ content: '.running-mark::before { animation: none !important }' })
+    const clip = await page.evaluate(async id => {
+      const index = document.querySelector(`.column:not(.hidden) .container[data-item-id="${id}"] .item-menu > .index`) as HTMLElement
+      index.scrollIntoView({ block: 'center' })
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      const [mark, own] = [index.querySelector('.running-mark')!.getBoundingClientRect(), index.getBoundingClientRect()]
+      return { x: Math.floor(mark.left) - 2, y: Math.floor(own.top) - 2, width: Math.ceil(own.right) - Math.floor(mark.left) + 2, height: Math.ceil(own.height) + 4 }
+    }, target)
+    const png = await page.screenshot({ clip })
+    await still.evaluate(style => (style as Element).remove())
+    return { clip, png }
+  }
+  await page.evaluate(id => void ((window._item(id) as unknown as { progress: number }).progress = 0), id)
+  await expect.poll(() => page.evaluate(box => document.querySelector(`${box} .running-mark`)!.classList.contains('filled'), box)).toBe(false)
+  const runningSnap = await snapRing(id)
+  // set acting first so the item stays at index 0 when running drops to false
+  await page.evaluate(id => {
+    const item = window._item(id) as unknown as { running: boolean; acting: string }
+    item.acting = 'claude: answering'
+    item.running = false
+  }, id)
+  await expect.poll(() => page.evaluate(box => {
+    const el = document.querySelector(box)
+    const mark = el?.querySelector('.running-mark') as HTMLElement | null
+    return [el?.classList.contains('running') ?? null, el?.classList.contains('acting') ?? null, mark?.title ?? null]
+  }, box), { timeout: 15_000 }).toEqual([false, true, 'claude: answering'])
+  const actingSnap = await snapRing(id)
+  expect(actingSnap.clip, 'an acting item\'s ring sits at the exact same clip as a running item\'s').toEqual(runningSnap.clip)
+  expect(Buffer.compare(actingSnap.png, runningSnap.png), 'an acting item\'s ring is pixel-identical to a running item\'s ring at the same place').toBe(0)
+  // a progress written while acting and not running must NOT fill the ring
+  await page.evaluate(id => void ((window._item(id) as unknown as { progress: number }).progress = 0.5), id)
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  expect(await page.evaluate(box => (mark => [mark.classList.contains('filled'), mark.style.getPropertyValue('--running-mark-fill'), getComputedStyle(mark, '::before').animationName != 'none'])(document.querySelector(`${box} .running-mark`) as HTMLElement), box), 'progress while acting and not running shows no fill').toEqual([false, '', true])
+  const actingProgressSnap = await snapRing(id)
+  expect(Buffer.compare(actingProgressSnap.png, runningSnap.png), 'with progress=0.5 while acting and not running, the ring stays pixel-identical to the turning ring').toBe(0)
+  // restore running (without acting) for the state circles block below
+  await page.evaluate(id => {
+    const item = window._item(id) as unknown as { running: boolean; acting: string; progress: number }
+    item.progress = 0
+    item.running = true
+    item.acting = ''
+  }, id)
+  await expect.poll(() => page.evaluate(box => [document.querySelector(box)?.classList.contains('running') ?? null, document.querySelector(box)?.classList.contains('acting') ?? null], box), { timeout: 15_000 }).toEqual([true, false])
   // THE STATE CIRCLES AT THE RING'S HEIGHT (2026-11-19): the same item, can be pushed and
   // previewed too, has both circles between the ring and the digits, each an image on the
   // baseline of a line of the number's font (the circles' box in the menu), lowered 2 px as the ring is:
@@ -1288,6 +1385,31 @@ test("the running mark stands on the number's baseline in the app's own font, as
       await nudge?.evaluate(style => (style as Element).remove())
     }
   }
+  // also pixel-identical beside the state circles, and a runnable acting item keeps an active
+  // Run button moved left by the ring's room
+  await page.evaluate(id => void ((window._item(id) as unknown as { progress: number }).progress = 0), id)
+  await expect.poll(() => page.evaluate(box => document.querySelector(`${box} .running-mark`)!.classList.contains('filled'), box)).toBe(false)
+  const circlesRunningSnap = await snapRing(id)
+  await page.evaluate(id => {
+    const item = window._item(id) as unknown as { running: boolean; acting: string }
+    item.acting = 'claude: answering'
+    item.running = false
+  }, id)
+  await expect.poll(() => page.evaluate(box => [document.querySelector(box)?.classList.contains('running') ?? null, document.querySelector(box)?.classList.contains('acting') ?? null], box), { timeout: 15_000 }).toEqual([false, true])
+  const circlesActingSnap = await snapRing(id)
+  expect(circlesActingSnap.clip, 'beside state circles, an acting item\'s ring sits at the exact same clip').toEqual(circlesRunningSnap.clip)
+  expect(Buffer.compare(circlesActingSnap.png, circlesRunningSnap.png), 'beside state circles, an acting item\'s ring is pixel-identical to a running item\'s').toBe(0)
+  await page.evaluate(id => void ((window._item(id) as unknown as { acting: string }).acting = ''), id)
+  // a runnable acting item keeps the Run button active (blue, pointer cursor) while moving it aside
+  const runnable = await page.evaluate(() => (window.__items.find(item => (item as unknown as { runnable?: unknown }).runnable) as { id: string }).id)
+  await page.evaluate(id => void (location.hash = id), runnable)
+  const rbox = `.column:not(.hidden) .container[data-item-id="${runnable}"]`
+  await expect.poll(() => page.evaluate(b => !!document.querySelector(`${b} .item-menu > .run`), rbox), { timeout: 15_000 }).toBe(true)
+  const runIdle = await page.evaluate(b => (btn => [getComputedStyle(btn).backgroundColor, getComputedStyle(btn).cursor, btn.getBoundingClientRect().left])(document.querySelector(`${b} .item-menu > .run`) as HTMLElement), rbox)
+  await page.evaluate(id => void ((window._item(id) as unknown as { acting: string }).acting = 'claude: editing'), runnable)
+  await expect.poll(() => page.evaluate(b => document.querySelector(b)?.classList.contains('acting') ?? false, rbox), { timeout: 15_000 }).toBe(true)
+  const runActing = await page.evaluate(b => (btn => [getComputedStyle(btn).backgroundColor, getComputedStyle(btn).cursor, btn.getBoundingClientRect().left])(document.querySelector(`${b} .item-menu > .run`) as HTMLElement), rbox)
+  expect([runActing[0], runActing[1], Math.round((runIdle[2] as number) - (runActing[2] as number))], 'a runnable acting item keeps an active Run button and shifts it left by 18 px').toEqual([runIdle[0], runIdle[1], 18])
 })
 
 // THE TAP (the owner, 2026-11-19: "yes to the tap on mobile for the tooltip"). Where no pointer

@@ -1478,6 +1478,27 @@
     // what is SET is kept whether the item is on the page or not, and outlives its element: the
     // line's setters retried a status every 250 ms until the item had its line, dropped a
     // progress for an item that had none, and lost both with the element
+    // AN AGENT ABOUT TO ACT ON THIS ITEM: its words (html, as status is stored, through
+    // statusHtml), or '' when none. in-tab state, never saved or synced. unlike status, the
+    // getter always reads the record, whether the item has an element on the page or not; an
+    // empty or missing value clears it. a change between none and some re-ranks the items as
+    // `running` does; a change of the words alone updates the ring in place without re-ranking
+    get acting(): string {
+      return items[indexFromId.get(this.id)]?.acting ?? ''
+    }
+
+    set acting(words: string) {
+      const record = items[indexFromId.get(this.id)]
+      if (!record) return
+      const next = words == null || words === '' ? '' : statusHtml(words)
+      const change = !!record.acting != !!next
+      itemShowStatus(this.id, { acting: next })
+      if (change) {
+        lastEditorChangeTime = 0 // disable debounce even if editor focused
+        onEditorChange(editorText) // trigger re-ranking since acting can affect it
+      }
+    }
+
     get status(): string {
       if (!this.elem?.querySelector(':scope > .container')) return null
       return items[indexFromId.get(this.id)]?.status ?? ''
@@ -3646,11 +3667,11 @@
       logFailedTests(item, failedTests) // always: the empty case clears the memo
     })
 
-    // Update (but not save yet) times for editing and running non-log items to maintain ordering
-    // among running/editing items within their sort level (see ordering logic below)
+    // Update (but not save yet) times for editing, running, and acting non-log items to maintain
+    // ordering among running/acting/editing items within their sort level (see ordering logic below)
     let now = Date.now()
     items.forEach(item => {
-      if ((item.editing || item.running) && !item.log) item.time = now
+      if ((item.editing || item.running || item.acting) && !item.log) item.time = now
     })
 
     if (!keep_times) {
@@ -3678,6 +3699,13 @@
       }
       updateItemLayout()
     } else {
+      // RANK A FRESH ARRAY: the sort below is in place, and a ranking can be asked for in the
+      // middle of a walk over `items` (a hook that a dispatch calls item by item sets another
+      // item's `running` or `acting`, whose setters rank at once). That walk goes on over the
+      // array it began with, each of its items once, in the order they had: sorting its array
+      // under it made it pass over one item and visit another twice. The copy is made before
+      // the dummy below is appended, so that the earlier array never holds it
+      items = [...items]
       // insert dummy item to determine "tail" of items ranked _purely_ by time, i.e. below dummy w/ time==now
       // IMPORTANT: dummy should define all ranking-relevant attributes to avoid errors or NaNs (see note below)
       items.push({
@@ -3693,6 +3721,7 @@
         editing: false,
         editingPromoted: false,
         running: 0, // a count (see initItemState); undefined, the criterion was skipped (NaN) for the dummy alone
+        acting: '',
         hasError: false,
         failedTests: false,
         previewable: false,
@@ -3756,8 +3785,8 @@
           (b.editing && (!b.log || b.editingPromoted) ? 1 : 0) - (a.editing && (!a.log || a.editingPromoted) ? 1 : 0) ||
           // log items matching #log query ordered by time
           (text == '#log' && b.log ? b.time : 0) - (text == '#log' && a.log ? a.time : 0) ||
-          // running items
-          b.running - a.running ||
+          // running or acting items (acting ranks where an item with one running reference is)
+          (b.running || (b.acting ? 1 : 0)) - (a.running || (a.acting ? 1 : 0)) ||
           // errors
           b.hasError - a.hasError ||
           // previewables
@@ -3801,6 +3830,7 @@
         item.hasError ||
         item.missingTags.length ||
         item.running ||
+        item.acting ||
         item.pushable ||
         item.previewable
 
@@ -8147,18 +8177,21 @@
   // the one exception: a positive progress written while the item does NOT run is the shown one
   // from then on, and the next run's mark begins filled with it (nothing ends a run that has not
   // begun)
-  function itemShowStatus(id: string, shown: { status?: string; progress?: number }) {
+  function itemShowStatus(id: string, shown: { status?: string; progress?: number; acting?: string }) {
     const record = items[indexFromId.get(id)]
     if (!record) return
     if ('status' in shown) record.status = shown.status
     if ('progress' in shown) record.progress = record.shownProgress = shown.progress
-    window['_item_hooks']?.[id]?.running_mark(record.status, record.shownProgress)
+    if ('acting' in shown) record.acting = shown.acting
+    window['_item_hooks']?.[id]?.running_mark(!!record.running, record.status, record.shownProgress, record.acting)
   }
   function itemRunEnded(id: string) {
     const record = items[indexFromId.get(id)]
-    if (!record || record.shownProgress == null) return
-    record.shownProgress = null
-    window['_item_hooks']?.[id]?.running_mark(record.status, record.shownProgress)
+    if (!record) return
+    const hadProgress = record.shownProgress != null
+    if (hadProgress) record.shownProgress = null
+    if (hadProgress || record.acting)
+      window['_item_hooks']?.[id]?.running_mark(false, record.status, record.shownProgress, record.acting)
   }
   // ONE RUNNING REFERENCE of an item, taken (true) or released (false) on its record: `running` is
   // a COUNT, since runs nest and overlap (a run's own, a chat call's, the #vault item's on a chat
@@ -8167,12 +8200,15 @@
   // here and then re-ranks the items; an Option-run counts its own here (onItemRun). nothing else
   // changes the count of a record once it is made
   function countRunning(record, running: boolean) {
+    const was = !!record.running
     record.running += running ? 1 : -1
     if (record.running < 0) {
       console.error('attempted running=false when already false', record.name)
       record.running = 0
     }
     if (!record.running) itemRunEnded(record.id)
+    else if (!was && record.acting)
+      window['_item_hooks']?.[record.id]?.running_mark(true, record.status, record.shownProgress, record.acting)
   }
 
   // a status as the status line held it, which is what the status getter gave back until
@@ -10558,6 +10594,7 @@
     item.lastRunTime = 0 // used for _item.get_log
     item.version = 0
     item.running = 0 // tracked as number to allow nesting
+    item.acting = '' // words of an agent about to act on this item, or '' (in-tab, never saved)
     return _.merge(item, state)
   }
 
@@ -13751,6 +13788,7 @@
                 previewable={item.previewable}
                 saving={item.saving}
                 running={item.running}
+                acting={item.acting}
                 status={item.status}
                 progress={item.shownProgress}
                 admin={item.admin}

@@ -123,6 +123,7 @@
   // the list. a change of either comes through this item's hook (itemHooks.running_mark, below),
   // not through these: the route writes them on the record without invalidating its list
   export let running = false
+  export let acting = ''
   export let status = ''
   export let progress: number = null
   export let admin = false
@@ -394,17 +395,18 @@
   // status, also when only the fraction changed. `filled` is a class of this code's, not a class
   // directive, so the stylesheet names it :global.
   // a progress of 0 is none: the mark turns
-  const ring = { status, progress, marks: new Set<HTMLElement>() }
+  const ring = { running: !!running, status, progress, acting, marks: new Set<HTMLElement>() }
   function writeRunningMark(mark: HTMLElement) {
-    mark.title = (ring.status && statusText(ring.status)) || 'running'
-    const fill = ring.progress > 0 ? (Math.min(ring.progress, 1) * 100).toFixed(3) + '%' : null
+    mark.title = ring.running ? (ring.status && statusText(ring.status)) || 'running' : statusText(ring.acting)
+    const fill = ring.running && ring.progress > 0 ? (Math.min(ring.progress, 1) * 100).toFixed(3) + '%' : null
     mark.classList.toggle('filled', !!fill)
     if (fill) mark.style.setProperty('--running-mark-fill', fill)
     else mark.style.removeProperty('--running-mark-fill')
   }
-  function showOnRunningMark(status: string, progress: number) {
-    if (status === ring.status && progress === ring.progress) return
-    Object.assign(ring, { status, progress })
+  function showOnRunningMark(isRunning: boolean, status: string, progress: number, acting: string) {
+    if (isRunning === ring.running && status === ring.status && progress === ring.progress && acting === ring.acting)
+      return
+    Object.assign(ring, { running: isRunning, status, progress, acting })
     ring.marks.forEach(writeRunningMark)
   }
   function runningMark(mark: HTMLElement) {
@@ -412,7 +414,7 @@
     writeRunningMark(mark)
     return { destroy: () => void ring.marks.delete(mark) }
   }
-  $: showOnRunningMark(status, progress) // (the record's values again, whenever the route's list is evaluated)
+  $: showOnRunningMark(!!running, status, progress, acting) // (the record's values again, whenever the route's list is evaluated)
   // where no pointer hovers (a phone) a tooltip never shows: there a tap on the mark shows the
   // same text in a small note under the menu (css: the mark's ::after, which reads the title, so
   // it follows the status), and the next tap anywhere takes it away, that tap doing whatever else
@@ -421,7 +423,7 @@
   // arrives through the number's handler (onIndexClick), in the editor by the mark's own
   let runningNote = false
   let noteDismissal: Event = null
-  $: if (!running) runningNote = false
+  $: if (!running && !acting) runningNote = false
   function onRunningMarkClick(e: MouseEvent) {
     e.stopPropagation()
     e.preventDefault()
@@ -530,8 +532,9 @@
     }
 
   // create cache objects (subobjects are created on first entry)
-  window['_elem_cache'] ??= {}
-  window['_html_cache'] ??= {}
+  // (keyed by an item's id, which can be a name every object carries, `constructor`: no prototype)
+  window['_elem_cache'] ??= Object.create(null)
+  window['_html_cache'] ??= Object.create(null)
   const _elem_cache_limit_per_item = 10
   const _html_cache_limit_per_item = 10
   function limit_cache_size(cache, limit, destroy = null) {
@@ -2568,7 +2571,9 @@
     render_images: (elems: NodeListOf<Element>) => renderImages(id, elems),
     running_mark: showOnRunningMark, // the item's status and its run's progress have changed (index.svelte, itemShowStatus)
   }
-  ;((window['_item_hooks'] ??= {}) as any)[id] = itemHooks
+  // (the registry has no prototype: the route looks the hooks of an item up by its id whether
+  // the item has an element or not, and an id can be a name every object carries, `constructor`)
+  ;((window['_item_hooks'] ??= Object.create(null)) as any)[id] = itemHooks
   window['_render_images'] ??= item =>
     window['_item_hooks']?.[item.id]?.render_images(item.elem?.querySelectorAll('.item > .content img') ?? [])
   window['_dot_rendered'] ??= function (item, dot) {
@@ -2685,6 +2690,7 @@
     class:target
     class:target_context
     class:running
+    class:acting={!!acting}
     class:admin
     class:showLogs
     class:bordered={error || failedTests || warning || target}
@@ -2732,7 +2738,7 @@
         {#if !fixed}
           <div class="button delete" on:click={onDeleteClick}>delete</div>
         {/if}
-        {#if running}
+        {#if running || acting}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="running-mark" class:noted={runningNote} use:runningMark on:mousedown|preventDefault on:click={onRunningMarkClick}></div>
         {/if}
@@ -2767,7 +2773,7 @@
         {/if}
         <!-- (the running mark comes after the digits, which stay the number's first child, and is shown before them by its order; its clicks are told from the number's in onIndexClick) -->
         <div class="button index" class:leader class:matching class:reserved={menuDigits(index) > 0} style:--index-digits={menuDigits(index)} on:click={onIndexClick}>
-          {index + 1}{#if running}<span class="running-mark" class:noted={runningNote} use:runningMark></span>{/if}
+          {index + 1}{#if running || acting}<span class="running-mark" class:noted={runningNote} use:runningMark></span>{/if}
         </div>
         <!-- (the state circles: the menu's last child, shown before the number by its order. no listener of their own: their presses and clicks are told from the item's by these two elements, see ownStateMark) -->
         {#if pushable || previewable}
@@ -3059,7 +3065,7 @@
   .container.editing {
     --state-mark-room: 29px;
   }
-  .container.running {
+  .container:is(.running, .acting) {
     --running-mark-room: 18px;
   }
   .container.pushable {
@@ -3077,7 +3083,7 @@
     right: var(--item-mark-room, 0px);
     translate: calc(-1 * (var(--running-mark-room) + var(--pushable-mark-room) + var(--previewable-mark-room))) 0;
   }
-  .container.running .item-menu > .index.reserved::before {
+  .container:is(.running, .acting) .item-menu > .index.reserved::before {
     margin-left: 0 !important;
   }
   .item-menu > .index:not(.reserved) > .running-mark {

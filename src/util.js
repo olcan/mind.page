@@ -335,7 +335,7 @@ export function invalidateElemCache(id) {
       // actually replaced it (or its component unmounts), since svelte's {@html} replacement
       // never runs the app's _destroy teardown hooks. the caller decides whether to force the
       // replacing render now (see invalidate_elem_cache in index.svelte)
-      ;(window['_retired_elems'] ??= {})[id] ??= new Set()
+      ;(window['_retired_elems'] ??= Object.create(null))[id] ??= new Set() // (by an item's id: no prototype)
       window['_retired_elems'][id].add(elem)
       live = true
     }
@@ -417,7 +417,7 @@ export function adoptCachedElem(elem) {
 }
 
 export function checkElemCache() {
-  if (!window['_elem_cache']) window['_elem_cache'] = {}
+  if (!window['_elem_cache']) window['_elem_cache'] = Object.create(null) // (by an item's id: no prototype)
   Object.keys(window['_elem_cache']).forEach(id => {
     window['_elem_cache'][id]?.forEach(elem => {
       if (document.contains(elem)) return // elem is already on the page
